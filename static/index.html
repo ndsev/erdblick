@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Emscripten test</title>
+</head>
+<body>
+
+<script src="./featureRenderer.js"></script>
+<script>
+    Module.onRuntimeInitialized = async () => {
+        const wasmTest = {
+            testInt: Module.test(),
+        };
+        console.log(wasmTest.testInt());
+    };
+</script>
+
+
+</body>
+</html>
