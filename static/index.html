@@ -5,15 +5,23 @@
     <title>Emscripten test</title>
 </head>
 <body>
+<div id="testDiv">
+<p id="testPara"></p>
+</div>
 
-<script src="./featureRenderer.js"></script>
+<script type="text/javascript" src="./FeatureLayerRenderer.js"></script>
 <script>
-    Module.onRuntimeInitialized = async () => {
-        const wasmTest = {
-            testInt: Module.test(),
-        };
-        console.log(wasmTest.testInt());
-    };
+    const para = document.getElementById("testPara");
+    const node = document.createTextNode("Test value: ");
+    para.appendChild(node);
+
+    libFeatureLayerRenderer().then(Module => {
+        FMRendererModule = Module;
+        fmr = new FMRendererModule.FeatureLayerRenderer();
+        const para = document.getElementById("testPara");
+        const node = document.createTextNode(fmr.test());
+        para.appendChild(node);
+    });
 </script>
 
 

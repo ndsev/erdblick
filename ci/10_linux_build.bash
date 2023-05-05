@@ -10,6 +10,5 @@ rm -r build && mkdir build
 cd build
 emcmake cmake ..
 cmake --build .
-emcc libFeatureLayerRenderer.a -o featureRenderer.js
 
 cp ../static/index.html ./index.html

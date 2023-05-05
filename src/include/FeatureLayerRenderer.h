@@ -1,17 +1,22 @@
 #ifndef ERDBLICK_FEATURELAYERRENDERER_H
 #define ERDBLICK_FEATURELAYERRENDERER_H
 
+#include <emscripten/bind.h>
+
 namespace erdblick {
 
 class FeatureLayerRenderer {
-
 public:
-  std::vector<uint8_t> render(
-      const std::string& dummyFeatureLayer,
-      const std::string& dummyIdCache);
   uint8_t test();
-
 };
 
+
+EMSCRIPTEN_BINDINGS(FLTest) {
+  emscripten::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
+      .constructor()
+      .function("test", &FeatureLayerRenderer::test);
 }
+
+}
+
 #endif // ERDBLICK_FEATURELAYERRENDERER_H

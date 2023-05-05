@@ -2,21 +2,14 @@
 #include <vector>
 #include <string>
 
-#include "emscripten.h"
-
 #include "include/FeatureLayerRenderer.h"
 
-namespace erdblick
-{
-std::vector<uint8_t> EMSCRIPTEN_KEEPALIVE FeatureLayerRenderer::render(
-    const std::string& dummyFeatureLayer,
-    const std::string& dummyIdCache) {
+namespace erdblick {
 
-  std::vector<uint8_t> binaryDataDummy = {2};
-  return binaryDataDummy;
-}
+uint8_t FeatureLayerRenderer::test() {
+  // Printf statements will end up in the console.
+  printf("hello, world!\n");
 
-uint8_t EMSCRIPTEN_KEEPALIVE FeatureLayerRenderer::test() {
   return 42;
 }
 
