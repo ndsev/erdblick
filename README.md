@@ -31,3 +31,30 @@ Capabilities:
 ## Architecture
 
 ![arch](docs/erdblick_uml.svg)
+
+## Build instructions (Linux-only)
+
+Run the setup script once to pull Emscripten SDK:
+
+```bash
+./ci/00_linux_setup.bash
+```
+
+To (re-)build the project, run:
+
+```bash
+./ci/10_linux_build.bash
+```
+
+Afterwards, view the static website under ``build/index.html``.
+
+To set up the build environment in CLion, first run the setup script.
+Then follow the instructions here:
+
+[https://stackoverflow.com/questions/51868832/integrate-emscripten-in-clion](https://stackoverflow.com/questions/51868832/integrate-emscripten-in-clion)
+
+Configure the custom CMake toolchain with the following options.
+
+**C compiler**: ci/emsdk/upstream/emscripten/emcc
+
+**C++ compiler**: ci/emsdk/upstream/emscripten/em++

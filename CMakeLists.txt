@@ -18,3 +18,8 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 	-s EXPORT_NAME='\"libFeatureLayerRenderer\"' \
 	-s EXPORTED_RUNTIME_METHODS='[\"cwrap\", \"ccall\"]' \
 ")
+
+add_custom_command(TARGET FeatureLayerRenderer
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/"
+)
