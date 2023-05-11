@@ -8,21 +8,29 @@ export class Demo
         const loadedData = await loader.loadAsync(glbString);
         const demo_object = loadedData.scene.children[0];
 
-        const camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 10 );
-        camera.position.z = 1;
+        // Adding material or geometry does not help.
+        // const dmaterial = new THREE.MeshNormalMaterial();
+        // const dgeometry = new THREE.BoxGeometry( 0.2, 0.2, 0.2 );
+        // demo_object.material = dmaterial;
+        // demo_object.geometry = dgeometry;
+
+        const camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 100 );
+        camera.position.z = 10;
 
         const scene = new THREE.Scene();
 
-        const dirLight = new THREE.DirectionalLight( 0xffffff, 0.8 );
-        dirLight.position.set( - 3, 10, - 10 );
-        scene.add( dirLight );
+        // Adding light does not help -- it does have an effect on the working mesh.
+        // const dirLight = new THREE.DirectionalLight( 0xffffff, 0.8 );
+        // dirLight.position.set( - 3, 10, - 10 );
+        // scene.add( dirLight );
 
         const geometry = new THREE.BoxGeometry( 0.2, 0.2, 0.2 );
         const material = new THREE.MeshNormalMaterial();
 
         const mesh = new THREE.Mesh( geometry, material );
         // scene.add( mesh, demo_object );
-        scene.add( mesh );
+        scene.add( demo_object );
+        // scene.add( mesh );
 
         const renderer = new THREE.WebGLRenderer( { antialias: true } );
         renderer.setSize( window.innerWidth - 50, window.innerHeight - 50 );
