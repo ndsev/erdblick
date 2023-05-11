@@ -7,7 +7,7 @@ namespace erdblick {
 
 class FeatureLayerRenderer {
 public:
-  uint8_t test();
+  std::string test();
 };
 
 

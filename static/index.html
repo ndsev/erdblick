@@ -9,21 +9,16 @@
 <p id="testPara"></p>
 </div>
 
-<script type="text/javascript" src="./FeatureLayerRenderer.js"></script>
-<script>
-    const para = document.getElementById("testPara");
-    const node = document.createTextNode("Test value: ");
-    para.appendChild(node);
+<div id="demoScene"></div>
 
-    libFeatureLayerRenderer().then(Module => {
-        FMRendererModule = Module;
-        fmr = new FMRendererModule.FeatureLayerRenderer();
-        const para = document.getElementById("testPara");
-        const node = document.createTextNode(fmr.test());
-        para.appendChild(node);
-    });
-</script>
+<script src="./FeatureLayerRenderer.js"></script>
 
+<!-- THREE.js sources -->
+<script type="module" src="./deps/three.js"></script>
+<script type="module" src="./deps/GLTFLoader.js"></script>
+<script type="module" src="./deps/meshline.js"></script>
+
+<script type="module" src="./demo.js"></script>
 
 </body>
 </html>
