@@ -8,5 +8,7 @@ cd "$ci_dir/.."
 
 rm -r build && mkdir build
 cd build
+mkdir deps
+mkdir assets
 emcmake cmake ..
 cmake --build .

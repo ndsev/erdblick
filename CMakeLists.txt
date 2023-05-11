@@ -22,4 +22,11 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 add_custom_command(TARGET FeatureLayerRenderer
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/demo.js" "${CMAKE_BINARY_DIR}/"
+
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/deps/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/meshline.js" "${CMAKE_BINARY_DIR}/deps/"
+
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/samples/Box/Box.glb" "${CMAKE_BINARY_DIR}/assets/"
 )
