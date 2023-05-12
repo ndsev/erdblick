@@ -4,9 +4,11 @@ import * as THREE from "./deps/three.js"
 export class Demo
 {
     async loadGlb(glbString) {
+        console.log(Object.keys(glbString).length)
         const loader = new GLTFLoader();
-        const loadedData = await loader.loadAsync(glbString);
-        const demo_object = loadedData.scene.children[0];
+        const loadedData = await loader.parse(glbString);
+        // const loadedData = await loader.loadAsync(glbString);
+        // const demo_object = loadedData.scene.children[0];
 
         // Adding material or geometry does not help.
         // const dmaterial = new THREE.MeshNormalMaterial();
@@ -29,8 +31,8 @@ export class Demo
 
         const mesh = new THREE.Mesh( geometry, material );
         // scene.add( mesh, demo_object );
-        scene.add( demo_object );
-        // scene.add( mesh );
+        // scene.add( demo_object );
+        scene.add( mesh );
 
         const renderer = new THREE.WebGLRenderer( { antialias: true } );
         renderer.setSize( window.innerWidth - 50, window.innerHeight - 50 );
@@ -63,9 +65,12 @@ libFeatureLayerRenderer().then(Module => {
     const FMRendererModule = Module;
     let fmr = new FMRendererModule.FeatureLayerRenderer();
     const para = document.getElementById("testPara");
-    const node = document.createTextNode(fmr.test());
+
+    let test_binary = Module.cwrap('test_binary', 'string');
+
+    const node = document.createTextNode(fmr.test_binary_size());
     para.appendChild(node);
 
     let d = new Demo();
-    d.loadGlb(fmr.test());
+    d.loadGlb(test_binary());
 });

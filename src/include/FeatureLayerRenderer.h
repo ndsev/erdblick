@@ -7,14 +7,17 @@ namespace erdblick {
 
 class FeatureLayerRenderer {
 public:
-  std::string test();
+  uint32_t test_binary_size();
+  uint8_t* test_binary();
 };
 
 
 EMSCRIPTEN_BINDINGS(FLTest) {
   emscripten::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
       .constructor()
-      .function("test", &FeatureLayerRenderer::test);
+      .function("test_binary_size", &FeatureLayerRenderer::test_binary_size)
+      .function("test_binary", &FeatureLayerRenderer::test_binary,
+                emscripten::allow_raw_pointers());
 }
 
 }
