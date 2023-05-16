@@ -21,15 +21,12 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 	-s EXPORTED_RUNTIME_METHODS='[\"cwrap\", \"ccall\"]' \
 ")
 
-add_custom_command(TARGET FeatureLayerRenderer
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/demo.js" "${CMAKE_BINARY_DIR}/"
+  configure_file("${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/index.html" @ONLY)
+  configure_file("${CMAKE_SOURCE_DIR}/static/demo.js" "${CMAKE_BINARY_DIR}/demo.js" @ONLY)
 
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/deps/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/static/deps/meshline.js" "${CMAKE_BINARY_DIR}/deps/"
-)
+  configure_file("${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/deps/three.js" @ONLY)
+  configure_file("${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/GLTFLoader.js" @ONLY)
+  configure_file("${CMAKE_SOURCE_DIR}/static/deps/meshline.js" "${CMAKE_BINARY_DIR}/deps/meshline.js" @ONLY)
 
 FetchContent_Declare(tinygltf
   GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
