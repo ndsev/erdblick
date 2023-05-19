@@ -12,16 +12,16 @@ export class Demo {
 
                 // Reference: https://github.com/mrdoob/three.js/blob/dev/README.md
                 const demo_object = loadedData.scene.children[0].children[0];
-                const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-                camera.position.z = 5;
+                const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 2000);
+                camera.position.z = 700;
 
                 const scene = new THREE.Scene();
 
                 const dirLight = new THREE.DirectionalLight( 0xffffff, 0.8 );
-                dirLight.position.set( - 3, 10, - 10 );
+                dirLight.position.set( - 300, 1000, - 1000 );
                 scene.add( dirLight );
                 const dirLight2 = new THREE.DirectionalLight( 0xffffff, 0.8 );
-                dirLight2.position.set(  3,  - 10, 10 );
+                dirLight2.position.set(  300,  - 1000, 1000 );
                 scene.add( dirLight2 );
 
                 scene.add( demo_object );
@@ -34,7 +34,7 @@ export class Demo {
                 container.appendChild(renderer.domElement);
 
                 function animation(time) {
-                    demo_object.rotation.x = time / 2000;
+                    demo_object.rotation.x = time / 2500;
                     demo_object.rotation.y = time / 1000;
                     renderer.render(scene, camera);
                 }

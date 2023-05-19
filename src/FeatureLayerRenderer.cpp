@@ -2,7 +2,7 @@
 #include <string>
 
 #include "tiny_gltf.h"
-#include "boxfile.c"
+#include "duckfile.c"
 
 #include "include/FeatureLayerRenderer.h"
 
@@ -13,11 +13,11 @@ const RenderObject& FeatureLayerRenderer::render() {
 }
 
 RenderObject::RenderObject() {
-  glb.assign(std::begin(boxfile), std::end(boxfile));
+  glb.assign(std::begin(duckfile), std::end(duckfile));
 }
 
 uint32_t RenderObject::getGlbSize() {
-  return boxfile_len;
+  return duckfile_len;
 }
 
 __UINT64_TYPE__ RenderObject::getGlbPtr() {
