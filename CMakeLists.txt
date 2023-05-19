@@ -19,6 +19,7 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 	-s MODULARIZE=1 \
 	-s EXPORT_NAME='\"libFeatureLayerRenderer\"' \
 	-s EXPORTED_RUNTIME_METHODS='[\"cwrap\", \"ccall\"]' \
+	-s WASM_BIGINT=1 \
 ")
 
   configure_file("${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/index.html" @ONLY)
