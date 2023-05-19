@@ -3,19 +3,14 @@ import * as THREE from "./deps/three.js"
 
 export class Demo {
     async loadGlb(glbArray) {
-        console.log(Object.keys(glbArray).length)
+
         const loader = new GLTFLoader();
-
-        console.log(glbArray);
-        const decoder = new TextDecoder('utf-8');
-        const s1 = decoder.decode(glbArray);
-        console.log(s1);
-
         loader.parse(
             glbArray,
             '',
             function (loadedData) {
 
+                // Reference: https://github.com/mrdoob/three.js/blob/dev/README.md
                 const demo_object = loadedData.scene.children[0].children[0];
                 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
                 camera.position.z = 5;
@@ -38,94 +33,49 @@ export class Demo {
                 const container = document.querySelector('#demoScene');
                 container.appendChild(renderer.domElement);
 
-                // animation
                 function animation(time) {
                     demo_object.rotation.x = time / 2000;
                     demo_object.rotation.y = time / 1000;
-
                     renderer.render(scene, camera);
                 }
             },
             function (xhr) {
-                // Progress callback
                 console.log((xhr.loaded / xhr.total) * 100 + '% loaded');
             },
             function (error) {
-                // Error callback
                 console.error('Error parsing GLTF', error);
             }
         );
     }
 }
 
-console.log("Outside demo class")
-
 const para = document.getElementById("testPara");
-const node = document.createTextNode("Test value: ");
+const node = document.createTextNode("GLB buffer size: ");
 para.appendChild(node);
 
 libFeatureLayerRenderer().then(Module => {
     const FMRendererModule = Module;
     let fmr = new FMRendererModule.FeatureLayerRenderer();
+    let renderObj = fmr.render();
+    let objSize = renderObj.getGlbSize();
+
     const para = document.getElementById("testPara");
-
-    var FMR_constructor = FMRendererModule.cwrap('getFMR', 'FeatureLayerRenderer', []);
-    var FMR_test_binary = FMRendererModule.cwrap('fillBuffer', null, ['number', 'number']);
-    var FMR_malloc = FMRendererModule.cwrap('emscripten_malloc', 'number', ['number']);
-    let testFMR = FMR_constructor();
-
-    let buffer_ptr = Number(fmr.test_binary_two());
-    // var FMR_test_binary_two = FMRendererModule.cwrap('testBinaryTwo', 'number', []);
-    // let buffer_ptr = FMR_test_binary_two(testFMR);
-    let a = Module.HEAPU8.buffer.slice(buffer_ptr, buffer_ptr + fmr.test_binary_size());
-    console.log(a)
-
-    let d = new Demo();
-    d.loadGlb(a);
-
-    const node = document.createTextNode(fmr.test_binary_size());
+    const node = document.createTextNode(objSize);
     para.appendChild(node);
 
-    // Fails because of unbound parameter or sth.
-    // let m = FMRendererModule.asm.memory.buffer;
-    // fmr.test_binary(m);
+    let bufferPtr = Number(renderObj.getGlbPtr());
+    // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
+    let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
-    // let memory = FMRendererModule.asm.memory.buffer;
+    console.log(bufferPtr);
+    console.log(arrBuf);
+    const decoder = new TextDecoder('utf-8');
+    const s1 = decoder.decode(arrBuf);
+    console.log(s1);
 
-    // Not a function.
-    // fmr.fillBuffer(testFMR, memory);
+    let d = new Demo();
+    d.loadGlb(arrBuf);
 
-    // Does not work - buffer is full of zeroes in the end.
-    // let buf = new ArrayBuffer(fmr.test_binary_size());
-    // FMR_test_binary(testFMR, buf);
-    // const dataView = new Uint8Array(buf, 0, fmr.test_binary_size());
-    // const decoder = new TextDecoder('utf-8');
-
-    // // Fill buffer with content from C++ generated code.
-    // FMR_test_binary(testFMR, memory);
-    // // FMR_test_binary(testFMR, memory);
-    // const unusedDataView = new Uint8Array(memory, 0, fmr.test_binary_size());
-    // const s0 = decoder.decode(unusedDataView);
-    // console.log(s0);
-    // console.log(unusedDataView);
-    //
-    // let heapPtr = FMR_malloc(fmr.test_binary_size());
-    // let otherHeapPtr = FMR_malloc(fmr.test_binary_size());
-    // FMR_test_binary(testFMR, heapPtr);
-    // let dataView = new Uint8Array(Module.HEAPU8.buffer, heapPtr, fmr.test_binary_size());
-    // let otherDataView = new Uint8Array(Module.HEAPU8.buffer, otherHeapPtr, fmr.test_binary_size());
-    //
-    // console.log(heapPtr);
-    // const s1 = decoder.decode(dataView);
-    // console.log(s1);
-    // console.log(dataView);
-    //
-    // console.log(otherHeapPtr);
-    // const s2 = decoder.decode(otherDataView);
-    // console.log(s2);
-    // console.log(otherDataView);
-
-    // let d = new Demo();
-    // d.loadGlb(dataView);
-
+    renderObj.delete();
+    fmr.delete();
 });
