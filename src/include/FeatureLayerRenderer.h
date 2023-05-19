@@ -21,6 +21,11 @@ void fillBuffer(FeatureLayerRenderer *fmr, char *memoryBuffer) {
   fmr->test_binary(memoryBuffer);
 }
 
+EMSCRIPTEN_KEEPALIVE
+void *emscripten_malloc(uint32_t size) {
+  return malloc(size);
+}
+
 }
 
 EMSCRIPTEN_BINDINGS(FLTest) {
