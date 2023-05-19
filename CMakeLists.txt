@@ -27,7 +27,8 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 
   configure_file("${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/deps/three.js" @ONLY)
   configure_file("${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/GLTFLoader.js" @ONLY)
-  configure_file("${CMAKE_SOURCE_DIR}/static/deps/meshline.js" "${CMAKE_BINARY_DIR}/deps/meshline.js" @ONLY)
+  configure_file("${CMAKE_SOURCE_DIR}/static/deps/BufferGeometryUtils.js" "${CMAKE_BINARY_DIR}/deps/BufferGeometryUtils.js" @ONLY)
+  configure_file("${CMAKE_SOURCE_DIR}/static/deps/LICENSE" "${CMAKE_BINARY_DIR}/deps/LICENSE" @ONLY)
 
 FetchContent_Declare(tinygltf
   GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
