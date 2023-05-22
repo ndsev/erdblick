@@ -40,10 +40,16 @@ Run the setup script once to pull Emscripten SDK:
 ./ci/00_linux_setup.bash
 ```
 
-To (re-)build the project, run:
+To build the project, run:
 
 ```bash
 ./ci/10_linux_build.bash
+```
+
+To rebuild the project (skipping checkouts and CMake initialization), run:
+
+```bash
+./ci/20_linux_rebuild.bash
 ```
 
 Afterwards, view the static website under ``build/index.html``.
