@@ -1,0 +1,30 @@
+name: build-release
+
+on:
+  push:
+    branches:
+      - 'feature/renderer-wasm-demo'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build demo with Emscripten
+        run: |
+          $GITHUB_WORKSPACE/ci/00_linux_setup.bash
+          $GITHUB_WORKSPACE/ci/10_linux_build.bash
+
+      - name: Release artifacts
+        uses: actions/upload-artifact@v3.1.2
+        with:
+          name: erdblick
+          path: |
+            build/FeatureLayerRenderer*
+            build/demo.js
+            build/index.html
+            build/deps
