@@ -1,0 +1,57 @@
+# Documentation:
+# https://releases.llvm.org/14.0.0/tools/clang/docs/ClangFormatStyleOptions.html
+# CLion setup guide:
+# https://www.jetbrains.com/help/clion/clangformat-as-alternative-formatter.html#clion-support
+---
+BasedOnStyle: Chromium
+IndentWidth: 4
+---
+Language: Cpp
+ColumnLimit: 100
+
+# Always break after an open bracket, if the parameters don’t fit on a single line.
+AlignAfterOpenBracket: AlwaysBreak
+
+# Function call’s arguments will either be all on the same line or will have one line each.
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: MultiLine
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: true
+  AfterObjCDeclaration: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  IndentBraces: false
+  BeforeLambdaBody: true
+
+# while (true) { continue; }
+AllowShortBlocksOnASingleLine: Always
+AllowShortLambdasOnASingleLine: Inline
+
+# case 1: return 2;
+AllowShortCaseLabelsOnASingleLine: true
+IndentCaseBlocks: false
+IndentCaseLabels: false
+
+AlignOperands: false
+ContinuationIndentWidth: 4
+
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: false
+
+IndentAccessModifiers: false
+AccessModifierOffset: -4
+
+PenaltyIndentedWhitespace: 10
+PenaltyBreakAssignment: 100
+PenaltyReturnTypeOnItsOwnLine: 100
+PenaltyBreakBeforeFirstCallParameter: 0
+PenaltyBreakOpenParenthesis: 200
