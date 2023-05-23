@@ -1,4 +1,4 @@
-#/usr/bin/bash
+#!/usr/bin/env bash
 
 ci_dir="$(realpath ${BASH_SOURCE[0]} | xargs -I{} dirname {})"
 echo "Setting up Emscripten in: $ci_dir"
