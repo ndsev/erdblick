@@ -34,6 +34,13 @@ FetchContent_Declare(tinygltf
   GIT_TAG        "v2.8.9"
   GIT_SHALLOW    ON)
 
+FetchContent_Declare(mapget
+  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+  GIT_TAG        "improvement/remove-openssl-dependency"
+)
+
+FetchContent_MakeAvailable(mapget)
+
 FetchContent_MakeAvailable(tinygltf)
 
 target_link_libraries(FeatureLayerRenderer
