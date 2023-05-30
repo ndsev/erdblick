@@ -1,0 +1,8 @@
+name: DemoStyle
+version: 1.0
+features:
+  - geometry: ["line"]
+    color: [255.0, 255.0, 255.0]
+  - geometry: ["mesh"]
+    opacity: 0.9
+  - geometry: ["point"]

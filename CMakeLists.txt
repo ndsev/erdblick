@@ -10,7 +10,11 @@ include_directories(src/include)
 
 add_executable(FeatureLayerRenderer
   src/include/FeatureLayerRenderer.h
-  src/FeatureLayerRenderer.cpp)
+  src/include/FeatureLayerStyle.h
+  src/include/FeatureLayerRule.h
+  src/FeatureLayerRenderer.cpp
+  src/FeatureLayerStyle.cpp
+  src/FeatureLayerRule.cpp)
 
 set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 	--bind \
@@ -33,15 +37,21 @@ FetchContent_Declare(tinygltf
   GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
   GIT_TAG        "v2.8.9"
   GIT_SHALLOW    ON)
+FetchContent_MakeAvailable(tinygltf)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
   GIT_TAG        "improvement/remove-openssl-dependency"
 )
-
 FetchContent_MakeAvailable(mapget)
 
-FetchContent_MakeAvailable(tinygltf)
+FetchContent_Declare(yaml-cpp
+  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
+  GIT_TAG        "yaml-cpp-0.7.0"
+  GIT_SHALLOW    ON)
+FetchContent_MakeAvailable(yaml-cpp)
 
 target_link_libraries(FeatureLayerRenderer
-  tinygltf)
+  tinygltf
+  mapget
+  yaml-cpp)
