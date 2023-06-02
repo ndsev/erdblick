@@ -11,10 +11,10 @@ include_directories(src/include)
 add_executable(FeatureLayerRenderer
   src/include/FeatureLayerRenderer.h
   src/include/FeatureLayerStyle.h
-  src/include/FeatureLayerRule.h
+  src/include/FeatureStyleRule.h
   src/FeatureLayerRenderer.cpp
   src/FeatureLayerStyle.cpp
-  src/FeatureLayerRule.cpp)
+  src/FeatureStyleRule.cpp)
 
 set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 	--bind \
@@ -32,6 +32,8 @@ configure_file("${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/d
 configure_file("${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/GLTFLoader.js" @ONLY)
 configure_file("${CMAKE_SOURCE_DIR}/static/deps/BufferGeometryUtils.js" "${CMAKE_BINARY_DIR}/deps/BufferGeometryUtils.js" @ONLY)
 configure_file("${CMAKE_SOURCE_DIR}/static/deps/LICENSE" "${CMAKE_BINARY_DIR}/deps/LICENSE" @ONLY)
+
+configure_file("${CMAKE_SOURCE_DIR}/static/styles/demo-style.yaml" "${CMAKE_BINARY_DIR}/styles/demo-style.yaml" @ONLY)
 
 FetchContent_Declare(tinygltf
   GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
@@ -53,5 +55,5 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 target_link_libraries(FeatureLayerRenderer
   tinygltf
-  mapget
+  mapget-model
   yaml-cpp)

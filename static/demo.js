@@ -35,6 +35,7 @@ export class Demo {
 
                 function animation(time) {
                     demo_object.rotation.x = time / 2500;
+                    demo_object.rotation.x = time / 2500;
                     demo_object.rotation.y = time / 1000;
                     renderer.render(scene, camera);
                 }
@@ -47,11 +48,26 @@ export class Demo {
             }
         );
     }
-}
 
-const para = document.getElementById("testPara");
-const node = document.createTextNode("GLB buffer size: ");
-para.appendChild(node);
+    async loadStyleYaml(url) {
+        const yamlFetchJob = fetch(url);
+        yamlFetchJob.then((response) => {
+            if (!response.ok) {
+                // Throw an error if the request did not succeed.
+                throw new Error(`HTTP error: ${response.status}`);
+            }
+            // Fetch the response as text and immediately return the promise.
+            let t = response.text();
+            console.log("Inside fetch callback...")
+            console.log(t);
+            return t;
+            })
+            // Catch any errors and display a message.
+            .catch((error) => {
+                console.log(`Could not fetch style: ${error}`);
+            });
+    }
+}
 
 libFeatureLayerRenderer().then(Module => {
     const FMRendererModule = Module;
@@ -59,22 +75,35 @@ libFeatureLayerRenderer().then(Module => {
     let renderObj = fmr.render();
     let objSize = renderObj.getGlbSize();
 
-    const para = document.getElementById("testPara");
-    const node = document.createTextNode(objSize);
-    para.appendChild(node);
-
     let bufferPtr = Number(renderObj.getGlbPtr());
     // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
     let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
-    console.log(bufferPtr);
-    console.log(arrBuf);
-    const decoder = new TextDecoder('utf-8');
-    const s1 = decoder.decode(arrBuf);
-    console.log(s1);
-
     let d = new Demo();
     d.loadGlb(arrBuf);
+
+    const styleUrl = "/styles/demo-style.yaml";
+
+    fetch(styleUrl).then((response) => {
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        return response.text();
+    })
+    .then((styleYaml) => {
+        console.log(styleYaml);
+        let styleLength = styleYaml.length * 2;
+        let arrBuf = FMRendererModule.HEAPU16.buffer.slice(bufferPtr, bufferPtr + styleLength);
+        let bufView = new Uint16Array(arrBuf);
+        for (let i = 0; i < styleLength; i++) {
+            bufView[i] = styleYaml.charCodeAt(i);
+        }
+        // TODO pass the buffer pointer and length to C++ YAML parser.
+        console.log(bufView);
+    })
+    .catch((error) => {
+        console.log(`Could not fetch style: ${error}`);
+    });
 
     renderObj.delete();
     fmr.delete();
