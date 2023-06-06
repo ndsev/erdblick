@@ -72,10 +72,11 @@ export class Demo {
 libFeatureLayerRenderer().then(Module => {
     const FMRendererModule = Module;
     let fmr = new FMRendererModule.FeatureLayerRenderer();
-    let renderObj = fmr.render();
-    let objSize = renderObj.getGlbSize();
+    let glbArray = fmr.render();
+    // TODO JS wrapper class for C++ SharedUint8Array.
+    let objSize = glbArray.getSize();
 
-    let bufferPtr = Number(renderObj.getGlbPtr());
+    let bufferPtr = Number(glbArray.getPointer());
     // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
     let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
@@ -92,18 +93,25 @@ libFeatureLayerRenderer().then(Module => {
     })
     .then((styleYaml) => {
         console.log(styleYaml);
-        let styleLength = styleYaml.length * 2;
-        let arrBuf = FMRendererModule.HEAPU16.buffer.slice(bufferPtr, bufferPtr + styleLength);
-        let bufView = new Uint16Array(arrBuf);
-        for (let i = 0; i < styleLength; i++) {
-            bufView[i] = styleYaml.charCodeAt(i);
+        bufferPtr = bufferPtr + objSize;
+
+        let e = new TextEncoder();
+        let yamlAsUtf8 = e.encode(styleYaml);
+        let styleLength = yamlAsUtf8.length;
+        // TODO make C++ code alloc the memory.
+        let arrBuf = FMRendererModule.HEAPU8.buffer; // .slice(bufferPtr, bufferPtr + styleLength);
+        let dv = new DataView(arrBuf);
+        for (let i = bufferPtr; i < bufferPtr + styleLength; i++) {
+            dv[i] = yamlAsUtf8[i];
         }
-        // TODO pass the buffer pointer and length to C++ YAML parser.
-        console.log(bufView);
+        console.log(dv);
+        console.log(bufferPtr);
+        console.log(styleLength);
+        let s = new FMRendererModule.FeatureLayerStyle(BigInt(bufferPtr), styleLength);
     })
-    .catch((error) => {
-        console.log(`Could not fetch style: ${error}`);
-    });
+    // .catch((error) => {
+    //     console.log(`Could not fetch style: ${error}`);
+    // });
 
     renderObj.delete();
     fmr.delete();
