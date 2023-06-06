@@ -71,20 +71,20 @@ export class Demo {
 
 libFeatureLayerRenderer().then(Module => {
     const FMRendererModule = Module;
-    let fmr = new FMRendererModule.FeatureLayerRenderer();
-    let glbArray = fmr.render();
-    // TODO JS wrapper class for C++ SharedUint8Array.
-    let objSize = glbArray.getSize();
+    var fmr = new FMRendererModule.FeatureLayerRenderer();
 
+    // Demo 1: Get duckfile as GLB and visualize the scene.
+    let glbArray = fmr.render();
+    let objSize = glbArray.getSize();
     let bufferPtr = Number(glbArray.getPointer());
     // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
     let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
-
     let d = new Demo();
-    d.loadGlb(arrBuf);
+    let res = d.loadGlb(arrBuf);
 
+
+    // Demo 2: Pass a configuration YAML to C++ style handling class.
     const styleUrl = "/styles/demo-style.yaml";
-
     fetch(styleUrl).then((response) => {
         if (!response.ok) {
             throw new Error(`HTTP error: ${response.status}`);
@@ -92,27 +92,26 @@ libFeatureLayerRenderer().then(Module => {
         return response.text();
     })
     .then((styleYaml) => {
-        console.log(styleYaml);
-        bufferPtr = bufferPtr + objSize;
 
         let e = new TextEncoder();
         let yamlAsUtf8 = e.encode(styleYaml);
-        let styleLength = yamlAsUtf8.length;
-        // TODO make C++ code alloc the memory.
-        let arrBuf = FMRendererModule.HEAPU8.buffer; // .slice(bufferPtr, bufferPtr + styleLength);
-        let dv = new DataView(arrBuf);
-        for (let i = bufferPtr; i < bufferPtr + styleLength; i++) {
-            dv[i] = yamlAsUtf8[i];
-        }
-        console.log(dv);
-        console.log(bufferPtr);
-        console.log(styleLength);
-        let s = new FMRendererModule.FeatureLayerStyle(BigInt(bufferPtr), styleLength);
-    })
-    // .catch((error) => {
-    //     console.log(`Could not fetch style: ${error}`);
-    // });
+        let yamlLength = yamlAsUtf8.length;
 
-    renderObj.delete();
+        // TODO: Write a JS wrapper class for C++ SharedUint8Array.
+        let yamlCppArr = new FMRendererModule.SharedUint8Array(yamlLength);
+        let yamlCppArrPtr = Number(yamlCppArr.getPointer());
+        // Creating an Uint8Array on top of the buffer is essential!
+        const memoryView = new Uint8Array(FMRendererModule.HEAPU8.buffer);
+        for (let i = 0; i < yamlLength; i++) {
+            memoryView[yamlCppArrPtr + i] = yamlAsUtf8[i];
+        }
+
+        var s = new FMRendererModule.FeatureLayerStyle(yamlCppArr);
+
+        // Do the processing...
+
+        s.delete();
+    })
+
     fmr.delete();
 });

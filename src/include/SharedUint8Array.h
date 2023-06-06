@@ -10,7 +10,8 @@ public:
     SharedUint8Array(uint32_t size);
     uint32_t getSize() const;
     __UINT64_TYPE__ getPointer();
-    void writeToArray(char const* start, char const* end);
+    void writeToArray(const char* start, const char* end);
+    std::string toString();
 
 private:
     uint32_t size_;

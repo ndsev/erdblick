@@ -1,8 +1,8 @@
-#ifndef ERDBLICK_FEATURELAYERRULE_H
-#define ERDBLICK_FEATURELAYERRULE_H
+#ifndef ERDBLICK_FEATURESTYLERULE_H
+#define ERDBLICK_FEATURESTYLERULE_H
 
 #include "mapget/model/feature.h"
-class FeatureLayerRule
+class FeatureStyleRule
 {
 public:
     bool match(mapget::Feature const&);
@@ -14,4 +14,4 @@ public:
     // const GeometryTypeBitmask geometryTypes();
 };
 
-#endif  // ERDBLICK_FEATURELAYERRULE_H
+#endif  // ERDBLICK_FEATURESTYLERULE_H

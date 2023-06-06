@@ -2,14 +2,24 @@
 #define ERDBLICK_FEATURELAYERSTYLE_H
 
 #include <cstdint>
+#include <emscripten/bind.h>
+#include "SharedUint8Array.h"
 
 class FeatureLayerStyle
 {
-    FeatureLayerStyle(__UINT64_TYPE__ yamlBufferPtr, uint32_t bufferSize);
+public:
+    FeatureLayerStyle(SharedUint8Array& yamlArray);
 
     /*
     const& vector<FeatureStyleRule> rules();
     */
 };
+
+
+EMSCRIPTEN_BINDINGS(FeatureLayerStyleBind)
+{
+    emscripten::class_<FeatureLayerStyle>("FeatureLayerStyle")
+        .constructor<SharedUint8Array&>();
+}
 
 #endif  // ERDBLICK_FEATURELAYERSTYLE_H
