@@ -1,6 +1,6 @@
 name: DemoStyle
 version: 1.0
-features:
+rules:
   - geometry: ["line"]
     color: [255.0, 255.0, 255.0]
   - geometry: ["mesh"]

@@ -1,19 +1,81 @@
-#include <string>
 #include <iostream>
 
 #include "include/FeatureLayerStyle.h"
+#include "simfil/model/nodes.h"
 #include "yaml-cpp/yaml.h"
 
-FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray) {
-    auto yamlStyleSpec = yamlArray.toString();
-    std::cout << yamlStyleSpec << std::endl;
+FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
+{
+    auto styleSpec = yamlArray.toString();
 
     // Convert char vector to YAML node.
-    auto yamlNode = YAML::Load(yamlStyleSpec);
-    if (yamlNode["features"] && yamlNode["features"].IsSequence()) {
-        for (YAML::detail::iterator_value feature : yamlNode["features"]) {
-            std::cout << feature["geometry"][0] << std::endl;
-        }
+    auto styleYaml = YAML::Load(styleSpec);
+
+    if (!styleYaml["rules"] || !(styleYaml["rules"].IsSequence())) {
+        std::cout << "YAML stylesheet error: Spec does not contain any rules?" << std::endl;
+        return;
     }
-    // TODO Parse all style fields from YAML node.
+
+    for (YAML::detail::iterator_value rule : styleYaml["rules"]) {
+        // Parse the geometry specifiers into a vector of simfil geometry types.
+        if (!rule["geometry"] || !(rule["geometry"].IsSequence())) {
+            std::cout << "YAML stylesheet error: Every rule must specify a 'geometry' sequence!"
+                      << std::endl;
+            return;
+        }
+        // TODO use GeometryTypeBitmask instead!
+        auto geometryTypes = std::vector<simfil::Geometry::GeomType>{};
+        std::string typePattern;
+        std::string filter;
+        std::string color = "255,255,255";
+        float opacity = 1.0;
+
+        for (YAML::detail::iterator_value geometryStr : rule["geometry"]) {
+            auto g = geometryStr.as<std::string>();
+            if (g == "point") {
+                geometryTypes.push_back(simfil::Geometry::GeomType::Points);
+            }
+            else if (g == "mesh") {
+                geometryTypes.push_back(simfil::Geometry::GeomType::Mesh);
+            }
+            else if (g == "line") {
+                geometryTypes.push_back(simfil::Geometry::GeomType::Line);
+            }
+            else {
+                std::cout << "Unsupported geometry type: " << g << std::endl;
+                return;
+            }
+        }
+
+        // Parse optional fields.
+        if (rule["type"]) {
+            typePattern = rule["type"].as<std::string>();
+        }
+        if (rule["filter"]) {
+            filter = rule["filter"].as<std::string>();
+        }
+        if (rule["color"]) {
+            // TODO AfwColor-style class + color parsing from string/sequence.
+        }
+        if (rule["opacity"]) {
+            opacity = rule["opacity"].as<float>();
+        }
+
+        // Create FeatureStyleRule object.
+        rules_.emplace_back(geometryTypes, typePattern, filter, opacity);
+    }
+
+    valid_ = true;
+
+    std::cout << "Parsed a style YAML!" << std::endl;
+}
+
+bool FeatureLayerStyle::isValid() const
+{
+    return valid_;
+}
+
+const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules()
+{
+    return rules_;
 }
