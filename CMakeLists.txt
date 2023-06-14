@@ -18,8 +18,8 @@ FetchContent_MakeAvailable(tinygltf)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "improvement/remove-openssl-dependency"
-  )
+  GIT_TAG        "issue/4-pymapget"
+  GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
 FetchContent_Declare(yaml-cpp
@@ -61,6 +61,7 @@ set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
 ")
 
 target_link_libraries(FeatureLayerRenderer
-  tinygltf
-  mapget-model
-  yaml-cpp)
+  PUBLIC
+    tinygltf
+    mapget-model
+    yaml-cpp)

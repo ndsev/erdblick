@@ -1,8 +1,9 @@
 #include <iostream>
 
 #include "include/FeatureLayerStyle.h"
-#include "simfil/model/nodes.h"
 #include "yaml-cpp/yaml.h"
+#include "simfil/simfil.h"
+#include "simfil/model/nodes.h"
 
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
 {
