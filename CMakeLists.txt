@@ -6,8 +6,6 @@ include(FetchContent)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_FLAGS "-Wall")
 
-include_directories(src/include)
-
 # External dependencies.
 
 FetchContent_Declare(tinygltf
@@ -28,17 +26,7 @@ FetchContent_Declare(yaml-cpp
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(yaml-cpp)
 
-# For WASM modules, add_executable is used instead of add_library.
-
-add_executable(FeatureLayerRenderer
-  src/include/FeatureLayerRenderer.h
-  src/include/FeatureLayerStyle.h
-  src/include/FeatureStyleRule.h
-  src/include/SharedUint8Array.h
-  src/FeatureLayerRenderer.cpp
-  src/FeatureLayerStyle.cpp
-  src/FeatureStyleRule.cpp
-  src/SharedUint8Array.cpp)
+add_subdirectory(libs/renderer)
 
 configure_file("${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/index.html" @ONLY)
 configure_file("${CMAKE_SOURCE_DIR}/static/demo.js" "${CMAKE_BINARY_DIR}/demo.js" @ONLY)
@@ -49,19 +37,3 @@ configure_file("${CMAKE_SOURCE_DIR}/static/deps/BufferGeometryUtils.js" "${CMAKE
 configure_file("${CMAKE_SOURCE_DIR}/static/deps/LICENSE" "${CMAKE_BINARY_DIR}/deps/LICENSE" @ONLY)
 
 configure_file("${CMAKE_SOURCE_DIR}/static/styles/demo-style.yaml" "${CMAKE_BINARY_DIR}/styles/demo-style.yaml" @ONLY)
-
-set_target_properties(FeatureLayerRenderer PROPERTIES LINK_FLAGS "\
-	--bind \
-	-s ENVIRONMENT=web \
-	-s MODULARIZE=1 \
-	-s EXPORT_NAME='\"libFeatureLayerRenderer\"' \
-	-s EXPORTED_RUNTIME_METHODS='[\"cwrap\", \"ccall\"]' \
-	-s WASM_BIGINT=1 \
-	-s NO_DISABLE_EXCEPTION_CATCHING \
-")
-
-target_link_libraries(FeatureLayerRenderer
-  PUBLIC
-    tinygltf
-    mapget-model
-    yaml-cpp)

@@ -3,7 +3,7 @@
 #include "duckfile.c"
 #include "tiny_gltf.h"
 
-#include "include/FeatureLayerRenderer.h"
+#include "FeatureLayerRenderer.h"
 
 FeatureLayerRenderer::FeatureLayerRenderer() {}
 

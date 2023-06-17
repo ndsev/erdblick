@@ -69,7 +69,7 @@ export class Demo {
     }
 }
 
-libFeatureLayerRenderer().then(Module => {
+libErdblickRenderer().then(Module => {
     const FMRendererModule = Module;
     var fmr = new FMRendererModule.FeatureLayerRenderer();
 

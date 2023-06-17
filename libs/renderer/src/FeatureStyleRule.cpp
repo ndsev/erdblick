@@ -1,4 +1,4 @@
-#include "include/FeatureStyleRule.h"
+#include "FeatureStyleRule.h"
 
 FeatureStyleRule::FeatureStyleRule(
     std::vector<simfil::Geometry::GeomType>& geometryTypes,
