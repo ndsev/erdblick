@@ -2,7 +2,7 @@
 #define ERDBLICK_FEATURELAYERRENDERER_H
 
 #include <emscripten/bind.h>
-#include "SharedUint8Array.h"
+#include "shareduint8array.h"
 
 class FeatureLayerRenderer
 {

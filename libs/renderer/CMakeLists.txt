@@ -2,15 +2,15 @@ project(ErdblickRenderer)
 
 # For WASM modules, add_executable is used instead of add_library.
 add_executable(ErdblickRenderer
-  include/renderer/FeatureLayerRenderer.h
-  include/renderer/FeatureLayerStyle.h
-  include/renderer/FeatureStyleRule.h
-  include/renderer/SharedUint8Array.h
+  include/renderer/featurelayerrenderer.h
+  include/renderer/featurelayerstyle.h
+  include/renderer/featurestylerule.h
+  include/renderer/shareduint8array.h
 
-  src/FeatureLayerRenderer.cpp
-  src/FeatureLayerStyle.cpp
-  src/FeatureStyleRule.cpp
-  src/SharedUint8Array.cpp)
+  src/featurelayerrenderer.cpp
+  src/featurelayerstyle.cpp
+  src/featurestylerule.cpp
+  src/shareduint8array.cpp)
 
 target_include_directories(ErdblickRenderer
   PUBLIC

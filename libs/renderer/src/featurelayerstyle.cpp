@@ -4,7 +4,7 @@
 #include "simfil/simfil.h"
 #include "simfil/model/nodes.h"
 
-#include "FeatureLayerStyle.h"
+#include "featurelayerstyle.h"
 
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
 {

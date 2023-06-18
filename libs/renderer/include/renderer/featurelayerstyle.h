@@ -3,8 +3,8 @@
 
 #include <emscripten/bind.h>
 #include <cstdint>
-#include "FeatureStyleRule.h"
-#include "SharedUint8Array.h"
+#include "featurestylerule.h"
+#include "shareduint8array.h"
 
 class FeatureLayerStyle
 {

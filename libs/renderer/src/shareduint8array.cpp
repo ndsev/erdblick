@@ -1,6 +1,7 @@
-#include "SharedUint8Array.h"
 #include <iostream>
 #include <sstream>
+
+#include "shareduint8array.h"
 
 SharedUint8Array::SharedUint8Array(uint32_t size) : size_(size)
 {
