@@ -2,13 +2,19 @@
 #define ERDBLICK_FEATURELAYERRENDERER_H
 
 #include <emscripten/bind.h>
+
+#include "mapget/model/featurelayer.h"
+
 #include "shareduint8array.h"
+#include "featurelayerstyle.h"
 
 class FeatureLayerRenderer
 {
 public:
     FeatureLayerRenderer();
-    SharedUint8Array& render();
+    SharedUint8Array& render(
+        const FeatureLayerStyle& style,
+        const std::shared_ptr<mapget::TileFeatureLayer>& layer);
 private:
     std::shared_ptr<SharedUint8Array> glbArray;
 };

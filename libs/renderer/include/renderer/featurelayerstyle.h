@@ -11,7 +11,7 @@ class FeatureLayerStyle
 public:
     explicit FeatureLayerStyle(SharedUint8Array& yamlArray);
     [[nodiscard]] bool isValid() const;
-    const std::vector<FeatureStyleRule>& rules();
+    [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
 
 private:
     std::vector<FeatureStyleRule> rules_;

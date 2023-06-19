@@ -12,7 +12,7 @@ public:
         std::string& type,
         std::string& filter,
         float opacity);
-    bool match(mapget::Feature const&);
+    bool match(const mapget::Feature& feature) const;
 
     const std::vector<simfil::Geometry::GeomType>& geometryTypes();
     const std::string& typeIdPattern();

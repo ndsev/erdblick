@@ -77,7 +77,7 @@ bool FeatureLayerStyle::isValid() const
     return valid_;
 }
 
-const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules()
+const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 {
     return rules_;
 }
