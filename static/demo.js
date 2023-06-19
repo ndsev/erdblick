@@ -70,21 +70,8 @@ export class Demo {
 }
 
 libErdblickRenderer().then(Module => {
-    const FMRendererModule = Module;
-    var fmr = new FMRendererModule.FeatureLayerRenderer();
-
-    // Demo 1: Get duckfile as GLB and visualize the scene.
-    let glbArray = fmr.render();
-    let objSize = glbArray.getSize();
-    let bufferPtr = Number(glbArray.getPointer());
-    // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
-    let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
-    let d = new Demo();
-    let res = d.loadGlb(arrBuf);
-
-
-    // Demo 2: Pass a configuration YAML to C++ style handling class.
-    const styleUrl = "/styles/demo-style.yaml";
+    // Pass a configuration YAML to C++ style handling class.
+    const styleUrl = "styles/demo-style.yaml";
     fetch(styleUrl).then((response) => {
         if (!response.ok) {
             throw new Error(`HTTP error: ${response.status}`);
@@ -92,11 +79,14 @@ libErdblickRenderer().then(Module => {
         return response.text();
     })
     .then((styleYaml) => {
+        const FMRendererModule = Module;
+        let fmr = new FMRendererModule.FeatureLayerRenderer();
 
         let e = new TextEncoder();
         let yamlAsUtf8 = e.encode(styleYaml);
         let yamlLength = yamlAsUtf8.length;
 
+        // Prepare to pass the style configuration to FeatureLayerRenderer.
         // TODO: Write a JS wrapper class for C++ SharedUint8Array.
         let yamlCppArr = new FMRendererModule.SharedUint8Array(yamlLength);
         let yamlCppArrPtr = Number(yamlCppArr.getPointer());
@@ -105,13 +95,22 @@ libErdblickRenderer().then(Module => {
         for (let i = 0; i < yamlLength; i++) {
             memoryView[yamlCppArrPtr + i] = yamlAsUtf8[i];
         }
+        const s = new FMRendererModule.FeatureLayerStyle(yamlCppArr);
 
-        var s = new FMRendererModule.FeatureLayerStyle(yamlCppArr);
+        // Prepare a TileFeatureLayer for visualization.
+        const testDataProvider = new FMRendererModule.TestDataProvider();
+        const testLayerPtr = testDataProvider.getTestLayer();
+        // Get the scene as GLB and visualize it.
+        let glbArray = fmr.render(s, testLayerPtr);
+        let objSize = glbArray.getSize();
+        let bufferPtr = Number(glbArray.getPointer());
+        // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
+        let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
-        // Do the processing...
-
-        s.delete();
+        let d = new Demo();
+        d.loadGlb(arrBuf).then(() => {
+            s.delete();
+            fmr.delete();
+        });
     })
-
-    fmr.delete();
 });

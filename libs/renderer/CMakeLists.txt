@@ -6,6 +6,7 @@ add_executable(ErdblickRenderer
   include/renderer/featurelayerstyle.h
   include/renderer/featurestylerule.h
   include/renderer/shareduint8array.h
+  include/renderer/testdataprovider.h
 
   src/featurelayerrenderer.cpp
   src/featurelayerstyle.cpp

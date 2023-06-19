@@ -64,6 +64,7 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
         }
 
         // Create FeatureStyleRule object.
+        // TODO store rules by the feature they apply to for faster processing.
         rules_.emplace_back(geometryTypes, typePattern, filter, opacity);
     }
 

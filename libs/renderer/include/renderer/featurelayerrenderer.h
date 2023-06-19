@@ -7,6 +7,7 @@
 
 #include "shareduint8array.h"
 #include "featurelayerstyle.h"
+#include "testdataprovider.h"
 
 class FeatureLayerRenderer
 {
@@ -30,6 +31,16 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     emscripten::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
         .constructor()
         .function("render", &FeatureLayerRenderer::render);
+    emscripten::class_<FeatureLayerStyle>("FeatureLayerStyle")
+        .constructor<SharedUint8Array&>();
+    emscripten::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
+        .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>("std::shared_ptr<mapget::TileFeatureLayer>");
+    // For reference, the below binding is not enough, throwing an
+    // UnboundTypeError at runtime when getTestLayer is called in demo.js.
+    // emscripten::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayerPtr");
+    emscripten::class_<TestDataProvider>("TestDataProvider")
+        .constructor()
+        .function("getTestLayer", &TestDataProvider::getTestLayer);
 }
 
 #endif  // ERDBLICK_FEATURELAYERRENDERER_H

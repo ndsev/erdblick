@@ -11,7 +11,7 @@ FeatureStyleRule::FeatureStyleRule(
 
 bool FeatureStyleRule::match(const mapget::Feature&) const
 {
-    // TODO check for match ing geometry, type pattern, filter.
+    // TODO check for matching geometry, type pattern, filter.
     return true;
 }
 

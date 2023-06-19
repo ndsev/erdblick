@@ -18,9 +18,4 @@ private:
     bool valid_ = false;
 };
 
-EMSCRIPTEN_BINDINGS(FeatureLayerStyleBind)
-{
-    emscripten::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
-}
-
 #endif  // ERDBLICK_FEATURELAYERSTYLE_H
