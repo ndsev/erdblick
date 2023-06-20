@@ -13,11 +13,10 @@ class FeatureLayerRenderer
 {
 public:
     FeatureLayerRenderer();
-    SharedUint8Array& render(
+    void render(
         const FeatureLayerStyle& style,
-        const std::shared_ptr<mapget::TileFeatureLayer>& layer);
-private:
-    std::shared_ptr<SharedUint8Array> glbArray;
+        const std::shared_ptr<mapget::TileFeatureLayer>& layer,
+        SharedUint8Array& data);
 };
 
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
@@ -25,6 +24,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     // JS code must access the array using its pointer and size specification,
     // we do not need to expose writeToArray().
     emscripten::class_<SharedUint8Array>("SharedUint8Array")
+        .constructor()
         .constructor<uint32_t>()
         .function("getSize", &SharedUint8Array::getSize)
         .function("getPointer", &SharedUint8Array::getPointer);

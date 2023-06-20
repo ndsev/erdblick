@@ -7,14 +7,17 @@
 class SharedUint8Array
 {
 public:
-    SharedUint8Array(uint32_t size);
-    uint32_t getSize() const;
+    SharedUint8Array() = default;
+    explicit SharedUint8Array(uint32_t size);
+    [[nodiscard]] uint32_t getSize() const;
     __UINT64_TYPE__ getPointer();
-    void writeToArray(const char* start, const char* end);
-    std::string toString();
+    std::shared_ptr<std::vector<uint8_t>> getArray();
 
+    void writeToArray(const char* start, const char* end);
+    void writeToArray(std::string& content);
+
+    std::string toString();
 private:
-    uint32_t size_;
     std::vector<uint8_t> array_;
 };
 

@@ -40,9 +40,6 @@ export class Demo {
                     renderer.render(scene, camera);
                 }
             },
-            function (xhr) {
-                console.log((xhr.loaded / xhr.total) * 100 + '% loaded');
-            },
             function (error) {
                 console.error('Error parsing GLTF', error);
             }
@@ -88,8 +85,8 @@ libErdblickRenderer().then(Module => {
 
         // Prepare to pass the style configuration to FeatureLayerRenderer.
         // TODO: Write a JS wrapper class for C++ SharedUint8Array.
-        let yamlCppArr = new FMRendererModule.SharedUint8Array(yamlLength);
-        let yamlCppArrPtr = Number(yamlCppArr.getPointer());
+        const yamlCppArr = new FMRendererModule.SharedUint8Array(yamlLength);
+        const yamlCppArrPtr = Number(yamlCppArr.getPointer());
         // Creating an Uint8Array on top of the buffer is essential!
         const memoryView = new Uint8Array(FMRendererModule.HEAPU8.buffer);
         for (let i = 0; i < yamlLength; i++) {
@@ -99,16 +96,18 @@ libErdblickRenderer().then(Module => {
 
         // Prepare a TileFeatureLayer for visualization.
         const testDataProvider = new FMRendererModule.TestDataProvider();
+        const sharedGlbArray = new FMRendererModule.SharedUint8Array();
         const testLayerPtr = testDataProvider.getTestLayer();
         // Get the scene as GLB and visualize it.
-        let glbArray = fmr.render(s, testLayerPtr);
-        let objSize = glbArray.getSize();
-        let bufferPtr = Number(glbArray.getPointer());
+        fmr.render(s, testLayerPtr, sharedGlbArray);
+        let objSize = sharedGlbArray.getSize();
+        let bufferPtr = Number(sharedGlbArray.getPointer());
         // Module.HEAPU8.buffer is the same as Module.asm.memory.buffer.
         let arrBuf = FMRendererModule.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
         let d = new Demo();
         d.loadGlb(arrBuf).then(() => {
+            // TODO delete C++/WASM objects.
             s.delete();
             fmr.delete();
         });
