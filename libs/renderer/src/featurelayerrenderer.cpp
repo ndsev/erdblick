@@ -23,7 +23,7 @@ void FeatureLayerRenderer::render(
     }
 
     // Just a tinygltf sample as a starter.
-    std::vector<double> coords = {0.0, 0.0, 0.0, 1.0, 1.0, 1.0};
+    std::vector<float> coords = {0.0, 0.0, 0.0, 1.0, 1.0, 1.0};
 
     tinygltf::Model model;
     model.asset.version = "2.0";
@@ -40,7 +40,7 @@ void FeatureLayerRenderer::render(
     tinygltf::Mesh mesh;
     tinygltf::Primitive primitive;
     primitive.mode = TINYGLTF_MODE_LINE;
-    primitive.attributes["POSITION"] = 1; // Index of the POSITION accessor
+    primitive.attributes["POSITION"] = 0; // Index of the POSITION accessor
     mesh.primitives.push_back(primitive);
     model.meshes.push_back(mesh);
 
@@ -57,7 +57,7 @@ void FeatureLayerRenderer::render(
     tinygltf::BufferView bufferView;
     bufferView.buffer = 0;
     bufferView.byteOffset = 0;
-    bufferView.byteLength = static_cast<int>(coords.size() * sizeof(double));
+    bufferView.byteLength = static_cast<int>(coords.size() * sizeof(float));
     bufferView.target = TINYGLTF_TARGET_ARRAY_BUFFER;
     model.bufferViews.push_back(bufferView);
 

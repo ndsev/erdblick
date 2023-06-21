@@ -11,9 +11,9 @@ export class Demo {
             function (loadedData) {
 
                 // Reference: https://github.com/mrdoob/three.js/blob/dev/README.md
-                const demo_object = loadedData.scene.children[0].children[0];
+                const demoObject = loadedData.scene.children[0];
                 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 2000);
-                camera.position.z = 700;
+                camera.position.z = 10;
 
                 const scene = new THREE.Scene();
 
@@ -24,7 +24,7 @@ export class Demo {
                 dirLight2.position.set(  300,  - 1000, 1000 );
                 scene.add( dirLight2 );
 
-                scene.add( demo_object );
+                scene.add( demoObject );
 
                 const renderer = new THREE.WebGLRenderer({antialias: true});
                 renderer.setSize(window.innerWidth - 50, window.innerHeight - 50);
@@ -34,9 +34,9 @@ export class Demo {
                 container.appendChild(renderer.domElement);
 
                 function animation(time) {
-                    demo_object.rotation.x = time / 2500;
-                    demo_object.rotation.x = time / 2500;
-                    demo_object.rotation.y = time / 1000;
+                    demoObject.rotation.x = time / 2500;
+                    demoObject.rotation.x = time / 2500;
+                    demoObject.rotation.y = time / 1000;
                     renderer.render(scene, camera);
                 }
             },
