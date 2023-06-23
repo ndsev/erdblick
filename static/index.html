@@ -2,22 +2,44 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Emscripten test</title>
+    <title>Erdblick</title>
+
+    <!-- Non-Module 3rd-party sources -->
+    <script src="./deps/jquery-3.2.1-min.js"></script>
+    <script src="./deps/wheel.js"></script>
+
+    <!-- Erdblick WASM library -->
+    <script type="module" src="./libs/renderer/ErdblickRenderer.js"></script>
+
+    <!-- THREE.js sources -->
+    <script type="module" src="./deps/three.js"></script>
+    <script type="module" src="./deps/BufferGeometryUtils.js"></script>
+    <script type="module" src="./deps/GLTFLoader.js"></script>
+
+    <!-- MapComponent sources -->
+    <script type="module" src="/mapcomponent/viewport.js"></script>
+    <script type="module" src="/mapcomponent/meshline.js"></script>
+    <script type="module" src="/mapcomponent/cameracontroller.js"></script>
+    <script type="module" src="/mapcomponent/globe.js"></script>
+    <script type="module" src="/mapcomponent/consts.js"></script>
+    <script type="module" src="/mapcomponent/utils.js"></script>
+    <script type="module" src="/mapcomponent/highlight.js"></script>
+    <script type="module" src="/mapcomponent/batch.js"></script>
+    <script type="module" src="/mapcomponent/model.js"></script>
+    <script type="module" src="/mapcomponent/renderingcontroller.js"></script>
+    <script type="module" src="/mapcomponent/mapcomponent.js"></script>
+    <script type="module" src="/mapcomponent/timer.js"></script>
+
+    <!-- App -->
+    <script type="module" src="./index.js"></script>
+
+    <!-- Style sheets -->
+    <link rel="stylesheet" href="./index.css">
 </head>
 <body>
 
-<div id="yamlDiv"></div>
-
-<div id="demoScene"></div>
-
-<script src="./libs/renderer/ErdblickRenderer.js"></script>
-
-<!-- THREE.js sources -->
-<script type="module" src="./deps/three.js"></script>
-<script type="module" src="./deps/BufferGeometryUtils.js"></script>
-<script type="module" src="./deps/GLTFLoader.js"></script>
-
-<script type="module" src="./demo.js"></script>
+<div id="mapviewer-canvas-container" class="mapviewer-renderlayer" style="pointer-events: all;" unselectable="on"></div>
+<div id="mapviewer-label-container" class="mapviewer-renderlayer" style="pointer-events: none;" unselectable="on"></div>
 
 </body>
 </html>

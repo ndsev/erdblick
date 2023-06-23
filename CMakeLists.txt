@@ -28,12 +28,5 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 add_subdirectory(libs/renderer)
 
-configure_file("${CMAKE_SOURCE_DIR}/static/index.html" "${CMAKE_BINARY_DIR}/index.html" @ONLY)
-configure_file("${CMAKE_SOURCE_DIR}/static/demo.js" "${CMAKE_BINARY_DIR}/demo.js" @ONLY)
-
-configure_file("${CMAKE_SOURCE_DIR}/static/deps/three.js" "${CMAKE_BINARY_DIR}/deps/three.js" @ONLY)
-configure_file("${CMAKE_SOURCE_DIR}/static/deps/GLTFLoader.js" "${CMAKE_BINARY_DIR}/deps/GLTFLoader.js" @ONLY)
-configure_file("${CMAKE_SOURCE_DIR}/static/deps/BufferGeometryUtils.js" "${CMAKE_BINARY_DIR}/deps/BufferGeometryUtils.js" @ONLY)
-configure_file("${CMAKE_SOURCE_DIR}/static/deps/LICENSE" "${CMAKE_BINARY_DIR}/deps/LICENSE" @ONLY)
-
-configure_file("${CMAKE_SOURCE_DIR}/static/styles/demo-style.yaml" "${CMAKE_BINARY_DIR}/styles/demo-style.yaml" @ONLY)
+add_custom_target(static-web-files ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/static" "${CMAKE_BINARY_DIR}")
