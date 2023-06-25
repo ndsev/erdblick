@@ -1,5 +1,4 @@
-#ifndef ERDBLICK_FEATURESTYLERULE_H
-#define ERDBLICK_FEATURESTYLERULE_H
+#pragma once
 
 #include "mapget/model/feature.h"
 #include "simfil/model/nodes.h"
@@ -14,10 +13,10 @@ public:
         float opacity);
     bool match(const mapget::Feature& feature) const;
 
-    const std::vector<simfil::Geometry::GeomType>& geometryTypes();
-    const std::string& typeIdPattern();
-    const std::string& filter();
-    float opacity();
+    const std::vector<simfil::Geometry::GeomType>& geometryTypes() const;
+    const std::string& typeIdPattern() const;
+    const std::string& filter() const;
+    float opacity() const;
     // TODO Create GeometryBitMask and Color classes.
     // const Color color();
 
@@ -29,4 +28,3 @@ private:
     float opacity_;
 };
 
-#endif  // ERDBLICK_FEATURESTYLERULE_H

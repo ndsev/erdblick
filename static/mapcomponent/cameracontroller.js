@@ -97,7 +97,7 @@ export class MapViewerCameraController extends EventDispatcher
         this.setCameraAzimuth(lon, lat, true);
 
         let alt = platform.getStateNumeric("alt", this.getCameraAltitude());
-        this.setCameraAltitude(alt * MapViewerConst.worldToSceneScale, true);
+        this.setCameraAltitude(alt, true);
 
         let x = platform.getStateNumeric("x", .0);
         let z = platform.getStateNumeric("z", .0);
@@ -352,7 +352,7 @@ export class MapViewerCameraController extends EventDispatcher
     };
 
     getCameraAltitude() {
-        return this.camera.position.z/MapViewerConst.worldToSceneScale;
+        return this.camera.position.z;
     }
 
     setCameraPosition(pos, isCameraJump) {

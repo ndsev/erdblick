@@ -1,12 +1,11 @@
-#ifndef ERDBLICK_FEATURELAYERRENDERER_H
-#define ERDBLICK_FEATURELAYERRENDERER_H
+#pragma once
 
 #include <emscripten/bind.h>
 
 #include "mapget/model/featurelayer.h"
 
-#include "shareduint8array.h"
-#include "featurelayerstyle.h"
+#include "buffer.h"
+#include "style.h"
 #include "testdataprovider.h"
 
 class FeatureLayerRenderer
@@ -16,7 +15,7 @@ public:
     void render(
         const FeatureLayerStyle& style,
         const std::shared_ptr<mapget::TileFeatureLayer>& layer,
-        SharedUint8Array& data);
+        SharedUint8Array& glbResultBuffer);
 };
 
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
@@ -35,12 +34,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
         .constructor<SharedUint8Array&>();
     emscripten::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
         .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>("std::shared_ptr<mapget::TileFeatureLayer>");
-    // For reference, the below binding is not enough, throwing an
-    // UnboundTypeError at runtime when getTestLayer is called in demo.js.
-    // emscripten::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayerPtr");
     emscripten::class_<TestDataProvider>("TestDataProvider")
         .constructor()
         .function("getTestLayer", &TestDataProvider::getTestLayer);
 }
-
-#endif  // ERDBLICK_FEATURELAYERRENDERER_H

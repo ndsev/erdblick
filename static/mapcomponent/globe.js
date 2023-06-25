@@ -328,7 +328,7 @@ export class Globe
                         showGrid:            { type:"i", value: true },
                         showTexture:         { type:"i", value: true },
                         showShadows:         { type:"i", value: true },
-                        terrainColor:        { type:"3f", value: new Vector3(1., .92, .70) },
+                        terrainColor:        { type:"3f", value: new Vector3(.2, .2, .2) },
                         gridNumDivs:         { type:"2f", value: new Vector2() },
                         gridOffset:          { type:"2f", value: new Vector2() },
                         globeTexture:        { type:"t", value: null },

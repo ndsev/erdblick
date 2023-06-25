@@ -5,8 +5,7 @@
  */
 export const MapViewerConst = (() => {
     /// Radius of the representation of the globe that is used
-    let globeRenderRadius = 1024;
-    let worldToSceneScale = globeRenderRadius / 6371;
+    let globeRenderRadius = 6371.;
 
     /// Speed of movement per arrow key/button stroke in any direction
     /// Fraction of current viewport arc on sphere.
@@ -32,11 +31,8 @@ export const MapViewerConst = (() => {
     /// before a drag move is recognized.
     let minPointerMoveBeforeDrag = 3;
 
-    /// Maximum number of parallel GLB requests before available URIs are queued
-    let maxNumParallelBatchRequests = 8;
-
     /// Maximum elevation that can be achieved with heightmaps
-    let maxElevation = 16.383 * worldToSceneScale;
+    let maxElevation = 16.383;
 
     /// Minimum ms between pointer-move event callbacks.
     let minPointerMoveDelta = 33;
@@ -48,7 +44,6 @@ export const MapViewerConst = (() => {
         globeRenderRadius: globeRenderRadius,
         minCameraGlobeDistance: globeRenderRadius * 0.000002,
         maxCameraGlobeDistance: globeRenderRadius * 2,
-        worldToSceneScale: worldToSceneScale,
         movementSpeedPerArrowKeyStroke: movementSpeedPerArrowKeyStroke,
         zoomSpeedPerKeyStroke: zoomSpeedPerKeyStroke,
         zoomSpeedPerWheelTurn: zoomSpeedPerWheelTurn,

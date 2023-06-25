@@ -1,5 +1,4 @@
-#ifndef ERDBLICK_SHAREDUINT8ARRAY_H
-#define ERDBLICK_SHAREDUINT8ARRAY_H
+#pragma once
 
 #include <vector>
 #include <emscripten/bind.h>
@@ -20,5 +19,3 @@ public:
 private:
     std::vector<uint8_t> array_;
 };
-
-#endif  // ERDBLICK_SHAREDUINT8ARRAY_H

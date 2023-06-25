@@ -1,4 +1,4 @@
-#include "shareduint8array.h"
+#include "buffer.h"
 
 SharedUint8Array::SharedUint8Array(uint32_t size) {
     array_.resize(size);

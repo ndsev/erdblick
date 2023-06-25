@@ -1,10 +1,11 @@
 #include <iostream>
+#include <regex>
 
 #include "yaml-cpp/yaml.h"
 #include "simfil/simfil.h"
 #include "simfil/model/nodes.h"
 
-#include "featurelayerstyle.h"
+#include "style.h"
 
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
 {

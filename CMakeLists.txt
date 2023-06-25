@@ -16,7 +16,7 @@ FetchContent_MakeAvailable(tinygltf)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "issue/4-pymapget"
+  GIT_TAG        "issue/6-cache-and-service-libs"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
@@ -25,6 +25,12 @@ FetchContent_Declare(yaml-cpp
   GIT_TAG        "yaml-cpp-0.7.0"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(yaml-cpp)
+
+FetchContent_Declare(glm
+    GIT_REPOSITORY "https://github.com/g-truc/glm.git"
+    GIT_TAG        "0.9.9.8"
+    GIT_SHALLOW    ON)
+FetchContent_MakeAvailable(glm)
 
 add_subdirectory(libs/renderer)
 

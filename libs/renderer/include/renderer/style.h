@@ -1,10 +1,9 @@
-#ifndef ERDBLICK_FEATURELAYERSTYLE_H
-#define ERDBLICK_FEATURELAYERSTYLE_H
+#pragma once
 
 #include <emscripten/bind.h>
 #include <cstdint>
-#include "featurestylerule.h"
-#include "shareduint8array.h"
+#include "buffer.h"
+#include "rule.h"
 
 class FeatureLayerStyle
 {
@@ -17,5 +16,3 @@ private:
     std::vector<FeatureStyleRule> rules_;
     bool valid_ = false;
 };
-
-#endif  // ERDBLICK_FEATURELAYERSTYLE_H

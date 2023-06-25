@@ -1,5 +1,4 @@
-#ifndef ERDBLICK_TESTDATAPROVIDER_H
-#define ERDBLICK_TESTDATAPROVIDER_H
+#pragma once
 
 #include "mapget/model/featurelayer.h"
 
@@ -69,4 +68,3 @@ private:
     std::shared_ptr<mapget::TileFeatureLayer> layer_;
 };
 
-#endif  // ERDBLICK_TESTDATAPROVIDER_H
