@@ -27,9 +27,8 @@ import {uvTransform} from "./utils.js";
 
 export class Globe
 {
-    constructor(platform, framebuffers, capabilities, viewport)
+    constructor(capabilities, viewport)
     {
-        this.platform = platform;
         this.terrain = {
             phiMin: .0,
             thetaMin: .0,
@@ -45,7 +44,6 @@ export class Globe
         this.lightmapData = null;
 
         this.gridLevelValue = -1;
-        this.meshVisual = null;
         this.materialVisual = null;
         this.materialPicking = null;
         this.vp = viewport;
@@ -236,9 +234,6 @@ export class Globe
                             textureIntensity);
                     }
         
-                    // ---------------- Apply map tiles --------------
-                    #include <tile_sample_and_apply_fragment>
-        
                     // ----------------- Apply shadow ----------------
                     if (showShadows) {
                         gl_FragColor.rgb *= light;
@@ -266,7 +261,7 @@ export class Globe
             #include <filter_uv_pars>
             #include <tile_pars_fragment>
             void main() {
-                #include <tile_sample_and_apply_fragment>
+                gl_FragColor = vec4(0.);
             }
             `
         };
@@ -285,12 +280,6 @@ export class Globe
             varying highp vec2 tileUv;
             uniform vec2 polarOffset;
             uniform vec2 polarDimensions;
-            uniform sampler2D tileTexture;
-        `;
-
-        ShaderChunk.tile_sample_and_apply_fragment = `
-            vec4 tileSample = texture2D(tileTexture, tileUv);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, tileSample.rgb, tileSample.a);
         `;
 
         ////////////////////////////// Initialization //////////////////////////////
@@ -303,7 +292,6 @@ export class Globe
             return {
                 polarOffset:         { type:"2f",  value: new Vector2() },
                 polarDimensions:     { type:"2f",  value: new Vector2() },
-                tileTexture:         { type:"t",   value: null },
                 heightmapTex:        { type:"t",   value: null },
                 terrainExcentricity: { type:"f",   value: 1. },
                 viewportToTerrainUv: { type:"3fm", value: new Matrix3() },
@@ -358,14 +346,12 @@ export class Globe
 
         this.materialsVisual = [...Array(this.vp.renderTileController.numRenderTiles)].map((_, i) => {
             let mat = this.materialVisual.clone();
-            mat.uniforms.tileTexture.value = framebuffers.visual[i];
             mat.rendertile = this.vp.renderTileController.tiles[i];
             return mat;
         });
 
         this.materialsPicking = [...Array(this.vp.renderTileController.numRenderTiles)].map((_, i) => {
             let mat = this.materialPicking.clone();
-            mat.uniforms.tileTexture.value = framebuffers.picking[i];
             mat.rendertile = this.vp.renderTileController.tiles[i];
             return mat;
         });

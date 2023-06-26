@@ -62,8 +62,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
     let labelObjects = new Set(); // labels receive special treatment in updateLabelStates()
     let labelObjectsToRemove = new Set(); // labels that were removed through onBatchAboutToBeRemoved.
                                           // Removal will be executed in updateLabelStates called by paint().
-    let renderTileSizeVisual = new Vector2(1024, 1024);
-    let renderTileSizePicking = new Vector2(512, 512);
 
     // ------------------------------ FPS ---------------------------------
 
@@ -110,10 +108,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
                 points: new Scene()
             }
         },
-        ortho: {
-            visual: new Scene(),
-            picking: new Scene(),
-        }
     };
 
     // ---------------------------- Framebuffers ------------------------------
@@ -124,13 +118,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
         format: RGBAFormat,
         minFilter: NearestFilter,
         magFilter: NearestFilter
-    };
-    let framebufferOptionsVisualOrtho = {
-        depthBuffer: true,
-        format: RGBAFormat,
-        generateMipmaps: false,
-        minFilter: LinearFilter,
-        magFilter: LinearFilter
     };
     let framebufferOptionsVisualPerspective = {
         depthBuffer: true,
@@ -144,20 +131,10 @@ export function MapViewerRenderingController(mapViewerModel, platform)
         {
             picking: new WebGLRenderTarget(canvasWidth, canvasHeight, framebufferOptionsPicking),
             visual: new WebGLRenderTarget(canvasWidth, canvasHeight, framebufferOptionsVisualPerspective),
-        },
-        tiles:
-        {
-            visual: [...Array(viewport.renderTileController.numRenderTiles)].map(
-                () => new WebGLRenderTarget(renderTileSizeVisual.x, renderTileSizeVisual.y, framebufferOptionsVisualOrtho)),
-            picking: [...Array(viewport.renderTileController.numRenderTiles)].map(
-                () => new WebGLRenderTarget(renderTileSizePicking.x, renderTileSizePicking.y, framebufferOptionsPicking))
-        },
+        }
     };
 
     // ------------------------------- Other ----------------------------------
-
-    /// Map from RegExp to bool to track which highlight styles should be shown/hidden
-    let styleFilterValues = new Map();
 
     /// Map to keep track of which visual id has how strong of a hover highlight
     let hoverIntensityPerId = new Map();
@@ -211,11 +188,7 @@ export function MapViewerRenderingController(mapViewerModel, platform)
         light.intensity = 0.4;
         scenes.perspective.visual.main.add(light);
 
-        scope.globeSphere = new Globe(
-            platform,
-            framebuffers.tiles,
-            renderer.capabilities,
-            viewport);
+        scope.globeSphere = new Globe(renderer.capabilities, viewport);
         scope.globeSphere.meshesVisual.forEach(mesh => scenes.perspective.visual.main.add(mesh));
         scope.globeSphere.meshesPicking.forEach(mesh => scenes.perspective.picking.main.add(mesh));
 
@@ -273,8 +246,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
         if (!mapViewerModelInitialized)
             return;
 
-        transitionRenderTiles();
-
         // Use black (space) or blue (sky) clear color depending on camera height
         let bkColor = CLEAR_COLOR_SKY.clone().multiplyScalar(1 - smoothstep(10, 100, scope.cameraController.getCameraAltitude()));
         bkColor = bkColor.x << 16 | bkColor.y << 8 | bkColor.z;
@@ -326,78 +297,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
 
         incFrameCounter();
         requestAnimationFrame(paint);
-    }
-
-    function transitionRenderTiles()
-    {
-        let rendertiles = viewport.renderTileController.tiles;
-
-        /**
-         * @param {MapViewerRenderTile} tile
-         * @param {Scene} scene
-         */
-        function paintTile(tile, scene)
-        {
-            let subtile = tile.subtile;
-            if (!subtile)
-                return;
-
-            let phiStart = subtile.angularOffset.x;
-            let phiLength = subtile.angularSize.x;
-            let thetaStart = subtile.angularOffset.y;
-            let thetaLength = subtile.angularSize.y;
-
-            // Normalize phiStart. It may be larger than PI, when looking at the globe backside
-            let normPhiStart = phiStart;
-            if (normPhiStart >= Math.PI)
-                normPhiStart -= 2*Math.PI;
-            if (normPhiStart < -Math.PI)
-                normPhiStart += 2*Math.PI;
-
-            cameras.ortho.right = phiLength/Math.PI * 180.;
-            cameras.ortho.top = -thetaLength/Math.PI * 180.;
-            cameras.ortho.position.x = normPhiStart/Math.PI * 180.;
-            cameras.ortho.position.y = (-thetaStart/Math.PI + .5) * 180.;
-            cameras.ortho.updateProjectionMatrix();
-            cameras.ortho.updateMatrixWorld();
-
-            renderer.clear();
-            renderer.render(scene, cameras.ortho);
-        }
-
-        let wantsClear = rendertiles.filter(
-            t =>
-                t.state === RenderTileState.CLEARME ||
-                t.state === RenderTileState.ASSIGNED);
-
-        wantsClear.forEach(t => {
-            renderer.setClearColor(0x000000, 0.);
-            renderer.setRenderTarget(framebuffers.tiles.visual[t.id]);
-            renderer.clear();
-            renderer.setRenderTarget(framebuffers.tiles.picking[t.id]);
-            renderer.clear();
-
-            if (t.state === RenderTileState.CLEARME)
-                t.unused();
-            else
-                t.dirty();
-        });
-
-        let wantsRender = viewport.renderTileController.tiles.filter(
-            t => t.state === RenderTileState.DIRTY
-        ).sort(
-            (a, b) => a.subtile.penalty - b.subtile.penalty
-        );
-
-        wantsRender.slice(0, 2).forEach(t => {
-            renderer.setRenderTarget(framebuffers.tiles.visual[t.id]);
-            paintTile(t, scenes.ortho.visual);
-            renderer.setRenderTarget(framebuffers.tiles.picking[t.id]);
-            paintTile(t, scenes.ortho.picking);
-            t.rendered();
-        });
-
-        return true;
     }
 
     function updateLabelStates() {
@@ -525,7 +424,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
                         node.children.forEach((child) => {
                             if (child.name === "wireframe") {
                                 child.material.visible = true;
-                                return;
                             }
                         })
                         const wireframeGeometry = new WireframeGeometry(node.geometry);
@@ -538,7 +436,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
                         node.children.forEach((child) => {
                             if (child.name === "wireframe") {
                                 child.material.visible = false;
-                                return;
                             }
                         })
                     }
@@ -754,36 +651,7 @@ export function MapViewerRenderingController(mapViewerModel, platform)
 
     scope.onBatchAboutToBeRemoved = (event) =>
     {
-        scenes.ortho.visual.remove(event.batch.visualRootPolys);
-        scenes.ortho.visual.remove(event.batch.visualRootLines);
-        scenes.ortho.picking.remove(event.batch.pickingRootPolys);
-        scenes.ortho.picking.remove(event.batch.pickingRootLines);
-
-        scenes.perspective.visual.main.remove(event.batch.visualRootObjects);
-        scenes.perspective.visual.points.remove(event.batch.visualRootPoints);
-        scenes.perspective.visual.points.remove(event.batch.visualRootLabels);
-        scenes.perspective.picking.main.remove(event.batch.pickingRootObjects);
-        scenes.perspective.picking.points.remove(event.batch.pickingRootPoints);
-
-        // Remove label objects
-        event.batch.visualRootLabels.children.forEach((styleNode) => {
-            styleNode.children.forEach((labelNode) => {
-                labelObjectsToRemove.add(labelNode.id);
-                labelObjects.delete(labelNode);
-            })
-        });
-
-        if (event.batch.hasAreasOrLines()) {
-            viewport.invalidate(event.batch.angularExtents());
-        }
-    };
-
-    // Sent out both for style filter changes and alpha-based showing/hiding
-    scope.onMapElemVisibleChanged = (event) => {
-        if (event.filter) {
-            styleFilterValues.set(event.filter.source, event.visible);
-        }
-        viewport.invalidate(event.bounds);
+        // TODO: Implement
     };
 
     scope.onViewportHeightmap = (event) =>
@@ -810,7 +678,6 @@ export function MapViewerRenderingController(mapViewerModel, platform)
 
     mapViewerModel.addEventListener(mapViewerModel.BATCH_ADDED,                 scope.onBatchAdded);
     mapViewerModel.addEventListener(mapViewerModel.BATCH_ABOUT_TO_BE_DISPOSED,  scope.onBatchAboutToBeRemoved);
-    mapViewerModel.addEventListener(mapViewerModel.MAP_ELEM_VISIBILE_CHANGED,   scope.onMapElemVisibleChanged);
     mapViewerModel.addEventListener(mapViewerModel.VIEWPORT_HEIGHTMAP,          scope.onViewportHeightmap);
     mapViewerModel.addEventListener(mapViewerModel.INITIALIZED,                 scope.onModelInitialized);
 } // MapViewerRenderingController

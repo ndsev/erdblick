@@ -53,10 +53,6 @@ export class MapViewerModel extends EventDispatcher
         //  A model client (controller/frontend) may connect to them via addEventListener()
         //  to react on them.
 
-        /// Triggered directly upon onNewBatchAvailable with the new update.queuedBatches.size.
-        /// Received by frontend.
-        this.BATCH_QUEUE_SIZE = "queueSizeChanged"; // {queueSize, deleteQueueSize}
-
         /// Triggered upon GLB load finished, with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
         this.BATCH_ADDED = "batchAdded"; // {batch, queueSize}
@@ -65,24 +61,9 @@ export class MapViewerModel extends EventDispatcher
         /// Received by frontend and MapViewerRenderingController.
         this.BATCH_ABOUT_TO_BE_DISPOSED = "batchAboutToBeDisposed"; // {batch, queueSize}
 
-        /// Triggered upon onClearBatches
-        /// Received by frontend and MapViewerRenderingController.
-        this.CLEAR_MAP_ELEMENT_BATCHES = "clearMapElementBatches";
-
         /// Triggered by the parent mapcomponent on mouse click.
         /// Received by frontend
         this.POSITION_PICKED = "positionPicked"; // {elementId, longitude, latitude, coords, userSelection : bool}
-
-        // Triggered upon calling MapViewerModel.optionsChanged()
-        // Received by Rendering COntroller to show/hide highlight geometry
-        this.MAP_ELEM_VISIBILE_CHANGED = "mapElemVisibleChanged"; // {<filter>: <regex>, <visible>: <bool>}
-
-        /// Extension status from `libmapviewer_typedefs.h ExtensionStatus`
-        this.extensionStatus = {
-            Default: 0,
-            NoData: 1,
-            Custom: 2
-        };
 
         /// Signaled by frontend for enabling debug features.
         this.ENABLE_DEBUG = "enableDebug"; // {}
@@ -98,9 +79,6 @@ export class MapViewerModel extends EventDispatcher
 
         // Received by frontend. Fired by renderingcontroller.
         this.INITIALIZED = "initialized"; // {}
-
-        // Received by frontend for feature searches. Fired by mapcomponent.
-        this.SEARCH_STATE = "searchState"; // {state: 'searching'|'found'|'notfound', timeout: int}
     }
 
     setGlobe(globe) {
