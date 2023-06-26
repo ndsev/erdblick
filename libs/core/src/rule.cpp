@@ -1,5 +1,8 @@
 #include "rule.h"
 
+namespace erdblick
+{
+
 FeatureStyleRule::FeatureStyleRule(
     std::vector<simfil::Geometry::GeomType>& geometryTypes,
     std::string& type,
@@ -33,4 +36,6 @@ const std::string& FeatureStyleRule::filter() const
 float FeatureStyleRule::opacity() const
 {
     return opacity_;
+}
+
 }

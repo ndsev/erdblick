@@ -7,7 +7,10 @@
 
 #include "style.h"
 
-FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array& yamlArray)
+namespace erdblick
+{
+
+FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 {
     auto styleSpec = yamlArray.toString();
 
@@ -82,4 +85,6 @@ bool FeatureLayerStyle::isValid() const
 const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 {
     return rules_;
+}
+
 }

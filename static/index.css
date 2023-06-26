@@ -28,3 +28,11 @@ body {
     width: 100% !important;
     height: 100% !important;
 }
+
+#headline {
+    color: white;
+    font-size: large;
+    background-color: transparent;
+    font-family: monospace;
+    position: relative;
+}

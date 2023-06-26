@@ -733,36 +733,19 @@ export function MapViewerRenderingController(mapViewerModel, platform)
 
     scope.onBatchAdded = (event) =>
     {
-        scenes.ortho.visual.add(event.batch.visualRootPolys);
-        scenes.ortho.visual.add(event.batch.visualRootLines);
-        scenes.ortho.picking.add(event.batch.pickingRootPolys);
-        scenes.ortho.picking.add(event.batch.pickingRootLines);
-
-        scenes.perspective.visual.main.add(event.batch.visualRootObjects);
-        scenes.perspective.visual.main.add(event.batch.visualRootLabels);
-        scenes.perspective.visual.points.add(event.batch.visualRootPoints);
-        scenes.perspective.picking.main.add(event.batch.pickingRootObjects);
-        scenes.perspective.picking.points.add(event.batch.pickingRootPoints);
-
-        adjustNodePositionsToTerrainHeight(event.batch.visualRootPoints);
-        adjustNodePositionsToTerrainHeight(event.batch.visualRootObjects);
-        adjustNodePositionsToTerrainHeight(event.batch.visualRootLabels);
-        adjustNodePositionsToTerrainHeight(event.batch.pickingRootPoints);
-        adjustNodePositionsToTerrainHeight(event.batch.pickingRootObjects);
+        for (let child of event.batch.children) {
+            scenes.perspective.visual.main.add(child);
+        }
 
         // Register label objects
-        event.batch.visualRootLabels.children.forEach((styleNode) => {
-            styleNode.children.forEach((labelNode) => {
-                labelNode.styleName = styleNode.name;
-                labelNode.name = decodeURIComponent(labelNode.name);
-                labelObjects.add(labelNode);
-                labelObjectsToRemove.delete(labelNode.id);
-            })
-        });
-
-        if (event.batch.hasAreasOrLines()) {
-            viewport.invalidate(event.batch.angularExtents());
-        }
+        // event.batch.visualRootLabels.children.forEach((styleNode) => {
+        //     styleNode.children.forEach((labelNode) => {
+        //         labelNode.styleName = styleNode.name;
+        //         labelNode.name = decodeURIComponent(labelNode.name);
+        //         labelObjects.add(labelNode);
+        //         labelObjectsToRemove.delete(labelNode.id);
+        //     })
+        // });
 
         if (wireframesEnabled) {
             updateWireframeMaterials();

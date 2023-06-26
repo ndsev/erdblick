@@ -4,12 +4,14 @@ import {EventDispatcher} from "../deps/three.js";
 import {MapViewerViewport} from "./viewport.js";
 import {throttle} from "./utils.js";
 
-const minViewportChangedCallDelta = 500; // ms
+
+const minViewportChangedCallDelta = 200; // ms
+
 
 export class MapViewerModel extends EventDispatcher
 {
 
-    constructor(platform)
+    constructor(platform, coreLibrary)
     {
         super();
 

@@ -6,14 +6,14 @@ import {MapViewerConst} from "./consts.js";
 import {SingleShotTimer} from "./timer.js";
 
 
-export function MapComponent(platform)
+export function MapComponent(platform, coreLib)
 {
     console.log("Constructing Map Component ...");
     let scope = this;
 
 // public:
 
-    scope.model = new MapViewerModel(platform);
+    scope.model = new MapViewerModel(platform, coreLib);
     console.log("  ... (1/2) constructed Map Viewer Model ("+scope.model+").");
 
     let renderingController = new MapViewerRenderingController(scope.model, platform);

@@ -3,6 +3,9 @@
 #include "mapget/model/feature.h"
 #include "simfil/model/nodes.h"
 
+namespace erdblick
+{
+
 class FeatureStyleRule
 {
 public:
@@ -21,10 +24,11 @@ public:
     // const Color color();
 
 private:
-    std::vector<simfil::Geometry::GeomType>& geometryTypes_;
+    std::vector<simfil::Geometry::GeomType> geometryTypes_;
     std::string type_;
     std::string filter_;
     // Color color_;
     float opacity_;
 };
 
+}

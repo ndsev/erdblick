@@ -53,7 +53,6 @@ export const MapViewerConst = (() => {
         cameraPitchInterval: cameraMaxPitch - cameraMinPitch,
         latClampFactor: latClampFactor,
         minPointerMoveBeforeDrag: minPointerMoveBeforeDrag,
-        maxNumParallelBatchRequests: maxNumParallelBatchRequests,
         maxElevation: maxElevation,
         minPointerMoveDelta: minPointerMoveDelta,
         zoomRedrawThreshold: zoomRedrawThreshold

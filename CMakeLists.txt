@@ -8,6 +8,8 @@ set(CMAKE_CXX_FLAGS "-Wall")
 
 # External dependencies.
 
+message("Building for ${CMAKE_SYSTEM_NAME}.")
+
 FetchContent_Declare(tinygltf
   GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
   GIT_TAG        "v2.8.9"
@@ -32,7 +34,11 @@ FetchContent_Declare(glm
     GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(glm)
 
-add_subdirectory(libs/renderer)
+add_subdirectory(libs/core)
 
 add_custom_target(static-web-files ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/static" "${CMAKE_BINARY_DIR}")
+
+if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+  add_subdirectory(test)
+endif()
