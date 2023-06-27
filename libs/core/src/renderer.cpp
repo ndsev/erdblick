@@ -53,8 +53,32 @@ struct RuleGeometry
         }
     }
 
+    std::pair<glm::vec3, glm::vec3> getMinMax()
+    {
+        if (vertices_.empty()) {
+            throw std::runtime_error("Empty vertices vector.");
+        }
+
+        glm::vec3 minVec = vertices_[0];
+        glm::vec3 maxVec = vertices_[0];
+
+        for (const auto& v : vertices_) {
+            minVec.x = std::min(minVec.x, v.x);
+            minVec.y = std::min(minVec.y, v.y);
+            minVec.z = std::min(minVec.z, v.z);
+            maxVec.x = std::max(maxVec.x, v.x);
+            maxVec.y = std::max(maxVec.y, v.y);
+            maxVec.z = std::max(maxVec.z, v.z);
+        }
+
+        return {minVec, maxVec};
+    }
+
     void addToScene(tinygltf::Model& model)
     {
+        if (vertices_.empty())
+            return;
+
         int nodeIndex = static_cast<int>(model.nodes.size());
         int meshIndex = static_cast<int>(model.meshes.size());
         int posAttrAccessorIndex = static_cast<int>(model.accessors.size());
@@ -76,9 +100,9 @@ struct RuleGeometry
         accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
         accessor.count = static_cast<int>(vertices_.size());
         accessor.type = TINYGLTF_TYPE_VEC3;
-        // TODO: Correct min/max values
-        accessor.maxValues = {1.0, 1.0, 1.0};  // Maximum coordinate values
-        accessor.minValues = {0.0, 0.0, 0.0};  // Minimum coordinate values
+        auto [minVal, maxVal] = getMinMax();
+        accessor.minValues = {minVal.x, minVal.y, minVal.z};
+        accessor.maxValues = {maxVal.x, maxVal.y, maxVal.z};
 
         auto& bufferView = model.bufferViews.emplace_back();
         bufferView.buffer = bufferIndex;
