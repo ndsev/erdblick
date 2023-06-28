@@ -1,10 +1,9 @@
-// Copyright (c) Navigation Data Standard e.V. - See "LICENSE" file.
-
 import { cookieValue } from "/mapcomponent/utils.js";
 import { platform} from "./platform.js";
 import { MapComponent } from "./mapcomponent/mapcomponent.js";
 import libErdblickCore from "./libs/core/erdblick-core.js";
 import { MapViewerBatch } from "./mapcomponent/batch.js";
+import { sharedBufferFromUrl } from "./mapcomponent/buffer.js";
 
 // --------------------------- Initialize Map Component --------------------------
 
@@ -18,43 +17,37 @@ libErdblickCore().then(coreLib =>
     let glbConverter = new coreLib.FeatureLayerRenderer();
     let testDataProvider = new coreLib.TestDataProvider();
 
-    window.loadTestTile = () => {
-        const styleUrl = "styles/demo-style.yaml";
-        fetch(styleUrl).then((response) => {
-            if (!response.ok) {
-                throw new Error(`HTTP error: ${response.status}`);
-            }
-            return response.text();
-        })
-        .then((styleYaml) => {
-            // Prepare to pass the style configuration to FeatureLayerRenderer.
-            // TODO: Write a JS wrapper class for C++ SharedUint8Array.
-            let e = new TextEncoder();
-            let yamlAsUtf8 = e.encode(styleYaml);
-            let yamlLength = yamlAsUtf8.length;
-            const yamlCppArr = new coreLib.SharedUint8Array(yamlLength);
-            const yamlCppArrPtr = Number(yamlCppArr.getPointer());
-            // Creating an Uint8Array on top of the buffer is essential!
-            const memoryView = new Uint8Array(coreLib.HEAPU8.buffer);
-            for (let i = 0; i < yamlLength; i++) {
-                memoryView[yamlCppArrPtr + i] = yamlAsUtf8[i];
-            }
-            const s = new coreLib.FeatureLayerStyle(yamlCppArr);
+    const styleUrl = "styles/demo-style.yaml";
+    const infoUrl = "maps/island1/info.json";
+    const tileUrl = "maps/island1/island1.bin";
 
-            // Prepare a TileFeatureLayer for visualization.
-            const testLayerPtr = testDataProvider.getTestLayer(
-                mapComponent.renderingController.cameraController.getCameraWgs84Coords().x,
-                mapComponent.renderingController.cameraController.getCameraWgs84Coords().y,
-                mapComponent.renderingController.viewport().gridAutoLevel());
+    let style = null;
+    sharedBufferFromUrl(coreLib, styleUrl, styleYamlBuffer => {
+        style = new coreLib.FeatureLayerStyle(styleYamlBuffer);
+        console.log("Loaded style.")
+    });
 
-            // Visualize it
-            new MapViewerBatch("test", coreLib, glbConverter, s, testLayerPtr, (batch)=>{
+    let stream = null;
+    sharedBufferFromUrl(coreLib, infoUrl, infoBuffer => {
+        stream = new coreLib.TileLayerParser(infoBuffer);
+        mapComponent.renderingController.cameraController.moveToCoords(11.126489719579604, 47.99422683197585);
+        mapComponent.renderingController.cameraController.setCameraOrientation(1.0746333541984274, -1.5179395047543438);
+        mapComponent.renderingController.cameraController.setCameraAltitude(0.8930176014438322);
+        stream.onTileParsed(tile => {
+            new MapViewerBatch("test", coreLib, glbConverter, style, tile, (batch)=>{
                 mapComponent.model.dispatchEvent({
                     type: mapComponent.model.BATCH_ADDED,
                     batch: batch
                 })
             }, ()=>{})
-        })
+        });
+        console.log("Loaded data source info.")
+    });
+
+    window.loadTestTile = () => {
+        sharedBufferFromUrl(coreLib, tileUrl, tileBuffer => {
+            stream.parse(tileBuffer);
+        });
     };
 
     // ----------------------- Initialize input event handlers -----------------------

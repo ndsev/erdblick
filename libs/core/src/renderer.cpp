@@ -24,11 +24,13 @@ wgsToEuclidean(Point const& wgsPoint, glm::dvec3 const& wgsOffset = glm::dvec3{.
 {
     const double phi = wgsPoint.x * M_PI / 180.;
     const double theta = wgsPoint.y * M_PI / 180.;
-    const double elevation = GLOBE_RADIUS + wgsPoint.z;
+
+    // TODO: Divisor should be 1000., but we leave it at 500 for 3D theatrics.
+    const double elevation = GLOBE_RADIUS + (wgsPoint.z + 10.)/500.;
     return {
-        elevation * std::cos(theta) * std::sin(phi) - wgsOffset.x,
-        elevation * std::sin(theta) - wgsOffset.y,
-        elevation * std::cos(theta) * std::cos(phi) - wgsOffset.z};
+        elevation * glm::cos(theta) * glm::sin(phi) - wgsOffset.x,
+        elevation * glm::sin(theta) - wgsOffset.y,
+        elevation * glm::cos(theta) * glm::cos(phi) - wgsOffset.z};
 }
 
 /** GLTF conversion for one geometry type of one rule. */
@@ -134,10 +136,14 @@ struct RuleGeometry
             return;
         // TODO: Add Geometry::numVertices
         // vertices_.reserve(vertices_.size() + geom->numVertices())
+        uint32_t count = 0;
         geom->forEachPoint(
-            [this](auto&& vertex)
+            [this, &count](auto&& vertex)
             {
+                if (count > 0)
+                    vertices_.emplace_back(vertices_.back());
                 vertices_.emplace_back(wgsToEuclidean(vertex, offset_));
+                ++count;
                 return true;
             });
     }

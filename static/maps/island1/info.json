@@ -1,0 +1,31 @@
+[
+  {
+    "mapId": "Island1",
+    "layers": {
+      "LaneLayer": {
+        "coverage": [
+          37357750779917
+        ],
+        "featureTypes": [
+          {
+            "name": "Centerline",
+            "uniqueIdCompositions": [
+              [
+                {
+                  "partId": "tileId",
+                  "description": "NDS packed tile id",
+                  "datatype": "U32"
+                },
+                {
+                  "partId": "centerlineId",
+                  "description": "centerlineId description",
+                  "datatype": "U32"
+                }
+              ]
+            ]
+          }
+        ]
+      }
+    }
+  }
+]

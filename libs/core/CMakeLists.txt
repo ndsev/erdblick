@@ -9,13 +9,15 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/color.h
   include/erdblick/testdataprovider.h
   include/erdblick/aabb.h
+  include/erdblick/stream.h
 
   src/renderer.cpp
   src/style.cpp
   src/rule.cpp
   src/color.cpp
   src/buffer.cpp
-  src/aabb.cpp)
+  src/aabb.cpp
+  src/stream.cpp)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)

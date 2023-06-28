@@ -5,6 +5,7 @@
 #include "renderer.h"
 #include "style.h"
 #include "testdataprovider.h"
+#include "stream.h"
 
 using namespace erdblick;
 namespace em = emscripten;
@@ -40,6 +41,16 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     em::class_<TestDataProvider>("TestDataProvider")
         .constructor()
         .function("getTestLayer", &TestDataProvider::getTestLayer);
+
+    ////////// TileLayerParser
+    em::class_<TileLayerParser>("TileLayerParser")
+        .constructor<SharedUint8Array const&>()
+        .function(
+            "onTileParsed",
+            std::function<void(TileLayerParser&, em::val)>(
+                [](TileLayerParser& self, em::val cb)
+                { self.onTileParsed([cb](auto&& tile) { cb(tile); }); }))
+        .function("parse", &TileLayerParser::parse);
 
     ////////// Wgs84AABB
     em::register_vector<int64_t>("VectorUint64");
