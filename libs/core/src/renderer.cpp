@@ -140,7 +140,7 @@ struct RuleGeometry
         geom->forEachPoint(
             [this, &count](auto&& vertex)
             {
-                if (count > 0)
+                if (count > 1)
                     vertices_.emplace_back(vertices_.back());
                 vertices_.emplace_back(wgsToEuclidean(vertex, offset_));
                 ++count;
