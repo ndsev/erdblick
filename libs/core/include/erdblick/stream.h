@@ -9,7 +9,7 @@ namespace erdblick
 class TileLayerParser
 {
 public:
-    TileLayerParser(SharedUint8Array const& dataSourceInfo);
+    explicit TileLayerParser(SharedUint8Array const& dataSourceInfo);
     void onTileParsed(std::function<void(mapget::TileFeatureLayer::Ptr)>);
     void parse(SharedUint8Array const& dataSourceInfo);
 

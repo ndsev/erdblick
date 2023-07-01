@@ -2,7 +2,5 @@ name: DemoStyle
 version: 1.0
 rules:
   - geometry: ["line"]
-    color: [255.0, 255.0, 255.0]
-  - geometry: ["mesh"]
+    color: "#ff0000"
     opacity: 0.9
-  - geometry: ["point"]

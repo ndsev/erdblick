@@ -25,8 +25,8 @@ wgsToEuclidean(Point const& wgsPoint, glm::dvec3 const& wgsOffset = glm::dvec3{.
     const double phi = wgsPoint.x * M_PI / 180.;
     const double theta = wgsPoint.y * M_PI / 180.;
 
-    // TODO: Divisor should be 1000., but we leave it at 500 for 3D theatrics.
-    const double elevation = GLOBE_RADIUS + (wgsPoint.z + 10.)/500.;
+    // TODO: Factor should be .001, but we leave it at .002 for 3D theatrics.
+    const double elevation = GLOBE_RADIUS + (wgsPoint.z + 1.)*.002;
     return {
         elevation * glm::cos(theta) * glm::sin(phi) - wgsOffset.x,
         elevation * glm::sin(theta) - wgsOffset.y,
@@ -81,20 +81,26 @@ struct RuleGeometry
         if (vertices_.empty())
             return;
 
-        int nodeIndex = static_cast<int>(model.nodes.size());
-        int meshIndex = static_cast<int>(model.meshes.size());
-        int posAttrAccessorIndex = static_cast<int>(model.accessors.size());
-        int bufferViewIndex = static_cast<int>(model.bufferViews.size());
-        int bufferIndex = static_cast<int>(model.buffers.size());
+        auto materialIndex = static_cast<int>(model.materials.size());
+        auto nodeIndex = static_cast<int>(model.nodes.size());
+        auto meshIndex = static_cast<int>(model.meshes.size());
+        auto posAttrAccessorIndex = static_cast<int>(model.accessors.size());
+        auto bufferViewIndex = static_cast<int>(model.bufferViews.size());
+        auto bufferIndex = static_cast<int>(model.buffers.size());
 
         auto& node = model.nodes.emplace_back();
         node.mesh = meshIndex;
         model.nodes[0].children.push_back(nodeIndex);
 
+        auto& material = model.materials.emplace_back();
+        auto color = rule_.color().toFVec4();
+        material.pbrMetallicRoughness.baseColorFactor = {color.r, color.g, color.b, color.a};
+
         auto& mesh = model.meshes.emplace_back();
         auto& primitive = mesh.primitives.emplace_back();
         primitive.mode = gltfPrimitiveMode_;
         primitive.attributes["POSITION"] = posAttrAccessorIndex;
+        primitive.material = materialIndex;
 
         auto& accessor = model.accessors.emplace_back();
         accessor.bufferView = bufferViewIndex;
