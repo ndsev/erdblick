@@ -651,7 +651,9 @@ export function MapViewerRenderingController(mapViewerModel, platform)
 
     scope.onBatchAboutToBeRemoved = (event) =>
     {
-        // TODO: Implement
+        for (let child of event.batch.children) {
+            scenes.perspective.visual.main.remove(child);
+        }
     };
 
     scope.onViewportHeightmap = (event) =>

@@ -9,14 +9,25 @@ export class MapViewerBatch
 {
 // public:
 
-    constructor(batchName, coreLib, renderer, style, tileFeatureLayer, onLoadingFinishedFn, onLoadingErrorFn)
+    constructor(batchName, tileFeatureLayer)
     {
         this.id = batchName;
         this.children = undefined;
+        this.tileFeatureLayer = tileFeatureLayer;
+    }
+
+    /**
+     * Convert this batch's tile to GLTF and broadcast the result
+     */
+    render(coreLib, glbConverter, style, onResult)
+    {
+        if (this.children) {
+            this.disposeChildren()
+        }
 
         // Get the scene as GLB and visualize it.
         let sharedGlbArray = new coreLib.SharedUint8Array();
-        renderer.render(style, tileFeatureLayer, sharedGlbArray);
+        glbConverter.render(style, this.tileFeatureLayer, sharedGlbArray);
         let objSize = sharedGlbArray.getSize();
         let bufferPtr = Number(sharedGlbArray.getPointer());
         let glbBuf = coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
@@ -27,63 +38,63 @@ export class MapViewerBatch
             // called once the gltf resource is loaded
             ( gltf ) =>
             {
-                sharedGlbArray.delete()
-                tileFeatureLayer.delete()
-
                 this.children = gltf.scene.children;
-                if(onLoadingFinishedFn)
-                    onLoadingFinishedFn(this);
+                onResult(this);
+                sharedGlbArray.delete()
             },
             // called when loading has errors
             ( error ) => {
                 // Don't spam errors when fetching fails because the server retracted a batch
                 if(error.message && !error.message.endsWith("glTF versions >=2.0 are supported."))
-                    console.warn( 'Glb load err: '+batchName+': '+error.message );
-                if(onLoadingErrorFn)
-                    onLoadingErrorFn()
+                    console.warn( `GLB load error: ${this.id}: ${error.message}` );
+                sharedGlbArray.delete()
             }
         )
     }
 
-    dispose()
+    disposeChildren()
     {
         this.children.forEach( (root) =>
         {
             if (!root)
                 return;
 
-            root.traverse(
-                (node) =>
+            root.traverse((node) => {
+                if (node.geometry)
+                    node.geometry.dispose();
+
+                if (node.material)
                 {
-                    if (node.geometry)
-                        node.geometry.dispose();
+                    if (node.material instanceof MeshFaceMaterial || node.material instanceof MultiMaterial) {
+                        node.material.materials.forEach((mtrl) => {
+                            if (mtrl.map) mtrl.map.dispose();
+                            if (mtrl.lightMap) mtrl.lightMap.dispose();
+                            if (mtrl.bumpMap) mtrl.bumpMap.dispose();
+                            if (mtrl.normalMap) mtrl.normalMap.dispose();
+                            if (mtrl.specularMap) mtrl.specularMap.dispose();
+                            if (mtrl.envMap) mtrl.envMap.dispose();
 
-                    if (node.material)
-                    {
-                        if (node.material instanceof MeshFaceMaterial || node.material instanceof MultiMaterial) {
-                            node.material.materials.forEach((mtrl) => {
-                                if (mtrl.map) mtrl.map.dispose();
-                                if (mtrl.lightMap) mtrl.lightMap.dispose();
-                                if (mtrl.bumpMap) mtrl.bumpMap.dispose();
-                                if (mtrl.normalMap) mtrl.normalMap.dispose();
-                                if (mtrl.specularMap) mtrl.specularMap.dispose();
-                                if (mtrl.envMap) mtrl.envMap.dispose();
-
-                                mtrl.dispose();    // disposes any programs associated with the material
-                            });
-                        }
-                        else {
-                            if (node.material.map) node.material.map.dispose();
-                            if (node.material.lightMap) node.material.lightMap.dispose();
-                            if (node.material.bumpMap) node.material.bumpMap.dispose();
-                            if (node.material.normalMap) node.material.normalMap.dispose();
-                            if (node.material.specularMap) node.material.specularMap.dispose();
-                            if (node.material.envMap) node.material.envMap.dispose();
-
-                            node.material.dispose();   // disposes any programs associated with the material
-                        }
+                            mtrl.dispose();    // disposes any programs associated with the material
+                        });
                     }
-                });
+                    else {
+                        if (node.material.map) node.material.map.dispose();
+                        if (node.material.lightMap) node.material.lightMap.dispose();
+                        if (node.material.bumpMap) node.material.bumpMap.dispose();
+                        if (node.material.normalMap) node.material.normalMap.dispose();
+                        if (node.material.specularMap) node.material.specularMap.dispose();
+                        if (node.material.envMap) node.material.envMap.dispose();
+
+                        node.material.dispose();   // disposes any programs associated with the material
+                    }
+                }
+            });
         });
+    }
+
+    dispose()
+    {
+        this.disposeChildren()
+        this.tileFeatureLayer.delete()
     }
 }

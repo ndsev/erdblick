@@ -14,66 +14,17 @@ libErdblickCore().then(coreLib =>
     console.log("  ...done.")
 
     let mapComponent = new MapComponent(platform, coreLib);
-    let glbConverter = new coreLib.FeatureLayerRenderer();
-
-    const styleUrl = "/styles/demo-style.yaml";
-    const infoUrl = "/sources";
-    const tileUrl = "/tiles";
-
-    // ------- Fetch style --------
-    let style = null;
-    new Fetch(coreLib, styleUrl).withWasmCallback(styleYamlBuffer => {
-        style = new coreLib.FeatureLayerStyle(styleYamlBuffer);
-        console.log("Loaded style.")
-    }).go();
-
-    // -------- Fetch info --------
-    let stream = null;
-    let info = null;
-    new Fetch(coreLib, infoUrl)
-        .withWasmCallback((infoBuffer, response) => {
-            stream = new coreLib.TileLayerParser(infoBuffer);
-            stream.onTileParsed(tile => {
-                new MapViewerBatch("test", coreLib, glbConverter, style, tile, (batch)=>{
-                    mapComponent.model.dispatchEvent({
-                        type: mapComponent.model.BATCH_ADDED,
-                        batch: batch
-                    })
-                }, ()=>{})
-            });
-            console.log("Loaded data source info.")
-        })
-        .withJsonCallback(result => {info = result;})
-        .go();
-
-    // --- Fetch tiles on-demand ---
-    window.loadTestTile = () =>
-    {
-        mapComponent.renderingController.cameraController.moveToCoords(11.126489719579604, 47.99422683197585);
-        mapComponent.renderingController.cameraController.setCameraOrientation(1.0746333541984274, -1.5179395047543438);
-        mapComponent.renderingController.cameraController.setCameraAltitude(0.8930176014438322);
-
-        let requests = []
-        for (let dataSource of info) {
-            for (let [layerName, layer] of Object.entries(dataSource.layers)) {
-                requests.push({
-                    mapId: dataSource.mapId,
-                    layerId: layerName,
-                    tileIds: layer.coverage
-                })
-            }
-        }
-        console.log(requests);
-
-        new Fetch(coreLib, tileUrl)
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody({requests: requests})
-            .withWasmCallback(tileBuffer => {
-                stream.parse(tileBuffer);
-            })
-            .go();
-    };
+    window.loadAllTiles = () => {
+        $("#log").empty()
+        mapComponent.model.runUpdate();
+    }
+    window.reloadStyle = () => {
+        mapComponent.model.reloadStyle();
+    }
+    window.zoomToBatch = (batchId) => {
+        let center = mapComponent.model.registeredBatches.get(batchId).tileFeatureLayer.center();
+        mapComponent.moveToPosition(center.x, center.y, center.z);
+    }
 
     // ----------------------- Initialize input event handlers -----------------------
 
