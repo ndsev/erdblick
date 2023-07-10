@@ -3,9 +3,9 @@
 #include "aabb.h"
 #include "buffer.h"
 #include "renderer.h"
+#include "stream.h"
 #include "style.h"
 #include "testdataprovider.h"
-#include "stream.h"
 
 using namespace erdblick;
 namespace em = emscripten;
@@ -30,7 +30,22 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
         .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>(
-            "std::shared_ptr<mapget::TileFeatureLayer>");
+            "std::shared_ptr<mapget::TileFeatureLayer>")
+        .function(
+            "id",
+            std::function<std::string(mapget::TileFeatureLayer const&)>(
+                [](mapget::TileFeatureLayer const& self) { return self.id().toString(); }))
+        .function(
+            "center",
+            std::function<em::val(mapget::TileFeatureLayer const&)>(
+                [](mapget::TileFeatureLayer const& self)
+                {
+                    em::val result = em::val::object();
+                    result.set("x", self.tileId().center().x);
+                    result.set("y", self.tileId().center().y);
+                    result.set("z", self.tileId().z());
+                    return result;
+                }));
 
     ////////// FeatureLayerRenderer
     em::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
@@ -66,6 +81,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                    uint32_t level,
                    uint32_t limit) -> em::val
                 {
+                    // TODO: This tileIds-implementation is a work-in-progress
                     std::vector<TileId> resultTiles;
                     resultTiles.reserve(limit);
                     self.tileIds(level, resultTiles);

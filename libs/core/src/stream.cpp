@@ -34,7 +34,12 @@ void TileLayerParser::onTileParsed(std::function<void(mapget::TileFeatureLayer::
 
 void TileLayerParser::parse(SharedUint8Array const& dataSourceInfo)
 {
-    reader_->read(dataSourceInfo.toString());
+    try {
+        reader_->read(dataSourceInfo.toString());
+    }
+    catch(std::exception const& e) {
+        std::cout << "ERROR: " << e.what() << std::endl;
+    }
 }
 
 }
