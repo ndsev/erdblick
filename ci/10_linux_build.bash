@@ -10,5 +10,5 @@ rm -rf build && mkdir build
 cd build
 mkdir deps
 mkdir assets
-emcmake cmake ..
+emcmake cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
