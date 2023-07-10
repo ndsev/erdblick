@@ -18,7 +18,7 @@ FetchContent_MakeAvailable(tinygltf)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "issue/6-cache-and-service-libs"
+  GIT_TAG        "main"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
