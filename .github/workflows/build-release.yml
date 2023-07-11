@@ -24,7 +24,12 @@ jobs:
         with:
           name: erdblick
           path: |
-            build/FeatureLayerRenderer*
-            build/demo.js
             build/index.html
+            build/index.css
+            build/index.js
             build/deps
+            build/platform.js
+            build/styles
+            build/mapcomponent
+            build/images
+            build/libs/core/erdblick-core.*

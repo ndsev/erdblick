@@ -1,3 +1,7 @@
 .clang-format
 build/
 ci/emsdk/
+.idea
+cmake-build-debug-wsl
+clion-build-*
+static/libs

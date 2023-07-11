@@ -2,23 +2,50 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Emscripten test</title>
+    <title>Erdblick</title>
+
+    <!-- Non-Module 3rd-party sources -->
+    <script src="./deps/jquery-3.2.1-min.js"></script>
+    <script src="./deps/wheel.js"></script>
+
+    <!-- Erdblick WASM library -->
+    <script type="module" src="./libs/core/erdblick-core.js"></script>
+
+    <!-- THREE.js sources -->
+    <script type="module" src="./deps/three.js"></script>
+    <script type="module" src="./deps/BufferGeometryUtils.js"></script>
+    <script type="module" src="./deps/GLTFLoader.js"></script>
+
+    <!-- MapComponent sources -->
+    <script type="module" src="/mapcomponent/viewport.js"></script>
+    <script type="module" src="/mapcomponent/meshline.js"></script>
+    <script type="module" src="/mapcomponent/cameracontroller.js"></script>
+    <script type="module" src="/mapcomponent/globe.js"></script>
+    <script type="module" src="/mapcomponent/consts.js"></script>
+    <script type="module" src="/mapcomponent/utils.js"></script>
+    <script type="module" src="/mapcomponent/highlight.js"></script>
+    <script type="module" src="/mapcomponent/batch.js"></script>
+    <script type="module" src="/mapcomponent/model.js"></script>
+    <script type="module" src="/mapcomponent/renderingcontroller.js"></script>
+    <script type="module" src="/mapcomponent/mapcomponent.js"></script>
+    <script type="module" src="/mapcomponent/timer.js"></script>
+
+    <!-- App -->
+    <script type="module" src="./index.js"></script>
+
+    <!-- Style sheets -->
+    <link rel="stylesheet" href="./index.css">
 </head>
 <body>
-<div id="testDiv">
-<p id="testPara"></p>
+
+<div id="mapviewer-canvas-container" class="mapviewer-renderlayer" style="pointer-events: all;" unselectable="on"></div>
+<div id="mapviewer-label-container" class="mapviewer-renderlayer" style="pointer-events: none;" unselectable="on"></div>
+<div id="info">
+    erdblick v0.1.0 //
+    <button onclick="loadAllTiles()">Load Tiles</button> //
+    <button onclick="reloadStyle()">Reload Style</button><br>
+    <div id="log"></div>
 </div>
-
-<div id="demoScene"></div>
-
-<script src="./FeatureLayerRenderer.js"></script>
-
-<!-- THREE.js sources -->
-<script type="module" src="./deps/three.js"></script>
-<script type="module" src="./deps/BufferGeometryUtils.js"></script>
-<script type="module" src="./deps/GLTFLoader.js"></script>
-
-<script type="module" src="./demo.js"></script>
 
 </body>
 </html>
