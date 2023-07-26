@@ -45,8 +45,10 @@ target_include_directories(erdblick-core
 
 target_link_libraries(erdblick-core
   PUBLIC
-    tinygltf
+    Cesium3DTilesWriter
+    CesiumGeospatial
+    glm
     mapget-model
-    yaml-cpp
-    glm)
+    tinygltf
+    yaml-cpp)
 
