@@ -6,29 +6,23 @@
 
     <!-- Non-Module 3rd-party sources -->
     <script src="./deps/jquery-3.2.1-min.js"></script>
-    <script src="./deps/wheel.js"></script>
 
     <!-- Erdblick WASM library -->
     <script type="module" src="./libs/core/erdblick-core.js"></script>
 
-    <!-- THREE.js sources -->
-    <script type="module" src="./deps/three.js"></script>
-    <script type="module" src="./deps/BufferGeometryUtils.js"></script>
-    <script type="module" src="./deps/GLTFLoader.js"></script>
+    <!-- CesiumJS sources -->
+    <!-- TODO: Make this a local resource (located in ./dep) -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.106/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.106/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 
     <!-- MapComponent sources -->
-    <script type="module" src="/mapcomponent/viewport.js"></script>
-    <script type="module" src="/mapcomponent/meshline.js"></script>
-    <script type="module" src="/mapcomponent/cameracontroller.js"></script>
-    <script type="module" src="/mapcomponent/globe.js"></script>
-    <script type="module" src="/mapcomponent/consts.js"></script>
-    <script type="module" src="/mapcomponent/utils.js"></script>
-    <script type="module" src="/mapcomponent/highlight.js"></script>
     <script type="module" src="/mapcomponent/batch.js"></script>
-    <script type="module" src="/mapcomponent/model.js"></script>
-    <script type="module" src="/mapcomponent/renderingcontroller.js"></script>
+    <script type="module" src="/mapcomponent/cesiumcontroller.js"></script>
+    <script type="module" src="/mapcomponent/cesiumviewer.js"></script>
     <script type="module" src="/mapcomponent/mapcomponent.js"></script>
+    <script type="module" src="/mapcomponent/model.js"></script>
     <script type="module" src="/mapcomponent/timer.js"></script>
+    <script type="module" src="/mapcomponent/utils.js"></script>
 
     <!-- App -->
     <script type="module" src="./index.js"></script>
@@ -38,14 +32,13 @@
 </head>
 <body>
 
-<div id="mapviewer-canvas-container" class="mapviewer-renderlayer" style="pointer-events: all;" unselectable="on"></div>
-<div id="mapviewer-label-container" class="mapviewer-renderlayer" style="pointer-events: none;" unselectable="on"></div>
+<!-- div id="mapviewer-canvas-container" class="mapviewer-renderlayer" style="pointer-events: all;" unselectable="on"></div>
+<div id="mapviewer-label-container" class="mapviewer-renderlayer" style="pointer-events: none;" unselectable="on"></div -->
+<div id="cesiumContainer" class="mapviewer-renderlayer"></div>
 <div id="info">
     erdblick v0.1.0 //
     <button onclick="loadAllTiles()">Load Tiles</button> //
     <button onclick="reloadStyle()">Reload Style</button><br>
-    <div id="log"></div>
 </div>
-
 </body>
 </html>

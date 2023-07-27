@@ -16,85 +16,72 @@ export class MapViewerBatch
         this.tileFeatureLayer = tileFeatureLayer;
     }
 
+    async fetchMockData()
+    {
+        // TODO: Use the tile id to pick the correct 3D tile
+
+        // Download the glb file
+        const urlToGlb = "/3dtiles/545356699.glb"
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to download glb: ${response.status} ${response.statusText}`);
+        }
+        const glbBinaryData = await response.arrayBuffer();
+        const blob = new Blob([glbBinaryData], { type: 'model/gltf-binary' });
+        const glbUrl = URL.createObjectURL(blob);
+
+        // Download the 3D TileSet descriptor (in JSON format)
+        const urlToTileSet = "/3dtiles/545356699.json"
+        const tsResponse = await fetch(url);
+        if (!tsResponse.ok) {
+            throw new Error(`Failed to download tileset: ${tsResponse.status} ${tsResponse.statusText}`);
+        }
+        const tileSetJson = await response.json().toString();
+        // TODO: Replace the uri with the one of the blob
+        // TODO: The 3D tileSet has to use the glb URL
+        //root.content->uri = tileNumber + ".glb";
+        const tileSetBlob = new Blob([tileSetJson], { type: 'application/json' });
+        const tileSetUrl = URL.createObjectURL(tileSetBlob);
+
+        this.glbUrl = glbUrl;
+        this.tileSetUrl = tileSetUrl;
+    }
+
     /**
      * Convert this batch's tile to GLTF and broadcast the result
      */
-    render(coreLib, glbConverter, style, onResult)
+    async render(coreLib, glbConverter, style, onResult)
     {
-        if (this.children) {
-            this.disposeChildren()
-        }
+
+        // TODO: Release resources if present
 
         // Get the scene as GLB and visualize it.
-        let sharedGlbArray = new coreLib.SharedUint8Array();
-        glbConverter.render(style, this.tileFeatureLayer, sharedGlbArray);
-        let objSize = sharedGlbArray.getSize();
-        let bufferPtr = Number(sharedGlbArray.getPointer());
-        let glbBuf = coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
+        // TODO: return 3DTileSet + gltfAsset
 
-        gltfLoader.parse(
-            glbBuf,
-            "",
-            // called once the gltf resource is loaded
-            ( gltf ) =>
-            {
-                this.children = gltf.scene.children;
-                onResult(this);
-                sharedGlbArray.delete()
-            },
-            // called when loading has errors
-            ( error ) => {
-                // Don't spam errors when fetching fails because the server retracted a batch
-                if(error.message && !error.message.endsWith("glTF versions >=2.0 are supported."))
-                    console.warn( `GLB load error: ${this.id}: ${error.message}` );
-                sharedGlbArray.delete()
-            }
-        )
-    }
+        // TODO: Create blob and corresponding URL
+        // let sharedGlbArray = new coreLib.SharedUint8Array();
+        // glbConverter.render(style, this.tileFeatureLayer, sharedGlbArray);
+        // let objSize = sharedGlbArray.getSize();
+        // let bufferPtr = Number(sharedGlbArray.getPointer());
+        // let glbBuf = coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
 
-    disposeChildren()
-    {
-        this.children.forEach( (root) =>
-        {
-            if (!root)
-                return;
+        // Mock: Just use dummy 3D Tileset
+        this.fetchMockData();
+        this.tileSet = await Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl);
 
-            root.traverse((node) => {
-                if (node.geometry)
-                    node.geometry.dispose();
-
-                if (node.material)
-                {
-                    if (node.material instanceof MeshFaceMaterial || node.material instanceof MultiMaterial) {
-                        node.material.materials.forEach((mtrl) => {
-                            if (mtrl.map) mtrl.map.dispose();
-                            if (mtrl.lightMap) mtrl.lightMap.dispose();
-                            if (mtrl.bumpMap) mtrl.bumpMap.dispose();
-                            if (mtrl.normalMap) mtrl.normalMap.dispose();
-                            if (mtrl.specularMap) mtrl.specularMap.dispose();
-                            if (mtrl.envMap) mtrl.envMap.dispose();
-
-                            mtrl.dispose();    // disposes any programs associated with the material
-                        });
-                    }
-                    else {
-                        if (node.material.map) node.material.map.dispose();
-                        if (node.material.lightMap) node.material.lightMap.dispose();
-                        if (node.material.bumpMap) node.material.bumpMap.dispose();
-                        if (node.material.normalMap) node.material.normalMap.dispose();
-                        if (node.material.specularMap) node.material.specularMap.dispose();
-                        if (node.material.envMap) node.material.envMap.dispose();
-
-                        node.material.dispose();   // disposes any programs associated with the material
-                    }
-                }
-            });
-        });
+        // TODO: Create object URLs for Cesium 3D Tileset Loader
+        // Delete all buffers after loading
+        // TODO: Delete all buffers after loading
+        //sharedGlbArray.delete()
     }
 
     dispose()
     {
-        this.disposeChildren()
-        this.tileFeatureLayer.delete()
+        this.tileSet.destroy();
+        this.tileSet = null;
+        URL.revokeObjectURL(this.tileSetUrl);
+        this.tileSetUrl = null;
+        URL.revokeObjectURL(this.glbUrl);
+        this.glbUrl = null;
     }
 }

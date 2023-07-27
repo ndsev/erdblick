@@ -1,6 +1,5 @@
 "use strict";
 
-import {EventDispatcher} from "../deps/three.js";
 import {MapViewerViewport} from "./viewport.js";
 import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
@@ -13,19 +12,15 @@ const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
 
-export class MapViewerModel extends EventDispatcher
+export class MapViewerModel
 {
-    constructor(platform, coreLibrary)
+    constructor(coreLibrary)
     {
-        super();
-
-        this.globeSphere = null;
-        this.platform = platform
-        this.coreLib = coreLibrary;
+        //this.coreLib = coreLibrary;
 
         this.style = null;
         this.sources = null;
-        this.glbConverter = new coreLibrary.FeatureLayerRenderer();
+        //this.glbConverter = new coreLibrary.FeatureLayerRenderer();
 
         this.registeredBatches = new Map();
 
@@ -63,21 +58,8 @@ export class MapViewerModel extends EventDispatcher
         /// Received by frontend and MapViewerRenderingController.
         this.BATCH_ABOUT_TO_BE_DISPOSED = "batchAboutToBeDisposed"; // {batch}
 
-        /// Triggered by the parent mapcomponent on mouse click.
-        /// Received by frontend
-        this.POSITION_PICKED = "positionPicked"; // {elementId, longitude, latitude, coords, userSelection : bool}
-
         /// Signaled by frontend for enabling debug features.
         this.ENABLE_DEBUG = "enableDebug"; // {}
-
-        // Received by model, forwarded to frontend for compass
-        this.CAM_POS_CHANGED = "camPosChanged";
-
-        // Received by rendering controller when GET heightmapapi/heightmap returns
-        this.VIEWPORT_HEIGHTMAP = "viewportHeightmap";
-
-        // Received by frontend, when a label position or visibility changes
-        this.LABEL_STATE_CHANGED = "labelStateChanged"; // {states: [{labelId, styleId, text, position, visible, deleted}]}
 
         // Received by frontend. Fired by renderingcontroller.
         this.INITIALIZED = "initialized"; // {}
@@ -116,10 +98,6 @@ export class MapViewerModel extends EventDispatcher
             })
             .withJsonCallback(result => {this.sources = result;})
             .go();
-    }
-
-    setGlobe(globe) {
-       this.globeSphere = globe;
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -245,10 +223,6 @@ export class MapViewerModel extends EventDispatcher
 
     go() {
         this.update.runningOnServer = false;
-        this.globeSphere.globeTextureLoadPromise.then(() =>
-        {
-            this.dispatchEvent({type: this.INITIALIZED});
-        });
     }
     ///////////////////////////////////////////////////////////////////////////
 }
