@@ -19,7 +19,8 @@ public:
     std::shared_ptr<std::vector<uint8_t>> getArray();
 
     void writeToArray(const char* start, const char* end);
-    void writeToArray(std::string& content);
+    void writeToArray(std::string const& content);
+    void writeToArray(std::vector<std::byte> const& content);
 
     std::string toString() const;
 

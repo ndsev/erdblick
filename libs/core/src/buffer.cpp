@@ -28,7 +28,7 @@ void SharedUint8Array::writeToArray(const char* start, const char* end)
     array_.assign(start, end);
 }
 
-void SharedUint8Array::writeToArray(std::string& content)
+void SharedUint8Array::writeToArray(std::string const& content)
 {
     array_.assign(content.begin(), content.end());
 }
@@ -41,6 +41,13 @@ std::string SharedUint8Array::toString() const
 std::shared_ptr<std::vector<uint8_t>> SharedUint8Array::getArray()
 {
     return std::make_shared<std::vector<uint8_t>>(array_);
+}
+
+void SharedUint8Array::writeToArray(const std::vector<std::byte>& content)
+{
+    array_.reserve(content.size());
+    for (auto& byte : content)
+        array_.emplace_back((uint8_t)byte);
 }
 
 }

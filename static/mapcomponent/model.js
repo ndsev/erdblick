@@ -1,6 +1,5 @@
 "use strict";
 
-import {MapViewerViewport} from "./viewport.js";
 import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
 import {MapViewerBatch} from "./batch.js";
@@ -16,11 +15,11 @@ export class MapViewerModel
 {
     constructor(coreLibrary)
     {
-        //this.coreLib = coreLibrary;
+        this.coreLib = coreLibrary;
 
         this.style = null;
         this.sources = null;
-        //this.glbConverter = new coreLibrary.FeatureLayerRenderer();
+        this.glbConverter = new coreLibrary.FeatureLayerRenderer();
 
         this.registeredBatches = new Map();
 
@@ -28,7 +27,6 @@ export class MapViewerModel
             running:            false,
             numLoadingBatches:  0,
             loadingBatchNames:  new Set(),
-            viewport:           new MapViewerViewport(),
             fetch:              null,
             stream:             null
         };
@@ -46,23 +44,13 @@ export class MapViewerModel
         //                               MODEL EVENTS                            //
         ///////////////////////////////////////////////////////////////////////////
 
-        // Names for events that are triggered for various conditions.
-        //  A model client (controller/frontend) may connect to them via addEventListener()
-        //  to react on them.
-
         /// Triggered upon GLB load finished, with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.BATCH_ADDED = "batchAdded"; // {batch}
+        this.batchAddedTopic = new rxjs.Subject(); // {batch}
 
         /// Triggered upon onBatchRemoved with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.BATCH_ABOUT_TO_BE_DISPOSED = "batchAboutToBeDisposed"; // {batch}
-
-        /// Signaled by frontend for enabling debug features.
-        this.ENABLE_DEBUG = "enableDebug"; // {}
-
-        // Received by frontend. Fired by renderingcontroller.
-        this.INITIALIZED = "initialized"; // {}
+        this.batchRemovedTopic = new rxjs.Subject(); // {batch}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
@@ -144,27 +132,15 @@ export class MapViewerModel
 
     renderBatch(batch, removeFirst) {
         if (removeFirst) {
-            let disposeEvent = {
-                type: this.BATCH_ABOUT_TO_BE_DISPOSED,
-                batch: batch,
-            };
-            this.dispatchEvent(disposeEvent);
+            this.batchRemovedTopic.next(batch)
         }
         batch.render(this.coreLib, this.glbConverter, this.style, batch => {
-            this.dispatchEvent({
-                type: this.BATCH_ADDED,
-                batch: batch
-            })
+            this.batchAddedTopic.next(batch)
         })
     }
 
     removeBatch(batchName) {
-        let disposeEvent = {
-            type: this.BATCH_ABOUT_TO_BE_DISPOSED,
-            batch: this.registeredBatches.get(batchName),
-        };
-        this.dispatchEvent(disposeEvent);
-        disposeEvent.batch.dispose();
+        this.batchRemovedTopic.next(this.registeredBatches.get(batchName));
         this.registeredBatches.delete(batchName);
     }
 
@@ -174,55 +150,7 @@ export class MapViewerModel
         this._viewportUpdateThrottle(viewport, jumped, camPos, alt, tilt, orientation);
     }
 
-    isMapUpdateRunning() {
-        return this.update.running
-    }
-
-    showMapElement(batchName, visualId, visible) {
-        if (!this.registeredBatches.has(batchName)) {
-            console.warn(`Attempt to show/hide map element ${visualId} for unknown batch ${batchName}!`);
-            return;
-        }
-        let batch = this.registeredBatches.get(batchName);
-        batch.setElementVisible(visualId, visible);
-        this.dispatchEvent({
-            type: this.MAP_ELEM_VISIBILE_CHANGED,
-            filter: false,
-            visible: visible,
-            bounds: batch.mapElementAngularExtents(visualId)
-        });
-    }
-
-    getMapElementCenterPosition(batchName, visualId) {
-        if (!this.registeredBatches.has(batchName)) {
-            console.warn(`Attempt to access map element ${visualId} for unknown batch ${batchName}!`);
-            return;
-        }
-        let batch = this.registeredBatches.get(batchName);
-        return batch.mapElementCenterPoint(visualId);
-    }
-
-    mapElementPriority(visualId) {
-        let visualIdString = visualId.toString();
-        let batch = this.batchPerVisualId.get(visualIdString);
-        if (!batch)
-            return 0;
-        let elemInfo = batch.visualIdIndex[visualIdString];
-        return (elemInfo.type === "line" || elemInfo.type === "point") + elemInfo.prio;
-    };
-
-    mapElementAngularExtents(visualId) {
-        let visualIdString = visualId.toString();
-        let batch = this.batchPerVisualId.get(visualIdString);
-        if (!batch)
-            return null;
-        return batch.mapElementAngularExtents(visualId);
-    };
-
-    ///////////////////////////////////////////////////////////////////////////
-
     go() {
-        this.update.runningOnServer = false;
+        // TODO: Implement Initial Data Request
     }
-    ///////////////////////////////////////////////////////////////////////////
 }

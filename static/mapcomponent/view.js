@@ -1,10 +1,18 @@
+import {MapViewerModel} from "./model.js";
 
-export class CesiumViewer  {
-    constructor() {
+export class MapViewerView
+{
+    /**
+     * Construct a Cesium View with a Model.
+     * @param {MapViewerModel} model
+     * @param containerDomElementId Div which hosts the Cesium view.
+     */
+    constructor(model, containerDomElementId)
+    {
         // The base64 encoding of a 1x1 black PNG
         let blackPixelBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
-        this.viewer = new Cesium.Viewer('cesiumContainer',
+        this.viewer = new Cesium.Viewer(containerDomElementId,
             {
                 // Create a SingleTileImageryProvider that uses the black pixel
                 imageryProvider: new Cesium.SingleTileImageryProvider({
@@ -23,14 +31,20 @@ export class CesiumViewer  {
             }
         );
 
-        //cViewer.creditContainer.innerHTML = "";
-
         let openStreetMap = new Cesium.UrlTemplateImageryProvider({
             url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
             maximumLevel: 19,
         });
         let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
         openStreetMapLayer.alpha = 0.5;
-    }
 
-};
+        model.batchAddedTopic.subscribe(batch => {
+            this.viewer.scene.primitives.add(batch.tileSet);
+            this.viewer.zoomTo(this.viewer.scene.primitives.get(this.viewer.scene.primitives.length - 1));
+        })
+
+        model.batchRemovedTopic.subscribe(batch => {
+            this.viewer.scene.primitives.remove(batch.tileSet);
+        })
+    }
+}

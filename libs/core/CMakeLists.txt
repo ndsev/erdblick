@@ -47,8 +47,9 @@ target_link_libraries(erdblick-core
   PUBLIC
     Cesium3DTilesWriter
     CesiumGeospatial
+    CesiumGltf
+    CesiumGltfWriter
     glm
     mapget-model
-    tinygltf
     yaml-cpp)
 

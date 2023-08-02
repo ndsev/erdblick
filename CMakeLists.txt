@@ -7,22 +7,16 @@ set(CMAKE_CXX_STANDARD 14)
 
 # Treat warnings as errors, with some exceptions for Cesium.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
     -Wall -Wno-error=sign-conversion")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
     -Wall -Wno-error=sign-conversion -Wno-error=shorten-64-to-32")
 endif()
 
 # External dependencies.
 
 message("Building for ${CMAKE_SYSTEM_NAME}.")
-
-FetchContent_Declare(tinygltf
-  GIT_REPOSITORY "https://github.com/syoyo/tinygltf.git"
-  GIT_TAG        "v2.8.9"
-  GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(tinygltf)
 
 FetchContent_Declare(glm
     GIT_REPOSITORY "https://github.com/g-truc/glm.git"

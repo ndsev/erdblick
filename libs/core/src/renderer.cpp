@@ -3,9 +3,18 @@
 #include <sstream>
 #include <vector>
 
-#include "duckfile.c"
 #include "glm/glm.hpp"
-#include "tiny_gltf.h"
+#include "glm/gtc/type_ptr.hpp"
+#include "glm/gtc/matrix_transform.hpp"
+#include "glm/gtx/quaternion.hpp"
+
+#include "CesiumGeospatial/Ellipsoid.h"
+#include "Cesium3DTilesWriter/TilesetWriter.h"
+#include "CesiumGeometry/Transforms.h"
+#include "Cesium3DTiles/Tileset.h"
+#include "CesiumUtility/Math.h"
+#include "CesiumGltf/Model.h"
+#include "CesiumGltfWriter/GltfWriter.h"
 
 #include "renderer.h"
 
@@ -16,21 +25,18 @@ namespace erdblick
 
 namespace
 {
-constexpr auto GLOBE_RADIUS = 6371.;
-
 template <typename ResultVec = glm::vec3>
 ResultVec
-wgsToEuclidean(Point const& wgsPoint, glm::dvec3 const& wgsOffset = glm::dvec3{.0, .0, .0})
+wgsToEuclidean(Point const& wgsPoint, glm::dvec3 const& origin = glm::dvec3{.0, .0, .0})
 {
-    const double phi = wgsPoint.x * M_PI / 180.;
-    const double theta = wgsPoint.y * M_PI / 180.;
-
-    // TODO: Factor should be .001, but we leave it at .002 for 3D theatrics.
-    const double elevation = GLOBE_RADIUS + (wgsPoint.z + 1.)*.002;
+    namespace geo = CesiumGeospatial;
+    auto& wgs84Elli = geo::Ellipsoid::WGS84;
+    auto cartoCoords = geo::Cartographic::fromDegrees(wgsPoint.x, wgsPoint.y, wgsPoint.z);
+    auto cartesian = wgs84Elli.cartographicToCartesian(cartoCoords);
     return {
-        elevation * glm::cos(theta) * glm::sin(phi) - wgsOffset.x,
-        elevation * glm::sin(theta) - wgsOffset.y,
-        elevation * glm::cos(theta) * glm::cos(phi) - wgsOffset.z};
+        cartesian.x - origin.x,
+        cartesian.y - origin.y,
+        cartesian.z - origin.z};
 }
 
 /** GLTF conversion for one geometry type of one rule. */
@@ -46,9 +52,9 @@ struct RuleGeometry
         : offset_(offset), rule_(rule), geomType_(geomType)
     {
         switch (geomType_) {
-        case GeomType::Line: gltfPrimitiveMode_ = TINYGLTF_MODE_LINE; break;
-        case GeomType::Points: gltfPrimitiveMode_ = TINYGLTF_MODE_POINTS; break;
-        case GeomType::Mesh: gltfPrimitiveMode_ = TINYGLTF_MODE_TRIANGLES; break;
+        case GeomType::Line: gltfPrimitiveMode_ = CesiumGltf::MeshPrimitive::Mode::LINES; break;
+        case GeomType::Points: gltfPrimitiveMode_ = CesiumGltf::MeshPrimitive::Mode::POINTS; break;
+        case GeomType::Mesh: gltfPrimitiveMode_ = CesiumGltf::MeshPrimitive::Mode::TRIANGLES; break;
         default:
             // empty
             break;
@@ -76,7 +82,7 @@ struct RuleGeometry
         return {minVec, maxVec};
     }
 
-    void addToScene(tinygltf::Model& model)
+    void addToScene(CesiumGltf::Model& model, CesiumGltf::Scene& scene)
     {
         if (vertices_.empty())
             return;
@@ -90,11 +96,11 @@ struct RuleGeometry
 
         auto& node = model.nodes.emplace_back();
         node.mesh = meshIndex;
-        model.nodes[0].children.push_back(nodeIndex);
+        scene.nodes.push_back(nodeIndex);
 
         auto& material = model.materials.emplace_back();
         auto color = rule_.color().toFVec4();
-        material.pbrMetallicRoughness.baseColorFactor = {color.r, color.g, color.b, color.a};
+        material.pbrMetallicRoughness->baseColorFactor = {color.r, color.g, color.b, color.a};
 
         auto& mesh = model.meshes.emplace_back();
         auto& primitive = mesh.primitives.emplace_back();
@@ -105,23 +111,23 @@ struct RuleGeometry
         auto& accessor = model.accessors.emplace_back();
         accessor.bufferView = bufferViewIndex;
         accessor.byteOffset = 0;
-        accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+        accessor.componentType = CesiumGltf::Accessor::ComponentType::FLOAT;
         accessor.count = static_cast<int>(vertices_.size());
-        accessor.type = TINYGLTF_TYPE_VEC3;
+        accessor.type = CesiumGltf::Accessor::Type::VEC3;
         auto [minVal, maxVal] = getMinMax();
-        accessor.minValues = {minVal.x, minVal.y, minVal.z};
-        accessor.maxValues = {maxVal.x, maxVal.y, maxVal.z};
+        accessor.min = {minVal.x, minVal.y, minVal.z};
+        accessor.max = {maxVal.x, maxVal.y, maxVal.z};
 
         auto& bufferView = model.bufferViews.emplace_back();
         bufferView.buffer = bufferIndex;
         bufferView.byteOffset = 0;
         bufferView.byteLength = static_cast<int>(vertices_.size() * 3 * sizeof(float_t));
-        bufferView.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+        bufferView.target = CesiumGltf::BufferView::Target::ARRAY_BUFFER;
 
         auto& buffer = model.buffers.emplace_back();
-        buffer.data.resize(static_cast<size_t>(bufferView.byteLength));
+        buffer.cesium.data.resize(static_cast<size_t>(bufferView.byteLength));
         std::memcpy(
-            buffer.data.data(),
+            buffer.cesium.data.data(),
             vertices_.data(),
             static_cast<size_t>(bufferView.byteLength));
     }
@@ -159,12 +165,12 @@ struct RuleGeometry
 
 FeatureLayerRenderer::FeatureLayerRenderer() = default;
 
-void FeatureLayerRenderer::render(  // NOLINT (render can be made static)
+mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made static)
     const FeatureLayerStyle& style,
     const std::shared_ptr<TileFeatureLayer>& layer,
-    SharedUint8Array& data)
+    SharedUint8Array& result)
 {
-    auto wgsOffset = wgsToEuclidean<glm::dvec3>(layer->tileId().center());
+    auto tileOrigin = wgsToEuclidean<glm::dvec3>(layer->tileId().center());
     std::map<std::pair<uint64_t, GeomType>, std::unique_ptr<RuleGeometry>> geomForRule;
 
     for (auto&& feature : *layer) {
@@ -176,7 +182,7 @@ void FeatureLayerRenderer::render(  // NOLINT (render can be made static)
                         std::make_pair(reinterpret_cast<uint64_t>(&rule), geomType),
                         std::unique_ptr<RuleGeometry>{});
                     if (wasInserted) {
-                        it->second = std::make_unique<RuleGeometry>(geomType, wgsOffset, rule);
+                        it->second = std::make_unique<RuleGeometry>(geomType, tileOrigin, rule);
                     }
                     it->second->addFeature(feature);
                 }
@@ -185,29 +191,62 @@ void FeatureLayerRenderer::render(  // NOLINT (render can be made static)
     }
 
     // Convert to GLTF
-    tinygltf::Model model;
+    CesiumGltf::Model model;
     model.asset.version = "2.0";
     model.asset.generator = "TinyGLTF";
     auto& rootNode = model.nodes.emplace_back();
     rootNode.name = "root";
-    rootNode.translation = {wgsOffset.x, wgsOffset.y, wgsOffset.z};
+    rootNode.translation = {tileOrigin.x, tileOrigin.y, tileOrigin.z};
     auto& scene = model.scenes.emplace_back();
     scene.nodes.push_back(0); // Root node index is always 0
     for (auto&& [_, ruleGeom] : geomForRule) {
-        ruleGeom->addToScene(model);
+        ruleGeom->addToScene(model, scene);
     }
 
     // Write the glTF model to an output stream.
-    tinygltf::TinyGLTF gltfSerializer;
-    std::ostringstream stream;
-    bool success = gltfSerializer.WriteGltfSceneToStream(&model, stream, true, true);
-    if (!success) {
+    CesiumGltfWriter::GltfWriter gltfSerializer;
+    auto glbSerializationResult = gltfSerializer.writeGlb(model, {});
+    if (!glbSerializationResult.errors.empty()) {
         std::cerr << "Failed to write glTF to output stream." << std::endl;
     }
+    else {
+        // Get the string representation of the stream.
+        result.writeToArray(glbSerializationResult.gltfBytes);
+    }
 
-    // Get the string representation of the stream.
-    std::string glbStr = stream.str();
-    data.writeToArray(glbStr);
+    return {tileOrigin.x, tileOrigin.y, tileOrigin.z};
+}
+
+void FeatureLayerRenderer::makeTileset(  // NOLINT (could be made static)
+    std::string const& tileGlbUrl,
+    mapget::Point const& origin,
+    SharedUint8Array& result)
+{
+    Cesium3DTiles::Tileset tileset;
+    tileset.asset.version = "1.1";
+    tileset.geometricError = 1.0;  // TODO: Pick/understand value
+
+    glm::dquat noRotation =
+        glm::angleAxis(CesiumUtility::Math::degreesToRadians(0.0), glm::dvec3(1.0, 0.0, 0.0));
+    auto localToGlobal = CesiumGeometry::Transforms::createTranslationRotationScaleMatrix(
+        {origin.x, origin.y, origin.z},
+        noRotation,
+        glm::dvec3(1.0, 1.0, 1.0));
+    localToGlobal = localToGlobal * CesiumGeometry::Transforms::Z_UP_TO_Y_UP;
+
+    auto& root = tileset.root;
+    root.transform =
+        std::vector<double>(glm::value_ptr(localToGlobal), glm::value_ptr(localToGlobal) + 16);
+    root.refine = Cesium3DTiles::Tile::Refine::REPLACE;
+    root.content = Cesium3DTiles::Content();
+    root.content->uri = tileGlbUrl;
+    root.geometricError = 0.0;
+    // Set a sphere with 200km radius as bounding volume
+    root.boundingVolume.sphere = std::vector<double>{0, 0, 0, 200000.0};
+
+    Cesium3DTilesWriter::TilesetWriter writer;
+    auto serializedTileset = writer.writeTileset(tileset, {true});
+    result.writeToArray(serializedTileset.tilesetBytes);
 }
 
 }  // namespace erdblick

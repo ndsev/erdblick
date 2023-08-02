@@ -36,7 +36,7 @@ Color::Color(const std::string& hexString)
     valid_ = true;
     switch (str.size()) {
     case 6:
-        r = parseHexDigit(str, 2);
+        x = parseHexDigit(str, 2);
         g = parseHexDigit(str, 2);
         b = parseHexDigit(str, 2);
         break;
