@@ -8,4 +8,4 @@ source "$ci_dir/emsdk/emsdk_env.sh"
 export EMSCRIPTEN="$ci_dir/emsdk/upstream/emscripten"
 
 cd "$ci_dir/../build"
-cmake --build .
+cmake --build . -- -j
