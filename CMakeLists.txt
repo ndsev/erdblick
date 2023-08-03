@@ -6,12 +6,12 @@ include(FetchContent)
 set(CMAKE_CXX_STANDARD 14)
 
 # Treat warnings as errors, with some exceptions for Cesium.
+set (ERDBLICK_CXX_FLAGS
+  "-Wall -Wno-error=sign-conversion -Wno-sign-compare -Wno-sign-conversion -Wno-unused-local-typedefs -Wno-comment -Wno-effc++")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
-    -Wall -Wno-error=sign-conversion")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ERDBLICK_CXX_FLAGS} -Wno-bool-compare")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
-    -Wall -Wno-error=sign-conversion -Wno-error=shorten-64-to-32")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ERDBLICK_CXX_FLAGS} -Wno-error=shorten-64-to-32")
 endif()
 
 # External dependencies.
@@ -27,6 +27,7 @@ FetchContent_MakeAvailable(glm)
 # Fetch cesium-native
 set(CESIUM_TESTS_ENABLED OFF)
 set(CESIUM_GLM_STRICT_ENABLED OFF)
+set(CESIUM_TRACING_ENABLED OFF)
 set(DRACO_JS_GLUE OFF CACHE BOOL "Disable JS glue for Draco" FORCE)
 FetchContent_Declare(
   cesiumnative
