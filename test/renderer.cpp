@@ -14,7 +14,7 @@ TEST_CASE("FeatureLayerRenderer", "[erdblick.renderer]")
     version: 1.0
     rules:
       - geometry: ["line"]
-        color: [255.0, 255.0, 255.0]
+        color: #ffffff
       - geometry: ["mesh"]
         opacity: 0.9
       - geometry: ["point"]

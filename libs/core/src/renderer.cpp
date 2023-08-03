@@ -47,9 +47,10 @@ struct RuleGeometry
     glm::dvec3 const& offset_;
     FeatureStyleRule const& rule_;
     GeomType geomType_;
+    uint32_t& requiredBufferSize_;
 
-    RuleGeometry(GeomType geomType, glm::dvec3 const& offset, FeatureStyleRule const& rule)
-        : offset_(offset), rule_(rule), geomType_(geomType)
+    RuleGeometry(GeomType geomType, glm::dvec3 const& offset, FeatureStyleRule const& rule, uint32_t& bufferSize)
+        : offset_(offset), rule_(rule), geomType_(geomType), requiredBufferSize_(bufferSize)
     {
         switch (geomType_) {
         case GeomType::Line: gltfPrimitiveMode_ = CesiumGltf::MeshPrimitive::Mode::LINES; break;
@@ -82,7 +83,7 @@ struct RuleGeometry
         return {minVec, maxVec};
     }
 
-    void addToScene(CesiumGltf::Model& model, CesiumGltf::Scene& scene)
+    void addToScene(CesiumGltf::Model& model, CesiumGltf::Scene& scene, std::byte* buf, int64_t& off)
     {
         if (vertices_.empty())
             return;
@@ -92,7 +93,6 @@ struct RuleGeometry
         auto meshIndex = static_cast<int>(model.meshes.size());
         auto posAttrAccessorIndex = static_cast<int>(model.accessors.size());
         auto bufferViewIndex = static_cast<int>(model.bufferViews.size());
-        auto bufferIndex = static_cast<int>(model.buffers.size());
 
         auto& node = model.nodes.emplace_back();
         node.mesh = meshIndex;
@@ -119,17 +119,16 @@ struct RuleGeometry
         accessor.max = {maxVal.x, maxVal.y, maxVal.z};
 
         auto& bufferView = model.bufferViews.emplace_back();
-        bufferView.buffer = bufferIndex;
-        bufferView.byteOffset = 0;
+        bufferView.buffer = 0;  // All buffer views must refer to the implicit buffer 0
+        bufferView.byteOffset = off;
         bufferView.byteLength = static_cast<int>(vertices_.size() * 3 * sizeof(float_t));
         bufferView.target = CesiumGltf::BufferView::Target::ARRAY_BUFFER;
 
-        auto& buffer = model.buffers.emplace_back();
-        buffer.cesium.data.resize(static_cast<size_t>(bufferView.byteLength));
         std::memcpy(
-            buffer.cesium.data.data(),
+            buf + off,
             vertices_.data(),
             static_cast<size_t>(bufferView.byteLength));
+        off += bufferView.byteLength;
     }
 
     void addFeature(model_ptr<Feature>& feature)
@@ -152,12 +151,15 @@ struct RuleGeometry
         geom->forEachPoint(
             [this, &count](auto&& vertex)
             {
-                if (count > 1)
+                if (count > 1) {
                     vertices_.emplace_back(vertices_.back());
+                    ++count;
+                }
                 vertices_.emplace_back(wgsToEuclidean(vertex, offset_));
                 ++count;
                 return true;
             });
+        requiredBufferSize_ += count * 3 * sizeof(float_t);
     }
 };
 
@@ -170,6 +172,7 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
     const std::shared_ptr<TileFeatureLayer>& layer,
     SharedUint8Array& result)
 {
+    uint32_t bufferSize = 0;
     auto tileOrigin = wgsToEuclidean<glm::dvec3>(layer->tileId().center());
     std::map<std::pair<uint64_t, GeomType>, std::unique_ptr<RuleGeometry>> geomForRule;
 
@@ -182,7 +185,8 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
                         std::make_pair(reinterpret_cast<uint64_t>(&rule), geomType),
                         std::unique_ptr<RuleGeometry>{});
                     if (wasInserted) {
-                        it->second = std::make_unique<RuleGeometry>(geomType, tileOrigin, rule);
+                        it->second =
+                            std::make_unique<RuleGeometry>(geomType, tileOrigin, rule, bufferSize);
                     }
                     it->second->addFeature(feature);
                 }
@@ -191,26 +195,22 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
     }
 
     // Convert to GLTF
+    std::vector<std::byte> buffer;
+    buffer.resize(bufferSize);
+    int64_t bufferOffset = 0;
     CesiumGltf::Model model;
+    model.buffers.emplace_back(); // Add single implicit buffer
     model.asset.version = "2.0";
-    model.asset.generator = "TinyGLTF";
-    auto& rootNode = model.nodes.emplace_back();
-    rootNode.name = "root";
-    rootNode.translation = {tileOrigin.x, tileOrigin.y, tileOrigin.z};
     auto& scene = model.scenes.emplace_back();
-    scene.nodes.push_back(0); // Root node index is always 0
-    for (auto&& [_, ruleGeom] : geomForRule) {
-        ruleGeom->addToScene(model, scene);
-    }
+    for (auto&& [_, ruleGeom] : geomForRule)
+        ruleGeom->addToScene(model, scene, buffer.data(), bufferOffset);
 
     // Write the glTF model to an output stream.
     CesiumGltfWriter::GltfWriter gltfSerializer;
-    auto glbSerializationResult = gltfSerializer.writeGlb(model, {});
-    if (!glbSerializationResult.errors.empty()) {
+    auto glbSerializationResult = gltfSerializer.writeGlb(model, buffer);
+    if (!glbSerializationResult.errors.empty())
         std::cerr << "Failed to write glTF to output stream." << std::endl;
-    }
     else {
-        // Get the string representation of the stream.
         result.writeToArray(glbSerializationResult.gltfBytes);
     }
 
