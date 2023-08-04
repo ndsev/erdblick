@@ -40,7 +40,8 @@ export class MapViewerView
 
         model.batchAddedTopic.subscribe(batch => {
             this.viewer.scene.primitives.add(batch.tileSet);
-            this.viewer.zoomTo(this.viewer.scene.primitives.get(this.viewer.scene.primitives.length - 1));
+            // TODO: Uncomment this if you want to zoom to every loaded batch
+            // this.viewer.zoomTo(this.viewer.scene.primitives.get(this.viewer.scene.primitives.length - 1));
         })
 
         model.batchRemovedTopic.subscribe(batch => {
