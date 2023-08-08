@@ -1,5 +1,9 @@
 "use strict";
 
+/**
+ * Run a WASM function which places data in a SharedUint8Array,
+ * and then store this data under an object URL.
+ */
 function blobUriFromWasm(coreLib, fun, contentType) {
     let sharedGlbArray = new coreLib.SharedUint8Array();
     fun(sharedGlbArray);
@@ -21,37 +25,6 @@ export class MapViewerBatch
         this.id = batchName;
         this.children = undefined;
         this.tileFeatureLayer = tileFeatureLayer;
-    }
-
-    async fetchMockData()
-    {
-        // TODO: Use the tile id to pick the correct 3D tile
-
-        // Download the glb file
-        const urlToGlb = "/3dtiles/545356699.glb"
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Failed to download glb: ${response.status} ${response.statusText}`);
-        }
-        const glbBinaryData = await response.arrayBuffer();
-        const blob = new Blob([glbBinaryData], { type: 'model/gltf-binary' });
-        const glbUrl = URL.createObjectURL(blob);
-
-        // Download the 3D TileSet descriptor (in JSON format)
-        const urlToTileSet = "/3dtiles/545356699.json"
-        const tsResponse = await fetch(url);
-        if (!tsResponse.ok) {
-            throw new Error(`Failed to download tileset: ${tsResponse.status} ${tsResponse.statusText}`);
-        }
-        const tileSetJson = await response.json().toString();
-        // TODO: Replace the uri with the one of the blob
-        // TODO: The 3D tileSet has to use the glb URL
-        //root.content->uri = tileNumber + ".glb";
-        const tileSetBlob = new Blob([tileSetJson], { type: 'application/json' });
-        const tileSetUrl = URL.createObjectURL(tileSetBlob);
-
-        this.glbUrl = glbUrl;
-        this.tileSetUrl = tileSetUrl;
     }
 
     /**

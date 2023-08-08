@@ -21,8 +21,7 @@ libErdblickCore().then(coreLib =>
         mapModel.reloadStyle();
     }
 
-    // window.zoomToBatch = (batchId) => {
-    //     let center = mapComponent.model.registeredBatches.get(batchId).tileFeatureLayer.center();
-    //     mapComponent.moveToPosition(center.x, center.y, center.z);
-    // }
+    window.zoomToBatch = (batchId) => {
+        mapView.viewer.zoomTo(mapModel.registeredBatches.get(batchId).tileSet);
+    }
 })
