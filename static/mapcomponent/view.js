@@ -29,16 +29,56 @@ export class MapViewerView
                 selectionIndicator: false,
                 timeline: false,
                 navigationHelpButton: false,
-                navigationInstructionsInitiallyVisible: false
+                navigationInstructionsInitiallyVisible: false,
+                requestRenderMode: true,
+                maximumRenderTimeChange: Infinity,
+                infoBox: false
             }
         );
 
-        let openStreetMap = new Cesium.UrlTemplateImageryProvider({
-            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            maximumLevel: 19,
-        });
-        let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
-        openStreetMapLayer.alpha = 0.5;
+        // let openStreetMap = new Cesium.UrlTemplateImageryProvider({
+        //     url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        //     maximumLevel: 19,
+        // });
+        // let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
+        // openStreetMapLayer.alpha = 0.5;
+
+        this.pickedFeature = null;
+        this.hoveredFeature = null;
+        this.leftClickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+
+        // Add a handler for selection
+        this.leftClickHandler.setInputAction(movement => {
+            // If there was a previously picked feature, reset its color
+            if (this.pickedFeature) {
+                this.pickedFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
+            }
+
+            let feature = this.viewer.scene.pick(movement.position);
+
+            if (feature instanceof Cesium.Cesium3DTileFeature) {
+                feature.color = Cesium.Color.YELLOW;
+                this.pickedFeature = feature; // Store the picked feature
+                this.hoveredFeature = null;
+            }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        // Add a handler for hover (i.e., MOUSE_MOVE) functionality
+        this.leftClickHandler.setInputAction(movement => {
+            // If there was a previously hovered feature, reset its color
+            if (this.hoveredFeature) {
+                this.hoveredFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
+            }
+
+            let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
+
+            if (feature instanceof Cesium.Cesium3DTileFeature) {
+                if (feature !== this.pickedFeature) {
+                    feature.color = Cesium.Color.GREEN;
+                    this.hoveredFeature = feature; // Store the hovered feature
+                }
+            }
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
         model.batchAddedTopic.subscribe(batch => {
             this.viewer.scene.primitives.add(batch.tileSet);
