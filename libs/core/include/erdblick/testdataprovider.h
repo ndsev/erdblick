@@ -51,23 +51,36 @@ public:
             fieldNames_);
         result->setPrefix({{"areaId", "TheBestArea"}});
 
-        // Create a feature with line geometry
-        auto feature1 = result->newFeature("Way", {{"wayId", 42}});
+        // Create a function to generate a random coordinate between two given points
+        auto randomCoordinateBetween = [&](const auto& point1, const auto& point2) {
+            auto x = point1.x + (point2.x - point1.x) * (rand() / static_cast<double>(RAND_MAX));
+            auto y = point1.y + (point2.y - point1.y) * (rand() / static_cast<double>(RAND_MAX));
+            auto z = 100. / static_cast<double>(level);
+            return mapget::Point{x, y, z};
+        };
 
-        // Use high-level geometry API
-        auto ne = tileId.ne();
-        auto sw = tileId.sw();
-        ne.z = sw.z = 100./static_cast<double>(level);
-        feature1->addLine({ne, sw});
+        // Seed the random number generator for consistency
+        srand(time(nullptr));
 
-        // Add a fixed attribute
-        feature1->attributes()->addField("main_ingredient", "Pepper");
+        // Create 10 random lines inside the bounding box defined by ne and sw
+        for (int i = 0; i < 10; i++) {
+            // Create a feature with line geometry
+            auto feature = result->newFeature("Way", {{"wayId", 42 + i}});
 
-        // Add an attribute layer
-        auto attrLayer = feature1->attributeLayers()->newLayer("cheese");
-        auto attr = attrLayer->newAttribute("mozzarella");
-        attr->setDirection(mapget::Attribute::Direction::Positive);
-        attr->addField("smell", "neutral");
+            // Generate random start and end points for the line
+            auto start = randomCoordinateBetween(tileId.ne(), tileId.sw());
+            auto end = randomCoordinateBetween(tileId.ne(), tileId.sw());
+            feature->addLine({start, end});
+
+            // Add a fixed attribute
+            feature->attributes()->addField("main_ingredient", "Pepper");
+
+            // Add an attribute layer
+            auto attrLayer = feature->attributeLayers()->newLayer("cheese");
+            auto attr = attrLayer->newAttribute("mozzarella");
+            attr->setDirection(mapget::Attribute::Direction::Positive);
+            attr->addField("smell", "neutral");
+        }
 
         return result;
     }
