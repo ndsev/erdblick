@@ -16,7 +16,6 @@ public:
     explicit SharedUint8Array(std::string const& data);
     [[nodiscard]] uint32_t getSize() const;
     __UINT64_TYPE__ getPointer();
-    std::shared_ptr<std::vector<uint8_t>> getArray();
 
     void writeToArray(const char* start, const char* end);
     void writeToArray(std::string const& content);
