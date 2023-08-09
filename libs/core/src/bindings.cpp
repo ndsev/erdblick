@@ -24,6 +24,9 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
         .function("getSize", &SharedUint8Array::getSize)
         .function("getPointer", &SharedUint8Array::getPointer);
 
+    ////////// Point
+    em::class_<mapget::Point>("Point");
+
     ////////// FeatureLayerStyle
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
 
@@ -50,7 +53,8 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// FeatureLayerRenderer
     em::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
         .constructor()
-        .function("render", &FeatureLayerRenderer::render);
+        .function("render", &FeatureLayerRenderer::render)
+        .function("makeTileset", &FeatureLayerRenderer::makeTileset);
 
     ////////// TestDataProvider
     em::class_<TestDataProvider>("TestDataProvider")
