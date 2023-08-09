@@ -43,7 +43,9 @@ export class MapViewerBatch
             glbConverter.makeTileset(this.glbUrl, origin, sharedBuffer);
         }, "application/json");
 
-        Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl).then(tileSet => {
+        Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl, {
+            featureIdLabel: "mapgetFeatureIndex"
+        }).then(tileSet => {
             this.tileSet = tileSet;
             onResult(this);
         });

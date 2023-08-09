@@ -16,6 +16,8 @@
 #include "CesiumGltf/Model.h"
 #include "CesiumGltfWriter/GltfWriter.h"
 #include "CesiumGltf/ExtensionExtMeshFeatures.h"
+#include "CesiumGltf/ExtensionModelExtStructuralMetadata.h"
+#include "CesiumGltf/ExtensionMeshPrimitiveExtStructuralMetadata.h"
 
 #include "renderer.h"
 
@@ -139,6 +141,8 @@ struct RuleGeometry
         meshFeatureExtFeatureIds.attribute = 0;
         meshFeatureExtFeatureIds.featureCount = numDistinctFeatureIDs();
         meshFeatureExtFeatureIds.nullFeatureId = -1;
+        meshFeatureExtFeatureIds.label = "mapgetFeatureIndex";
+        meshFeatureExtFeatureIds.propertyTable = 0;
         primitive.extensions[CesiumGltf::ExtensionExtMeshFeatures::ExtensionName] = meshFeatureExt;
 
         auto& posAccessor = model.accessors.emplace_back();
@@ -236,9 +240,17 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
     const std::shared_ptr<TileFeatureLayer>& layer,
     SharedUint8Array& result)
 {
-    uint32_t bufferSize = 0;
+    uint32_t globalBufferSize = 0;
     auto tileOrigin = wgsToEuclidean<glm::dvec3>(layer->tileId().center());
     std::map<std::pair<uint64_t, GeomType>, std::unique_ptr<RuleGeometry>> geomForRule;
+
+    // We store feature ID's in an extra dummy property buffer.
+    // This attributes features with their index by their index,
+    // so the information stored is fairly useless.
+    // But cesium demands us to declare at least
+    // one per-feature property for picking to work. So this is the way.
+    std::vector<uint32_t> featureIdBuffer;
+    featureIdBuffer.reserve(layer->numRoots());
 
     // The Feature ID corresponds to the index of the feature
     // within the TileFeatureLayer.
@@ -253,23 +265,71 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
                         std::unique_ptr<RuleGeometry>{});
                     if (wasInserted) {
                         it->second =
-                            std::make_unique<RuleGeometry>(geomType, tileOrigin, rule, bufferSize);
+                            std::make_unique<RuleGeometry>(geomType, tileOrigin, rule, globalBufferSize);
                     }
                     it->second->addFeature(feature, featureId);
                 }
             }
         }
+        featureIdBuffer.emplace_back(featureId);
         ++featureId;
     }
+    globalBufferSize += featureIdBuffer.size() * sizeof(uint32_t);
 
     // Convert to GLTF
     std::vector<std::byte> buffer;
-    buffer.resize(bufferSize);
+    buffer.resize(globalBufferSize);
     int64_t bufferOffset = 0;
     CesiumGltf::Model model;
     model.buffers.emplace_back(); // Add single implicit buffer
     model.asset.version = "2.0";
     model.extensionsUsed.emplace_back(CesiumGltf::ExtensionExtMeshFeatures::ExtensionName);
+    model.extensionsUsed.emplace_back(CesiumGltf::ExtensionModelExtStructuralMetadata::ExtensionName);
+
+    // Prepare feature metadata table description - see
+    // https://github.com/CesiumGS/glTF/tree/3d-tiles-next/extensions/2.0/Vendor/EXT_structural_metadata
+    CesiumGltf::ExtensionModelExtStructuralMetadata metadataModelExt;
+    CesiumGltf::ExtensionExtStructuralMetadataSchema metadataSchema;
+    CesiumGltf::ExtensionExtStructuralMetadataClass metadataClass;
+    CesiumGltf::ExtensionExtStructuralMetadataClassProperty metadataFeatureIdProperty;
+    CesiumGltf::ExtensionExtStructuralMetadataPropertyTable metadataPropertyTable;
+    CesiumGltf::ExtensionExtStructuralMetadataPropertyTableProperty metadataFeatureIdTableColumn;
+    metadataFeatureIdProperty.type = "UINT32";
+    metadataFeatureIdProperty.description = "Mapget tile id and feature index in one string.";
+    metadataClass.name = "mapgetFeatureMetadataClass";
+    metadataClass.properties["mapgetFeatureId"] = metadataFeatureIdProperty;
+    metadataSchema.id = "mapgetFeatureMetadataSchema";
+    metadataSchema.classes[*metadataClass.name] = metadataClass;
+    metadataFeatureIdTableColumn.values = 0;  // Values are stored in first accessor
+    metadataPropertyTable.name = "mapgetFeaturePropertyTable";
+    metadataPropertyTable.classProperty = *metadataClass.name;
+    metadataPropertyTable.count = (int64_t)featureIdBuffer.size();
+    metadataPropertyTable.properties["mapgetFeatureId"] = metadataFeatureIdTableColumn;
+    metadataModelExt.schema = metadataSchema;
+    metadataModelExt.propertyTables.emplace_back(std::move(metadataPropertyTable));
+    model.extensions[CesiumGltf::ExtensionModelExtStructuralMetadata::ExtensionName] = metadataModelExt;
+
+    // Create Accessor and BufferView for Feature ID property values
+    auto& featIdAccessor = model.accessors.emplace_back();
+    featIdAccessor.bufferView = 0;
+    featIdAccessor.byteOffset = 0;
+    featIdAccessor.componentType = CesiumGltf::Accessor::ComponentType::UNSIGNED_INT;
+    featIdAccessor.count = static_cast<int>(featureIdBuffer.size());
+    featIdAccessor.type = CesiumGltf::Accessor::Type::SCALAR;
+    featIdAccessor.min = {featureIdBuffer.empty() ? .0 : (double)featureIdBuffer.front()};
+    featIdAccessor.max = {featureIdBuffer.empty() ? .0 : (double)featureIdBuffer.back()};
+
+    auto& featIdBufferView = model.bufferViews.emplace_back();
+    featIdBufferView.buffer = 0;  // All buffer views must refer to the implicit buffer 0
+    featIdBufferView.byteOffset = bufferOffset;
+    featIdBufferView.byteLength = static_cast<int>(featureIdBuffer.size() * sizeof(uint32_t));
+    featIdBufferView.target = CesiumGltf::BufferView::Target::ARRAY_BUFFER;
+
+    std::memcpy(
+        buffer.data() + bufferOffset,
+        featureIdBuffer.data(),
+        static_cast<size_t>(featIdBufferView.byteLength));
+    bufferOffset += featIdBufferView.byteLength;
 
     auto& scene = model.scenes.emplace_back();
     for (auto&& [_, ruleGeom] : geomForRule)
@@ -302,8 +362,8 @@ void FeatureLayerRenderer::makeTileset(  // NOLINT (could be made static)
 
     Cesium3DTiles::Tileset tileset;
     tileset.asset.version = "1.1";
-
     tileset.geometricError = geometricError;
+    tileset.extensionsUsed.emplace_back(CesiumGltf::ExtensionExtMeshFeatures::ExtensionName);
 
     glm::dquat noRotation =
         glm::angleAxis(CesiumUtility::Math::degreesToRadians(0.0), glm::dvec3(1.0, 0.0, 0.0));
