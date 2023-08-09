@@ -10,14 +10,16 @@ export class MapViewerView
     constructor(model, containerDomElementId)
     {
         // The base64 encoding of a 1x1 black PNG
-        let blackPixelBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+        let blackPixelBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC';
 
         this.viewer = new Cesium.Viewer(containerDomElementId,
             {
                 // Create a SingleTileImageryProvider that uses the black pixel
                 imageryProvider: new Cesium.SingleTileImageryProvider({
                     url: blackPixelBase64,
-                    rectangle: Cesium.Rectangle.MAX_VALUE
+                    rectangle: Cesium.Rectangle.MAX_VALUE,
+                    tileWidth: 1,
+                    tileHeight: 1
                 }),
                 baseLayerPicker: false,
                 animation: false,
