@@ -45,10 +45,13 @@ export class MapViewerView
 
         this.pickedFeature = null;
         this.hoveredFeature = null;
-        this.leftClickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+        this.mouseHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+
+        /// Holds the currently selected feature
+        this.selectionTopic = new rxjs.BehaviorSubject(null); // {Feature}
 
         // Add a handler for selection
-        this.leftClickHandler.setInputAction(movement => {
+        this.mouseHandler.setInputAction(movement => {
             // If there was a previously picked feature, reset its color
             if (this.pickedFeature) {
                 this.pickedFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
@@ -60,11 +63,14 @@ export class MapViewerView
                 feature.color = Cesium.Color.YELLOW;
                 this.pickedFeature = feature; // Store the picked feature
                 this.hoveredFeature = null;
+                this.selectionTopic.next(this.resolveFeature(feature.tileset, feature.featureId))
             }
+            else
+                this.selectionTopic.next(null);
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality
-        this.leftClickHandler.setInputAction(movement => {
+        this.mouseHandler.setInputAction(movement => {
             // If there was a previously hovered feature, reset its color
             if (this.hoveredFeature) {
                 this.hoveredFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
@@ -80,12 +86,25 @@ export class MapViewerView
             }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
+        this.batchForTileSet = new Map();
+
         model.batchAddedTopic.subscribe(batch => {
             this.viewer.scene.primitives.add(batch.tileSet);
+            this.batchForTileSet.set(batch.tileSet, batch);
         })
 
         model.batchRemovedTopic.subscribe(batch => {
             this.viewer.scene.primitives.remove(batch.tileSet);
+            this.batchForTileSet.delete(batch.tileSet);
         })
+    }
+
+    resolveFeature(tileSet, index) {
+        let batch = this.batchForTileSet.get(tileSet);
+        if (!batch) {
+            console.error("Failed find batch for tileSet!");
+            return null;
+        }
+        return batch.tileFeatureLayer.at(index);
     }
 }

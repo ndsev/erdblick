@@ -46,11 +46,11 @@ export class MapViewerModel
 
         /// Triggered upon GLB load finished, with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.batchAddedTopic = new rxjs.Subject(); // {batch}
+        this.batchAddedTopic = new rxjs.Subject(); // {MapViewerBatch}
 
         /// Triggered upon onBatchRemoved with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.batchRemovedTopic = new rxjs.Subject(); // {batch}
+        this.batchRemovedTopic = new rxjs.Subject(); // {MapViewerBatch}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //

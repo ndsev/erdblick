@@ -31,11 +31,19 @@
 <body>
 
 <div id="cesiumContainer" class="mapviewer-renderlayer"></div>
-<div id="info">
-    erdblick v0.1.0 //
+
+<div id="info" class="panel">
+    <span class="toggle-indicator"></span>
+    erdblick v0.2.0 //
     <button onclick="loadAllTiles()">Load Tiles</button> //
     <button onclick="reloadStyle()">Reload Style</button><br>
     <div id="log"></div>
+</div>
+
+<div id="selectionPanel" class="panel">
+    <span class="toggle-indicator"></span>
+    <span>Selected Feature: </span><span id="selectedFeatureId"></span>
+    <pre id="selectedFeatureGeoJson"></pre> <!-- Use <pre> for preserving whitespace -->
 </div>
 
 </body>

@@ -24,4 +24,27 @@ libErdblickCore().then(coreLib =>
     window.zoomToBatch = (batchId) => {
         mapView.viewer.zoomTo(mapModel.registeredBatches.get(batchId).tileSet);
     }
+
+    mapView.selectionTopic.subscribe(selectedFeature => {
+        if (!selectedFeature) {
+            $("#selectionPanel").hide()
+            return
+        }
+
+        $("#selectedFeatureGeoJson").text(selectedFeature.geojson())
+        $("#selectedFeatureId").text(selectedFeature.id())
+        $("#selectionPanel").show()
+    })
 })
+
+$(document).ready(function() {
+    // Toggle the expanded/collapsed state of the panels when clicked
+    $(".panel").click(function() {
+        $(this).toggleClass("expanded");
+        if ($(this).hasClass("expanded")) {
+            $(this).find("pre").slideDown();
+        } else {
+            $(this).find("pre").slideUp();
+        }
+    });
+});
