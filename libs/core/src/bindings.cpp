@@ -7,6 +7,8 @@
 #include "style.h"
 #include "testdataprovider.h"
 
+#include "mapget/log.h"
+
 using namespace erdblick;
 namespace em = emscripten;
 
@@ -30,6 +32,19 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// FeatureLayerStyle
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
 
+    ////////// Feature
+    using FeaturePtr = mapget::model_ptr<mapget::Feature>;
+    em::class_<FeaturePtr>("Feature")
+        .function(
+            "id",
+            std::function<std::string(FeaturePtr&)>(
+                [](FeaturePtr& self) { return self->id()->toString(); }))
+        .function(
+            "geojson",
+            std::function<std::string(FeaturePtr&)>(
+                [](FeaturePtr& self) {
+                    return self->toGeoJson().dump(4); }));
+
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
         .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>(
@@ -48,6 +63,17 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                     result.set("y", self.tileId().center().y);
                     result.set("z", self.tileId().z());
                     return result;
+                }))
+        .function(
+            "at",
+            std::function<
+                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, int i)>(
+                [](mapget::TileFeatureLayer const& self, int i)
+                {
+                    if (i < 0 || i >= self.numRoots()) {
+                        mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
+                    }
+                    return self.at(i);
                 }));
 
     ////////// FeatureLayerRenderer

@@ -3,7 +3,7 @@ project(erdblick)
 
 include(FetchContent)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 # Treat warnings as errors, with some exceptions for Cesium.
 set (ERDBLICK_CXX_FLAGS
@@ -38,7 +38,7 @@ FetchContent_MakeAvailable(cesiumnative)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "main"
+  GIT_TAG        "access-feature-by-index"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
