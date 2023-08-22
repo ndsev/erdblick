@@ -16,8 +16,13 @@ function blobUriFromWasm(coreLib, fun, contentType) {
     return glbUrl;
 }
 
-/// Used to create and manage the visualization of one visual batch
-export class MapViewerBatch
+/**
+ * Bundle of a WASM TileFeatureLayer and a rendered representation
+ * in the form of a Cesium 3D TileSet which references a binary GLTF tile.
+ * The tileset JSON and the GLTF blob are stored as browser Blob objects
+ * (see https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static).
+ */
+export class FeatureLayerTileSet
 {
 // public:
     constructor(batchName, tileFeatureLayer)
@@ -25,6 +30,9 @@ export class MapViewerBatch
         this.id = batchName;
         this.children = undefined;
         this.tileFeatureLayer = tileFeatureLayer;
+        this.glbUrl = null;
+        this.tileSetUrl = null;
+        this.tileSet = null;
     }
 
     /**
@@ -68,5 +76,34 @@ export class MapViewerBatch
     {
         this.disposeRenderResult();
         this.tileFeatureLayer.delete();
+        this.tileFeatureLayer = null;
+    }
+}
+
+/**
+ * Wrapper which combines a FeatureLayerTileSet and the index of
+ * a feature within the tileset. Using the unwrap-function, it is
+ * possible to access the WASM feature view in a memory-safe way.
+ */
+export class FeatureWrapper
+{
+    constructor(index, featureLayerTileSet) {
+        this.index = index;
+        this.featureLayerTileSet = featureLayerTileSet;
+    }
+
+    /**
+     * Run a callback with the WASM Feature object referenced by this wrapper.
+     * The feature object will be deleted after the callback is called.
+     */
+    peek(callback) {
+        if (!this.featureLayerTileSet.tileFeatureLayer) {
+            throw new RuntimeError("Unable to access feature of deleted layer.");
+        }
+        let feature = this.featureLayerTileSet.tileFeatureLayer.at(this.index);
+        if (callback) {
+            callback(feature);
+        }
+        feature.delete();
     }
 }

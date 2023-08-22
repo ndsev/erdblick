@@ -1,4 +1,5 @@
 import {MapViewerModel} from "./model.js";
+import {FeatureWrapper} from "./featurelayer.js";
 
 export class MapViewerView
 {
@@ -48,7 +49,7 @@ export class MapViewerView
         this.mouseHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
         /// Holds the currently selected feature
-        this.selectionTopic = new rxjs.BehaviorSubject(null); // {Feature}
+        this.selectionTopic = new rxjs.BehaviorSubject(null); // {FeatureWrapper}
 
         // Add a handler for selection
         this.mouseHandler.setInputAction(movement => {
@@ -105,6 +106,6 @@ export class MapViewerView
             console.error("Failed find batch for tileSet!");
             return null;
         }
-        return batch.tileFeatureLayer.at(index);
+        return new FeatureWrapper(index, batch);
     }
 }

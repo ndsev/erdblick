@@ -25,15 +25,17 @@ libErdblickCore().then(coreLib =>
         mapView.viewer.zoomTo(mapModel.registeredBatches.get(batchId).tileSet);
     }
 
-    mapView.selectionTopic.subscribe(selectedFeature => {
-        if (!selectedFeature) {
+    mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
+        if (!selectedFeatureWrapper) {
             $("#selectionPanel").hide()
             return
         }
 
-        $("#selectedFeatureGeoJson").text(selectedFeature.geojson())
-        $("#selectedFeatureId").text(selectedFeature.id())
-        $("#selectionPanel").show()
+        selectedFeatureWrapper.peek(feature => {
+            $("#selectedFeatureGeoJson").text(feature.geojson())
+            $("#selectedFeatureId").text(feature.id())
+            $("#selectionPanel").show()
+        })
     })
 })
 
