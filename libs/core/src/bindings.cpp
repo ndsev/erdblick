@@ -12,9 +12,78 @@
 using namespace erdblick;
 namespace em = emscripten;
 
-Wgs84AABB createWgs84AABB(float x, float y, uint32_t softLimit, uint16_t level)
+/**
+ * Gets the prioritized list of tile IDs for a given viewport, zoom level, and tile limit.
+ *
+ * This function takes a viewport, a zoom level, and a tile limit, and returns an array of tile IDs
+ * that are visible in the viewport, prioritized by radial distance from the camera position.
+ *
+ * The function first extracts the viewport properties and creates an Axis-Aligned Bounding Box (AABB)
+ * from the viewport boundaries. If the number of tile IDs in the AABB at the given zoom level exceeds
+ * the specified limit, a new AABB is created from the camera position and tile limit.
+ *
+ * The function then populates a vector of prioritized tile IDs by calculating the radial distance
+ * from the camera position to the center of each tile in the AABB. The tile IDs are then sorted by
+ * their radial distance, and the sorted array is converted to an emscripten value to be returned.
+ * Duplicate tile IDs are removed from the array before it is returned.
+ *
+ * @param viewport An emscripten value representing the viewport. The viewport is an object
+ *                 containing the following properties:
+ *                 - south: The southern boundary of the viewport.
+ *                 - west: The western boundary of the viewport.
+ *                 - width: The width of the viewport.
+ *                 - height: The height of the viewport.
+ *                 - camPosLon: The longitude of the camera position.
+ *                 - camPosLat: The latitude of the camera position.
+ *                 - orientation: The orientation of the viewport.
+ * @param level The zoom level for which to get the tile IDs.
+ * @param limit The maximum number of tile IDs to return.
+ *
+ * @return An emscripten value representing an array of prioritized tile IDs.
+ */
+em::val getTileIds(em::val viewport, int level, int limit)
 {
-    return Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{x, y, 0}, softLimit, level);
+    double vpSouth = viewport["south"].as<double>();
+    double vpWest = viewport["west"].as<double>();
+    double vpWidth = viewport["width"].as<double>();
+    double vpHeight = viewport["height"].as<double>();
+    double camPosLon = viewport["camPosLon"].as<double>();
+    double camPosLat = viewport["camPosLat"].as<double>();
+    double orientation = viewport["orientation"].as<double>();
+
+    Wgs84AABB aabb(Wgs84Point{vpWest, vpSouth, .0}, {vpWidth, vpHeight});
+    if (aabb.numTileIds(level) > limit)
+        // Create a size-limited AABB from the tile limit.
+        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{camPosLon, camPosLat, .0}, limit, level);
+
+    std::vector<std::pair<mapget::TileId, float>> prioritizedTileIds;
+    prioritizedTileIds.reserve(limit);
+    aabb.tileIdsWithPriority(
+        level,
+        prioritizedTileIds,
+        Wgs84AABB::radialDistancePrioFn({camPosLon, camPosLat}, orientation));
+
+    std::sort(
+        prioritizedTileIds.begin(),
+        prioritizedTileIds.end(),
+        [](auto const& l, auto const& r) { return l.second < r.second; });
+
+    em::val resultArray = em::val::array();
+    int64_t prevTileId = -1;
+    for (const auto& tileId : prioritizedTileIds) {
+        if (tileId.first.value_ == prevTileId)
+            continue;
+        resultArray.call<void>("push", tileId.first.value_);
+        prevTileId = tileId.first.value_;
+    }
+
+    return resultArray;
+}
+
+/** Get the position for a mapget tile id in WGS84. */
+mapget::Point getTilePosition(uint64_t tileIdValue) {
+    mapget::TileId tid(tileIdValue);
+    return tid.center();
 }
 
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
@@ -27,7 +96,10 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
         .function("getPointer", &SharedUint8Array::getPointer);
 
     ////////// Point
-    em::class_<mapget::Point>("Point");
+    em::value_object<mapget::Point>("Point")
+        .field("x", &mapget::Point::x)
+        .field("y", &mapget::Point::y)
+        .field("z", &mapget::Point::z);
 
     ////////// FeatureLayerStyle
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
@@ -97,67 +169,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                 { self.onTileParsed([cb](auto&& tile) { cb(tile); }); }))
         .function("parse", &TileLayerParser::parse);
 
-    ////////// Wgs84AABB
-    em::register_vector<int64_t>("VectorUint64");
-    em::register_vector<double>("VectorDouble");
-    em::class_<Wgs84AABB>("Wgs84AABB")
-        .function(
-            "tileIds",
-            std::function<em::val(Wgs84AABB&, double, double, double, uint32_t, uint32_t)>(
-                [](Wgs84AABB& self,
-                   double camX,
-                   double camY,
-                   double camOrientation,
-                   uint32_t level,
-                   uint32_t limit) -> em::val
-                {
-                    // TODO: This tileIds-implementation is a work-in-progress
-                    std::vector<TileId> resultTiles;
-                    resultTiles.reserve(limit);
-                    self.tileIds(level, resultTiles);
-
-                    std::vector<int64_t> tileIdArray;
-                    std::vector<double> xArray;
-                    std::vector<double> yArray;
-                    tileIdArray.reserve(resultTiles.size());
-                    xArray.reserve(resultTiles.size());
-                    yArray.reserve(resultTiles.size());
-                    for (auto& tile : resultTiles) {
-                        tileIdArray.emplace_back((int64_t)tile.value_);
-                        auto pos = tile.center();
-                        xArray.emplace_back(pos.x);
-                        yArray.emplace_back(pos.y);
-                    }
-
-                    em::val result = em::val::object();
-                    result.set("id", tileIdArray);
-                    result.set("x", xArray);
-                    result.set("y", yArray);
-
-                    return result;
-                    // return em::val(resultWithPrio.size());
-                }))
-        .function(
-            "ne",
-            std::function<em::val(Wgs84AABB&)>(
-                [](Wgs84AABB& self) -> em::val
-                {
-                    Wgs84Point pt = self.ne();
-                    em::val list = em::val::array();
-                    list.set(0, pt.x);
-                    list.set(1, pt.y);
-                    return list;
-                }))
-        .function(
-            "sw",
-            std::function<em::val(Wgs84AABB&)>(
-                [](Wgs84AABB& self) -> em::val
-                {
-                    Wgs84Point pt = self.sw();
-                    em::val list = em::val::array();
-                    list.set(0, pt.x);
-                    list.set(1, pt.y);
-                    return list;
-                }));
-    function("createWgs84AABB", &createWgs84AABB, em::allow_raw_pointers());
+    ////////// Viewport TileID calculation
+    em::function("getTileIds", &getTileIds);
+    em::function("getTilePosition", &getTilePosition);
 }

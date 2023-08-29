@@ -10,6 +10,17 @@ const styleUrl = "/styles/demo-style.yaml";
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
+export class MapViewerViewport {
+    constructor(south, west, width, height, camPosLon, camPosLat, orientation) {
+        this.south = south;
+        this.west = west;
+        this.width = width;
+        this.height = height;
+        this.camPosLon = camPosLon;
+        this.camPosLat = camPosLat;
+        this.orientation = orientation;
+    }
+}
 
 export class MapViewerModel
 {
@@ -28,17 +39,10 @@ export class MapViewerModel
             numLoadingBatches:  0,
             loadingBatchNames:  new Set(),
             fetch:              null,
-            stream:             null
+            stream:             null,
+            viewport:           new MapViewerViewport,
+            visibleTileIds:     []
         };
-
-        this._viewportUpdateThrottle = throttle(
-            minViewportChangedCallDelta,
-            (viewport, jumped, camPos, alt, tilt, orientation) =>
-            {
-                this.update.viewport = viewport.clone();
-                // this.update()
-            }
-        );
 
         ///////////////////////////////////////////////////////////////////////////
         //                               MODEL EVENTS                            //
@@ -92,7 +96,11 @@ export class MapViewerModel
     //                          MAP UPDATE CONTROLS                          //
     ///////////////////////////////////////////////////////////////////////////
 
-    runUpdate() {
+    runUpdate()
+    {
+        // Get the tile IDs for the current viewport.
+        this.update.visibleTileIds = this.coreLib.getTileIds(this.update.viewport, 13, 128);
+
         // TODO
         //  if (this.update.fetch)
         //      this.update.fetch.abort()
@@ -146,11 +154,8 @@ export class MapViewerModel
 
 // public:
 
-    viewportChanged(viewport, jumped, camPos, alt, tilt, orientation) {
-        this._viewportUpdateThrottle(viewport, jumped, camPos, alt, tilt, orientation);
-    }
-
-    go() {
-        // TODO: Implement Initial Data Request
+    setViewport(viewport) {
+        this.update.viewport = viewport;
+        this.runUpdate();
     }
 }

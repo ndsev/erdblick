@@ -1,4 +1,4 @@
-import {MapViewerModel} from "./model.js";
+import {MapViewerModel, MapViewerViewport} from "./model.js";
 import {FeatureWrapper} from "./featurelayer.js";
 
 export class MapViewerView
@@ -10,18 +10,10 @@ export class MapViewerView
      */
     constructor(model, containerDomElementId)
     {
-        // The base64 encoding of a 1x1 black PNG.
-        let blackPixelBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC';
-
+        this.model = model;
         this.viewer = new Cesium.Viewer(containerDomElementId,
             {
-                // Create a SingleTileImageryProvider that uses the black pixel.
-                imageryProvider: new Cesium.SingleTileImageryProvider({
-                    url: blackPixelBase64,
-                    rectangle: Cesium.Rectangle.MAX_VALUE,
-                    tileWidth: 1,
-                    tileHeight: 1
-                }),
+                imageryProvider: false,
                 baseLayerPicker: false,
                 animation: false,
                 geocoder: false,
@@ -48,7 +40,7 @@ export class MapViewerView
         this.hoveredFeature = null;
         this.mouseHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
-        /// Holds the currently selected feature.
+        // Holds the currently selected feature.
         this.selectionTopic = new rxjs.BehaviorSubject(null); // {FeatureWrapper}
 
         // Add a handler for selection.
@@ -87,6 +79,43 @@ export class MapViewerView
             }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
+        // Add a handler for camera movement
+        this.viewer.camera.changed.addEventListener(() => {
+            let canvas = this.viewer.scene.canvas;
+            let center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+            let centerCartesian = this.viewer.camera.pickEllipsoid(center);
+            let centerLon, centerLat;
+
+            // If the center of the screen is not on the earth's surface (i.e., the horizon is below the viewport center),
+            // fallback to using the camera's position.
+            if (Cesium.defined(centerCartesian)) {
+                let centerCartographic = Cesium.Cartographic.fromCartesian(centerCartesian);
+                centerLon = Cesium.Math.toDegrees(centerCartographic.longitude);
+                centerLat = Cesium.Math.toDegrees(centerCartographic.latitude);
+            } else {
+                let cameraCartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.positionWC);
+                centerLon = Cesium.Math.toDegrees(cameraCartographic.longitude);
+                centerLat = Cesium.Math.toDegrees(cameraCartographic.latitude);
+            }
+
+            let rectangle = this.viewer.camera.computeViewRectangle();
+
+            // Extract the WGS84 coordinates for the rectangle's corners
+            let west = Cesium.Math.toDegrees(rectangle.west);
+            let south = Cesium.Math.toDegrees(rectangle.south);
+            let east = Cesium.Math.toDegrees(rectangle.east);
+            let north = Cesium.Math.toDegrees(rectangle.north);
+            let sizeLon = east - west;
+            let sizeLat = north - south;
+
+            // Create the viewport object
+            let viewport = new MapViewerViewport(south, west, sizeLon, sizeLat, centerLon, centerLat, this.viewer.camera.heading);
+
+            // Pass the viewport object to the model
+            model.setViewport(viewport);
+            this.visualizeTileIds();
+        });
+
         this.batchForTileSet = new Map();
 
         model.batchAddedTopic.subscribe(batch => {
@@ -98,6 +127,40 @@ export class MapViewerView
             this.viewer.scene.primitives.remove(batch.tileSet);
             this.batchForTileSet.delete(batch.tileSet);
         })
+
+        let polylines = new Cesium.PolylineCollection();
+
+        // Line over the equator divided into four 90-degree segments
+        this.viewer.entities.add({
+            name: 'Equator',
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([
+                    -180, 0,   // Start
+                    -90, 0,    // 1st quarter
+                    0, 0,      // Halfway
+                    90, 0,     // 3rd quarter
+                    180, 0     // End
+                ]),
+                width: 2,
+                material: Cesium.Color.RED.withAlpha(0.5)
+            }
+        });
+
+        // Line over the antimeridian
+        this.viewer.entities.add({
+            name: 'Antimeridian',
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([
+                    -180, -90,
+                    -180, 90
+                ]),
+                width: 2,
+                material: Cesium.Color.BLUE.withAlpha(0.5)
+            }
+        });
+
+        this.viewer.scene.primitives.add(polylines);
+        this.viewer.scene.globe.baseColor = new Cesium.Color(0.1, 0.1, 0.1, 1);
     }
 
     resolveFeature(tileSet, index) {
@@ -107,5 +170,45 @@ export class MapViewerView
             return null;
         }
         return new FeatureWrapper(index, batch);
+    }
+
+    visualizeTileIds() {
+        // Remove previous points
+        if (this.points) {
+            for (let i = 0; i < this.points.length; i++) {
+                this.viewer.entities.remove(this.points[i]);
+            }
+        }
+
+        // Get the tile IDs for the current viewport.
+        let tileIds = this.model.update.visibleTileIds;
+
+        // Calculate total number of tile IDs
+        let totalTileIds = tileIds.length;
+
+        // Initialize points array
+        this.points = [];
+
+        // Iterate through each tile ID
+        for(let i = 0; i < totalTileIds; i++) {
+            // Get WGS84 coordinates for the tile ID
+            let position = this.model.coreLib.getTilePosition(tileIds[i]);
+
+            // Calculate the color based on the position in the list
+            let colorValue = i / totalTileIds;
+            let color = Cesium.Color.fromHsl(0.6 - colorValue * 0.5, 1.0, 0.5);
+
+            // Create a point and add it to the Cesium scene
+            let point = this.viewer.entities.add({
+                position : Cesium.Cartesian3.fromDegrees(position.x, position.y),
+                point : {
+                    pixelSize : 5,
+                    color : color
+                }
+            });
+
+            // Add the point to the points array
+            this.points.push(point);
+        }
     }
 }
