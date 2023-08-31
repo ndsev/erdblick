@@ -82,7 +82,7 @@ export class FeatureLayerTileSet
 
 /**
  * Wrapper which combines a FeatureLayerTileSet and the index of
- * a feature within the tileset. Using the unwrap-function, it is
+ * a feature within the tileset. Using the peek-function, it is
  * possible to access the WASM feature view in a memory-safe way.
  */
 export class FeatureWrapper

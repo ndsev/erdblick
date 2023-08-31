@@ -295,7 +295,7 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
     CesiumGltf::ExtensionExtStructuralMetadataPropertyTable metadataPropertyTable;
     CesiumGltf::ExtensionExtStructuralMetadataPropertyTableProperty metadataFeatureIdTableColumn;
     metadataFeatureIdProperty.type = "UINT32";
-    metadataFeatureIdProperty.description = "Mapget tile id and feature index in one string.";
+    metadataFeatureIdProperty.description = "Mapget feature index within the TileFeatureLayer.";
     metadataClass.name = "mapgetFeatureMetadataClass";
     metadataClass.properties["mapgetFeatureId"] = metadataFeatureIdProperty;
     metadataSchema.id = "mapgetFeatureMetadataSchema";

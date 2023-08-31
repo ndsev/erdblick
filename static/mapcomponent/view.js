@@ -10,12 +10,12 @@ export class MapViewerView
      */
     constructor(model, containerDomElementId)
     {
-        // The base64 encoding of a 1x1 black PNG
+        // The base64 encoding of a 1x1 black PNG.
         let blackPixelBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC';
 
         this.viewer = new Cesium.Viewer(containerDomElementId,
             {
-                // Create a SingleTileImageryProvider that uses the black pixel
+                // Create a SingleTileImageryProvider that uses the black pixel.
                 imageryProvider: new Cesium.SingleTileImageryProvider({
                     url: blackPixelBase64,
                     rectangle: Cesium.Rectangle.MAX_VALUE,
@@ -48,12 +48,12 @@ export class MapViewerView
         this.hoveredFeature = null;
         this.mouseHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
-        /// Holds the currently selected feature
+        /// Holds the currently selected feature.
         this.selectionTopic = new rxjs.BehaviorSubject(null); // {FeatureWrapper}
 
-        // Add a handler for selection
+        // Add a handler for selection.
         this.mouseHandler.setInputAction(movement => {
-            // If there was a previously picked feature, reset its color
+            // If there was a previously picked feature, reset its color.
             if (this.pickedFeature) {
                 this.pickedFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
             }
@@ -62,7 +62,7 @@ export class MapViewerView
 
             if (feature instanceof Cesium.Cesium3DTileFeature) {
                 feature.color = Cesium.Color.YELLOW;
-                this.pickedFeature = feature; // Store the picked feature
+                this.pickedFeature = feature; // Store the picked feature.
                 this.hoveredFeature = null;
                 this.selectionTopic.next(this.resolveFeature(feature.tileset, feature.featureId))
             }
@@ -70,9 +70,9 @@ export class MapViewerView
                 this.selectionTopic.next(null);
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-        // Add a handler for hover (i.e., MOUSE_MOVE) functionality
+        // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction(movement => {
-            // If there was a previously hovered feature, reset its color
+            // If there was a previously hovered feature, reset its color.
             if (this.hoveredFeature) {
                 this.hoveredFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
             }
@@ -82,7 +82,7 @@ export class MapViewerView
             if (feature instanceof Cesium.Cesium3DTileFeature) {
                 if (feature !== this.pickedFeature) {
                     feature.color = Cesium.Color.GREEN;
-                    this.hoveredFeature = feature; // Store the hovered feature
+                    this.hoveredFeature = feature; // Store the hovered feature.
                 }
             }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
