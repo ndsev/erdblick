@@ -1,5 +1,7 @@
 #include "buffer.h"
 
+#include <cstring>
+
 namespace erdblick
 {
 
@@ -38,16 +40,10 @@ std::string SharedUint8Array::toString() const
     return {array_.begin(), array_.end()};
 }
 
-std::shared_ptr<std::vector<uint8_t>> SharedUint8Array::getArray()
-{
-    return std::make_shared<std::vector<uint8_t>>(array_);
-}
-
 void SharedUint8Array::writeToArray(const std::vector<std::byte>& content)
 {
-    array_.reserve(content.size());
-    for (auto& byte : content)
-        array_.emplace_back((uint8_t)byte);
+    array_.resize(content.size());
+    std::memcpy(array_.data(), content.data(), content.size());
 }
 
 }

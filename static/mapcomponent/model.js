@@ -2,7 +2,7 @@
 
 import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
-import {MapViewerBatch} from "./batch.js";
+import {FeatureLayerTileSet} from "./featurelayer.js";
 
 const minViewportChangedCallDelta = 200; // ms
 
@@ -46,11 +46,11 @@ export class MapViewerModel
 
         /// Triggered upon GLB load finished, with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.batchAddedTopic = new rxjs.Subject(); // {batch}
+        this.batchAddedTopic = new rxjs.Subject(); // {MapViewerBatch}
 
         /// Triggered upon onBatchRemoved with the visual and picking geometry batch roots.
         /// Received by frontend and MapViewerRenderingController.
-        this.batchRemovedTopic = new rxjs.Subject(); // {batch}
+        this.batchRemovedTopic = new rxjs.Subject(); // {MapViewerBatch}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
@@ -125,7 +125,7 @@ export class MapViewerModel
 
     addBatch(tile) {
         let batchName = tile.id();
-        let batch = new MapViewerBatch(batchName, tile)
+        let batch = new FeatureLayerTileSet(batchName, tile)
         this.registeredBatches.set(batchName, batch)
         this.renderBatch(batch);
     }

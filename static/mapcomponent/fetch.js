@@ -2,7 +2,8 @@
  * A class to fetch data from a URL and process the response
  * for usage in JavaScript and WebAssembly.
  */
-export class Fetch {
+export class Fetch
+{
     /**
      * Constructor to initialize the fetch processor with the required parameters.
      * @param {object} coreLib - The WebAssembly core library.
