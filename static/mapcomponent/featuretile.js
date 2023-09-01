@@ -22,12 +22,13 @@ function blobUriFromWasm(coreLib, fun, contentType) {
  * The tileset JSON and the GLTF blob are stored as browser Blob objects
  * (see https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static).
  */
-export class FeatureLayerTileSet
+export class FeatureTile
 {
 // public:
-    constructor(batchName, tileFeatureLayer)
+    constructor(tileFeatureLayer)
     {
-        this.id = batchName;
+        this.id = tileFeatureLayer.id();
+        this.tileId = tileFeatureLayer.tileId();
         this.children = undefined;
         this.tileFeatureLayer = tileFeatureLayer;
         this.glbUrl = null;
@@ -81,7 +82,7 @@ export class FeatureLayerTileSet
 }
 
 /**
- * Wrapper which combines a FeatureLayerTileSet and the index of
+ * Wrapper which combines a FeatureTile and the index of
  * a feature within the tileset. Using the peek-function, it is
  * possible to access the WASM feature view in a memory-safe way.
  */

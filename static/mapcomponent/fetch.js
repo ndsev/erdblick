@@ -14,10 +14,11 @@ export class Fetch
         this.url = url;
         this.method = 'GET';
         this.body = null;
-        this.signal = null;
+        this.abortSignal = new AbortSignal();
         this.processChunks = false;
         this.jsonCallback = null;
         this.wasmCallback = null;
+        this.aborted = false;
     }
 
     /**
@@ -37,16 +38,6 @@ export class Fetch
      */
     withBody(body) {
         this.body = body;
-        return this;
-    }
-
-    /**
-     * Method to set the signal for the request (for aborting the request).
-     * @param {AbortSignal} signal - The AbortSignal object.
-     * @return {Fetch} The Fetch instance for chaining.
-     */
-    withSignal(signal) {
-        this.signal = signal;
         return this;
     }
 
@@ -90,7 +81,7 @@ export class Fetch
                 //  Currently, the connection stays open for five seconds.
                 'Connection': 'close'
             },
-            signal: this.signal,
+            signal: this.abortSignal,
             keepalive: false,
             mode: "same-origin"
         };
@@ -188,7 +179,7 @@ export class Fetch
      */
     runWasmCallback(uint8Array)
     {
-        if (!this.wasmCallback)
+        if (!this.wasmCallback || this.aborted)
             return;
 
         let sharedArr = new this.coreLib.SharedUint8Array(uint8Array.length);
@@ -203,5 +194,15 @@ export class Fetch
         }
 
         sharedArr.delete();
+    }
+
+    /**
+     * Signal that the request should be aborted.
+     */
+    abort() {
+        if (this.aborted)
+            return
+        this.abortSignal.abort();
+        this.aborted = true;
     }
 }

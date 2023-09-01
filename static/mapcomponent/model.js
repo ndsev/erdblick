@@ -2,7 +2,7 @@
 
 import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
-import {FeatureLayerTileSet} from "./featurelayer.js";
+import {FeatureTile} from "./featuretile.js";
 
 const minViewportChangedCallDelta = 200; // ms
 
@@ -31,30 +31,21 @@ export class MapViewerModel
         this.style = null;
         this.sources = null;
         this.glbConverter = new coreLibrary.FeatureLayerRenderer();
-
-        this.registeredBatches = new Map();
-
-        this.update = {
-            running:            false,
-            numLoadingBatches:  0,
-            loadingBatchNames:  new Set(),
-            fetch:              null,
-            stream:             null,
-            viewport:           new MapViewerViewport,
-            visibleTileIds:     []
-        };
+        this.loadedTileLayers = new Map();
+        this.currentFetch = null;
+        this.currentTileStream = null;
+        this.currentViewport = new MapViewerViewport;
+        this.currentVisibleTileIds = new Set();
 
         ///////////////////////////////////////////////////////////////////////////
         //                               MODEL EVENTS                            //
         ///////////////////////////////////////////////////////////////////////////
 
-        /// Triggered upon GLB load finished, with the visual and picking geometry batch roots.
-        /// Received by frontend and MapViewerRenderingController.
-        this.batchAddedTopic = new rxjs.Subject(); // {MapViewerBatch}
+        /// Triggered when a tile layer is freshly rendered and should be added to the frontend.
+        this.tileLayerAddedTopic = new rxjs.Subject(); // {FeatureTile}
 
-        /// Triggered upon onBatchRemoved with the visual and picking geometry batch roots.
-        /// Received by frontend and MapViewerRenderingController.
-        this.batchRemovedTopic = new rxjs.Subject(); // {MapViewerBatch}
+        /// Triggered when a tile layer is being removed.
+        this.tileLayerRemovedTopic = new rxjs.Subject(); // {FeatureTile}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
@@ -69,8 +60,8 @@ export class MapViewerModel
             this.style.delete()
         new Fetch(this.coreLib, styleUrl).withWasmCallback(styleYamlBuffer => {
             this.style = new this.coreLib.FeatureLayerStyle(styleYamlBuffer);
-            for (let [batchId, batch] of this.registeredBatches.entries()) {
-                this.renderBatch(batch, true)
+            for (let [batchId, batch] of this.loadedTileLayers.entries()) {
+                this.renderTileLayer(batch, true)
             }
             console.log("Loaded style.")
         }).go();
@@ -79,16 +70,20 @@ export class MapViewerModel
     reloadSources() {
         new Fetch(this.coreLib, infoUrl)
             .withWasmCallback(infoBuffer => {
-                if (this.update.stream)
-                    this.update.stream.delete()
-                this.update.stream = new this.coreLib.TileLayerParser(infoBuffer);
-                this.update.stream.onTileParsed(tile => {
-                    this.addBatch(tile)
-                    $("#log").append(`<span>Loaded ${tile.id()}</span>&nbsp;<button onclick="zoomToBatch('${tile.id()}')">Focus</button><br>`)
+                if (this.currentTileStream)
+                    this.currentTileStream.delete()
+                this.currentTileStream = new this.coreLib.TileLayerParser(infoBuffer);
+                this.currentTileStream.onTileParsed(tileFeatureLayer => {
+                    this.addTileLayer(new FeatureTile(tileFeatureLayer))
                 });
                 console.log("Loaded data source info.")
             })
-            .withJsonCallback(result => {this.sources = result;})
+            .withJsonCallback(result => {
+                this.sources = result;
+                for (let source of this.sources) {
+                    $("#maps").append(`<span>Map ${source.mapId}</span>&nbsp;<button onclick="zoomToBatch('${tile.id()}')">Focus</button><br>`)
+                }
+            })
             .go();
     }
 
@@ -96,66 +91,85 @@ export class MapViewerModel
     //                          MAP UPDATE CONTROLS                          //
     ///////////////////////////////////////////////////////////////////////////
 
-    runUpdate()
+    update()
     {
         // Get the tile IDs for the current viewport.
-        this.update.visibleTileIds = this.coreLib.getTileIds(this.update.viewport, 13, 128);
+        const requestTileIdList = this.coreLib.getTileIds(this.currentViewport, 13, 512);
+        this.currentVisibleTileIds = new Set(requestTileIdList);
 
-        // TODO
-        //  if (this.update.fetch)
-        //      this.update.fetch.abort()
-        //  if (this.update.stream)
-        //      this.update.stream.clear()
+        // Abort previous fetch operation.
+        if (this.currentFetch)
+            this.currentFetch.abort()
 
-        // TODO: Remove present batches
+        // Make sure that there are no unparsed bytes lingering from the previous response stream.
+        this.currentTileStream.reset()
 
+        // Evict present non-required tile layers.
+        let newTileLayers = new Map();
+        for (let tileLayer of this.loadedTileLayers.values()) {
+            if (!this.currentVisibleTileIds.has(tileLayer.tileId)) {
+                this.tileLayerRemovedTopic.next(tileLayer.id);
+                tileLayer.dispose()
+            }
+            else
+                newTileLayers.set(tileLayer.id, tileLayer);
+        }
+        this.loadedTileLayers = newTileLayers;
+
+        // Request non-present required tile layers.
         let requests = []
         for (let dataSource of this.sources) {
-            for (let [layerName, layer] of Object.entries(dataSource.layers)) {
-                requests.push({
-                    mapId: dataSource.mapId,
-                    layerId: layerName,
-                    tileIds: layer.coverage
-                })
+            for (let [layerName, layer] of Object.entries(dataSource.layers))
+            {
+                // Find tile IDs which are not yet loaded for this map layer combination.
+                let requestTilesForMapLayer = []
+                for (let tileId of requestTilesForMapLayer) {
+                    const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(dataSource.mapId, layerName, tileId);
+                    if (!this.loadedTileLayers.has(tileMapLayerKey))
+                        requestTilesForMapLayer.push(tileId)
+                }
+
+                // Only add a request if there are tiles to be loaded.
+                if (requestTilesForMapLayer)
+                    requests.push({
+                        mapId: dataSource.mapId,
+                        layerId: layerName,
+                        tileIds: requestTilesForMapLayer
+                    })
             }
         }
 
-        new Fetch(this.coreLib, tileUrl)
+        this.currentFetch = new Fetch(this.coreLib, tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
-            // TODO: Add fields dict offset info to request
-            .withBody({requests: requests})
-            .withWasmCallback(tileBuffer => {
-                this.update.stream.parse(tileBuffer);
+            .withBody({
+                requests: requests,
+                maxKnownFieldIds: this.currentTileStream.fieldDictOffsets()
             })
-            .go();
+            .withWasmCallback(tileBuffer => {
+                this.currentTileStream.parse(tileBuffer);
+            });
+        this.currentFetch.go();
     }
 
-    addBatch(tile) {
-        let batchName = tile.id();
-        let batch = new FeatureLayerTileSet(batchName, tile)
-        this.registeredBatches.set(batchName, batch)
-        this.renderBatch(batch);
+    addTileLayer(tileLayer) {
+        this.loadedTileLayers.set(tileLayer.id, tileLayer)
+        this.renderTileLayer(tileLayer);
     }
 
-    renderBatch(batch, removeFirst) {
+    renderTileLayer(tileLayer, removeFirst) {
         if (removeFirst) {
-            this.batchRemovedTopic.next(batch)
+            this.tileLayerRemovedTopic.next(tileLayer)
         }
-        batch.render(this.coreLib, this.glbConverter, this.style, batch => {
-            this.batchAddedTopic.next(batch)
+        tileLayer.render(this.coreLib, this.glbConverter, this.style, _ => {
+            this.tileLayerAddedTopic.next(tileLayer)
         })
-    }
-
-    removeBatch(batchName) {
-        this.batchRemovedTopic.next(this.registeredBatches.get(batchName));
-        this.registeredBatches.delete(batchName);
     }
 
 // public:
 
     setViewport(viewport) {
-        this.update.viewport = viewport;
-        this.runUpdate();
+        this.currentViewport = viewport;
+        this.update();
     }
 }

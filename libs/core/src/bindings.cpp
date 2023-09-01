@@ -80,10 +80,20 @@ em::val getTileIds(em::val viewport, int level, int limit)
     return resultArray;
 }
 
-/** Get the position for a mapget tile id in WGS84. */
+/** Get the center position for a mapget tile id in WGS84. */
 mapget::Point getTilePosition(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
     return tid.center();
+}
+
+/** Get the full key of a map tile feature layer. */
+std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
+    auto tileKey = mapget::MapTileKey();
+    tileKey.layer_ = mapget::LayerType::Features;
+    tileKey.mapId_ = mapId;
+    tileKey.layerId_ = layerId;
+    tileKey.tileId_ = tileId;
+    return tileKey.toString();
 }
 
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
@@ -126,6 +136,10 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
             std::function<std::string(mapget::TileFeatureLayer const&)>(
                 [](mapget::TileFeatureLayer const& self) { return self.id().toString(); }))
         .function(
+            "tileId",
+            std::function<uint64_t(mapget::TileFeatureLayer const&)>(
+                [](mapget::TileFeatureLayer const& self) { return self.tileId().value_; }))
+        .function(
             "center",
             std::function<em::val(mapget::TileFeatureLayer const&)>(
                 [](mapget::TileFeatureLayer const& self)
@@ -167,9 +181,23 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
             std::function<void(TileLayerParser&, em::val)>(
                 [](TileLayerParser& self, em::val cb)
                 { self.onTileParsed([cb](auto&& tile) { cb(tile); }); }))
-        .function("parse", &TileLayerParser::parse);
+        .function("parse", &TileLayerParser::parse)
+        .function("reset", &TileLayerParser::reset)
+        .function(
+            "fieldDictOffsets",
+            std::function<em::val(TileLayerParser&)>(
+                [](TileLayerParser& self)
+                {
+                    auto result = em::val::object();
+                    for (auto const& [nodeId, fieldId] : self.fieldDictOffsets())
+                        result.set(nodeId, fieldId);
+                    return result;
+                }));
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getTilePosition", &getTilePosition);
+
+    ////////// Get full id of a TileFeatureLayer
+    em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
 }

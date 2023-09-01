@@ -118,12 +118,12 @@ export class MapViewerView
 
         this.batchForTileSet = new Map();
 
-        model.batchAddedTopic.subscribe(batch => {
+        model.tileLayerAddedTopic.subscribe(batch => {
             this.viewer.scene.primitives.add(batch.tileSet);
             this.batchForTileSet.set(batch.tileSet, batch);
         })
 
-        model.batchRemovedTopic.subscribe(batch => {
+        model.tileLayerRemovedTopic.subscribe(batch => {
             this.viewer.scene.primitives.remove(batch.tileSet);
             this.batchForTileSet.delete(batch.tileSet);
         })
@@ -181,7 +181,7 @@ export class MapViewerView
         }
 
         // Get the tile IDs for the current viewport.
-        let tileIds = this.model.update.visibleTileIds;
+        let tileIds = this.model.currentVisibleTileIds;
 
         // Calculate total number of tile IDs
         let totalTileIds = tileIds.length;

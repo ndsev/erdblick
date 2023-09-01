@@ -12,11 +12,6 @@ libErdblickCore().then(coreLib =>
     let mapModel = new MapViewerModel(coreLib);
     let mapView = new MapViewerView(mapModel, 'cesiumContainer');
 
-    window.loadAllTiles = () => {
-        $("#log").empty()
-        mapModel.runUpdate();
-    }
-
     window.reloadStyle = () => {
         mapModel.reloadStyle();
     }
