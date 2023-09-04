@@ -276,6 +276,9 @@ mapget::Point FeatureLayerRenderer::render(  // NOLINT (render can be made stati
     }
     globalBufferSize += featureIdBuffer.size() * sizeof(uint32_t);
 
+    if (geomForRule.empty())
+        return {tileOrigin.x, tileOrigin.y, tileOrigin.z};
+
     // Convert to GLTF
     std::vector<std::byte> buffer;
     buffer.resize(globalBufferSize);

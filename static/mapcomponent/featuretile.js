@@ -2,11 +2,15 @@
 
 /**
  * Run a WASM function which places data in a SharedUint8Array,
- * and then store this data under an object URL.
+ * and then store this data under an object URL. Will be aborted
+ * and return null, if the user function returns false.
  */
 function blobUriFromWasm(coreLib, fun, contentType) {
     let sharedGlbArray = new coreLib.SharedUint8Array();
-    fun(sharedGlbArray);
+    if (fun(sharedGlbArray) === false) {
+        sharedGlbArray.delete();
+        return null;
+    }
     let objSize = sharedGlbArray.getSize();
     let bufferPtr = Number(sharedGlbArray.getPointer());
     let data = coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
@@ -41,22 +45,44 @@ export class FeatureTile
      */
     render(coreLib, glbConverter, style, onResult)
     {
+        // Start timer
+        let startOverall = performance.now();
+
         this.disposeRenderResult();
 
+        let startGLBConversion = performance.now();
         let origin = null;
         this.glbUrl = blobUriFromWasm(coreLib, sharedBuffer => {
             origin = glbConverter.render(style, this.tileFeatureLayer, sharedBuffer);
+            if (sharedBuffer.getSize() === 0)
+                return false;
         }, "model/gltf-binary");
+        let endGLBConversion = performance.now();
+        console.log(`GLB conversion time: ${endGLBConversion - startGLBConversion}ms`);
 
+        // The GLB URL will be null if there were no features to render.
+        if (this.glbUrl === null)
+            return;
+
+        let startTilesetConversion = performance.now();
         this.tileSetUrl = blobUriFromWasm(coreLib, sharedBuffer => {
             glbConverter.makeTileset(this.glbUrl, origin, sharedBuffer);
         }, "application/json");
+        let endTilesetConversion = performance.now();
+        console.log(`Tileset conversion time: ${endTilesetConversion - startTilesetConversion}ms`);
 
+        let startTilesetFromUrl = performance.now();
         Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl, {
             featureIdLabel: "mapgetFeatureIndex"
         }).then(tileSet => {
             this.tileSet = tileSet;
             onResult(this);
+
+            let endTilesetFromUrl = performance.now();
+            console.log(`Cesium tileset from URL time: ${endTilesetFromUrl - startTilesetFromUrl}ms`);
+
+            let endOverall = performance.now();
+            console.log(`Overall execution time: ${endOverall - startOverall}ms`);
         });
     }
 
@@ -65,7 +91,8 @@ export class FeatureTile
         if (!this.tileSet)
             return;
 
-        this.tileSet.destroy();
+        if (!this.tileSet.isDestroyed)
+            this.tileSet.destroy();
         this.tileSet = null;
         URL.revokeObjectURL(this.tileSetUrl);
         this.tileSetUrl = null;

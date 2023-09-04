@@ -47,6 +47,9 @@ export class MapViewerModel
         /// Triggered when a tile layer is being removed.
         this.tileLayerRemovedTopic = new rxjs.Subject(); // {FeatureTile}
 
+        /// Triggered when the user requests to zoom to a map layer
+        this.zoomToWgs84Position = new rxjs.Subject(); // {.x,.y}
+
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
         ///////////////////////////////////////////////////////////////////////////
@@ -80,8 +83,16 @@ export class MapViewerModel
             })
             .withJsonCallback(result => {
                 this.sources = result;
-                for (let source of this.sources) {
-                    $("#maps").append(`<span>Map ${source.mapId}</span>&nbsp;<button onclick="zoomToBatch('${tile.id()}')">Focus</button><br>`)
+                $("#maps").empty()
+                for (let dataSource of this.sources) {
+                    for (let [layerName, layer] of Object.entries(dataSource.layers)) {
+                        let mapsEntry = $(`<span>Map ${dataSource.mapId}</span>&nbsp;<button>Focus</button><br>`);
+                        $(mapsEntry[2]).on("click", _=>{
+                            // Grab first tile id from coverage and zoom to it. TODO: Zoom to extent of map instead.
+                            this.zoomToWgs84Position.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
+                        })
+                        $("#maps").append(mapsEntry)
+                    }
                 }
             })
             .go();
@@ -94,8 +105,8 @@ export class MapViewerModel
     update()
     {
         // Get the tile IDs for the current viewport.
-        const requestTileIdList = this.coreLib.getTileIds(this.currentViewport, 13, 512);
-        this.currentVisibleTileIds = new Set(requestTileIdList);
+        const allViewportTileIds = this.coreLib.getTileIds(this.currentViewport, 13, 512);
+        this.currentVisibleTileIds = new Set(allViewportTileIds);
 
         // Abort previous fetch operation.
         if (this.currentFetch)
@@ -108,7 +119,8 @@ export class MapViewerModel
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (!this.currentVisibleTileIds.has(tileLayer.tileId)) {
-                this.tileLayerRemovedTopic.next(tileLayer.id);
+                console.log("Removing tile")
+                this.tileLayerRemovedTopic.next(tileLayer);
                 tileLayer.dispose()
             }
             else
@@ -123,10 +135,10 @@ export class MapViewerModel
             {
                 // Find tile IDs which are not yet loaded for this map layer combination.
                 let requestTilesForMapLayer = []
-                for (let tileId of requestTilesForMapLayer) {
+                for (let tileId of allViewportTileIds) {
                     const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(dataSource.mapId, layerName, tileId);
                     if (!this.loadedTileLayers.has(tileMapLayerKey))
-                        requestTilesForMapLayer.push(tileId)
+                        requestTilesForMapLayer.push(Number(tileId))
                 }
 
                 // Only add a request if there are tiles to be loaded.

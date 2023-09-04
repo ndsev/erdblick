@@ -14,7 +14,7 @@ export class Fetch
         this.url = url;
         this.method = 'GET';
         this.body = null;
-        this.abortSignal = new AbortSignal();
+        this.abortController = new AbortController();
         this.processChunks = false;
         this.jsonCallback = null;
         this.wasmCallback = null;
@@ -81,7 +81,7 @@ export class Fetch
                 //  Currently, the connection stays open for five seconds.
                 'Connection': 'close'
             },
-            signal: this.abortSignal,
+            signal: this.abortController.signal,
             keepalive: false,
             mode: "same-origin"
         };
@@ -202,7 +202,13 @@ export class Fetch
     abort() {
         if (this.aborted)
             return
-        this.abortSignal.abort();
+        try {
+            // For some reason, abort always throws an exception by design.
+            this.abortController.abort("User abort.");
+        }
+        catch (e) {
+            // Nothing to do.
+        }
         this.aborted = true;
     }
 }

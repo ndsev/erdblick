@@ -16,10 +16,6 @@ libErdblickCore().then(coreLib =>
         mapModel.reloadStyle();
     }
 
-    window.zoomToBatch = (batchId) => {
-        mapView.viewer.zoomTo(mapModel.registeredBatches.get(batchId).tileSet);
-    }
-
     mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
         if (!selectedFeatureWrapper) {
             $("#selectionPanel").hide()

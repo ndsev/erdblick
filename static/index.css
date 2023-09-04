@@ -90,11 +90,11 @@ body {
     left: 10px;
 }
 
-#info > #log {
+#info > #maps {
     display: none;
 }
 
-#info.expanded > #log {
+#info.expanded > #maps {
     display: block;
 }
 

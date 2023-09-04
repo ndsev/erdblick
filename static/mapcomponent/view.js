@@ -29,12 +29,12 @@ export class MapViewerView
             }
         );
 
-        // let openStreetMap = new Cesium.UrlTemplateImageryProvider({
-        //     url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        //     maximumLevel: 19,
-        // });
-        // let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
-        // openStreetMapLayer.alpha = 0.5;
+        let openStreetMap = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            maximumLevel: 19,
+        });
+        let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
+        openStreetMapLayer.alpha = 0.3;
 
         this.pickedFeature = null;
         this.hoveredFeature = null;
@@ -116,17 +116,36 @@ export class MapViewerView
             this.visualizeTileIds();
         });
 
-        this.batchForTileSet = new Map();
+        this.tileLayerForTileSet = new Map();
 
-        model.tileLayerAddedTopic.subscribe(batch => {
-            this.viewer.scene.primitives.add(batch.tileSet);
-            this.batchForTileSet.set(batch.tileSet, batch);
+        model.tileLayerAddedTopic.subscribe(tileLayer => {
+            this.viewer.scene.primitives.add(tileLayer.tileSet);
+            this.tileLayerForTileSet.set(tileLayer.tileSet, tileLayer);
         })
 
-        model.tileLayerRemovedTopic.subscribe(batch => {
-            this.viewer.scene.primitives.remove(batch.tileSet);
-            this.batchForTileSet.delete(batch.tileSet);
+        model.tileLayerRemovedTopic.subscribe(tileLayer => {
+            if (this.pickedFeature && this.pickedFeature.tileset === tileLayer.tileSet) {
+                this.pickedFeature = null;
+                this.selectionTopic.next(null);
+            }
+            if (this.hoveredFeature && this.hoveredFeature.tileset === tileLayer.tileSet) {
+                this.hoveredFeature = null;
+            }
+            console.log("TileLayer removed from view.")
+            this.viewer.scene.primitives.remove(tileLayer.tileSet);
+            this.tileLayerForTileSet.delete(tileLayer.tileSet);
         })
+
+        model.zoomToWgs84Position.subscribe(pos => {
+            this.viewer.camera.setView({
+                destination: Cesium.Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3
+                orientation: {
+                    heading: Cesium.Math.toRadians(0), // East, in radians
+                    pitch: Cesium.Math.toRadians(-90), // Directly looking down
+                    roll: 0 // No rotation
+                }
+            });
+        });
 
         let polylines = new Cesium.PolylineCollection();
 
@@ -151,8 +170,8 @@ export class MapViewerView
             name: 'Antimeridian',
             polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray([
-                    -180, -90,
-                    -180, 90
+                    -180, -80,
+                    -180, 80
                 ]),
                 width: 2,
                 material: Cesium.Color.BLUE.withAlpha(0.5)
@@ -164,12 +183,12 @@ export class MapViewerView
     }
 
     resolveFeature(tileSet, index) {
-        let batch = this.batchForTileSet.get(tileSet);
-        if (!batch) {
-            console.error("Failed find batch for tileSet!");
+        let tileLayer = this.tileLayerForTileSet.get(tileSet);
+        if (!tileLayer) {
+            console.error("Failed find tileLayer for tileSet!");
             return null;
         }
-        return new FeatureWrapper(index, batch);
+        return new FeatureWrapper(index, tileLayer);
     }
 
     visualizeTileIds() {
@@ -184,15 +203,18 @@ export class MapViewerView
         let tileIds = this.model.currentVisibleTileIds;
 
         // Calculate total number of tile IDs
-        let totalTileIds = tileIds.length;
+        let totalTileIds = tileIds.size;
 
         // Initialize points array
         this.points = [];
 
-        // Iterate through each tile ID
-        for(let i = 0; i < totalTileIds; i++) {
+        // Counter for iteration over Set
+        let i = 0;
+
+        // Iterate through each tile ID using Set's forEach method
+        tileIds.forEach(tileId => {
             // Get WGS84 coordinates for the tile ID
-            let position = this.model.coreLib.getTilePosition(tileIds[i]);
+            let position = this.model.coreLib.getTilePosition(tileId);
 
             // Calculate the color based on the position in the list
             let colorValue = i / totalTileIds;
@@ -200,15 +222,18 @@ export class MapViewerView
 
             // Create a point and add it to the Cesium scene
             let point = this.viewer.entities.add({
-                position : Cesium.Cartesian3.fromDegrees(position.x, position.y),
-                point : {
-                    pixelSize : 5,
-                    color : color
+                position: Cesium.Cartesian3.fromDegrees(position.x, position.y),
+                point: {
+                    pixelSize: 5,
+                    color: color
                 }
             });
 
             // Add the point to the points array
             this.points.push(point);
-        }
+
+            // Increment counter
+            i++;
+        });
     }
 }

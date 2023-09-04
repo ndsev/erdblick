@@ -13,8 +13,10 @@ public:
     FeatureLayerRenderer();
 
     /**
-     * Convert a TileFeatureLayer to a GLB buffer.
-     * Returns the cartesian origin of the tile.
+     * Convert a TileFeatureLayer to a GLB buffer. Returns the
+     * cartesian origin of the tile. If there are no features to render,
+     * either because the layer is empty or because no style rule matched,
+     * then the size of the result buffer will be zero.
      */
     mapget::Point render(
         const FeatureLayerStyle& style,
