@@ -58,7 +58,7 @@ export class FeatureTile
                 return false;
         }, "model/gltf-binary");
         let endGLBConversion = performance.now();
-        console.log(`GLB conversion time: ${endGLBConversion - startGLBConversion}ms`);
+        console.debug(`[${this.id}] GLB conversion time: ${endGLBConversion - startGLBConversion}ms`);
 
         // The GLB URL will be null if there were no features to render.
         if (this.glbUrl === null)
@@ -69,7 +69,7 @@ export class FeatureTile
             glbConverter.makeTileset(this.glbUrl, origin, sharedBuffer);
         }, "application/json");
         let endTilesetConversion = performance.now();
-        console.log(`Tileset conversion time: ${endTilesetConversion - startTilesetConversion}ms`);
+        console.debug(`[${this.id}] Tileset conversion time: ${endTilesetConversion - startTilesetConversion}ms`);
 
         let startTilesetFromUrl = performance.now();
         Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl, {
@@ -79,10 +79,10 @@ export class FeatureTile
             onResult(this);
 
             let endTilesetFromUrl = performance.now();
-            console.log(`Cesium tileset from URL time: ${endTilesetFromUrl - startTilesetFromUrl}ms`);
+            console.debug(`[${this.id}] Cesium tileset from URL time: ${endTilesetFromUrl - startTilesetFromUrl}ms`);
 
             let endOverall = performance.now();
-            console.log(`Overall execution time: ${endOverall - startOverall}ms`);
+            console.debug(`[${this.id}] Overall execution time: ${endOverall - startOverall}ms`);
         });
     }
 
@@ -90,9 +90,9 @@ export class FeatureTile
     {
         if (!this.tileSet)
             return;
-
         if (!this.tileSet.isDestroyed)
             this.tileSet.destroy();
+
         this.tileSet = null;
         URL.revokeObjectURL(this.tileSetUrl);
         this.tileSetUrl = null;
@@ -105,6 +105,7 @@ export class FeatureTile
         this.disposeRenderResult();
         this.tileFeatureLayer.delete();
         this.tileFeatureLayer = null;
+        console.debug(`[${this.id}] Disposed.`);
     }
 }
 
@@ -115,9 +116,9 @@ export class FeatureTile
  */
 export class FeatureWrapper
 {
-    constructor(index, featureLayerTileSet) {
+    constructor(index, featureTile) {
         this.index = index;
-        this.featureLayerTileSet = featureLayerTileSet;
+        this.featureTile = featureTile;
     }
 
     /**
@@ -125,10 +126,10 @@ export class FeatureWrapper
      * The feature object will be deleted after the callback is called.
      */
     peek(callback) {
-        if (!this.featureLayerTileSet.tileFeatureLayer) {
-            throw new RuntimeError("Unable to access feature of deleted layer.");
+        if (!this.featureTile.tileFeatureLayer) {
+            throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
         }
-        let feature = this.featureLayerTileSet.tileFeatureLayer.at(this.index);
+        let feature = this.featureTile.tileFeatureLayer.at(this.index);
         if (callback) {
             callback(feature);
         }

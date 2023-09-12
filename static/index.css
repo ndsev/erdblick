@@ -94,6 +94,11 @@ body {
     display: none;
 }
 
+#info > #maps > div {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+}
+
 #info.expanded > #maps {
     display: block;
 }

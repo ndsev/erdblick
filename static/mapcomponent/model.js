@@ -4,8 +4,6 @@ import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
 import {FeatureTile} from "./featuretile.js";
 
-const minViewportChangedCallDelta = 200; // ms
-
 const styleUrl = "/styles/demo-style.yaml";
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
@@ -29,10 +27,11 @@ export class MapViewerModel
         this.coreLib = coreLibrary;
 
         this.style = null;
-        this.sources = null;
+        this.maps = null;
         this.glbConverter = new coreLibrary.FeatureLayerRenderer();
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
+        this.currentFetchId = 0;
         this.currentTileStream = null;
         this.currentViewport = new MapViewerViewport;
         this.currentVisibleTileIds = new Set();
@@ -77,17 +76,25 @@ export class MapViewerModel
                     this.currentTileStream.delete()
                 this.currentTileStream = new this.coreLib.TileLayerParser(infoBuffer);
                 this.currentTileStream.onTileParsed(tileFeatureLayer => {
-                    this.addTileLayer(new FeatureTile(tileFeatureLayer))
+                    // Schedule the addition of the parsed tile to the viewport.
+                    const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
+                    const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
+                    if (isInViewport && !alreadyLoaded) {
+                        let tile = new FeatureTile(tileFeatureLayer);
+                        this.addTileLayer(tile);
+                    }
+                    else
+                        tileFeatureLayer.delete();
                 });
                 console.log("Loaded data source info.")
             })
             .withJsonCallback(result => {
-                this.sources = result;
+                this.maps = Object.fromEntries(result.map(mapInfo => [mapInfo.mapId, mapInfo]));
                 $("#maps").empty()
-                for (let dataSource of this.sources) {
-                    for (let [layerName, layer] of Object.entries(dataSource.layers)) {
-                        let mapsEntry = $(`<span>Map ${dataSource.mapId}</span>&nbsp;<button>Focus</button><br>`);
-                        $(mapsEntry[2]).on("click", _=>{
+                for (let [mapName, map] of Object.entries(this.maps)) {
+                    for (let [layerName, layer] of Object.entries(map.layers)) {
+                        let mapsEntry = $(`<div><span>${mapName} / ${layerName}</span>&nbsp;<button>Focus</button></div>`);
+                        $(mapsEntry[0][2]).on("click", _=>{
                             // Grab first tile id from coverage and zoom to it. TODO: Zoom to extent of map instead.
                             this.zoomToWgs84Position.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
                         })
@@ -119,7 +126,6 @@ export class MapViewerModel
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (!this.currentVisibleTileIds.has(tileLayer.tileId)) {
-                console.log("Removing tile")
                 this.tileLayerRemovedTopic.next(tileLayer);
                 tileLayer.dispose()
             }
@@ -130,13 +136,13 @@ export class MapViewerModel
 
         // Request non-present required tile layers.
         let requests = []
-        for (let dataSource of this.sources) {
-            for (let [layerName, layer] of Object.entries(dataSource.layers))
+        for (let [mapName, map] of Object.entries(this.maps)) {
+            for (let [layerName, layer] of Object.entries(map.layers))
             {
                 // Find tile IDs which are not yet loaded for this map layer combination.
                 let requestTilesForMapLayer = []
                 for (let tileId of allViewportTileIds) {
-                    const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(dataSource.mapId, layerName, tileId);
+                    const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
                     if (!this.loadedTileLayers.has(tileMapLayerKey))
                         requestTilesForMapLayer.push(Number(tileId))
                 }
@@ -144,13 +150,14 @@ export class MapViewerModel
                 // Only add a request if there are tiles to be loaded.
                 if (requestTilesForMapLayer)
                     requests.push({
-                        mapId: dataSource.mapId,
+                        mapId: mapName,
                         layerId: layerName,
                         tileIds: requestTilesForMapLayer
                     })
             }
         }
 
+        let fetchId = ++(this.currentFetchId);
         this.currentFetch = new Fetch(this.coreLib, tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
@@ -159,12 +166,23 @@ export class MapViewerModel
                 maxKnownFieldIds: this.currentTileStream.fieldDictOffsets()
             })
             .withWasmCallback(tileBuffer => {
-                this.currentTileStream.parse(tileBuffer);
-            });
+                // Schedule the parsing of the newly arrived tile layer,
+                // but don't do it synchronously to avoid stalling the ongoing
+                // fetch operation.
+                setTimeout(_ => {
+                    // Only process the buffer chunk, if the fetch operation
+                    // for the chunk is the most recent one.
+                    if (fetchId === this.currentFetchId) {
+                        this.currentTileStream.parse(tileBuffer);
+                    }
+                    tileBuffer.delete();
+                }, 0)
+            }, true);
         this.currentFetch.go();
     }
 
     addTileLayer(tileLayer) {
+        console.assert(!this.loadedTileLayers.has(tileLayer.id))
         this.loadedTileLayers.set(tileLayer.id, tileLayer)
         this.renderTileLayer(tileLayer);
     }
@@ -174,7 +192,14 @@ export class MapViewerModel
             this.tileLayerRemovedTopic.next(tileLayer)
         }
         tileLayer.render(this.coreLib, this.glbConverter, this.style, _ => {
-            this.tileLayerAddedTopic.next(tileLayer)
+            // It is possible, that the tile went out of view while
+            // Cesium took its time to load it. In this case, don't
+            // add it to the viewport.
+            const isInViewport = this.currentVisibleTileIds.has(tileLayer.tileId);
+            if (isInViewport)
+                this.tileLayerAddedTopic.next(tileLayer)
+            else
+                tileLayer.disposeRenderResult()
         })
     }
 

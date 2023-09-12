@@ -1,5 +1,5 @@
 import {MapViewerModel, MapViewerViewport} from "./model.js";
-import {FeatureWrapper} from "./featurelayer.js";
+import {FeatureWrapper} from "./featuretile.js";
 
 export class MapViewerView
 {
@@ -80,6 +80,7 @@ export class MapViewerView
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement
+        this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
             let canvas = this.viewer.scene.canvas;
             let center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
@@ -131,7 +132,6 @@ export class MapViewerView
             if (this.hoveredFeature && this.hoveredFeature.tileset === tileLayer.tileSet) {
                 this.hoveredFeature = null;
             }
-            console.log("TileLayer removed from view.")
             this.viewer.scene.primitives.remove(tileLayer.tileSet);
             this.tileLayerForTileSet.delete(tileLayer.tileSet);
         })
