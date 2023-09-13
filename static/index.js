@@ -28,6 +28,23 @@ libErdblickCore().then(coreLib =>
             $("#selectionPanel").show()
         })
     })
+
+    mapModel.mapInfoTopic.subscribe(mapInfo => {
+        let mapSettingsBox = $("#maps");
+        mapSettingsBox.empty()
+        for (let [mapName, map] of Object.entries(this.maps)) {
+            for (let [layerName, layer] of Object.entries(map.layers)) {
+                let mapsEntry = $(`<div><span>${mapName} / ${layerName}</span>&nbsp;<button>Focus</button></div>`);
+                $(mapsEntry.find("button")).on("click", _=>{
+                    // Grab first tile id from coverage and zoom to it.
+                    // TODO: Zoom to extent of map instead.
+                    if (layer.coverage[0] !== undefined)
+                        this.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
+                })
+                mapSettingsBox.append(mapsEntry)
+            }
+        }
+    })
 })
 
 $(document).ready(function() {

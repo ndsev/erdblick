@@ -136,7 +136,7 @@ export class MapViewerView
             this.tileLayerForTileSet.delete(tileLayer.tileSet);
         })
 
-        model.zoomToWgs84Position.subscribe(pos => {
+        model.zoomToWgs84PositionTopic.subscribe(pos => {
             this.viewer.camera.setView({
                 destination: Cesium.Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3
                 orientation: {

@@ -59,7 +59,10 @@ export class MapViewerModel
         this.tileLayerRemovedTopic = new rxjs.Subject(); // {FeatureTile}
 
         /// Triggered when the user requests to zoom to a map layer
-        this.zoomToWgs84Position = new rxjs.Subject(); // {.x,.y}
+        this.zoomToWgs84PositionTopic = new rxjs.Subject(); // {.x,.y}
+
+        /// Triggered when the map info is updated
+        this.mapInfoTopic = new rxjs.Subject(); // {<mapId>: <mapInfo>}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
@@ -96,17 +99,7 @@ export class MapViewerModel
             })
             .withJsonCallback(result => {
                 this.maps = Object.fromEntries(result.map(mapInfo => [mapInfo.mapId, mapInfo]));
-                $("#maps").empty()
-                for (let [mapName, map] of Object.entries(this.maps)) {
-                    for (let [layerName, layer] of Object.entries(map.layers)) {
-                        let mapsEntry = $(`<div><span>${mapName} / ${layerName}</span>&nbsp;<button>Focus</button></div>`);
-                        $(mapsEntry[0][2]).on("click", _=>{
-                            // Grab first tile id from coverage and zoom to it. TODO: Zoom to extent of map instead.
-                            this.zoomToWgs84Position.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
-                        })
-                        $("#maps").append(mapsEntry)
-                    }
-                }
+                this.mapInfoTopic.next(this.maps)
             })
             .go();
     }
