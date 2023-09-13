@@ -86,7 +86,7 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
-/** Get the full key of a map tile feature layer. */
+/** Get the full string key of a map tile feature layer. */
 std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
     auto tileKey = mapget::MapTileKey();
     tileKey.layer_ = mapget::LayerType::Features;

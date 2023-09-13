@@ -1,5 +1,5 @@
-import { MapViewerView } from "./mapcomponent/view.js";
-import { MapViewerModel } from "./mapcomponent/model.js";
+import { ErdblickView } from "./erdblick/view.js";
+import { ErdblickModel } from "./erdblick/model.js";
 import libErdblickCore from "./libs/core/erdblick-core.js";
 
 // --------------------------- Initialize Map Componesnt --------------------------
@@ -9,8 +9,8 @@ libErdblickCore().then(coreLib =>
 {
     console.log("  ...done.")
 
-    let mapModel = new MapViewerModel(coreLib);
-    let mapView = new MapViewerView(mapModel, 'cesiumContainer');
+    let mapModel = new ErdblickModel(coreLib);
+    let mapView = new ErdblickView(mapModel, 'mapViewContainer');
 
     window.reloadStyle = () => {
         mapModel.reloadStyle();
@@ -32,14 +32,14 @@ libErdblickCore().then(coreLib =>
     mapModel.mapInfoTopic.subscribe(mapInfo => {
         let mapSettingsBox = $("#maps");
         mapSettingsBox.empty()
-        for (let [mapName, map] of Object.entries(this.maps)) {
+        for (let [mapName, map] of Object.entries(mapInfo)) {
             for (let [layerName, layer] of Object.entries(map.layers)) {
                 let mapsEntry = $(`<div><span>${mapName} / ${layerName}</span>&nbsp;<button>Focus</button></div>`);
                 $(mapsEntry.find("button")).on("click", _=>{
                     // Grab first tile id from coverage and zoom to it.
                     // TODO: Zoom to extent of map instead.
                     if (layer.coverage[0] !== undefined)
-                        this.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
+                        mapModel.zoomToWgs84PositionTopic.next(coreLib.getTilePosition(BigInt(layer.coverage[0])));
                 })
                 mapSettingsBox.append(mapsEntry)
             }

@@ -19,7 +19,7 @@ body {
     -o-user-select:none;
 }
 
-#cesiumContainer .cesium-widget-credits {
+#mapViewContainer .cesium-widget-credits {
     display:none !important;
 }
 

@@ -1,13 +1,16 @@
 "use strict";
 
-import {throttle} from "./utils.js";
 import {Fetch} from "./fetch.js";
-import {FeatureTile} from "./featuretile.js";
+import {FeatureTile} from "./features.js";
 
 const styleUrl = "/styles/demo-style.yaml";
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
+/**
+ * Viewport object which can be interpreted by the erdblick-core WASM
+ * `getTileIds` function.
+ */
 export class MapViewerViewport {
     constructor(south, west, width, height, camPosLon, camPosLat, orientation) {
         this.south = south;
@@ -20,7 +23,18 @@ export class MapViewerViewport {
     }
 }
 
-export class MapViewerModel
+/**
+ * Erdblick view-model class. This class is responsible for keeping track
+ * of the following objects:
+ *  (1) available maps
+ *  (2) currently loaded tiles
+ *  (3) available style sheets.
+ *
+ * As the viewport changes, it requests new tiles from the mapget server
+ * and triggers their conversion to Cesium tiles according to the active
+ * style sheets.
+ */
+export class ErdblickModel
 {
     constructor(coreLibrary)
     {

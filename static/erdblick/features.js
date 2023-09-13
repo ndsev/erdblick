@@ -1,6 +1,6 @@
 "use strict";
 
-import {blobUriFromWasm, uint8ArrayFromWasm, uint8ArrayToWasm} from "./blob.js";
+import {blobUriFromWasm, uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 
 /**
  * Bundle of a WASM TileFeatureLayer and a rendered representation
@@ -117,7 +117,10 @@ export class FeatureTile
 
         // Run the callback with the deserialized layer, and
         // store the result as the return value.
-        let result = callback(deserializedLayer);
+        let result = null;
+        if (callback) {
+            result = callback(deserializedLayer);
+        }
 
         // Clean up.
         deserializedLayer.delete();
@@ -177,17 +180,20 @@ export class FeatureWrapper
     /**
      * Run a callback with the WASM Feature object referenced by this wrapper.
      * The feature object will be deleted after the callback is called.
+     * @returns The value returned by the callback.
      */
     peek(callback) {
         if (this.featureTile.disposed) {
             throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
         }
-        this.featureTile.peek(tileFeatureLayer => {
+        return this.featureTile.peek(tileFeatureLayer => {
             let feature = tileFeatureLayer.at(this.index);
+            let result = null;
             if (callback) {
-                callback(feature);
+                result = callback(feature);
             }
             feature.delete();
+            return result;
         });
     }
 }

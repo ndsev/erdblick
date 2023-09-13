@@ -1,3 +1,5 @@
+"use strict";
+
 export class SingleShotTimer
 {
     constructor(interval, callback, waitForRestart) {

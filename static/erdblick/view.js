@@ -1,11 +1,13 @@
-import {MapViewerModel, MapViewerViewport} from "./model.js";
-import {FeatureWrapper} from "./featuretile.js";
+"use strict";
 
-export class MapViewerView
+import {ErdblickModel, MapViewerViewport} from "./model.js";
+import {FeatureWrapper} from "./features.js";
+
+export class ErdblickView
 {
     /**
      * Construct a Cesium View with a Model.
-     * @param {MapViewerModel} model
+     * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
      */
     constructor(model, containerDomElementId)
@@ -82,39 +84,7 @@ export class MapViewerView
         // Add a handler for camera movement
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
-            let canvas = this.viewer.scene.canvas;
-            let center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-            let centerCartesian = this.viewer.camera.pickEllipsoid(center);
-            let centerLon, centerLat;
-
-            // If the center of the screen is not on the earth's surface (i.e., the horizon is below the viewport center),
-            // fallback to using the camera's position.
-            if (Cesium.defined(centerCartesian)) {
-                let centerCartographic = Cesium.Cartographic.fromCartesian(centerCartesian);
-                centerLon = Cesium.Math.toDegrees(centerCartographic.longitude);
-                centerLat = Cesium.Math.toDegrees(centerCartographic.latitude);
-            } else {
-                let cameraCartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.positionWC);
-                centerLon = Cesium.Math.toDegrees(cameraCartographic.longitude);
-                centerLat = Cesium.Math.toDegrees(cameraCartographic.latitude);
-            }
-
-            let rectangle = this.viewer.camera.computeViewRectangle();
-
-            // Extract the WGS84 coordinates for the rectangle's corners
-            let west = Cesium.Math.toDegrees(rectangle.west);
-            let south = Cesium.Math.toDegrees(rectangle.south);
-            let east = Cesium.Math.toDegrees(rectangle.east);
-            let north = Cesium.Math.toDegrees(rectangle.north);
-            let sizeLon = east - west;
-            let sizeLat = north - south;
-
-            // Create the viewport object
-            let viewport = new MapViewerViewport(south, west, sizeLon, sizeLat, centerLon, centerLat, this.viewer.camera.heading);
-
-            // Pass the viewport object to the model
-            model.setViewport(viewport);
-            this.visualizeTileIds();
+            this.updateViewport();
         });
 
         this.tileLayerForTileSet = new Map();
@@ -189,6 +159,49 @@ export class MapViewerView
             return null;
         }
         return new FeatureWrapper(index, tileLayer);
+    }
+
+    updateViewport() {
+        let canvas = this.viewer.scene.canvas;
+        let center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+        let centerCartesian = this.viewer.camera.pickEllipsoid(center);
+        let centerLon, centerLat;
+
+        if (Cesium.defined(centerCartesian)) {
+            let centerCartographic = Cesium.Cartographic.fromCartesian(centerCartesian);
+            centerLon = Cesium.Math.toDegrees(centerCartographic.longitude);
+            centerLat = Cesium.Math.toDegrees(centerCartographic.latitude);
+        } else {
+            let cameraCartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.positionWC);
+            centerLon = Cesium.Math.toDegrees(cameraCartographic.longitude);
+            centerLat = Cesium.Math.toDegrees(cameraCartographic.latitude);
+        }
+
+        let rectangle = this.viewer.camera.computeViewRectangle();
+
+        let west = Cesium.Math.toDegrees(rectangle.west);
+        let south = Cesium.Math.toDegrees(rectangle.south);
+        let east = Cesium.Math.toDegrees(rectangle.east);
+        let north = Cesium.Math.toDegrees(rectangle.north);
+        let sizeLon = east - west;
+        let sizeLat = north - south;
+
+        // Handle the antimeridian.
+        // TODO: Must also handle north pole.
+        if (west > -180 && sizeLon > 180.) {
+            sizeLon = 360. - sizeLon;
+        }
+
+        // Grow the viewport rectangle by 25%
+        let expandLon = sizeLon * 0.25;
+        let expandLat = sizeLat * 0.25;
+        if (west > east) {
+            sizeLon += 360.;
+        }
+
+        let viewport = new MapViewerViewport(south, west, sizeLon, sizeLat, centerLon, centerLat, this.viewer.camera.heading);
+        this.model.setViewport(viewport);
+        this.visualizeTileIds();
     }
 
     visualizeTileIds() {
