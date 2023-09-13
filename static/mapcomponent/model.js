@@ -25,16 +25,28 @@ export class MapViewerModel
     constructor(coreLibrary)
     {
         this.coreLib = coreLibrary;
-
         this.style = null;
         this.maps = null;
         this.glbConverter = new coreLibrary.FeatureLayerRenderer();
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
         this.currentFetchId = 0;
-        this.currentTileStream = null;
         this.currentViewport = new MapViewerViewport;
         this.currentVisibleTileIds = new Set();
+
+        // Instantiate the TileLayerParser, and set its callback
+        // for when a new tile is received.
+        this.tileParser = new this.coreLib.TileLayerParser();
+        this.tileParser.onTileParsedFromStream(tileFeatureLayer => {
+            const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
+            const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
+            if (isInViewport && !alreadyLoaded) {
+                let tile = new FeatureTile(this.coreLib, this.tileParser, tileFeatureLayer);
+                this.addTileLayer(tile);
+            }
+            else
+                tileFeatureLayer.delete();
+        });
 
         ///////////////////////////////////////////////////////////////////////////
         //                               MODEL EVENTS                            //
@@ -54,14 +66,21 @@ export class MapViewerModel
         ///////////////////////////////////////////////////////////////////////////
 
         this.reloadStyle()
-        this.reloadSources()
+        this.reloadDataSources()
     }
 
-    reloadStyle() {
+    reloadStyle()
+    {
+        // Delete the old style if present.
         if (this.style)
             this.style.delete()
+
+        // Fetch the new one.
         new Fetch(this.coreLib, styleUrl).withWasmCallback(styleYamlBuffer => {
+            // Parse the style description into a WASM style object.
             this.style = new this.coreLib.FeatureLayerStyle(styleYamlBuffer);
+
+            // Re-render all present batches with the new style.
             for (let [batchId, batch] of this.loadedTileLayers.entries()) {
                 this.renderTileLayer(batch, true)
             }
@@ -69,23 +88,10 @@ export class MapViewerModel
         }).go();
     }
 
-    reloadSources() {
+    reloadDataSources() {
         new Fetch(this.coreLib, infoUrl)
             .withWasmCallback(infoBuffer => {
-                if (this.currentTileStream)
-                    this.currentTileStream.delete()
-                this.currentTileStream = new this.coreLib.TileLayerParser(infoBuffer);
-                this.currentTileStream.onTileParsed(tileFeatureLayer => {
-                    // Schedule the addition of the parsed tile to the viewport.
-                    const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
-                    const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
-                    if (isInViewport && !alreadyLoaded) {
-                        let tile = new FeatureTile(tileFeatureLayer);
-                        this.addTileLayer(tile);
-                    }
-                    else
-                        tileFeatureLayer.delete();
-                });
+                this.tileParser.setDataSourceInfo(infoBuffer);
                 console.log("Loaded data source info.")
             })
             .withJsonCallback(result => {
@@ -120,7 +126,7 @@ export class MapViewerModel
             this.currentFetch.abort()
 
         // Make sure that there are no unparsed bytes lingering from the previous response stream.
-        this.currentTileStream.reset()
+        this.tileParser.reset()
 
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
@@ -163,7 +169,7 @@ export class MapViewerModel
             .withMethod("POST")
             .withBody({
                 requests: requests,
-                maxKnownFieldIds: this.currentTileStream.fieldDictOffsets()
+                maxKnownFieldIds: this.tileParser.fieldDictOffsets()
             })
             .withWasmCallback(tileBuffer => {
                 // Schedule the parsing of the newly arrived tile layer,
@@ -173,7 +179,7 @@ export class MapViewerModel
                     // Only process the buffer chunk, if the fetch operation
                     // for the chunk is the most recent one.
                     if (fetchId === this.currentFetchId) {
-                        this.currentTileStream.parse(tileBuffer);
+                        this.tileParser.parseFromStream(tileBuffer);
                     }
                     tileBuffer.delete();
                 }, 0)
@@ -191,7 +197,10 @@ export class MapViewerModel
         if (removeFirst) {
             this.tileLayerRemovedTopic.next(tileLayer)
         }
-        tileLayer.render(this.coreLib, this.glbConverter, this.style, _ => {
+        tileLayer.render(this.glbConverter, this.style).then(wasRendered => {
+            if (!wasRendered)
+                return;
+
             // It is possible, that the tile went out of view while
             // Cesium took its time to load it. In this case, don't
             // add it to the viewport.

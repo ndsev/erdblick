@@ -177,13 +177,14 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
 
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
-        .constructor<SharedUint8Array const&>()
+        .constructor<>()
+        .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
         .function(
-            "onTileParsed",
+            "onTileParsedFromStream",
             std::function<void(TileLayerParser&, em::val)>(
                 [](TileLayerParser& self, em::val cb)
-                { self.onTileParsed([cb](auto&& tile) { cb(tile); }); }))
-        .function("parse", &TileLayerParser::parse)
+                { self.onTileParsedFromStream([cb](auto&& tile) { cb(tile); }); }))
+        .function("parseFromStream", &TileLayerParser::parseFromStream)
         .function("reset", &TileLayerParser::reset)
         .function(
             "fieldDictOffsets",
@@ -194,7 +195,9 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                     for (auto const& [nodeId, fieldId] : self.fieldDictOffsets())
                         result.set(nodeId, fieldId);
                     return result;
-                }));
+                }))
+        .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("writeTileFeatureLayer", &TileLayerParser::writeTileFeatureLayer);
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
