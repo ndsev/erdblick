@@ -24,7 +24,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
-    --profiling \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
@@ -34,6 +33,9 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     -s JS_MATH=0 \
     -s ALLOW_MEMORY_GROWTH=1 \
   ")
+
+  # Add this option to see WASM function names in Browser performance traces.
+  # --profiling \
 else()
   add_library(erdblick-core ${ERDBLICK_SOURCE_FILES})
 endif()
