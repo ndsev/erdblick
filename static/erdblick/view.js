@@ -1,6 +1,6 @@
 "use strict";
 
-import {ErdblickModel, MapViewerViewport} from "./model.js";
+import {ErdblickModel} from "./model.js";
 import {FeatureWrapper} from "./features.js";
 
 export class ErdblickView
@@ -81,7 +81,7 @@ export class ErdblickView
             }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-        // Add a handler for camera movement
+        // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
             this.updateViewport();
@@ -108,10 +108,10 @@ export class ErdblickView
 
         model.zoomToWgs84PositionTopic.subscribe(pos => {
             this.viewer.camera.setView({
-                destination: Cesium.Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3
+                destination: Cesium.Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {
-                    heading: Cesium.Math.toRadians(0), // East, in radians
-                    pitch: Cesium.Math.toRadians(-90), // Directly looking down
+                    heading: Cesium.Math.toRadians(0), // East, in radians.
+                    pitch: Cesium.Math.toRadians(-90), // Directly looking down.
                     roll: 0 // No rotation
                 }
             });
@@ -119,7 +119,7 @@ export class ErdblickView
 
         let polylines = new Cesium.PolylineCollection();
 
-        // Line over the equator divided into four 90-degree segments
+        // Line over the equator divided into four 90-degree segments.
         this.viewer.entities.add({
             name: 'Equator',
             polyline: {
@@ -135,7 +135,7 @@ export class ErdblickView
             }
         });
 
-        // Line over the antimeridian
+        // Line over the antimeridian.
         this.viewer.entities.add({
             name: 'Antimeridian',
             polyline: {
@@ -195,17 +195,20 @@ export class ErdblickView
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
         let expandLat = sizeLat * 0.25;
-        if (west > east) {
-            sizeLon += 360.;
-        }
-
-        let viewport = new MapViewerViewport(south, west, sizeLon, sizeLat, centerLon, centerLat, this.viewer.camera.heading);
-        this.model.setViewport(viewport);
+        this.model.setViewport({
+            south: south - expandLat,
+            west: west - expandLat,
+            width: sizeLon + expandLon*2,
+            height: sizeLat + expandLat*2,
+            camPosLon: centerLon,
+            camPosLat: centerLat,
+            orientation: this.viewer.camera.heading,
+        });
         this.visualizeTileIds();
     }
 
     visualizeTileIds() {
-        // Remove previous points
+        // Remove previous points.
         if (this.points) {
             for (let i = 0; i < this.points.length; i++) {
                 this.viewer.entities.remove(this.points[i]);
@@ -215,25 +218,25 @@ export class ErdblickView
         // Get the tile IDs for the current viewport.
         let tileIds = this.model.currentVisibleTileIds;
 
-        // Calculate total number of tile IDs
+        // Calculate total number of tile IDs.
         let totalTileIds = tileIds.size;
 
-        // Initialize points array
+        // Initialize points array.
         this.points = [];
 
-        // Counter for iteration over Set
+        // Counter for iteration over Set.
         let i = 0;
 
-        // Iterate through each tile ID using Set's forEach method
+        // Iterate through each tile ID using Set's forEach method.
         tileIds.forEach(tileId => {
             // Get WGS84 coordinates for the tile ID
             let position = this.model.coreLib.getTilePosition(tileId);
 
-            // Calculate the color based on the position in the list
+            // Calculate the color based on the position in the list.
             let colorValue = i / totalTileIds;
             let color = Cesium.Color.fromHsl(0.6 - colorValue * 0.5, 1.0, 0.5);
 
-            // Create a point and add it to the Cesium scene
+            // Create a point and add it to the Cesium scene.
             let point = this.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(position.x, position.y),
                 point: {
@@ -242,10 +245,10 @@ export class ErdblickView
                 }
             });
 
-            // Add the point to the points array
+            // Add the point to the points array.
             this.points.push(point);
 
-            // Increment counter
+            // Increment counter.
             i++;
         });
     }

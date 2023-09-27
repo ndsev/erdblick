@@ -64,25 +64,25 @@ export class ErdblickModel
         /// Triggered when a tile layer is being removed.
         this.tileLayerRemovedTopic = new rxjs.Subject(); // {FeatureTile}
 
-        /// Triggered when the user requests to zoom to a map layer
+        /// Triggered when the user requests to zoom to a map layer.
         this.zoomToWgs84PositionTopic = new rxjs.Subject(); // {.x,.y}
 
-        /// Triggered when the map info is updated
+        /// Triggered when the map info is updated.
         this.mapInfoTopic = new rxjs.Subject(); // {<mapId>: <mapInfo>}
 
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
         ///////////////////////////////////////////////////////////////////////////
 
-        this.reloadStyle()
-        this.reloadDataSources()
+        this.reloadStyle();
+        this.reloadDataSources();
     }
 
     reloadStyle()
     {
         // Delete the old style if present.
         if (this.style)
-            this.style.delete()
+            this.style.delete();
 
         // Fetch the new one.
         new Fetch(this.coreLib, styleUrl).withWasmCallback(styleYamlBuffer => {
@@ -91,9 +91,9 @@ export class ErdblickModel
 
             // Re-render all present batches with the new style.
             for (let [batchId, batch] of this.loadedTileLayers.entries()) {
-                this.renderTileLayer(batch, true)
+                this.renderTileLayer(batch, true);
             }
-            console.log("Loaded style.")
+            console.log("Loaded style.");
         }).go();
     }
 
@@ -101,11 +101,11 @@ export class ErdblickModel
         new Fetch(this.coreLib, infoUrl)
             .withWasmCallback(infoBuffer => {
                 this.tileParser.setDataSourceInfo(infoBuffer);
-                console.log("Loaded data source info.")
+                console.log("Loaded data source info.");
             })
             .withJsonCallback(result => {
                 this.maps = Object.fromEntries(result.map(mapInfo => [mapInfo.mapId, mapInfo]));
-                this.mapInfoTopic.next(this.maps)
+                this.mapInfoTopic.next(this.maps);
             })
             .go();
     }
@@ -122,17 +122,17 @@ export class ErdblickModel
 
         // Abort previous fetch operation.
         if (this.currentFetch)
-            this.currentFetch.abort()
+            this.currentFetch.abort();
 
         // Make sure that there are no unparsed bytes lingering from the previous response stream.
-        this.tileParser.reset()
+        this.tileParser.reset();
 
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (!this.currentVisibleTileIds.has(tileLayer.tileId)) {
                 this.tileLayerRemovedTopic.next(tileLayer);
-                tileLayer.dispose()
+                tileLayer.dispose();
             }
             else
                 newTileLayers.set(tileLayer.id, tileLayer);
@@ -149,7 +149,7 @@ export class ErdblickModel
                 for (let tileId of allViewportTileIds) {
                     const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
                     if (!this.loadedTileLayers.has(tileMapLayerKey))
-                        requestTilesForMapLayer.push(Number(tileId))
+                        requestTilesForMapLayer.push(Number(tileId));
                 }
 
                 // Only add a request if there are tiles to be loaded.
@@ -158,7 +158,7 @@ export class ErdblickModel
                         mapId: mapName,
                         layerId: layerName,
                         tileIds: requestTilesForMapLayer
-                    })
+                    });
             }
         }
 
@@ -187,14 +187,16 @@ export class ErdblickModel
     }
 
     addTileLayer(tileLayer) {
-        console.assert(!this.loadedTileLayers.has(tileLayer.id))
-        this.loadedTileLayers.set(tileLayer.id, tileLayer)
+        if (this.loadedTileLayers.has(tileLayer.id)) {
+            throw new Error(`Refusing to add tile layer ${tileLayer.id}, which is already present.`);
+        }
+        this.loadedTileLayers.set(tileLayer.id, tileLayer);
         this.renderTileLayer(tileLayer);
     }
 
     renderTileLayer(tileLayer, removeFirst) {
         if (removeFirst) {
-            this.tileLayerRemovedTopic.next(tileLayer)
+            this.tileLayerRemovedTopic.next(tileLayer);
         }
         tileLayer.render(this.glbConverter, this.style).then(wasRendered => {
             if (!wasRendered)
@@ -205,9 +207,9 @@ export class ErdblickModel
             // add it to the viewport.
             const isInViewport = this.currentVisibleTileIds.has(tileLayer.tileId);
             if (isInViewport)
-                this.tileLayerAddedTopic.next(tileLayer)
+                this.tileLayerAddedTopic.next(tileLayer);
             else
-                tileLayer.disposeRenderResult()
+                tileLayer.disposeRenderResult();
         })
     }
 
