@@ -96,7 +96,8 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
 {
-    mapget::log().set_level(spdlog::level::debug);
+    // Activate this to see a lot more output from the WASM lib.
+    // mapget::log().set_level(spdlog::level::debug);
 
     ////////// SharedUint8Array
     em::class_<SharedUint8Array>("SharedUint8Array")
