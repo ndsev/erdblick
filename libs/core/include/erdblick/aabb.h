@@ -109,7 +109,7 @@ public:
      * in WGS84, and orientation (bearing) in Radians. This priority function
      * may be plugged into tileIdsWithPriority.
      */
-    static TilePriorityFn radialDistancePrioFn(glm::vec2 camPos, float orientation);
+    static TilePriorityFn radialDistancePrioFn(glm::vec2 const& camPos, float orientation);
 
 private:
     vec2_t sw_{.0, .0};

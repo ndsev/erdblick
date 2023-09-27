@@ -177,7 +177,7 @@ void Wgs84AABB::tileIdsWithPriority(
     }
 }
 
-TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 camPos, float orientation)
+TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 const& camPos, float orientation)
 {
     return [camPos, orientation](TileId const& tid)
     {
@@ -191,7 +191,7 @@ TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 camPos, float orientati
         if (angle > glm::pi<float>())
             angle = glm::two_pi<float>() - angle;
 
-        auto distance = glm::sqrt(yDiff*yDiff + xDiff*xDiff); // Use manhattan distance to avoid comp overhead?
+        auto distance = glm::sqrt(yDiff*yDiff + xDiff*xDiff);
         return distance + angle * distance;
     };
 }
