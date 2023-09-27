@@ -49,7 +49,9 @@ export class ErdblickView
         this.mouseHandler.setInputAction(movement => {
             // If there was a previously picked feature, reset its color.
             if (this.pickedFeature) {
-                this.pickedFeature.color = Cesium.Color.WHITE; // Assuming the original color is WHITE. Adjust as necessary.
+                // TODO: Feature color must be reset to its original color,
+                //  based on the style sheet.
+                this.pickedFeature.color = Cesium.Color.WHITE;
             }
 
             let feature = this.viewer.scene.pick(movement.position);
