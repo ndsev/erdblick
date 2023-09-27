@@ -199,7 +199,7 @@ export class ErdblickView
         let expandLat = sizeLat * 0.25;
         this.model.setViewport({
             south: south - expandLat,
-            west: west - expandLat,
+            west: west - expandLon,
             width: sizeLon + expandLon*2,
             height: sizeLat + expandLat*2,
             camPosLon: centerLon,
