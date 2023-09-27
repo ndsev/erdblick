@@ -8,22 +8,6 @@ const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
 /**
- * Viewport object which can be interpreted by the erdblick-core WASM
- * `getTileIds` function.
- */
-export class MapViewerViewport {
-    constructor(south, west, width, height, camPosLon, camPosLat, orientation) {
-        this.south = south;
-        this.west = west;
-        this.width = width;
-        this.height = height;
-        this.camPosLon = camPosLon;
-        this.camPosLat = camPosLat;
-        this.orientation = orientation;
-    }
-}
-
-/**
  * Erdblick view-model class. This class is responsible for keeping track
  * of the following objects:
  *  (1) available maps
@@ -45,7 +29,15 @@ export class ErdblickModel
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
         this.currentFetchId = 0;
-        this.currentViewport = new MapViewerViewport;
+        this.currentViewport = {
+            south: .0,
+            west: .0,
+            width: .0,
+            height: .0,
+            camPosLon: .0,
+            camPosLat: .0,
+            orientation: .0,
+        };
         this.currentVisibleTileIds = new Set();
 
         // Instantiate the TileLayerParser, and set its callback

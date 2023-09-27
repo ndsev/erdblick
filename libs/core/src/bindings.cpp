@@ -13,6 +13,20 @@ using namespace erdblick;
 namespace em = emscripten;
 
 /**
+ * WGS84 Viewport Descriptor, which may be used with the
+ * `getTileIds` function below.
+ */
+struct Viewport {
+    double south = .0;       // The southern boundary of the viewport (degrees).
+    double west = .0;        // The western boundary of the viewport (degrees).
+    double width = .0;       // The width of the viewport (degrees).
+    double height = .0;      // The height of the viewport (degrees).
+    double camPosLon = .0;   // The longitude of the camera position (degrees).
+    double camPosLat = .0;   // The latitude of the camera position (degrees).
+    double orientation = .0; // The compass orientation of the camera (radians).
+};
+
+/**
  * Gets the prioritized list of tile IDs for a given viewport, zoom level, and tile limit.
  *
  * This function takes a viewport, a zoom level, and a tile limit, and returns an array of tile IDs
@@ -27,41 +41,25 @@ namespace em = emscripten;
  * their radial distance, and the sorted array is converted to an emscripten value to be returned.
  * Duplicate tile IDs are removed from the array before it is returned.
  *
- * @param viewport An emscripten value representing the viewport. The viewport is an object
- *                 containing the following properties:
- *                 - south: The southern boundary of the viewport.
- *                 - west: The western boundary of the viewport.
- *                 - width: The width of the viewport.
- *                 - height: The height of the viewport.
- *                 - camPosLon: The longitude of the camera position.
- *                 - camPosLat: The latitude of the camera position.
- *                 - orientation: The orientation of the viewport.
+ * @param viewport The viewport descriptor for which tile ids are needed.
  * @param level The zoom level for which to get the tile IDs.
  * @param limit The maximum number of tile IDs to return.
  *
  * @return An emscripten value representing an array of prioritized tile IDs.
  */
-em::val getTileIds(em::val viewport, int level, int limit)
+em::val getTileIds(Viewport const& vp, int level, int limit)
 {
-    double vpSouth = viewport["south"].as<double>();
-    double vpWest = viewport["west"].as<double>();
-    double vpWidth = viewport["width"].as<double>();
-    double vpHeight = viewport["height"].as<double>();
-    double camPosLon = viewport["camPosLon"].as<double>();
-    double camPosLat = viewport["camPosLat"].as<double>();
-    double orientation = viewport["orientation"].as<double>();
-
-    Wgs84AABB aabb(Wgs84Point{vpWest, vpSouth, .0}, {vpWidth, vpHeight});
+    Wgs84AABB aabb(Wgs84Point{vp.west, vp.south, .0}, {vp.width, vp.height});
     if (aabb.numTileIds(level) > limit)
         // Create a size-limited AABB from the tile limit.
-        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{camPosLon, camPosLat, .0}, limit, level);
+        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{vp.camPosLon, vp.camPosLat, .0}, limit, level);
 
     std::vector<std::pair<mapget::TileId, float>> prioritizedTileIds;
     prioritizedTileIds.reserve(limit);
     aabb.tileIdsWithPriority(
         level,
         prioritizedTileIds,
-        Wgs84AABB::radialDistancePrioFn({camPosLon, camPosLat}, orientation));
+        Wgs84AABB::radialDistancePrioFn({vp.camPosLon, vp.camPosLat}, vp.orientation));
 
     std::sort(
         prioritizedTileIds.begin(),
@@ -112,6 +110,16 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
         .field("x", &mapget::Point::x)
         .field("y", &mapget::Point::y)
         .field("z", &mapget::Point::z);
+
+    ////////// Viewport
+    em::value_object<Viewport>("Viewport")
+        .field("south", &Viewport::south)
+        .field("west", &Viewport::west)
+        .field("width", &Viewport::width)
+        .field("height", &Viewport::height)
+        .field("camPosLon", &Viewport::camPosLon)
+        .field("camPosLat", &Viewport::camPosLat)
+        .field("orientation", &Viewport::orientation);
 
     ////////// FeatureLayerStyle
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
