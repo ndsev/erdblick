@@ -1,5 +1,7 @@
 #include "aabb.h"
 
+#include "glm/ext.hpp"
+
 namespace erdblick
 {
 
@@ -14,33 +16,6 @@ inline glm::dvec3 vec(Wgs84Point const& p)
 inline Wgs84Point point(glm::dvec3 const& p)
 {
     return {p.x, p.y, p.z};
-}
-
-float fastAtan2(float y, float x)
-{
-    if (x == 0.0 && y == 0.0) {
-        return 0.0;  // handle the case when both x and y are zero
-    }
-
-    float abs_x = std::abs(x);
-    float abs_y = std::abs(y);
-
-    float a = std::min(abs_x, abs_y) / std::max(abs_x, abs_y);
-    float s = a * a;
-
-    float r = ((-0.0464964749f * s + 0.15931422f) * s - 0.327622764f) * s * a + a;
-
-    if (abs_y > abs_x) {
-        r = 1.57079637f - r;
-    }
-    if (x < 0.0) {
-        r = 3.14159274f - r;
-    }
-    if (y < 0.0) {
-        r = -r;
-    }
-
-    return r;
 }
 
 }  // namespace
@@ -165,15 +140,18 @@ bool Wgs84AABB::intersects(const Wgs84AABB& other) const
         contains(other.nw()) || other.intersects(*this);
 }
 
-void Wgs84AABB::tileIds(uint16_t level, std::vector<TileId>& tileIdsResult) const
+void Wgs84AABB::tileIdsWithPriority(
+    uint16_t level,
+    std::vector<std::pair<TileId, float>> &tileIdsResult,
+    TilePriorityFn const& prioFn) const
 {
     if (containsAntiMeridian()) {
         auto normalizedViewports = splitOverAntiMeridian();
         assert(
             !normalizedViewports.first.containsAntiMeridian() &&
             !normalizedViewports.second.containsAntiMeridian());
-        normalizedViewports.first.tileIds(level, tileIdsResult);
-        normalizedViewports.second.tileIds(level, tileIdsResult);
+        normalizedViewports.first.tileIdsWithPriority(level, tileIdsResult, prioFn);
+        normalizedViewports.second.tileIdsWithPriority(level, tileIdsResult, prioFn);
     }
 
     auto const tileWidth = 180. / static_cast<double>(1 << level);
@@ -191,7 +169,7 @@ void Wgs84AABB::tileIds(uint16_t level, std::vector<TileId>& tileIdsResult) cons
         double y = minPoint.y;
         while (y <= maxPoint.y && remainingCapacity > 0) {
             auto tid = TileId::fromWgs84(x, y, level);
-            tileIdsResult.emplace_back(tid);
+            tileIdsResult.emplace_back(tid, prioFn(tid));
             remainingCapacity -= 1;
             y += glm::min(tileWidth, glm::max(maxPoint.y - y, epsilon));
         }
@@ -199,23 +177,22 @@ void Wgs84AABB::tileIds(uint16_t level, std::vector<TileId>& tileIdsResult) cons
     }
 }
 
-TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 camPos, float orientation)
+TilePriorityFn Wgs84AABB::radialDistancePrioFn(glm::vec2 const& camPos, float orientation)
 {
     return [camPos, orientation](TileId const& tid)
     {
         auto center = tid.center();
-        float xDiff = center.x - camPos.x;
-        float yDiff = center.y - camPos.y;
+        float xDiff = static_cast<float>(center.x) - camPos.x;
+        float yDiff = static_cast<float>(center.y) - camPos.y;
         auto angle = glm::atan(yDiff, xDiff);  // Angle to east (x axis) direction. glm::atan is atan2.
 
-        angle -= orientation +
-            M_PI_2;  // Difference w/ compass direction normalized from North to East
-        angle = glm::abs(glm::mod(angle, (float)M_2_PI));  // Map angle to circle
-        if (angle > M_PI)
-            angle = M_2_PI - angle;
+        angle -= orientation + glm::two_pi<float>();  // Difference w/ compass direction normalized from North to East
+        angle = glm::abs(glm::mod(angle, glm::two_pi<float>()));  // Map angle to circle
+        if (angle > glm::pi<float>())
+            angle = glm::two_pi<float>() - angle;
 
-        auto distance = yDiff + xDiff;  // eventually use manhattan distance to avoid comp overhead?
-        return yDiff + xDiff + angle * distance;
+        auto distance = glm::sqrt(yDiff*yDiff + xDiff*xDiff);
+        return distance + angle * distance;
     };
 }
 

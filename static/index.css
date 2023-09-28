@@ -19,7 +19,7 @@ body {
     -o-user-select:none;
 }
 
-#cesiumContainer .cesium-widget-credits {
+#mapViewContainer .cesium-widget-credits {
     display:none !important;
 }
 
@@ -90,11 +90,16 @@ body {
     left: 10px;
 }
 
-#info > #log {
+#info > #maps {
     display: none;
 }
 
-#info.expanded > #log {
+#info > #maps > div {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+}
+
+#info.expanded > #maps {
     display: block;
 }
 

@@ -24,6 +24,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
+    --profiling \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
@@ -52,4 +53,3 @@ target_link_libraries(erdblick-core
     glm
     mapget-model
     yaml-cpp)
-

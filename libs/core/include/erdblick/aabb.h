@@ -20,8 +20,6 @@ using Wgs84Point = mapget::Point;
 class Wgs84AABB
 {
 public:
-    static TilePriorityFn radialDistancePrioFn(glm::vec2 camPos, float orientation);
-
     using vec2_t = glm::dvec2;
 
     Wgs84AABB() = default;
@@ -58,8 +56,9 @@ public:
     /** Obtain the size of this bounding box. */
     vec2_t const& size() const { return size_; }
 
-    /** Determine whether the horizontal extent of this bounding rect
-     *  crosses the anti-meridian (lon == +/- 180°).
+    /**
+     * Determine whether the horizontal extent of this bounding rect
+     * crosses the anti-meridian (lon == +/- 180°).
      */
     bool containsAntiMeridian() const;
 
@@ -93,17 +92,24 @@ public:
     /** Determine whether this bounding rect has an intersection with another bounding rect. */
     bool intersects(Wgs84AABB const& other) const;
 
-    /** Obtain TileIds for a given tile level.
+    /**
+     * Obtain TileIds for a given tile level. Will fill in tileIds for the
+     * given level into resultTileIdsWithPriority up to resultTileIdsWithPriority.capacity(),
+     * so the function is guaranteed not to allocate any heap memory.
+     * Also annotates each returned TileId with a float as returned by the
+     * TilePenaltyFn lambda.
      */
-    void tileIds(uint16_t level, std::vector<TileId> &result) const;
-
-    /** Same as tileIdsWithPriority, but strips the priority values
-     *  and converts the linked list to a vector.
-     */
-    std::vector<TileId> tileIds(
+    void tileIdsWithPriority(
         uint16_t level,
-        std::function<double(TileId const&)> const& tilePenaltyFun,
-        size_t limit) const;
+        std::vector<std::pair<TileId, float>> &resultTileIdsWithPriority,
+        TilePriorityFn const& prioFn) const;
+
+    /**
+     * Returns a tile priority function based on the given camera position
+     * in WGS84, and orientation (bearing) in Radians. This priority function
+     * may be plugged into tileIdsWithPriority.
+     */
+    static TilePriorityFn radialDistancePrioFn(glm::vec2 const& camPos, float orientation);
 
 private:
     vec2_t sw_{.0, .0};

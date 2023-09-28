@@ -1,3 +1,5 @@
+"use strict";
+
 /**
  * A class to fetch data from a URL and process the response
  * for usage in JavaScript and WebAssembly.
@@ -14,10 +16,12 @@ export class Fetch
         this.url = url;
         this.method = 'GET';
         this.body = null;
-        this.signal = null;
+        this.abortController = new AbortController();
         this.processChunks = false;
         this.jsonCallback = null;
         this.wasmCallback = null;
+        this.wasmBufferDeletedByUser = false;
+        this.aborted = false;
     }
 
     /**
@@ -37,16 +41,6 @@ export class Fetch
      */
     withBody(body) {
         this.body = body;
-        return this;
-    }
-
-    /**
-     * Method to set the signal for the request (for aborting the request).
-     * @param {AbortSignal} signal - The AbortSignal object.
-     * @return {Fetch} The Fetch instance for chaining.
-     */
-    withSignal(signal) {
-        this.signal = signal;
         return this;
     }
 
@@ -72,10 +66,15 @@ export class Fetch
     /**
      * Method to set the callback for handling the WASM response.
      * @param {Function} callback - The callback function.
+     * @param {boolean} deletionByUser - Whether the passed WASM shared
+     *  buffer should not be immediately deleted after the callback is
+     *  called - this is used to in the streaming viewport response
+     *  handling to ensure that the fetch operation is not stalled.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withWasmCallback(callback) {
+    withWasmCallback(callback, deletionByUser) {
         this.wasmCallback = callback;
+        this.wasmBufferDeletedByUser = deletionByUser;
         return this;
     }
 
@@ -90,7 +89,7 @@ export class Fetch
                 //  Currently, the connection stays open for five seconds.
                 'Connection': 'close'
             },
-            signal: this.signal,
+            signal: this.abortController.signal,
             keepalive: false,
             mode: "same-origin"
         };
@@ -109,7 +108,7 @@ export class Fetch
                         console.assert(!this.processChunks)
                         this.handleJsonResponse(response);
                     } else if (this.processChunks) {
-                        this.handleChunkedResponse(response);
+                        this.handleChunkedResponse(response).then(_ => {}).catch();
                     } else {
                         this.handleBlobResponse(response);
                     }
@@ -131,22 +130,47 @@ export class Fetch
 
     /**
      * Method to handle and process a chunked response.
+     * The chunks must be encoded as Version-Type-Length-Value (VTLV) frames,
+     * where Version is 6B, Type is 1B, Length is 4B (Little Endian).
+     * This is the chunk encoding used by the mapget TileLayerStream.
      * @param {Response} response - The fetch response.
      */
-    handleChunkedResponse(response) {
+    async handleChunkedResponse(response) {
         const reader = response.body.getReader();
-        let pump = () => {
-            return reader.read().then(({ done, value }) => {
-                if (value) {
-                    let uint8Array = new Uint8Array(value.buffer);
-                    this.runWasmCallback(uint8Array);
+        let accumulatedData = new Uint8Array(0);
+
+        const processAccumulatedData = () => {
+            while (accumulatedData.length >= 11) {  // Ensure we have at least VTL header
+                const type = accumulatedData[6];
+                const length = new DataView(accumulatedData.buffer, 7, 4).getUint32(0, true); // Little-endian
+
+                // Check if we have the full VTLV frame
+                if (accumulatedData.length >= 6 + 1 + 4 + length) {
+                    const vtlvFrame = accumulatedData.slice(0, 11 + length);
+                    this.runWasmCallback(vtlvFrame);
+
+                    // Remove the processed data from the beginning of accumulatedData
+                    accumulatedData = accumulatedData.slice(11 + length);
+                } else {
+                    break;
                 }
-                if (done)
-                    return;
-                return pump();
-            });
+            }
         }
-        pump();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (value && value.length) {
+                // Append new data to accumulatedData
+                const temp = new Uint8Array(accumulatedData.length + value.length);
+                temp.set(accumulatedData);
+                temp.set(value, accumulatedData.length);
+                accumulatedData = temp;
+
+                // Try to process any complete VTLV frames
+                processAccumulatedData();
+            }
+            if (done) break;
+        }
     }
 
     /**
@@ -188,7 +212,7 @@ export class Fetch
      */
     runWasmCallback(uint8Array)
     {
-        if (!this.wasmCallback)
+        if (!this.wasmCallback || this.aborted)
             return;
 
         let sharedArr = new this.coreLib.SharedUint8Array(uint8Array.length);
@@ -202,6 +226,24 @@ export class Fetch
             this.wasmCallback(sharedArr);
         }
 
-        sharedArr.delete();
+        if (!this.wasmBufferDeletedByUser) {
+            sharedArr.delete();
+        }
+    }
+
+    /**
+     * Signal that the request should be aborted.
+     */
+    abort() {
+        if (this.aborted)
+            return
+        try {
+            // For some reason, abort always throws an exception by design.
+            this.abortController.abort("User abort.");
+        }
+        catch (e) {
+            // Nothing to do.
+        }
+        this.aborted = true;
     }
 }
