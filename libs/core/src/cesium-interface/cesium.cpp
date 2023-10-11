@@ -11,7 +11,11 @@ CesiumLib::CesiumLib() :
 
     Material("Material"),
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
-    Color("Color")
+    PolylineColorAppearance("PolylineColorAppearance"),
+
+    ColorGeometryInstanceAttribute("ColorGeometryInstanceAttribute"),
+    Color("Color"),
+    ArcType("ArcType")
 {
 }
 
@@ -24,6 +28,11 @@ CesiumLib& Cesium()
 JsValue CesiumLib::MaterialFromType(std::string const& type, const JsValue& options)
 {
     return JsValue(Material.call<NativeJsValue>("fromType", type, *options));
+}
+
+JsValue CesiumLib::ColorAttributeFromColor(const JsValue& color)
+{
+    return JsValue(ColorGeometryInstanceAttribute.call<NativeJsValue>("fromColor", *color));
 }
 
 }

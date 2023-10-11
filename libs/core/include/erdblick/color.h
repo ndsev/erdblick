@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <stdint.h>
 #include <string>
+#include "cesium-interface/cesium.h"
 
 namespace erdblick
 {
@@ -110,6 +111,11 @@ public:
       * Use Color::Black to obtain a valid black color instance.
      */
     bool isValid() const;
+
+    /**
+     * Convert the color to a CesiumJS.Color object.
+     */
+    [[nodiscard]] JsValue toCesiumColor(float opacity) const;
 
     /**
       * Predefined color constants

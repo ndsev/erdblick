@@ -15,9 +15,13 @@ struct CesiumLib
 
     CesiumClass Material;
     CesiumClass PolylineMaterialAppearance;
+    CesiumClass PolylineColorAppearance;
+    CesiumClass ColorGeometryInstanceAttribute;
     CesiumClass Color;
+    CesiumClass ArcType;
 
     [[nodiscard]] JsValue MaterialFromType(std::string const& type, JsValue const& options);
+    [[nodiscard]] JsValue ColorAttributeFromColor(JsValue const& color);
 
 private:
     friend CesiumLib& Cesium();

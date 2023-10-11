@@ -247,6 +247,11 @@ bool Color::isValid() const {
     return valid_ || r != 0 || g != 0 || b != 0;
 }
 
+JsValue Color::toCesiumColor(float opacity) const
+{
+    return Cesium().Color.New((float)r/255., (float)g/255., (float)b/255., opacity);
+}
+
 Color const Color::AliceBlue("#F0F8FF");
 Color const Color::AntiqueWhite("#FAEBD7");
 Color const Color::Aqua("#00FFFF");
@@ -395,6 +400,5 @@ Color const Color::White("#FFFFFF");
 Color const Color::WhiteSmoke("#F5F5F5");
 Color const Color::Yellow("#FFFF00");
 Color const Color::YellowGreen("#9ACD32");
-
 
 }

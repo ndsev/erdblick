@@ -92,20 +92,20 @@ export class ErdblickView
         this.tileLayerForTileSet = new Map();
 
         model.tileLayerAddedTopic.subscribe(tileLayer => {
-            this.viewer.scene.primitives.add(tileLayer.tileSet);
-            this.tileLayerForTileSet.set(tileLayer.tileSet, tileLayer);
+            this.viewer.scene.primitives.add(tileLayer.primitiveCollection);
+            this.tileLayerForTileSet.set(tileLayer.primitiveCollection, tileLayer);
         })
 
         model.tileLayerRemovedTopic.subscribe(tileLayer => {
-            if (this.pickedFeature && this.pickedFeature.tileset === tileLayer.tileSet) {
+            if (this.pickedFeature && this.pickedFeature.tileset === tileLayer.primitiveCollection) {
                 this.pickedFeature = null;
                 this.selectionTopic.next(null);
             }
-            if (this.hoveredFeature && this.hoveredFeature.tileset === tileLayer.tileSet) {
+            if (this.hoveredFeature && this.hoveredFeature.tileset === tileLayer.primitiveCollection) {
                 this.hoveredFeature = null;
             }
-            this.viewer.scene.primitives.remove(tileLayer.tileSet);
-            this.tileLayerForTileSet.delete(tileLayer.tileSet);
+            this.viewer.scene.primitives.remove(tileLayer.primitiveCollection);
+            this.tileLayerForTileSet.delete(tileLayer.primitiveCollection);
         })
 
         model.zoomToWgs84PositionTopic.subscribe(pos => {
@@ -152,6 +152,8 @@ export class ErdblickView
 
         this.viewer.scene.primitives.add(polylines);
         this.viewer.scene.globe.baseColor = new Cesium.Color(0.1, 0.1, 0.1, 1);
+
+        this.viewer.scene.primitives.add(model.coreLib.makeTestLine());
     }
 
     resolveFeature(tileSet, index) {
