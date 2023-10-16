@@ -10,7 +10,7 @@ class TestDataProvider
 public:
     TestDataProvider()
     {
-        auto layerInfo_ = mapget::LayerInfo::fromJson(R"({
+        layerInfo_ = mapget::LayerInfo::fromJson(R"({
             "layerId": "WayLayer",
             "type": "Features",
             "featureTypes": [

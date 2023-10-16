@@ -73,7 +73,7 @@ void JsValue::push(const JsValue& o)
 #ifdef EMSCRIPTEN
     value_.call<void>("push", o.value_);
 #else
-    value_["methodCalls"].push_back({{"methodName", "push"}, {"arguments", {o.value_}}});
+    value_.push_back(o.value_);
 #endif
 }
 
