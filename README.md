@@ -1,24 +1,85 @@
-# erdblick
+# erdblick 🌍
 
-`erdblick` is a mapviewer based on the `mapget` feature service.
+`erdblick` is a dynamic mapviewer built on the `mapget` feature service.
 
-Capabilities:
+> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase. Our goal is to launch a fully functional Desktop app by the end of 2023. Stay tuned! 🚀
 
-* View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.
-* Define a map layer as a style-sheet, which translates specific features to specific visual elements in 2D or 3D.
-* View 3D features and terrain with a freely controllable 3D camera.
-* Edit map layer style sheets in real-time in the front-end.
-* Select multiple features simultaneuosly, with a filter or lasso selection.
-* Create split-screen panes for optional overlayed or synced navigation with a splitter.
-* View multiple map layer tile zoom levels simultaneously.
+**Capabilities:** 🛠️
+
+* 🗺️ View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.
+* 🎨 Define visual styles for map layers through style-sheets, translating specific features into visual elements in both 2D and 3D.
+* 🏔️ Experience 3D features and terrains with a flexible 3D camera powered by [CesiumJS](https://github.com/CesiumGS/cesium/).
+* ✍️ Edit map layer style sheets in real-time directly from the front-end.
+* 🔍 Select multiple features at once using filter or lasso selection tools.
+* 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter.
+* 🔎 View multiple map layer tile zoom levels all at once.
 
 ## Setup
 
-Ready to get your hands on the freshest `erdblick` web files? Swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the latest pack. Keep in mind, `erdblick` is made to be buddies with the [`mapget`](https://github.com/klebert-engineering/mapget) server, so make sure to serve it up with the `mapget serve` command. Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with `mapget serve -w path-to-unpacked-erdblick`.
+Ready to try out the latest version? While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, so make sure to serve it up with the `mapget serve` command. Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with `mapget serve -w path-to-unpacked-erdblick`.
 
 ![mapget alpha ui](./docs/erdblick-alpha.png)
 
+## Styling System
+
+Erdblick styles are defined as *YAML*-files, which must have a rules key that contains an array
+feature visualisation rule objects. During runtime, a feature will be visualised according to each
+rule that matches it.
+
+<details>
+<summary>Show details</summary>
+
+Each rule within the `rules` array can have the following fields:
+
+| Field       | Description                                                  | Type             | Optional? | Example Value                         |
+|-------------|--------------------------------------------------------------|------------------|-----------|---------------------------------------|
+| `geometry`  | Specifies the geometry type(s) the rule applies to.          | Array of strings | No        | `["point", "mesh"]`                   |
+| `type`      | A regular expression to match against a feature type.        | String           | Yes       | `"Lane\|Boundary"`                    |
+| `filter`    | A simfil filter expression.                                  | String           | Yes       | `properties.functionalRoadClass == 4` |
+| `color`     | A CSS color value.                                           | String           | Yes       | `"#FF5733"`, `red`                    |
+| `opacity`   | A float value between 0 and 1 indicating the opacity.        | Float            | Yes       | `0.8`                                 |
+| `width`     | Specifies the line width (default in pixels).                | Float            | Yes       | `4.5`                                 |
+
+From a matching feature, each rule only converts the geometry mentioned in the `geometry` list.
+The following geometry types that are stored in a feature may be visualised:
+
+| Value     | Description                    |
+|-----------|--------------------------------|
+| `point`   | Represents point geometry.     |
+| `mesh`    | Represents mesh geometry.      |
+| `line`    | Represents line geometry.      |
+| `polygon` | Represents polygon geometry.   |
+
+
+**A brief example:**
+
+```yaml
+rules:
+  - geometry:
+      - point
+      - mesh
+    type: "SomeType"
+    filter: "properties.someProperty == someValue"
+    color: "#FF5733"
+    opacity: 0.8
+    width: 4.5
+  - geometry:
+      - line
+      - polygon
+    type: "OtherType"
+    color: "#33FF57"
+```
+
+> **Note ⚠️:** While the mature product envisions a rich UI with the ability
+> to edit and toggle multiple style sheets, the current alpha version loads
+> its style sheet from the hard-coded path [static/styles/demo-style.yaml](./static/styles/demo-style.yaml).
+
+</details>
+
 ## Build instructions (Linux-only)
+
+<details>
+<summary>Show instructions</summary>
 
 Run the setup script once to pull Emscripten SDK:
 
@@ -41,15 +102,18 @@ To rebuild the project (skipping checkouts and CMake initialization), run:
 You can also build the `erdblick-core` library with a standard C++ compiler
 in an IDE of your choice. This is also useful to run the unit-tests.
 
-## Conceptual Background
+</details>
 
-Our Erdblick project is still very much under development. We've gathered
+## Concepts
+
+As the project is still very much under development, we've gathered
 some resources that should give you a clearer picture of what we're aiming
-for. Feel free to take a look.
+for with the mature product. Feel free to take a look.
 
-### UI Mocks
+<details>
+<summary>UI Mocks</summary>
 
-First, you'll find a series of mockups showcasing our proposed user interface in various scenarios.
+You'll find a series of mockups showcasing our proposed user interface in various scenarios.
 Keep an eye out for notes within the images - they provide extra insight into specific features.
 
 #### Overview
@@ -68,6 +132,11 @@ Keep an eye out for notes within the images - they provide extra insight into sp
 
 ![split-view](docs/erdblick_ui_split.svg)
 
+</details>
+
+<details>
+<summary>Initial Architecture UML</summary>
+
 ### Architecture
 
 Second is a UML diagram giving you an overview of our emerging architecture.
@@ -77,3 +146,5 @@ context on how the parts fit together.
 ![arch](docs/erdblick_uml.svg)
 
 Keep in mind, that these concepts are always up for changing.
+
+</details>

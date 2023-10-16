@@ -44,6 +44,6 @@ The above Cesium Primitive concepts support all planned Feature styling aspects,
 * Lines with arrow-heads on both sides (unless we use a texture?).
 * **Highlighting:** `(Polyline)-MaterialAppearance`-based geometry instances will require some magic.
   Ad-hoc color changes are only possible for `PerInstanceColorAppearance`/`PolylineColorAppearance`.
-  hiding the "real" instance and showing a "highlight instance".
+  For example, we can hide the "real" instance and switch to a "highlight instance".
 
 **Note:** Textured polylines/corridors would look equivalent to the legacy NDS mapviewer.
