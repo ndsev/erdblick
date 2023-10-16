@@ -57,9 +57,21 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
     }
 }
 
-bool FeatureStyleRule::match(const mapget::Feature&) const
+bool FeatureStyleRule::match(mapget::Feature& feature) const
 {
-    // TODO check for matching type pattern, filter.
+    // Filter by feature type regular expression
+    if (type_) {
+        auto typeId = feature.typeId();
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_))
+            return false;
+    }
+
+    // Filter by simfil expression
+    if (!filter_.empty()) {
+        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>())
+            return false;
+    }
+
     return true;
 }
 
