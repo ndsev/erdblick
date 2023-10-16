@@ -28,7 +28,6 @@ export class ErdblickModel
         this.glbConverter = new coreLibrary.FeatureLayerRenderer();
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
-        this.currentFetchId = 0;
         this.currentViewport = {
             south: .0,
             west: .0,
@@ -39,6 +38,7 @@ export class ErdblickModel
             orientation: .0,
         };
         this.currentVisibleTileIds = new Set();
+        this.tileStreamParsingQueue = [];
 
         // Instantiate the TileLayerParser, and set its callback
         // for when a new tile is received.
@@ -76,6 +76,22 @@ export class ErdblickModel
 
         this.reloadStyle();
         this.reloadDataSources();
+
+        // Initial call to processTileStream, will keep calling itself
+        this.processTileStream();
+    }
+
+    processTileStream()
+    {
+        if (this.tileStreamParsingQueue.length) {
+            let message = this.tileStreamParsingQueue.shift();
+            // Only process the buffer chunk, if the fetch operation
+            // for the chunk is the most recent one.
+            this.tileParser.parseFromStream(message);
+            message.delete();
+        }
+        // Keep processing messages. ASAP if more messages exist, 10ms delay otherwise.
+        setTimeout(_ => this.processTileStream(), this.tileStreamParsingQueue.length ? 0 : 10);
     }
 
     reloadStyle()
@@ -121,8 +137,12 @@ export class ErdblickModel
         this.currentVisibleTileIds = new Set(allViewportTileIds);
 
         // Abort previous fetch operation.
-        if (this.currentFetch)
+        if (this.currentFetch) {
             this.currentFetch.abort();
+            // Clear any unparsed messages
+            this.tileStreamParsingQueue.forEach(message => message.delete());
+            this.tileStreamParsingQueue = [];
+        }
 
         // Make sure that there are no unparsed bytes lingering from the previous response stream.
         this.tileParser.reset();
@@ -162,7 +182,6 @@ export class ErdblickModel
             }
         }
 
-        let fetchId = ++(this.currentFetchId);
         this.currentFetch = new Fetch(this.coreLib, tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
@@ -174,14 +193,7 @@ export class ErdblickModel
                 // Schedule the parsing of the newly arrived tile layer,
                 // but don't do it synchronously to avoid stalling the ongoing
                 // fetch operation.
-                setTimeout(_ => {
-                    // Only process the buffer chunk, if the fetch operation
-                    // for the chunk is the most recent one.
-                    if (fetchId === this.currentFetchId) {
-                        this.tileParser.parseFromStream(tileBuffer);
-                    }
-                    tileBuffer.delete();
-                }, 0)
+                this.tileStreamParsingQueue.push(tileBuffer);
             }, true);
         this.currentFetch.go();
     }
@@ -191,7 +203,11 @@ export class ErdblickModel
             throw new Error(`Refusing to add tile layer ${tileLayer.id}, which is already present.`);
         }
         this.loadedTileLayers.set(tileLayer.id, tileLayer);
-        this.renderTileLayer(tileLayer);
+        // Schedule the visualization of the newly added tile layer,
+        // but don't do it synchronously to avoid stalling the main thread.
+        setTimeout(() => {
+            this.renderTileLayer(tileLayer);
+        })
     }
 
     renderTileLayer(tileLayer, removeFirst) {

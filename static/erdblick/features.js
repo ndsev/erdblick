@@ -1,6 +1,6 @@
 "use strict";
 
-import {blobUriFromWasm, uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
+import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 
 /**
  * Bundle of a WASM TileFeatureLayer and a rendered representation
@@ -37,10 +37,10 @@ export class FeatureTile
      * contains a single tile. Returns a promise which resolves to true,
      * if there is a freshly baked Cesium3DTileset, or false,
      * if no output was generated because the tile is empty.
-     * @param {*} glbConverter The WASM GLTF converter that should be used.
+     * @param {*} cesiumConverter The Cesium primitive renderer that should be used.
      * @param {null} style The style that is used to make the conversion.
      */
-    async render(glbConverter, style)
+    async render(cesiumConverter, style)
     {
         // Remove any previous render-result, as a new one is generated
         // TODO: Ensure that the View also takes note of the removed PrimitiveCollection.
@@ -49,10 +49,10 @@ export class FeatureTile
 
         let startConversion = performance.now();
         this.peek(tileFeatureLayer => {
-            this.primitiveCollection = glbConverter.render(style, tileFeatureLayer);
+            this.primitiveCollection = cesiumConverter.render(style, tileFeatureLayer);
         });
         let endConversion = performance.now();
-        console.debug(`[${this.id}] GLB conversion time: ${endConversion - startConversion}ms`);
+        console.debug(`[${this.id}] Cesium conversion time: ${endConversion - startConversion}ms`);
 
         // The primitive collection will be null if there were no features to render.
         return this.primitiveCollection !== null && this.primitiveCollection !== undefined;
@@ -101,7 +101,7 @@ export class FeatureTile
     {
         if (!this.primitiveCollection)
             return;
-        if (!this.primitiveCollection.isDestroyed)
+        if (!this.primitiveCollection.isDestroyed())
             this.primitiveCollection.destroy();
 
         this.primitiveCollection = null;
