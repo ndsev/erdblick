@@ -55,7 +55,7 @@ struct CesiumTileGeometry
         if (!count)
             return;
 
-        coloredLines_.addLine(jsPoints, rule.color().toCesiumColor(rule.opacity()));
+        coloredLines_.addLine(jsPoints, rule, id);
     }
 
     CesiumPrimitive coloredLines_;

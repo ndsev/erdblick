@@ -8,17 +8,16 @@ namespace erdblick
 /** Imports of Cesium classes from the global Cesium Javascript namespace. */
 struct CesiumLib
 {
+    CesiumClass ArcType;
+    CesiumClass Color;
+    CesiumClass ColorGeometryInstanceAttribute;
+    CesiumClass GeometryInstance;
+    CesiumClass Material;
+    CesiumClass PolylineColorAppearance;
+    CesiumClass PolylineGeometry;
+    CesiumClass PolylineMaterialAppearance;
     CesiumClass Primitive;
     CesiumClass PrimitiveCollection;
-    CesiumClass GeometryInstance;
-    CesiumClass PolylineGeometry;
-
-    CesiumClass Material;
-    CesiumClass PolylineMaterialAppearance;
-    CesiumClass PolylineColorAppearance;
-    CesiumClass ColorGeometryInstanceAttribute;
-    CesiumClass Color;
-    CesiumClass ArcType;
 
     [[nodiscard]] JsValue MaterialFromType(std::string const& type, JsValue const& options);
     [[nodiscard]] JsValue ColorAttributeFromColor(JsValue const& color);

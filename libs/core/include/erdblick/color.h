@@ -9,7 +9,7 @@ namespace erdblick
 {
 
 /**
-  * Color Class
+ * Color Class
  */
 class Color : public glm::u8vec3
 {

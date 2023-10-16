@@ -103,7 +103,7 @@ NativeJsValue makeTestLine() {
     result.addLine(JsValue::newList({
         JsValue(wgsToCartesian<mapget::Point>({42., 11., 0.})),
         JsValue(wgsToCartesian<mapget::Point>({42., 12., 0.}))
-    }), Cesium().Color["BLUE"]);
+    }), YAML::Load("{geometry: ['line'], color: red}"), 0);
     return result.toJsObject();
 }
 

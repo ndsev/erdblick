@@ -4,18 +4,16 @@ namespace erdblick
 {
 
 CesiumLib::CesiumLib() :
-    Primitive("Primitive"),
-    PrimitiveCollection("PrimitiveCollection"),
-    GeometryInstance("GeometryInstance"),
-    PolylineGeometry("PolylineGeometry"),
-
-    Material("Material"),
-    PolylineMaterialAppearance("PolylineMaterialAppearance"),
-    PolylineColorAppearance("PolylineColorAppearance"),
-
-    ColorGeometryInstanceAttribute("ColorGeometryInstanceAttribute"),
+    ArcType("ArcType"),
     Color("Color"),
-    ArcType("ArcType")
+    ColorGeometryInstanceAttribute("ColorGeometryInstanceAttribute"),
+    GeometryInstance("GeometryInstance"),
+    Material("Material"),
+    PolylineColorAppearance("PolylineColorAppearance"),
+    PolylineGeometry("PolylineGeometry"),
+    PolylineMaterialAppearance("PolylineMaterialAppearance"),
+    Primitive("Primitive"),
+    PrimitiveCollection("PrimitiveCollection")
 {
 }
 
