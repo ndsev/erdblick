@@ -9,10 +9,10 @@
 * 🗺️ View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.
 * 🎨 Define visual styles for map layers through style-sheets, translating specific features into visual elements in both 2D and 3D.
 * 🏔️ Experience 3D features and terrains with a flexible 3D camera powered by [CesiumJS](https://github.com/CesiumGS/cesium/).
-* ✍️ Edit map layer style sheets in real-time directly from the front-end.
-* 🔍 Select multiple features at once using filter or lasso selection tools.
-* 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter.
-* 🔎 View multiple map layer tile zoom levels all at once.
+* ✍️ Edit map layer style sheets in real-time directly from the front-end **(Planned)**.
+* 🔍 Select multiple features at once using filter or lasso selection tools **(Planned)**.
+* 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter **(Planned)**.
+* 🔎 View multiple map layer tile zoom levels all at once **(Planned)**.
 
 ## Setup
 
@@ -22,34 +22,27 @@ Ready to try out the latest version? While the Desktop app is still work-in-prog
 
 ## Styling System
 
-Erdblick styles are defined as *YAML*-files, which must have a rules key that contains an array
+Erdblick styles are defined as *YAML*-files, which must have a `rules` key that contains an array of
 feature visualisation rule objects. During runtime, a feature will be visualised according to each
 rule that matches it.
 
 <details>
 <summary>Show details</summary>
 
-Each rule within the `rules` array can have the following fields:
+> **Note ⚠️:** While the mature product envisions a rich UI with the ability
+> to edit and toggle multiple style sheets, the current alpha version loads
+> its style sheet from the hard-coded path [static/styles/demo-style.yaml](static/styles/demo-style.yaml).
 
-| Field       | Description                                                  | Type             | Optional? | Example Value                         |
-|-------------|--------------------------------------------------------------|------------------|-----------|---------------------------------------|
-| `geometry`  | Specifies the geometry type(s) the rule applies to.          | Array of strings | No        | `["point", "mesh"]`                   |
-| `type`      | A regular expression to match against a feature type.        | String           | Yes       | `"Lane\|Boundary"`                    |
-| `filter`    | A simfil filter expression.                                  | String           | Yes       | `properties.functionalRoadClass == 4` |
-| `color`     | A CSS color value.                                           | String           | Yes       | `"#FF5733"`, `red`                    |
-| `opacity`   | A float value between 0 and 1 indicating the opacity.        | Float            | Yes       | `0.8`                                 |
-| `width`     | Specifies the line width (default in pixels).                | Float            | Yes       | `4.5`                                 |
+Each rule within the YAML `rules` array can have the following fields:
 
-From a matching feature, each rule only converts the geometry mentioned in the `geometry` list.
-The following geometry types that are stored in a feature may be visualised:
-
-| Value     | Description                    |
-|-----------|--------------------------------|
-| `point`   | Represents point geometry.     |
-| `mesh`    | Represents mesh geometry.      |
-| `line`    | Represents line geometry.      |
-| `polygon` | Represents polygon geometry.   |
-
+| Field      | Description                                                                                          | Type                                         | Optional? | Example Value                         |
+|------------|------------------------------------------------------------------------------------------------------|----------------------------------------------|-----------|---------------------------------------|
+| `geometry` | List of feature geometry type(s) the rule applies to.                                                | [`"point"`\|`"mesh"`\|`"line"`\|`"polygon"`] | No        | `["point", "mesh"]`                   |
+| `type`     | A regular expression to match against a feature type.                                                | String                                       | Yes       | `"Lane\|Boundary"`                    |
+| `filter`   | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                         | String                                       | Yes       | `properties.functionalRoadClass == 4` |
+| `color`    | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                       | Yes       | `"#FF5733"`, `red`                    |
+| `opacity`  | A float value between 0 and 1 indicating the opacity.                                                | Float                                        | Yes       | `0.8`                                 |
+| `width`    | Specifies the line width or point diameter (default in pixels).                                      | Float                                        | Yes       | `4.5`                                 |
 
 **A brief example:**
 
@@ -58,7 +51,7 @@ rules:
   - geometry:
       - point
       - mesh
-    type: "SomeType"
+    type: "Landmark"
     filter: "properties.someProperty == someValue"
     color: "#FF5733"
     opacity: 0.8
@@ -66,13 +59,9 @@ rules:
   - geometry:
       - line
       - polygon
-    type: "OtherType"
+    type: "Boundary"
     color: "#33FF57"
 ```
-
-> **Note ⚠️:** While the mature product envisions a rich UI with the ability
-> to edit and toggle multiple style sheets, the current alpha version loads
-> its style sheet from the hard-coded path [static/styles/demo-style.yaml](./static/styles/demo-style.yaml).
 
 </details>
 
