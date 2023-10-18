@@ -42,17 +42,18 @@ export class FeatureTile
      */
     async render(cesiumConverter, style)
     {
-        // Remove any previous render-result, as a new one is generated
+        // Do not try to render if the underlying data is disposed.
+        if (this.disposed)
+            return false;
+
+        // Remove any previous render-result, as a new one is generated.
         // TODO: Ensure that the View also takes note of the removed PrimitiveCollection.
         //  This will become apparent once interactive re-styling is a prime use-case.
         this.disposeRenderResult();
 
-        let startConversion = performance.now();
         this.peek(tileFeatureLayer => {
             this.primitiveCollection = cesiumConverter.render(style, tileFeatureLayer);
         });
-        let endConversion = performance.now();
-        console.debug(`[${this.id}] Cesium conversion time: ${endConversion - startConversion}ms`);
 
         // The primitive collection will be null if there were no features to render.
         return this.primitiveCollection !== null && this.primitiveCollection !== undefined;
@@ -118,7 +119,6 @@ export class FeatureTile
             this.tileFeatureLayerInitDeserialized = null;
         }
         this.disposed = true;
-        console.debug(`[${this.id}] Disposed.`);
     }
 }
 

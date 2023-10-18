@@ -25,7 +25,7 @@ TEST_CASE("FeatureLayerRenderer", "[erdblick.renderer]")
     FeatureLayerRenderer renderer;
     auto result = renderer.render(style, testLayer);
 
-    std::cerr << result << std::endl;
+    std::cout << result << std::endl;
 
     REQUIRE(!result.empty());
 }

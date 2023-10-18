@@ -85,8 +85,6 @@ export class ErdblickModel
     {
         if (this.tileStreamParsingQueue.length) {
             let message = this.tileStreamParsingQueue.shift();
-            // Only process the buffer chunk, if the fetch operation
-            // for the chunk is the most recent one.
             this.tileParser.parseFromStream(message);
             message.delete();
         }
@@ -219,7 +217,7 @@ export class ErdblickModel
                 return;
 
             // It is possible, that the tile went out of view while
-            // Cesium took its time to load it. In this case, don't
+            // we took our time to visualize it. In this case, don't
             // add it to the viewport.
             const isInViewport = this.currentVisibleTileIds.has(tileLayer.tileId);
             if (isInViewport)

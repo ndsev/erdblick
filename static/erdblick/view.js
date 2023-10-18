@@ -119,7 +119,7 @@ export class ErdblickView
      */
     setHoveredCesiumFeature(feature) {
         if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature))
-            return
+            return;
         // Restore the previously hovered feature to its original color.
         if (this.hoveredFeature)
             this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
@@ -133,7 +133,7 @@ export class ErdblickView
     }
 
     /**
-     * Set or re-set the hovered feature.
+     * Set or re-set the picked feature.
      */
     setPickedCesiumFeature(feature) {
         if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))

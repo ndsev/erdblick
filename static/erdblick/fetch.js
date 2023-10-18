@@ -108,13 +108,13 @@ export class Fetch
                         console.assert(!this.processChunks)
                         this.handleJsonResponse(response);
                     } else if (this.processChunks) {
-                        this.handleChunkedResponse(response).then(_ => {}).catch();
+                        this.handleChunkedResponse(response).then(_ => {}).catch(e => this.handleError(e));
                     } else {
                         this.handleBlobResponse(response);
                     }
                 }
             })
-            .catch(e => console.log('There has been a problem with your fetch operation: ' + e.message));
+            .catch(e => this.handleError(e));
     }
 
     /**
@@ -245,5 +245,14 @@ export class Fetch
             // Nothing to do.
         }
         this.aborted = true;
+    }
+
+    /**
+     * Log an error if it does not relate to an intentional abort-call.
+     */
+    handleError(e) {
+        if (e !== "User abort.") {
+            console.error(e);
+        }
     }
 }
