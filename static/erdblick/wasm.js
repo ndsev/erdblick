@@ -2,26 +2,6 @@
 
 /**
  * Run a WASM function which places data in a SharedUint8Array,
- * and then store this data under an object URL. Will be aborted
- * and return null, if the user function returns false.
- */
-export function blobUriFromWasm(coreLib, fun, contentType) {
-    let sharedGlbArray = new coreLib.SharedUint8Array();
-    if (fun(sharedGlbArray) === false) {
-        sharedGlbArray.delete();
-        return null;
-    }
-    let objSize = sharedGlbArray.getSize();
-    let bufferPtr = Number(sharedGlbArray.getPointer());
-    let data = coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize);
-    const blob = new Blob([data], { type: contentType });
-    const glbUrl = URL.createObjectURL(blob);
-    sharedGlbArray.delete();
-    return glbUrl;
-}
-
-/**
- * Run a WASM function which places data in a SharedUint8Array,
  * and then retrieve this data as a Uint8Array. Will return null
  * if the user function returns false.
  */

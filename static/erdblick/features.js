@@ -1,12 +1,10 @@
 "use strict";
 
-import {blobUriFromWasm, uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
+import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 
 /**
  * Bundle of a WASM TileFeatureLayer and a rendered representation
- * in the form of a Cesium 3D TileSet which references a binary GLTF tile.
- * The tileset JSON and the GLTF blob are stored as browser Blob objects
- * (see https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static).
+ * in the form of a Cesium PrimitiveCollection.
  *
  * The WASM TileFatureLayer object is stored as a blob when not needed,
  * to keep the memory usage within reasonable limits. To use the wrapped
@@ -30,9 +28,7 @@ export class FeatureTile
         this.children = undefined;
         this.tileFeatureLayerInitDeserialized = tileFeatureLayer;
         this.tileFeatureLayerSerialized = null;
-        this.glbUrl = null;
-        this.tileSetUrl = null;
-        this.tileSet = null;
+        this.primitiveCollection = null;
         this.disposed = false;
     }
 
@@ -41,54 +37,26 @@ export class FeatureTile
      * contains a single tile. Returns a promise which resolves to true,
      * if there is a freshly baked Cesium3DTileset, or false,
      * if no output was generated because the tile is empty.
-     * @param {*} glbConverter The WASM GLTF converter that should be used.
+     * @param {*} cesiumConverter The Cesium primitive renderer that should be used.
      * @param {null} style The style that is used to make the conversion.
      */
-    async render(glbConverter, style)
+    async render(cesiumConverter, style)
     {
-        // Start timer
-        let startOverall = performance.now();
+        // Do not try to render if the underlying data is disposed.
+        if (this.disposed)
+            return false;
 
-        // Remove any previous render-result, as a new one is generated
-        // TODO: Ensure that the View also takes note of the removed Cesium3DTile.
+        // Remove any previous render-result, as a new one is generated.
+        // TODO: Ensure that the View also takes note of the removed PrimitiveCollection.
         //  This will become apparent once interactive re-styling is a prime use-case.
         this.disposeRenderResult();
 
-        let startGLBConversion = performance.now();
-        let origin = null;
         this.peek(tileFeatureLayer => {
-            this.glbUrl = blobUriFromWasm(this.coreLib, sharedBuffer => {
-                origin = glbConverter.render(style, tileFeatureLayer, sharedBuffer);
-                if (sharedBuffer.getSize() === 0)
-                    return false;
-            }, "model/gltf-binary");
+            this.primitiveCollection = cesiumConverter.render(style, tileFeatureLayer);
         });
-        let endGLBConversion = performance.now();
-        console.debug(`[${this.id}] GLB conversion time: ${endGLBConversion - startGLBConversion}ms`);
 
-        // The GLB URL will be null if there were no features to render.
-        if (this.glbUrl === null)
-            return false;
-
-        let startTilesetConversion = performance.now();
-        this.tileSetUrl = blobUriFromWasm(this.coreLib, sharedBuffer => {
-            glbConverter.makeTileset(this.glbUrl, origin, sharedBuffer);
-        }, "application/json");
-        let endTilesetConversion = performance.now();
-        console.debug(`[${this.id}] Tileset conversion time: ${endTilesetConversion - startTilesetConversion}ms`);
-
-        let startTilesetFromUrl = performance.now();
-        this.tileSet = await Cesium.Cesium3DTileset.fromUrl(this.tileSetUrl, {
-            featureIdLabel: "mapgetFeatureIndex"
-        })
-
-        let endTilesetFromUrl = performance.now();
-        console.debug(`[${this.id}] Cesium tileset from URL time: ${endTilesetFromUrl - startTilesetFromUrl}ms`);
-
-        let endOverall = performance.now();
-        console.debug(`[${this.id}] Overall execution time: ${endOverall - startOverall}ms`);
-
-        return true;
+        // The primitive collection will be null if there were no features to render.
+        return this.primitiveCollection !== null && this.primitiveCollection !== undefined;
     }
 
     /**
@@ -97,7 +65,7 @@ export class FeatureTile
      * @returns The value returned by the callback.
      */
     peek(callback) {
-        // For the first call to peek, the tileFeatureLayer member
+        // For the first call to peek, the tileFeatureLayerInitDeserialized member
         // is still set, and the tileFeatureLayerSerialized is not yet set.
         let deserializedLayer = this.tileFeatureLayerInitDeserialized;
         if (this.tileFeatureLayerInitDeserialized) {
@@ -132,16 +100,12 @@ export class FeatureTile
      */
     disposeRenderResult()
     {
-        if (!this.tileSet)
+        if (!this.primitiveCollection)
             return;
-        if (!this.tileSet.isDestroyed)
-            this.tileSet.destroy();
+        if (!this.primitiveCollection.isDestroyed())
+            this.primitiveCollection.destroy();
 
-        this.tileSet = null;
-        URL.revokeObjectURL(this.tileSetUrl);
-        this.tileSetUrl = null;
-        URL.revokeObjectURL(this.glbUrl);
-        this.glbUrl = null;
+        this.primitiveCollection = null;
     }
 
     /**
@@ -155,7 +119,6 @@ export class FeatureTile
             this.tileFeatureLayerInitDeserialized = null;
         }
         this.disposed = true;
-        console.debug(`[${this.id}] Disposed.`);
     }
 }
 

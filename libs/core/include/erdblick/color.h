@@ -3,12 +3,13 @@
 #include <glm/glm.hpp>
 #include <stdint.h>
 #include <string>
+#include "cesium-interface/cesium.h"
 
 namespace erdblick
 {
 
 /**
-  * Color Class
+ * Color Class
  */
 class Color : public glm::u8vec3
 {
@@ -30,10 +31,11 @@ public:
       * - #fff
       * - 0xfffff
       * - 0xfff
+      * - A CSS color name: https://www.w3.org/wiki/CSS/Properties/color/keywords
       * If none of these formats matches the input, the resulting color will be invalid.
      */
-    Color(const char* hexValue);
-    Color(const std::string& hexValue);
+    Color(const char* colorString);
+    Color(const std::string& colorString);
 
     /**
       * Construct a color from 8 bit color components
@@ -112,162 +114,21 @@ public:
     bool isValid() const;
 
     /**
-      * Predefined color constants
+     * Convert the color to a CesiumJS.Color object.
      */
-    static Color const AliceBlue;
-    static Color const AntiqueWhite;
-    static Color const Aqua;
-    static Color const Aquamarine;
-    static Color const Azure;
-    static Color const Beige;
-    static Color const Bisque;
-    static Color const Black;
-    static Color const BlanchedAlmond;
-    static Color const Blue;
-    static Color const BlueViolet;
-    static Color const Brown;
-    static Color const BurlyWood;
-    static Color const CadetBlue;
-    static Color const Chartreuse;
-    static Color const Chocolate;
-    static Color const Coral;
-    static Color const CornflowerBlue;
-    static Color const Cornsilk;
-    static Color const Crimson;
-    static Color const Cyan;
-    static Color const DarkBlue;
-    static Color const DarkCyan;
-    static Color const DarkGoldenRod;
-    static Color const DarkGray;
-    static Color const DarkGrey;
-    static Color const DarkGreen;
-    static Color const DarkKhaki;
-    static Color const DarkMagenta;
-    static Color const DarkOliveGreen;
-    static Color const DarkOrange;
-    static Color const DarkOrchid;
-    static Color const DarkRed;
-    static Color const DarkSalmon;
-    static Color const DarkSeaGreen;
-    static Color const DarkSlateBlue;
-    static Color const DarkSlateGray;
-    static Color const DarkSlateGrey;
-    static Color const DarkTurquoise;
-    static Color const DarkViolet;
-    static Color const DeepPink;
-    static Color const DeepSkyBlue;
-    static Color const DimGray;
-    static Color const DimGrey;
-    static Color const DodgerBlue;
-    static Color const FireBrick;
-    static Color const FloralWhite;
-    static Color const ForestGreen;
-    static Color const Fuchsia;
-    static Color const Gainsboro;
-    static Color const GhostWhite;
-    static Color const Gold;
-    static Color const GoldenRod;
-    static Color const Gray;
-    static Color const Grey;
-    static Color const Green;
-    static Color const GreenYellow;
-    static Color const HoneyDew;
-    static Color const HotPink;
-    static Color const IndianRed;
-    static Color const Indigo;
-    static Color const Ivory;
-    static Color const Khaki;
-    static Color const Lavender;
-    static Color const LavenderBlush;
-    static Color const LawnGreen;
-    static Color const LemonChiffon;
-    static Color const LightBlue;
-    static Color const LightCoral;
-    static Color const LightCyan;
-    static Color const LightGoldenRodYellow;
-    static Color const LightGray;
-    static Color const LightGrey;
-    static Color const LightGreen;
-    static Color const LightPink;
-    static Color const LightSalmon;
-    static Color const LightSeaGreen;
-    static Color const LightSkyBlue;
-    static Color const LightSlateGray;
-    static Color const LightSlateGrey;
-    static Color const LightSteelBlue;
-    static Color const LightYellow;
-    static Color const Lime;
-    static Color const LimeGreen;
-    static Color const Linen;
-    static Color const Magenta;
-    static Color const Maroon;
-    static Color const MediumAquaMarine;
-    static Color const MediumBlue;
-    static Color const MediumOrchid;
-    static Color const MediumPurple;
-    static Color const MediumSeaGreen;
-    static Color const MediumSlateBlue;
-    static Color const MediumSpringGreen;
-    static Color const MediumTurquoise;
-    static Color const MediumVioletRed;
-    static Color const MidnightBlue;
-    static Color const MintCream;
-    static Color const MistyRose;
-    static Color const Moccasin;
-    static Color const NavajoWhite;
-    static Color const Navy;
-    static Color const OldLace;
-    static Color const Olive;
-    static Color const OliveDrab;
-    static Color const Orange;
-    static Color const OrangeRed;
-    static Color const Orchid;
-    static Color const PaleGoldenRod;
-    static Color const PaleGreen;
-    static Color const PaleTurquoise;
-    static Color const PaleVioletRed;
-    static Color const PapayaWhip;
-    static Color const PeachPuff;
-    static Color const Peru;
-    static Color const Pink;
-    static Color const Plum;
-    static Color const PowderBlue;
-    static Color const Purple;
-    static Color const RebeccaPurple;
-    static Color const Red;
-    static Color const RosyBrown;
-    static Color const RoyalBlue;
-    static Color const SaddleBrown;
-    static Color const Salmon;
-    static Color const SandyBrown;
-    static Color const SeaGreen;
-    static Color const SeaShell;
-    static Color const Sienna;
-    static Color const Silver;
-    static Color const SkyBlue;
-    static Color const SlateBlue;
-    static Color const SlateGray;
-    static Color const SlateGrey;
-    static Color const Snow;
-    static Color const SpringGreen;
-    static Color const SteelBlue;
-    static Color const Tan;
-    static Color const Teal;
-    static Color const Thistle;
-    static Color const Tomato;
-    static Color const Turquoise;
-    static Color const Violet;
-    static Color const Wheat;
-    static Color const White;
-    static Color const WhiteSmoke;
-    static Color const Yellow;
-    static Color const YellowGreen;
+    [[nodiscard]] JsValue toCesiumColor(float opacity) const;
 
 private:
     /**
       * Flag indicating if the color is valid
      */
     bool valid_ = false;
+
+    /**
+     * Map of supported CSS color names from here:
+     * https://www.w3.org/wiki/CSS/Properties/color/keywords
+     */
+    static const std::map<std::string, Color> cssColors;
 };
 
 }

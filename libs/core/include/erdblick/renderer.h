@@ -3,6 +3,7 @@
 #include "mapget/model/featurelayer.h"
 #include "buffer.h"
 #include "style.h"
+#include "cesium-interface/object.h"
 
 namespace erdblick
 {
@@ -13,23 +14,11 @@ public:
     FeatureLayerRenderer();
 
     /**
-     * Convert a TileFeatureLayer to a GLB buffer. Returns the
-     * cartesian origin of the tile. If there are no features to render,
-     * either because the layer is empty or because no style rule matched,
-     * then the size of the result buffer will be zero.
+     * Convert a TileFeatureLayer to a collection of Cesium scene
+     * primitives, using a particular style sheet.
      */
-    mapget::Point render(
-        const FeatureLayerStyle& style,
-        const std::shared_ptr<mapget::TileFeatureLayer>& layer,
-        SharedUint8Array& result);
-
-    /**
-     * Create a Cesium tileset-wrapper for a GLB-converted TileFeatureLayer URL.
-     */
-    void makeTileset(
-        std::string const& tileGlbUrl,
-        mapget::Point const& origin,
-        SharedUint8Array& glbResultBuffer);
+    NativeJsValue
+    render(const FeatureLayerStyle& style, const std::shared_ptr<mapget::TileFeatureLayer>& layer);
 };
 
 }

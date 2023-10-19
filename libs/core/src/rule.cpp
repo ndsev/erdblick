@@ -1,5 +1,6 @@
 #include "rule.h"
 #include <iostream>
+#include "simfil/value.h"
 
 namespace erdblick
 {
@@ -24,6 +25,9 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
         else if (g == "line") {
             geometryTypes_.push_back(simfil::Geometry::GeomType::Line);
         }
+        else if (g == "polygon") {
+            geometryTypes_.push_back(simfil::Geometry::GeomType::Polygon);
+        }
         else {
             std::cout << "Unsupported geometry type: " << g << std::endl;
             return;
@@ -31,23 +35,43 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
     }
 
     // Parse optional fields.
-    if (yaml["type"]) {
+    if (yaml["type"].IsDefined()) {
+        // Parse a feature type regular expression, e.g. `Lane|Boundary`
         type_ = yaml["type"].as<std::string>();
     }
-    if (yaml["filter"]) {
+    if (yaml["filter"].IsDefined()) {
+        // Parse a simfil filter expression, e.g. `properties.functionalRoadClass == 4`
         filter_ = yaml["filter"].as<std::string>();
     }
-    if (yaml["color"]) {
-        color_ = Color(yaml["color"].as<std::string>());
+    if (yaml["color"].IsDefined()) {
+        // Parse a CSS color
+        color_ = Color(yaml["color"].as<std::string>()).toFVec4();
     }
-    if (yaml["opacity"]) {
-        opacity_ = yaml["opacity"].as<float>();
+    if (yaml["opacity"].IsDefined()) {
+        // Parse an opacity float value in range 0..1
+        color_.a = yaml["opacity"].as<float>();
+    }
+    if (yaml["width"].IsDefined()) {
+        // Parse a line width, defaults to pixels
+        width_ = yaml["width"].as<float>();
     }
 }
 
-bool FeatureStyleRule::match(const mapget::Feature&) const
+bool FeatureStyleRule::match(mapget::Feature& feature) const
 {
-    // TODO check for matching type pattern, filter.
+    // Filter by feature type regular expression
+    if (type_) {
+        auto typeId = feature.typeId();
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_))
+            return false;
+    }
+
+    // Filter by simfil expression
+    if (!filter_.empty()) {
+        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>())
+            return false;
+    }
+
     return true;
 }
 
@@ -56,24 +80,14 @@ const std::vector<simfil::Geometry::GeomType>& FeatureStyleRule::geometryTypes()
     return geometryTypes_;
 }
 
-const std::string& FeatureStyleRule::typeIdPattern() const
-{
-    return type_;
-}
-
-const std::string& FeatureStyleRule::filter() const
-{
-    return filter_;
-}
-
-float FeatureStyleRule::opacity() const
-{
-    return opacity_;
-}
-
-Color const& FeatureStyleRule::color() const
+glm::fvec4 const& FeatureStyleRule::color() const
 {
     return color_;
+}
+
+float FeatureStyleRule::width() const
+{
+    return width_;
 }
 
 }

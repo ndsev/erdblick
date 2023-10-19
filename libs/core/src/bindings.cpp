@@ -7,6 +7,9 @@
 #include "style.h"
 #include "testdataprovider.h"
 
+#include "cesium-interface/point-conversion.h"
+#include "cesium-interface/primitive.h"
+
 #include "mapget/log.h"
 
 using namespace erdblick;
@@ -94,6 +97,16 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     return tileKey.toString();
 }
 
+/** Create a test polyline. */
+NativeJsValue makeTestLine() {
+    CesiumPrimitive result;
+    result.addLine(JsValue::newList({
+        JsValue(wgsToCartesian<mapget::Point>({42., 11., 0.})),
+        JsValue(wgsToCartesian<mapget::Point>({42., 12., 0.}))
+    }), YAML::Load("{geometry: ['line'], color: red}"), 0);
+    return result.toJsObject();
+}
+
 EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
 {
     // Activate this to see a lot more output from the WASM lib.
@@ -111,6 +124,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
         .field("x", &mapget::Point::x)
         .field("y", &mapget::Point::y)
         .field("z", &mapget::Point::z);
+    em::register_vector<mapget::Point>("Points");
 
     ////////// Viewport
     em::value_object<Viewport>("Viewport")
@@ -176,8 +190,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// FeatureLayerRenderer
     em::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
         .constructor()
-        .function("render", &FeatureLayerRenderer::render)
-        .function("makeTileset", &FeatureLayerRenderer::makeTileset);
+        .function("render", &FeatureLayerRenderer::render);
 
     ////////// TestDataProvider
     em::class_<TestDataProvider>("TestDataProvider")
@@ -214,4 +227,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
 
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
+
+    ////////// Get a test line
+    em::function("makeTestLine", &makeTestLine);
 }

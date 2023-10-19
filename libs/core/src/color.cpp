@@ -10,17 +10,25 @@ Color::Color(const Color& other)
       , valid_(other.valid_)
 {}
 
-Color::Color(const char* hexString)
-    : Color(std::string{hexString})
+Color::Color(const char* colorString)
+    : Color(std::string{colorString})
 {}
 
-Color::Color(const std::string& hexString)
+Color::Color(const std::string& colorString) : vec()
 {
-    std::string_view str(hexString);
+    // Match the string to a CSS color name, e.g. 'red'
+    auto cssColorIt = cssColors.find(colorString);
+    if (cssColorIt != cssColors.end()) {
+        *this = cssColorIt->second;
+        return;
+    }
+
+    // Parse the string as a hex-color
+    std::string_view str(colorString);
 
     if (str.find("0x") == 0)
         str.remove_prefix(2);
-    else if (str.find("#") == 0)
+    else if (str.find('#') == 0)
         str.remove_prefix(1);
 
     auto parseHexDigit = [](std::string_view& v, std::size_t digits) {
@@ -247,154 +255,160 @@ bool Color::isValid() const {
     return valid_ || r != 0 || g != 0 || b != 0;
 }
 
-Color const Color::AliceBlue("#F0F8FF");
-Color const Color::AntiqueWhite("#FAEBD7");
-Color const Color::Aqua("#00FFFF");
-Color const Color::Aquamarine("#7FFFD4");
-Color const Color::Azure("#F0FFFF");
-Color const Color::Beige("#F5F5DC");
-Color const Color::Bisque("#FFE4C4");
-Color const Color::Black("#000000");
-Color const Color::BlanchedAlmond("#FFEBCD");
-Color const Color::Blue("#0000FF");
-Color const Color::BlueViolet("#8A2BE2");
-Color const Color::Brown("#A52A2A");
-Color const Color::BurlyWood("#DEB887");
-Color const Color::CadetBlue("#5F9EA0");
-Color const Color::Chartreuse("#7FFF00");
-Color const Color::Chocolate("#D2691E");
-Color const Color::Coral("#FF7F50");
-Color const Color::CornflowerBlue("#6495ED");
-Color const Color::Cornsilk("#FFF8DC");
-Color const Color::Crimson("#DC143C");
-Color const Color::Cyan("#00FFFF");
-Color const Color::DarkBlue("#00008B");
-Color const Color::DarkCyan("#008B8B");
-Color const Color::DarkGoldenRod("#B8860B");
-Color const Color::DarkGray("#A9A9A9");
-Color const Color::DarkGrey("#A9A9A9");
-Color const Color::DarkGreen("#006400");
-Color const Color::DarkKhaki("#BDB76B");
-Color const Color::DarkMagenta("#8B008B");
-Color const Color::DarkOliveGreen("#556B2F");
-Color const Color::DarkOrange("#FF8C00");
-Color const Color::DarkOrchid("#9932CC");
-Color const Color::DarkRed("#8B0000");
-Color const Color::DarkSalmon("#E9967A");
-Color const Color::DarkSeaGreen("#8FBC8F");
-Color const Color::DarkSlateBlue("#483D8B");
-Color const Color::DarkSlateGray("#2F4F4F");
-Color const Color::DarkSlateGrey("#2F4F4F");
-Color const Color::DarkTurquoise("#00CED1");
-Color const Color::DarkViolet("#9400D3");
-Color const Color::DeepPink("#FF1493");
-Color const Color::DeepSkyBlue("#00BFFF");
-Color const Color::DimGray("#696969");
-Color const Color::DimGrey("#696969");
-Color const Color::DodgerBlue("#1E90FF");
-Color const Color::FireBrick("#B22222");
-Color const Color::FloralWhite("#FFFAF0");
-Color const Color::ForestGreen("#228B22");
-Color const Color::Fuchsia("#FF00FF");
-Color const Color::Gainsboro("#DCDCDC");
-Color const Color::GhostWhite("#F8F8FF");
-Color const Color::Gold("#FFD700");
-Color const Color::GoldenRod("#DAA520");
-Color const Color::Gray("#808080");
-Color const Color::Grey("#808080");
-Color const Color::Green("#008000");
-Color const Color::GreenYellow("#ADFF2F");
-Color const Color::HoneyDew("#F0FFF0");
-Color const Color::HotPink("#FF69B4");
-Color const Color::IndianRed("#CD5C5C");
-Color const Color::Indigo("#4B0082");
-Color const Color::Ivory("#FFFFF0");
-Color const Color::Khaki("#F0E68C");
-Color const Color::Lavender("#E6E6FA");
-Color const Color::LavenderBlush("#FFF0F5");
-Color const Color::LawnGreen("#7CFC00");
-Color const Color::LemonChiffon("#FFFACD");
-Color const Color::LightBlue("#ADD8E6");
-Color const Color::LightCoral("#F08080");
-Color const Color::LightCyan("#E0FFFF");
-Color const Color::LightGoldenRodYellow("#FAFAD2");
-Color const Color::LightGray("#D3D3D3");
-Color const Color::LightGrey("#D3D3D3");
-Color const Color::LightGreen("#90EE90");
-Color const Color::LightPink("#FFB6C1");
-Color const Color::LightSalmon("#FFA07A");
-Color const Color::LightSeaGreen("#20B2AA");
-Color const Color::LightSkyBlue("#87CEFA");
-Color const Color::LightSlateGray("#778899");
-Color const Color::LightSlateGrey("#778899");
-Color const Color::LightSteelBlue("#B0C4DE");
-Color const Color::LightYellow("#FFFFE0");
-Color const Color::Lime("#00FF00");
-Color const Color::LimeGreen("#32CD32");
-Color const Color::Linen("#FAF0E6");
-Color const Color::Magenta("#FF00FF");
-Color const Color::Maroon("#800000");
-Color const Color::MediumAquaMarine("#66CDAA");
-Color const Color::MediumBlue("#0000CD");
-Color const Color::MediumOrchid("#BA55D3");
-Color const Color::MediumPurple("#9370DB");
-Color const Color::MediumSeaGreen("#3CB371");
-Color const Color::MediumSlateBlue("#7B68EE");
-Color const Color::MediumSpringGreen("#00FA9A");
-Color const Color::MediumTurquoise("#48D1CC");
-Color const Color::MediumVioletRed("#C71585");
-Color const Color::MidnightBlue("#191970");
-Color const Color::MintCream("#F5FFFA");
-Color const Color::MistyRose("#FFE4E1");
-Color const Color::Moccasin("#FFE4B5");
-Color const Color::NavajoWhite("#FFDEAD");
-Color const Color::Navy("#000080");
-Color const Color::OldLace("#FDF5E6");
-Color const Color::Olive("#808000");
-Color const Color::OliveDrab("#6B8E23");
-Color const Color::Orange("#FFA500");
-Color const Color::OrangeRed("#FF4500");
-Color const Color::Orchid("#DA70D6");
-Color const Color::PaleGoldenRod("#EEE8AA");
-Color const Color::PaleGreen("#98FB98");
-Color const Color::PaleTurquoise("#AFEEEE");
-Color const Color::PaleVioletRed("#DB7093");
-Color const Color::PapayaWhip("#FFEFD5");
-Color const Color::PeachPuff("#FFDAB9");
-Color const Color::Peru("#CD853F");
-Color const Color::Pink("#FFC0CB");
-Color const Color::Plum("#DDA0DD");
-Color const Color::PowderBlue("#B0E0E6");
-Color const Color::Purple("#800080");
-Color const Color::RebeccaPurple("#663399");
-Color const Color::Red("#FF0000");
-Color const Color::RosyBrown("#BC8F8F");
-Color const Color::RoyalBlue("#4169E1");
-Color const Color::SaddleBrown("#8B4513");
-Color const Color::Salmon("#FA8072");
-Color const Color::SandyBrown("#F4A460");
-Color const Color::SeaGreen("#2E8B57");
-Color const Color::SeaShell("#FFF5EE");
-Color const Color::Sienna("#A0522D");
-Color const Color::Silver("#C0C0C0");
-Color const Color::SkyBlue("#87CEEB");
-Color const Color::SlateBlue("#6A5ACD");
-Color const Color::SlateGray("#708090");
-Color const Color::SlateGrey("#708090");
-Color const Color::Snow("#FFFAFA");
-Color const Color::SpringGreen("#00FF7F");
-Color const Color::SteelBlue("#4682B4");
-Color const Color::Tan("#D2B48C");
-Color const Color::Teal("#008080");
-Color const Color::Thistle("#D8BFD8");
-Color const Color::Tomato("#FF6347");
-Color const Color::Turquoise("#40E0D0");
-Color const Color::Violet("#EE82EE");
-Color const Color::Wheat("#F5DEB3");
-Color const Color::White("#FFFFFF");
-Color const Color::WhiteSmoke("#F5F5F5");
-Color const Color::Yellow("#FFFF00");
-Color const Color::YellowGreen("#9ACD32");
+JsValue Color::toCesiumColor(float opacity) const
+{
+    return Cesium().Color.New((float)r/255., (float)g/255., (float)b/255., opacity);
+}
 
+const std::map<std::string, Color> Color::cssColors = {
+    {"aliceblue", Color("#F0F8FF")},
+    {"antiquewhite", Color("#FAEBD7")},
+    {"aqua", Color("#00FFFF")},
+    {"aquamarine", Color("#7FFFD4")},
+    {"azure", Color("#F0FFFF")},
+    {"beige", Color("#F5F5DC")},
+    {"bisque", Color("#FFE4C4")},
+    {"black", Color("#000000")},
+    {"blanchedalmond", Color("#FFEBCD")},
+    {"blue", Color("#0000FF")},
+    {"blueviolet", Color("#8A2BE2")},
+    {"brown", Color("#A52A2A")},
+    {"burlywood", Color("#DEB887")},
+    {"cadetblue", Color("#5F9EA0")},
+    {"chartreuse", Color("#7FFF00")},
+    {"chocolate", Color("#D2691E")},
+    {"coral", Color("#FF7F50")},
+    {"cornflowerblue", Color("#6495ED")},
+    {"cornsilk", Color("#FFF8DC")},
+    {"crimson", Color("#DC143C")},
+    {"cyan", Color("#00FFFF")},
+    {"darkblue", Color("#00008B")},
+    {"darkcyan", Color("#008B8B")},
+    {"darkgoldenrod", Color("#B8860B")},
+    {"darkgray", Color("#A9A9A9")},
+    {"darkgrey", Color("#A9A9A9")},
+    {"darkgreen", Color("#006400")},
+    {"darkkhaki", Color("#BDB76B")},
+    {"darkmagenta", Color("#8B008B")},
+    {"darkolivegreen", Color("#556B2F")},
+    {"darkorange", Color("#FF8C00")},
+    {"darkorchid", Color("#9932CC")},
+    {"darkred", Color("#8B0000")},
+    {"darksalmon", Color("#E9967A")},
+    {"darkseagreen", Color("#8FBC8F")},
+    {"darkslateblue", Color("#483D8B")},
+    {"darkslategray", Color("#2F4F4F")},
+    {"darkslategrey", Color("#2F4F4F")},
+    {"darkturquoise", Color("#00CED1")},
+    {"darkviolet", Color("#9400D3")},
+    {"deeppink", Color("#FF1493")},
+    {"deepskyblue", Color("#00BFFF")},
+    {"dimgray", Color("#696969")},
+    {"dimgrey", Color("#696969")},
+    {"dodgerblue", Color("#1E90FF")},
+    {"firebrick", Color("#B22222")},
+    {"floralwhite", Color("#FFFAF0")},
+    {"forestgreen", Color("#228B22")},
+    {"fuchsia", Color("#FF00FF")},
+    {"gainsboro", Color("#DCDCDC")},
+    {"ghostwhite", Color("#F8F8FF")},
+    {"gold", Color("#FFD700")},
+    {"goldenrod", Color("#DAA520")},
+    {"gray", Color("#808080")},
+    {"grey", Color("#808080")},
+    {"green", Color("#008000")},
+    {"greenyellow", Color("#ADFF2F")},
+    {"honeydew", Color("#F0FFF0")},
+    {"hotpink", Color("#FF69B4")},
+    {"indianred", Color("#CD5C5C")},
+    {"indigo", Color("#4B0082")},
+    {"ivory", Color("#FFFFF0")},
+    {"khaki", Color("#F0E68C")},
+    {"lavender", Color("#E6E6FA")},
+    {"lavenderblush", Color("#FFF0F5")},
+    {"lawngreen", Color("#7CFC00")},
+    {"lemonchiffon", Color("#FFFACD")},
+    {"lightblue", Color("#ADD8E6")},
+    {"lightcoral", Color("#F08080")},
+    {"lightcyan", Color("#E0FFFF")},
+    {"lightgoldenrodyellow", Color("#FAFAD2")},
+    {"lightgray", Color("#D3D3D3")},
+    {"lightgrey", Color("#D3D3D3")},
+    {"lightgreen", Color("#90EE90")},
+    {"lightpink", Color("#FFB6C1")},
+    {"lightsalmon", Color("#FFA07A")},
+    {"lightseagreen", Color("#20B2AA")},
+    {"lightskyblue", Color("#87CEFA")},
+    {"lightslategray", Color("#778899")},
+    {"lightslategrey", Color("#778899")},
+    {"lightsteelblue", Color("#B0C4DE")},
+    {"lightyellow", Color("#FFFFE0")},
+    {"lime", Color("#00FF00")},
+    {"limegreen", Color("#32CD32")},
+    {"linen", Color("#FAF0E6")},
+    {"magenta", Color("#FF00FF")},
+    {"maroon", Color("#800000")},
+    {"mediumaquamarine", Color("#66CDAA")},
+    {"mediumblue", Color("#0000CD")},
+    {"mediumorchid", Color("#BA55D3")},
+    {"mediumpurple", Color("#9370DB")},
+    {"mediumseagreen", Color("#3CB371")},
+    {"mediumslateblue", Color("#7B68EE")},
+    {"mediumspringgreen", Color("#00FA9A")},
+    {"mediumturquoise", Color("#48D1CC")},
+    {"mediumvioletred", Color("#C71585")},
+    {"midnightblue", Color("#191970")},
+    {"mintcream", Color("#F5FFFA")},
+    {"mistyrose", Color("#FFE4E1")},
+    {"moccasin", Color("#FFE4B5")},
+    {"navajowhite", Color("#FFDEAD")},
+    {"navy", Color("#000080")},
+    {"oldlace", Color("#FDF5E6")},
+    {"olive", Color("#808000")},
+    {"olivedrab", Color("#6B8E23")},
+    {"orange", Color("#FFA500")},
+    {"orangered", Color("#FF4500")},
+    {"orchid", Color("#DA70D6")},
+    {"palegoldenrod", Color("#EEE8AA")},
+    {"palegreen", Color("#98FB98")},
+    {"paleturquoise", Color("#AFEEEE")},
+    {"palevioletred", Color("#DB7093")},
+    {"papayawhip", Color("#FFEFD5")},
+    {"peachpuff", Color("#FFDAB9")},
+    {"peru", Color("#CD853F")},
+    {"pink", Color("#FFC0CB")},
+    {"plum", Color("#DDA0DD")},
+    {"powderblue", Color("#B0E0E6")},
+    {"purple", Color("#800080")},
+    {"rebeccapurple", Color("#663399")},
+    {"red", Color("#FF0000")},
+    {"rosybrown", Color("#BC8F8F")},
+    {"royalblue", Color("#4169E1")},
+    {"saddlebrown", Color("#8B4513")},
+    {"salmon", Color("#FA8072")},
+    {"sandybrown", Color("#F4A460")},
+    {"seagreen", Color("#2E8B57")},
+    {"seashell", Color("#FFF5EE")},
+    {"sienna", Color("#A0522D")},
+    {"silver", Color("#C0C0C0")},
+    {"skyblue", Color("#87CEEB")},
+    {"slateblue", Color("#6A5ACD")},
+    {"slategray", Color("#708090")},
+    {"slategrey", Color("#708090")},
+    {"snow", Color("#FFFAFA")},
+    {"springgreen", Color("#00FF7F")},
+    {"steelblue", Color("#4682B4")},
+    {"tan", Color("#D2B48C")},
+    {"teal", Color("#008080")},
+    {"thistle", Color("#D8BFD8")},
+    {"tomato", Color("#FF6347")},
+    {"turquoise", Color("#40E0D0")},
+    {"violet", Color("#EE82EE")},
+    {"wheat", Color("#F5DEB3")},
+    {"white", Color("#FFFFFF")},
+    {"whitesmoke", Color("#F5F5F5")},
+    {"yellow", Color("#FFFF00")},
+    {"yellowgreen", Color("#9ACD32")},
+};
 
 }

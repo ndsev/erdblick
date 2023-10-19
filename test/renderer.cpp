@@ -22,11 +22,10 @@ TEST_CASE("FeatureLayerRenderer", "[erdblick.renderer]")
 
     auto testLayer = TestDataProvider().getTestLayer(42., 11., 13);
 
-    SharedUint8Array result;
     FeatureLayerRenderer renderer;
-    renderer.render(style, testLayer, result);
+    auto result = renderer.render(style, testLayer);
 
-    std::cerr << result.toString() << std::endl;
+    std::cout << result << std::endl;
 
-    REQUIRE(result.getSize() != 0);
+    REQUIRE(!result.empty());
 }

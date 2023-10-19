@@ -6,6 +6,8 @@
 
 #include "color.h"
 
+#include <regex>
+
 namespace erdblick
 {
 
@@ -13,21 +15,18 @@ class FeatureStyleRule
 {
 public:
     FeatureStyleRule(YAML::Node const& yaml);
-    bool match(const mapget::Feature& feature) const;
+    bool match(mapget::Feature& feature) const;
 
     const std::vector<simfil::Geometry::GeomType>& geometryTypes() const;
-    const std::string& typeIdPattern() const;
-    const std::string& filter() const;
-    float opacity() const;
-    Color const& color() const;
+    glm::fvec4 const& color() const;
+    float width() const;
 
 private:
-    // TODO use GeometryTypeBitmask instead!
     std::vector<simfil::Geometry::GeomType> geometryTypes_;
-    std::string type_;
+    std::optional<std::regex> type_;
     std::string filter_;
-    Color color_;
-    float opacity_ = .0;
+    glm::fvec4 color_{.0, .0, .0, 1.};
+    float width_ = 1.;
 };
 
 }
