@@ -24,19 +24,61 @@ struct CesiumPrimitive
     static CesiumPrimitive withPolylineColorAppearance();
 
     /**
-     * Add a 3D polyline to the primitive. The provided coordinates
-     * must already be transformed to Cesium cartesian coordinates.
+     * Create a primitive which uses the PerInstanceColorAppearance.
+     * See https://cesium.com/learn/cesiumjs/ref-doc/PerInstanceColorAppearance.html
      */
-    void addLine(JsValue const& pointList, FeatureStyleRule const& style, uint32_t id);
+    static CesiumPrimitive withPerInstanceColorAppearance();
+
+    /**
+     * Add a 3D polyline to the primitive. The provided vertices
+     * must be a JS list of Point objects in Cesium cartesian coordinates.
+     *
+     * Note: In order to visualize the line correctly, the primitive
+     * must have been constructed using withPolylineColorAppearance.
+     */
+    void addPolyLine(JsValue const& vertices, FeatureStyleRule const& style, uint32_t id);
+
+    /**
+     * Add a 3D polygon to the primitive. The provided vertices
+     * must be a JS list of Point objects in Cesium cartesian coordinates.
+     *
+     * Note: In order to visualize the polygon correctly, the primitive
+     * must have been constructed using withPerInstanceColorAppearance.
+     */
+    void addPolygon(JsValue const& vertices, FeatureStyleRule const& style, uint32_t id);
+
+    /**
+     * Add a 3D triangle mesh to the primitive. The provided vertices
+     * must be a JS Float64Array like [x0,y0,z0,x1,y1,z2...]. This is unlike other functions
+     * here which need a JS list of Point objects, due to Cesium internals.
+     *
+     * Note: In order to visualize the triangles correctly, the primitive
+     * must have been constructed using withPerInstanceColorAppearance.
+     */
+    void addTriangles(JsValue const& float64Array, FeatureStyleRule const& style, uint32_t id);
 
     /**
      * Constructs a JS Primitive from the provided Geometry instances.
      */
-    NativeJsValue toJsObject();
+    [[nodiscard]] NativeJsValue toJsObject() const;
+
+    /**
+     * Check if any geometry has been added to the primitive.
+     */
+    [[nodiscard]] bool empty() const;
 
 private:
+    /**
+     * Add a Cesium GeometryInstance which wraps a Cesium Geometry,
+     * and add it to this primitive's geometryInstances_ collection.
+     */
+    void addGeometryInstance(const FeatureStyleRule& style, uint32_t id, const JsValue& geom);
+
+    /** Number of entries in geometryInstances_. */
+    size_t numGeometryInstances_ = 0;
+
     /** geometryInstances option for the Primitive JS Object ctor. */
-    JsValue geometryInstances_ = JsValue::newList();
+    JsValue geometryInstances_ = JsValue::List();
 
     /** appearance option for the Primitive JS Object ctor. */
     JsValue appearance_;
