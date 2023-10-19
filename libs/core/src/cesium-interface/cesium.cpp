@@ -7,13 +7,20 @@ CesiumLib::CesiumLib() :
     ArcType("ArcType"),
     Color("Color"),
     ColorGeometryInstanceAttribute("ColorGeometryInstanceAttribute"),
+    ComponentDatatype("ComponentDatatype"),
+    Geometry("Geometry"),
+    GeometryAttribute("GeometryAttribute"),
     GeometryInstance("GeometryInstance"),
     Material("Material"),
+    PerInstanceColorAppearance("PerInstanceColorAppearance"),
+    PolygonGeometry("PolygonGeometry"),
+    PolygonHierarchy("PolygonHierarchy"),
     PolylineColorAppearance("PolylineColorAppearance"),
     PolylineGeometry("PolylineGeometry"),
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
     Primitive("Primitive"),
-    PrimitiveCollection("PrimitiveCollection")
+    PrimitiveCollection("PrimitiveCollection"),
+    PrimitiveType("PrimitiveType")
 {
 }
 
@@ -26,11 +33,6 @@ CesiumLib& Cesium()
 JsValue CesiumLib::MaterialFromType(std::string const& type, const JsValue& options)
 {
     return JsValue(Material.call<NativeJsValue>("fromType", type, *options));
-}
-
-JsValue CesiumLib::ColorAttributeFromColor(const JsValue& color)
-{
-    return JsValue(ColorGeometryInstanceAttribute.call<NativeJsValue>("fromColor", *color));
 }
 
 }
