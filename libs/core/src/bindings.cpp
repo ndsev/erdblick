@@ -2,7 +2,7 @@
 
 #include "aabb.h"
 #include "buffer.h"
-#include "renderer.h"
+#include "visualization.h"
 #include "stream.h"
 #include "style.h"
 #include "testdataprovider.h"
@@ -98,16 +98,12 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 }
 
 /** Create a test polyline. */
-NativeJsValue makeTestLine() {
-    CesiumPrimitive result;
-    result.addLine(JsValue::newList({
-        JsValue(wgsToCartesian<mapget::Point>({42., 11., 0.})),
-        JsValue(wgsToCartesian<mapget::Point>({42., 12., 0.}))
-    }), YAML::Load("{geometry: ['line'], color: red}"), 0);
-    return result.toJsObject();
+NativeJsValue generateTestPrimitive() {
+    auto testLayer = TestDataProvider().getTestLayer(11., 42., 11);
+    return FeatureLayerVisualization(TestDataProvider::style(), testLayer).primitiveCollection();
 }
 
-EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
+EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
@@ -188,9 +184,9 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                 }));
 
     ////////// FeatureLayerRenderer
-    em::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
-        .constructor()
-        .function("render", &FeatureLayerRenderer::render);
+    em::class_<FeatureLayerVisualization>("FeatureLayerRenderer")
+        .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
+        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
 
     ////////// TestDataProvider
     em::class_<TestDataProvider>("TestDataProvider")
@@ -228,6 +224,6 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
 
-    ////////// Get a test line
-    em::function("makeTestLine", &makeTestLine);
+    ////////// Get a rendered primitive from a test tile
+    em::function("generateTestPrimitive", &generateTestPrimitive);
 }

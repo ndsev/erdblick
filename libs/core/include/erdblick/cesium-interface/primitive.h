@@ -2,7 +2,7 @@
 
 #include "object.h"
 #include "mapget/model/tileid.h"
-#include "rule.h"
+#include "../rule.h"
 
 namespace erdblick
 {

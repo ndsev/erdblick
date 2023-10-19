@@ -25,7 +25,6 @@ export class ErdblickModel
         this.coreLib = coreLibrary;
         this.style = null;
         this.maps = null;
-        this.glbConverter = new coreLibrary.FeatureLayerRenderer();
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
         this.currentViewport = {

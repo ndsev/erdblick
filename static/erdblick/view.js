@@ -75,9 +75,10 @@ export class ErdblickView
 
         model.tileLayerAddedTopic.subscribe(tileLayer => {
             this.viewer.scene.primitives.add(tileLayer.primitiveCollection);
-            this.tileLayerForPrimitive.set(tileLayer.primitiveCollection, tileLayer);
+            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
+                this.tileLayerForPrimitive.set(tileLayer.primitiveCollection.get(i), tileLayer);
             this.viewer.scene.requestRender();
-        })
+        });
 
         model.tileLayerRemovedTopic.subscribe(tileLayer => {
             if (this.pickedFeature && this.pickedFeature.primitive === tileLayer.primitiveCollection) {
@@ -87,8 +88,10 @@ export class ErdblickView
                 this.setHoveredCesiumFeature(null);
             }
             this.viewer.scene.primitives.remove(tileLayer.primitiveCollection);
-            this.tileLayerForPrimitive.delete(tileLayer.primitiveCollection);
-        })
+            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
+                this.tileLayerForPrimitive.delete(tileLayer.primitiveCollection.get(i));
+            this.viewer.scene.requestRender();
+        });
 
         model.zoomToWgs84PositionTopic.subscribe(pos => {
             this.viewer.camera.setView({
