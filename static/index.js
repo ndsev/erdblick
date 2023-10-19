@@ -1,6 +1,7 @@
 import { ErdblickView } from "./erdblick/view.js";
 import { ErdblickModel } from "./erdblick/model.js";
 import libErdblickCore from "./libs/core/erdblick-core.js";
+import { ErdblickDebugApi } from "./erdblick/debugapi.js";
 
 // --------------------------- Initialize Map Componesnt --------------------------
 console.log("Loading core library ...")
@@ -15,6 +16,11 @@ libErdblickCore().then(coreLib =>
     window.reloadStyle = () => {
         mapModel.reloadStyle();
     }
+
+    // Add debug API that can be easily called
+    // from browser's debug console
+    const debugApi = new ErdblickDebugApi(mapView);
+    window.ebDebug = debugApi;
 
     mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
         if (!selectedFeatureWrapper) {
