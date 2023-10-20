@@ -9,6 +9,7 @@ namespace erdblick
 struct CesiumLib
 {
     CesiumClass ArcType;
+    CesiumClass BoundingSphere;
     CesiumClass Color;
     CesiumClass ColorGeometryInstanceAttribute;
     CesiumClass ComponentDatatype;

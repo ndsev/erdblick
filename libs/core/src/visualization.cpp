@@ -8,7 +8,8 @@ namespace erdblick {
 
 FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& style, const std::shared_ptr<mapget::TileFeatureLayer>& layer)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance()),
-      coloredMeshes_(CesiumPrimitive::withPerInstanceColorAppearance())
+      coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false)),
+      coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true))
 {
     uint32_t featureId = 0;
     for (auto&& feature : *layer) {
@@ -28,8 +29,10 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
     auto collection = Cesium().PrimitiveCollection.New();
     if (!coloredLines_.empty())
         collection.call<void>("add", coloredLines_.toJsObject());
-    if (!coloredMeshes_.empty())
-        collection.call<void>("add", coloredMeshes_.toJsObject());
+    if (!coloredNontrivialMeshes_.empty())
+        collection.call<void>("add", coloredNontrivialMeshes_.toJsObject());
+    if (!coloredTrivialMeshes_.empty())
+        collection.call<void>("add", coloredTrivialMeshes_.toJsObject());
     return *collection;
 }
 
@@ -46,7 +49,7 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
     switch (geom->geomType()) {
     case mapget::Geometry::GeomType::Polygon:
         if (auto verts = encodeVerticesAsList(geom)) {
-            coloredMeshes_.addPolygon(*verts, rule, id);
+            coloredNontrivialMeshes_.addPolygon(*verts, rule, id);
         }
         break;
     case mapget::Geometry::GeomType::Line:
@@ -56,7 +59,7 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
         break;
     case mapget::Geometry::GeomType::Mesh:
         if (auto verts = encodeVerticesAsFloat64Array(geom)) {
-            coloredMeshes_.addTriangles(*verts, rule, id);
+            coloredTrivialMeshes_.addTriangles(*verts, rule, id);
         }
         break;
     case mapget::Geometry::GeomType::Points:

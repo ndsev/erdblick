@@ -14,7 +14,9 @@ export class ErdblickDebugApi {
      * @param mapView Reference to a ErdblickView instance
      */
     constructor(mapView) {
-        this.mapView = mapView;
+        this.view = mapView;
+        this.model = mapView.model;
+        this.coreLib = mapView.model.coreLib;
     }
 
     /**

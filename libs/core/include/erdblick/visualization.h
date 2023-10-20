@@ -28,6 +28,7 @@ public:
      */
     [[nodiscard]] NativeJsValue primitiveCollection() const;
 
+private:
     /**
      * Add all geometry of some feature which is compatible with the given rule.
      */
@@ -49,10 +50,10 @@ public:
      */
     static std::optional<JsValue> encodeVerticesAsFloat64Array(mapget::model_ptr<mapget::Geometry> const& geom);
 
-private:
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
-    CesiumPrimitive coloredMeshes_;
+    CesiumPrimitive coloredNontrivialMeshes_;
+    CesiumPrimitive coloredTrivialMeshes_;
 };
 
 }  // namespace erdblick

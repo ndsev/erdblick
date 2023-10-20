@@ -45,10 +45,8 @@ export class ErdblickModel
         this.tileParser.onTileParsedFromStream(tileFeatureLayer => {
             const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
             const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
-            if (isInViewport && !alreadyLoaded) {
-                let tile = new FeatureTile(this.coreLib, this.tileParser, tileFeatureLayer);
-                this.addTileLayer(tile);
-            }
+            if (isInViewport && !alreadyLoaded)
+                this.addTileLayer(tileFeatureLayer);
             else
                 tileFeatureLayer.delete();
         });

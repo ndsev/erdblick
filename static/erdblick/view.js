@@ -81,6 +81,8 @@ export class ErdblickView
         });
 
         model.tileLayerRemovedTopic.subscribe(tileLayer => {
+            if (!tileLayer.primitiveCollection)
+                return;
             if (this.pickedFeature && this.pickedFeature.primitive === tileLayer.primitiveCollection) {
                 this.setPickedCesiumFeature(null);
             }
@@ -104,8 +106,6 @@ export class ErdblickView
             });
         });
 
-        let polylines = new Cesium.PolylineCollection();
-        this.viewer.scene.primitives.add(polylines);
         this.viewer.scene.globe.baseColor = new Cesium.Color(0.1, 0.1, 0.1, 1);
     }
 

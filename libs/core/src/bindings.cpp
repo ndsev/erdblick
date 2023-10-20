@@ -183,15 +183,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     return self.at(i);
                 }));
 
-    ////////// FeatureLayerRenderer
-    em::class_<FeatureLayerVisualization>("FeatureLayerRenderer")
+    ////////// FeatureLayerVisualization
+    em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
         .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
-
-    ////////// TestDataProvider
-    em::class_<TestDataProvider>("TestDataProvider")
-        .constructor()
-        .function("getTestLayer", &TestDataProvider::getTestLayer);
 
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")

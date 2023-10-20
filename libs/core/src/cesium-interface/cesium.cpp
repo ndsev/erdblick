@@ -5,6 +5,7 @@ namespace erdblick
 
 CesiumLib::CesiumLib() :
     ArcType("ArcType"),
+    BoundingSphere("BoundingSphere"),
     Color("Color"),
     ColorGeometryInstanceAttribute("ColorGeometryInstanceAttribute"),
     ComponentDatatype("ComponentDatatype"),

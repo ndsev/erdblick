@@ -26,8 +26,13 @@ struct CesiumPrimitive
     /**
      * Create a primitive which uses the PerInstanceColorAppearance.
      * See https://cesium.com/learn/cesiumjs/ref-doc/PerInstanceColorAppearance.html
+     *
+     * The parameter flatAndSynchronous must be set to true for primitives
+     * which contain basic triangle meshes. In the future, we can also have
+     * smoothly shaded triangle meshes by calling Cesium.GeometryPipeline.computeNormal
+     * and Cesium.GeometryPipeline.compressVertices on the mesh geometry.
      */
-    static CesiumPrimitive withPerInstanceColorAppearance();
+    static CesiumPrimitive withPerInstanceColorAppearance(bool flatAndSynchronous = false);
 
     /**
      * Add a 3D polyline to the primitive. The provided vertices
@@ -53,7 +58,7 @@ struct CesiumPrimitive
      * here which need a JS list of Point objects, due to Cesium internals.
      *
      * Note: In order to visualize the triangles correctly, the primitive
-     * must have been constructed using withPerInstanceColorAppearance.
+     * must have been constructed using withPerInstanceColorAppearance(true).
      */
     void addTriangles(JsValue const& float64Array, FeatureStyleRule const& style, uint32_t id);
 
@@ -82,6 +87,9 @@ private:
 
     /** appearance option for the Primitive JS Object ctor. */
     JsValue appearance_;
+
+    /** Flag which enables the direct triangle display required for addTriangles. */
+    bool flatAndSynchronous_ = false;
 };
 
 }

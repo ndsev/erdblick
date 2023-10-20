@@ -12,10 +12,13 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance()
     return result;
 }
 
-CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance()
+CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous)
 {
     CesiumPrimitive result;
-    result.appearance_ = Cesium().PerInstanceColorAppearance.New();
+    result.flatAndSynchronous_ = flatAndSynchronous;
+    result.appearance_ = Cesium().PerInstanceColorAppearance.New({
+        {"flat", JsValue(flatAndSynchronous)}
+    });
     return result;
 }
 
@@ -50,15 +53,16 @@ void CesiumPrimitive::addTriangles(
     const FeatureStyleRule& style,
     uint32_t id)
 {
-    auto geometry = Cesium().Geometry.New({
-        {"attributes", JsValue::Dict({
-            {"position", Cesium().GeometryAttribute.New({
-                {"componentDatatype", Cesium().ComponentDatatype["DOUBLE"]},
-                {"componentsPerAttribute", JsValue(3)},
-                {"values", float64Array}
-            })}
-        })}
-    });
+    auto geometry = Cesium().Geometry.New(
+        {{"attributes",
+          JsValue::Dict(
+              {{"position",
+                Cesium().GeometryAttribute.New(
+                    {{"componentDatatype", Cesium().ComponentDatatype["DOUBLE"]},
+                     {"componentsPerAttribute", JsValue(3)},
+                     {"values", float64Array}})}})},
+          {"boundingSphere",
+           JsValue(Cesium().BoundingSphere.call<NativeJsValue>("fromVertices", *float64Array))}});
     addGeometryInstance(style, id, geometry);
 }
 
@@ -85,7 +89,8 @@ NativeJsValue CesiumPrimitive::toJsObject() const
     auto result = Cesium().Primitive.New(*JsValue::Dict(
         {{"geometryInstances", geometryInstances_},
          {"appearance", appearance_},
-         {"releaseGeometryInstances", JsValue(true)}}));
+         {"releaseGeometryInstances", JsValue(true)},
+         {"asynchronous", JsValue(!flatAndSynchronous_)}}));
     return *result;
 }
 
