@@ -50,7 +50,7 @@ export class ErdblickView
         // Add a handler for selection.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.position);
-            if (feature && feature.id && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
                 this.setPickedCesiumFeature(feature);
             else
                 this.setPickedCesiumFeature(null);
@@ -59,7 +59,7 @@ export class ErdblickView
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
-            if (feature && feature.id && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
                 this.setHoveredCesiumFeature(feature);
             else
                 this.setHoveredCesiumFeature(null);
