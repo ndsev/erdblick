@@ -99,7 +99,7 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 
 /** Create a test tile over New York. */
 std::shared_ptr<mapget::TileFeatureLayer> generateTestTile() {
-    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 10);
+    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 9);
 }
 
 /** Create a test style. */

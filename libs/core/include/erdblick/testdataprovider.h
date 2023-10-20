@@ -115,7 +115,7 @@ public:
         };
 
         // Create 10 random Way features inside the bounding box defined by NE and SW
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 2; i++) {
             std::cout << "Generated Way " << i << std::endl;
             // Create a feature with line geometry
             auto feature = result->newFeature("Way", {{"wayId", 42 + i}});
@@ -134,7 +134,7 @@ public:
         }
 
         // Create 10 random Sign features inside the bounding box defined by NE and SW
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 2; i++) {
             std::cout << "Generated Sign " << i << std::endl;
 
             // Create a feature with polygon geometry
