@@ -49,6 +49,23 @@ public:
                             }
                         ]
                     ]
+                },
+                {
+                    "name": "Diamond",
+                    "uniqueIdCompositions": [
+                        [
+                            {
+                                "partId": "areaId",
+                                "description": "String which identifies the map area.",
+                                "datatype": "STR"
+                            },
+                            {
+                                "partId": "diamondId",
+                                "description": "Globally Unique 32b integer.",
+                                "datatype": "U32"
+                            }
+                        ]
+                    ]
                 }
             ]
         })"_json);
@@ -130,6 +147,36 @@ public:
             feature->attributes()->addField("signType", signTypes[randomIndex]);
         }
 
+        // Add a diamond mesh in the center of the tile.
+        auto diamondMeshFeature = result->newFeature("Diamond", {{"diamondId", 999}});
+        auto center = tileId.center();
+        auto size = tileId.size();
+        size.x *= .25;
+        size.y *= .25;
+        size.z = 1000.;
+        double baseHeight = 1600.0; // Base height from previous code
+        // Define the vertices of the diamond
+        std::vector<mapget::Point> diamondVertices = {
+            {center.x, center.y - size.y, baseHeight}, // Top front vertex
+            {center.x - size.x, center.y, baseHeight}, // Left vertex
+            {center.x, center.y + size.y, baseHeight}, // Bottom front vertex
+            {center.x + size.x, center.y, baseHeight}, // Right vertex
+            {center.x, center.y, baseHeight + size.z}, // Top apex (center top vertex)
+            {center.x, center.y, baseHeight - size.z}  // Bottom apex (center bottom vertex)
+        };
+        // Form triangles for the 3D diamond
+        std::vector<mapget::Point> diamondTriangles = {
+            diamondVertices[4], diamondVertices[0], diamondVertices[1], // Top front-left triangle
+            diamondVertices[4], diamondVertices[1], diamondVertices[2], // Top left-right triangle
+            diamondVertices[4], diamondVertices[2], diamondVertices[3], // Top right-bottom triangle
+            diamondVertices[4], diamondVertices[3], diamondVertices[0], // Top bottom-front triangle
+            diamondVertices[5], diamondVertices[1], diamondVertices[0], // Bottom left-front triangle
+            diamondVertices[5], diamondVertices[2], diamondVertices[1], // Bottom right-left triangle
+            diamondVertices[5], diamondVertices[3], diamondVertices[2], // Bottom bottom-right triangle
+            diamondVertices[5], diamondVertices[0], diamondVertices[3]  // Bottom front-bottom triangle
+        };
+        diamondMeshFeature->addMesh(diamondTriangles);
+
         return result;
     }
 
@@ -194,6 +241,12 @@ public:
             type: "Sign"
             filter: "properties.signType == 'Speed Limit'"
             color: "#2c3e50" # Dark color for Speed Limit Sign
+
+          - geometry:
+              - mesh
+            type: "Diamond"
+            color: gold
+            opacity: 0.5
         )yaml"));
     }
 

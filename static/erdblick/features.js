@@ -13,16 +13,19 @@ import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 export class FeatureTile
 {
 // public:
+    forceShow;
     /**
      * Construct a FeatureTile object.
      * @param coreLib Reference to the WASM erdblick library.
      * @param parser Singleton TileLayerStream WASM object.
      * @param tileFeatureLayer Deserialized WASM TileFeatureLayer.
+     * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib, parser, tileFeatureLayer)
+    constructor(coreLib, parser, tileFeatureLayer, preventCulling)
     {
         this.coreLib = coreLib;
         this.parser = parser;
+        this.preventCulling = preventCulling;
         this.id = tileFeatureLayer.id();
         this.tileId = tileFeatureLayer.tileId();
         this.children = undefined;

@@ -97,10 +97,14 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     return tileKey.toString();
 }
 
-/** Create a test polyline. */
-NativeJsValue generateTestPrimitive() {
-    auto testLayer = TestDataProvider().getTestLayer(11., 42., 11);
-    return FeatureLayerVisualization(TestDataProvider::style(), testLayer).primitiveCollection();
+/** Create a test tile over New York. */
+std::shared_ptr<mapget::TileFeatureLayer> generateTestTile() {
+    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 10);
+}
+
+/** Create a test style. */
+FeatureLayerStyle generateTestStyle() {
+    return TestDataProvider::style();
 }
 
 EMSCRIPTEN_BINDINGS(erdblick)
@@ -219,6 +223,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
 
-    ////////// Get a rendered primitive from a test tile
-    em::function("generateTestPrimitive", &generateTestPrimitive);
+    ////////// Get a test tile/style
+    em::function("generateTestTile", &generateTestTile);
+    em::function("generateTestStyle", &generateTestStyle);
 }

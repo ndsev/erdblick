@@ -26,7 +26,7 @@ export class ErdblickDebugApi {
      */
     setCamera(cameraInfoStr) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.mapView.viewer.camera.setView({
+        this.view.viewer.camera.setView({
             destination: Cesium.Cartesian3.fromArray(cameraInfo.position),
             orientation: {
                 heading: cameraInfo.orientation.heading,
@@ -43,15 +43,24 @@ export class ErdblickDebugApi {
      */
     getCamera() {
         const position = [
-            this.mapView.viewer.camera.position.x,
-            this.mapView.viewer.camera.position.y,
-            this.mapView.viewer.camera.position.z
+            this.view.viewer.camera.position.x,
+            this.view.viewer.camera.position.y,
+            this.view.viewer.camera.position.z
         ];
         const orientation = {
-            heading: this.mapView.viewer.camera.heading,
-            pitch: this.mapView.viewer.camera.pitch,
-            roll: this.mapView.viewer.camera.roll
+            heading: this.view.viewer.camera.heading,
+            pitch: this.view.viewer.camera.pitch,
+            roll: this.view.viewer.camera.roll
         };
         return JSON.stringify({ position, orientation });
+    }
+
+    /**
+     * Generate a test TileFeatureLayer, and show it.
+     */
+    showTestTile() {
+        let tile = this.coreLib.generateTestTile();
+        let style = this.coreLib.generateTestStyle();
+        this.model.addTileLayer(tile, style, true);
     }
 }
