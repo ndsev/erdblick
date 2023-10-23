@@ -2,6 +2,7 @@
 
 #include "mapget/model/stream.h"
 #include "buffer.h"
+#include "cesium-interface/object.h"
 
 namespace erdblick
 {
@@ -18,14 +19,15 @@ public:
     void setDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
 
     /**
-     * Serialize a TileFeatureLayer to a buffer.
-     */
-    void writeTileFeatureLayer(mapget::TileFeatureLayer::Ptr const& tile, SharedUint8Array& buffer);
-
-    /**
      * Parse a TileFeatureLayer from a buffer as returned by writeTileFeatureLayer.
      */
     mapget::TileFeatureLayer::Ptr readTileFeatureLayer(SharedUint8Array const& buffer);
+
+    /**
+     * Parse only the stringified MapTileKey and tile id from the tile layer blob.
+     * Returns two-element JS list, containing both.
+     */
+    NativeJsValue readTileLayerKeyAndTileId(SharedUint8Array const& buffer);
 
     /**
      * Reset the parser by removing any buffered unparsed stream chunks.
@@ -37,18 +39,12 @@ public:
      * This is used to tell the server whether additional field-id mapping updates
      * need to be sent.
      */
-    mapget::TileLayerStream::FieldOffsetMap fieldDictOffsets();
+    NativeJsValue getFieldDictOffsets();
 
     /**
-     * Stream-based parsing functionality: Set callback which is called
-     * as soon as a tile has been parsed.
+     * Add a chunk of streamed fields into this TileLayerParser.
      */
-    void onTileParsedFromStream(std::function<void(mapget::TileFeatureLayer::Ptr)>);
-
-    /**
-     * Add a chunk of streamed data into this TileLayerParser.
-     */
-    void parseFromStream(SharedUint8Array const& buffer);
+    void readFieldDictUpdate(SharedUint8Array const& buffer);
 
 private:
     std::map<std::string, mapget::DataSourceInfo> info_;

@@ -1,6 +1,6 @@
 "use strict";
 
-import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
+import {uint8ArrayToWasm} from "./wasm.js";
 
 /**
  * Bundle of a WASM TileFeatureLayer and a rendered representation
@@ -13,24 +13,25 @@ import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 export class FeatureTile
 {
 // public:
-    forceShow;
+
     /**
      * Construct a FeatureTile object.
      * @param coreLib Reference to the WASM erdblick library.
      * @param parser Singleton TileLayerStream WASM object.
-     * @param tileFeatureLayer Deserialized WASM TileFeatureLayer.
+     * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib, parser, tileFeatureLayer, preventCulling)
+    constructor(coreLib, parser, tileFeatureLayerBlob, preventCulling)
     {
+        let mapTileKeyAndTileId = uint8ArrayToWasm(coreLib, wasmBlob => {
+            return parser.readTileLayerKeyAndTileId(wasmBlob);
+        }, tileFeatureLayerBlob);
+        this.id = mapTileKeyAndTileId[0];
+        this.tileId = mapTileKeyAndTileId[1];
         this.coreLib = coreLib;
         this.parser = parser;
         this.preventCulling = preventCulling;
-        this.id = tileFeatureLayer.id();
-        this.tileId = tileFeatureLayer.tileId();
-        this.children = undefined;
-        this.tileFeatureLayerInitDeserialized = tileFeatureLayer;
-        this.tileFeatureLayerSerialized = null;
+        this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         this.primitiveCollection = null;
         this.disposed = false;
     }
@@ -69,34 +70,16 @@ export class FeatureTile
      * @returns The value returned by the callback.
      */
     peek(callback) {
-        // For the first call to peek, the tileFeatureLayerInitDeserialized member
-        // is still set, and the tileFeatureLayerSerialized is not yet set.
-        let deserializedLayer = this.tileFeatureLayerInitDeserialized;
-        if (this.tileFeatureLayerInitDeserialized) {
-            this.tileFeatureLayerInitDeserialized = null;
-            this.tileFeatureLayerSerialized = uint8ArrayFromWasm(this.coreLib, bufferToWrite => {
-                this.parser.writeTileFeatureLayer(deserializedLayer, bufferToWrite);
-            });
-        }
-
-        if (!deserializedLayer) {
-            // Deserialize the WASM tileFeatureLayer from the blob.
-            console.assert(this.tileFeatureLayerSerialized);
-            uint8ArrayToWasm(this.coreLib, bufferToRead => {
-                deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            }, this.tileFeatureLayerSerialized);
-        }
-
-        // Run the callback with the deserialized layer, and
-        // store the result as the return value.
-        let result = null;
-        if (callback) {
-            result = callback(deserializedLayer);
-        }
-
-        // Clean up.
-        deserializedLayer.delete();
-        return result;
+        // Deserialize the WASM tileFeatureLayer from the blob.
+        return uint8ArrayToWasm(this.coreLib, bufferToRead => {
+            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            // Run the callback with the deserialized layer, and
+            // provide the result as the return value.
+            if (callback) {
+                return callback(deserializedLayer);
+            }
+            deserializedLayer.delete();
+        }, this.tileFeatureLayerBlob);
     }
 
     /**
@@ -108,7 +91,6 @@ export class FeatureTile
             return;
         if (!this.primitiveCollection.isDestroyed())
             this.primitiveCollection.destroy();
-
         this.primitiveCollection = null;
     }
 
@@ -118,10 +100,6 @@ export class FeatureTile
     dispose()
     {
         this.disposeRenderResult();
-        if (this.tileFeatureLayerInitDeserialized) {
-            this.tileFeatureLayerInitDeserialized.delete();
-            this.tileFeatureLayerInitDeserialized = null;
-        }
         this.disposed = true;
     }
 }

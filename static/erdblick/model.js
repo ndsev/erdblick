@@ -2,6 +2,7 @@
 
 import {Fetch} from "./fetch.js";
 import {FeatureTile} from "./features.js";
+import {uint8ArrayToWasm} from "./wasm.js";
 
 const styleUrl = "/styles/demo-style.yaml";
 const infoUrl = "/sources";
@@ -42,14 +43,6 @@ export class ErdblickModel
         // Instantiate the TileLayerParser, and set its callback
         // for when a new tile is received.
         this.tileParser = new this.coreLib.TileLayerParser();
-        this.tileParser.onTileParsedFromStream(tileFeatureLayer => {
-            const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
-            const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
-            if (isInViewport && !alreadyLoaded)
-                this.addTileLayer(tileFeatureLayer);
-            else
-                tileFeatureLayer.delete();
-        });
 
         ///////////////////////////////////////////////////////////////////////////
         //                               MODEL EVENTS                            //
@@ -81,9 +74,17 @@ export class ErdblickModel
     processTileStream()
     {
         if (this.tileStreamParsingQueue.length) {
-            let message = this.tileStreamParsingQueue.shift();
-            this.tileParser.parseFromStream(message);
-            message.delete();
+            let [message, messageType] = this.tileStreamParsingQueue.shift();
+            if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                uint8ArrayToWasm(this.coreLib, wasmBuffer => {
+                    this.tileParser.readFieldDictUpdate(wasmBuffer);
+                }, message);
+            }
+            else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
+                this.addTileFeatureLayer(message.slice(Fetch.CHUNK_HEADER_SIZE));
+            }
+            else
+                console.error(`Encountered unknown message type ${messageType}!`);
         }
         // Keep processing messages. ASAP if more messages exist, 10ms delay otherwise.
         setTimeout(_ => this.processTileStream(), this.tileStreamParsingQueue.length ? 0 : 10);
@@ -96,9 +97,11 @@ export class ErdblickModel
             this.style.delete();
 
         // Fetch the new one.
-        new Fetch(this.coreLib, styleUrl).withWasmCallback(styleYamlBuffer => {
+        new Fetch(styleUrl).withBufferCallback(styleYamlBuffer => {
             // Parse the style description into a WASM style object.
-            this.style = new this.coreLib.FeatureLayerStyle(styleYamlBuffer);
+            uint8ArrayToWasm(this.coreLib, wasmBuffer => {
+                this.style = new this.coreLib.FeatureLayerStyle(wasmBuffer);
+            }, styleYamlBuffer)
 
             // Re-render all present batches with the new style.
             for (let [batchId, batch] of this.loadedTileLayers.entries()) {
@@ -109,9 +112,11 @@ export class ErdblickModel
     }
 
     reloadDataSources() {
-        new Fetch(this.coreLib, infoUrl)
-            .withWasmCallback(infoBuffer => {
-                this.tileParser.setDataSourceInfo(infoBuffer);
+        new Fetch(infoUrl)
+            .withBufferCallback(infoBuffer => {
+                uint8ArrayToWasm(this.coreLib, wasmBuffer => {
+                    this.tileParser.setDataSourceInfo(wasmBuffer);
+                }, infoBuffer)
                 console.log("Loaded data source info.");
             })
             .withJsonCallback(result => {
@@ -134,8 +139,7 @@ export class ErdblickModel
         // Abort previous fetch operation.
         if (this.currentFetch) {
             this.currentFetch.abort();
-            // Clear any unparsed messages
-            this.tileStreamParsingQueue.forEach(message => message.delete());
+            // Clear any unparsed messages from the previous stream.
             this.tileStreamParsingQueue = [];
         }
 
@@ -145,10 +149,8 @@ export class ErdblickModel
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
-            if (!tileLayer.preventCulling && !this.currentVisibleTileIds.has(tileLayer.tileId)) {
-                this.tileLayerRemovedTopic.next(tileLayer);
-                tileLayer.dispose();
-            }
+            if (!tileLayer.preventCulling && !this.currentVisibleTileIds.has(tileLayer.tileId))
+                this.removeTileLayer(tileLayer, true);
             else
                 newTileLayers.set(tileLayer.id, tileLayer);
         }
@@ -177,33 +179,50 @@ export class ErdblickModel
             }
         }
 
-        this.currentFetch = new Fetch(this.coreLib, tileUrl)
+        this.currentFetch = new Fetch(tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
             .withBody({
                 requests: requests,
-                maxKnownFieldIds: this.tileParser.fieldDictOffsets()
+                maxKnownFieldIds: this.tileParser.getFieldDictOffsets()
             })
-            .withWasmCallback(tileBuffer => {
+            .withBufferCallback((message, messageType) => {
                 // Schedule the parsing of the newly arrived tile layer,
                 // but don't do it synchronously to avoid stalling the ongoing
                 // fetch operation.
-                this.tileStreamParsingQueue.push(tileBuffer);
-            }, true);
+                this.tileStreamParsingQueue.push([message, messageType]);
+            });
         this.currentFetch.go();
     }
 
-    addTileLayer(wasmTileLayer, style, preventCulling) {
-        let tileLayer = new FeatureTile(this.coreLib, this.tileParser, wasmTileLayer, preventCulling);
+    addTileFeatureLayer(tileLayerBlob, style, preventCulling) {
+        let tileLayer = new FeatureTile(this.coreLib, this.tileParser, tileLayerBlob, preventCulling);
+
+        // Don't add a tile that is not supposed to be visible.
+        if (!preventCulling) {
+            if (!this.currentVisibleTileIds.has(tileLayer.tileId))
+                return;
+        }
+
+        // If this one replaces an older tile with the same key,
+        // then first remove the older existing one.
         if (this.loadedTileLayers.has(tileLayer.id)) {
-            throw new Error(`Refusing to add tile layer ${tileLayer.id}, which is already present.`);
+            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.id));
         }
         this.loadedTileLayers.set(tileLayer.id, tileLayer);
+
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
         setTimeout(() => {
             this.renderTileLayer(tileLayer, false, style);
         })
+    }
+
+    removeTileLayer(tileLayer, skipRemoveFromDict) {
+        this.tileLayerRemovedTopic.next(tileLayer);
+        tileLayer.dispose();
+        if (!skipRemoveFromDict)
+            this.loadedTileLayers.delete(tileLayer.id);
     }
 
     renderTileLayer(tileLayer, removeFirst, style) {

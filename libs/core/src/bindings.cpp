@@ -196,25 +196,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
-        .function(
-            "onTileParsedFromStream",
-            std::function<void(TileLayerParser&, em::val)>(
-                [](TileLayerParser& self, em::val cb)
-                { self.onTileParsedFromStream([cb](auto&& tile) { cb(tile); }); }))
-        .function("parseFromStream", &TileLayerParser::parseFromStream)
-        .function("reset", &TileLayerParser::reset)
-        .function(
-            "fieldDictOffsets",
-            std::function<em::val(TileLayerParser&)>(
-                [](TileLayerParser& self)
-                {
-                    auto result = em::val::object();
-                    for (auto const& [nodeId, fieldId] : self.fieldDictOffsets())
-                        result.set(nodeId, fieldId);
-                    return result;
-                }))
+        .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
+        .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
-        .function("writeTileFeatureLayer", &TileLayerParser::writeTileFeatureLayer);
+        .function("readTileLayerKeyAndTileId", &TileLayerParser::readTileLayerKeyAndTileId)
+        .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
