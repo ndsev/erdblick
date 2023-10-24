@@ -1,6 +1,15 @@
 #include "aabb.h"
-
+#define _USE_MATH_DEFINES
+#include <cmath>
 #include "glm/ext.hpp"
+
+
+// For non-GNU compilers (e.g. MSVC).
+// Consider switching to std::numbers::pi once C++20 support
+// is available.
+#ifndef M_PI_2
+#define M_PI_2 1.57079632679489661923  /* π/2 */
+#endif
 
 namespace erdblick
 {
