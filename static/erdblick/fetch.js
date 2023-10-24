@@ -239,8 +239,8 @@ export class Fetch
      * Log an error if it does not relate to an intentional abort-call.
      */
     handleError(e) {
-        if (e !== "User abort.") {
-            console.error(e);
-        }
+        if (e === "User abort." || (e && e.name === "AbortError"))
+            return;
+        console.error(e);
     }
 }
