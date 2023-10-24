@@ -33,3 +33,11 @@ jobs:
             build/mapcomponent
             build/images
             build/libs/core/erdblick-core.*
+            build/erdblick/debugapi.js
+            build/erdblick/features.js
+            build/erdblick/fetch.js
+            build/erdblick/model.js
+            build/erdblick/timer.js
+            build/erdblick/view.js
+            build/erdblick/wasm.js
+            
