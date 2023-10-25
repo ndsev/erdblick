@@ -1,15 +1,7 @@
 #include "aabb.h"
-#define _USE_MATH_DEFINES
-#include <cmath>
 #include "glm/ext.hpp"
 
 
-// For non-GNU compilers (e.g. MSVC).
-// Consider switching to std::numbers::pi once C++20 support
-// is available.
-#ifndef M_PI_2
-#define M_PI_2 1.57079632679489661923  /* π/2 */
-#endif
 
 namespace erdblick
 {
@@ -116,7 +108,7 @@ double Wgs84AABB::avgMercatorStretch()
     auto latBottom = glm::radians(sw_.y);
     auto radToMercatorLat = [](double wgs84Lat)
     {
-        return atanh(sin(wgs84Lat - M_PI_2));
+        return atanh(sin(wgs84Lat - glm::half_pi<double>()));
     };
     return (radToMercatorLat(latTop) - radToMercatorLat(latBottom)) / glm::radians(size_.y);
 }
