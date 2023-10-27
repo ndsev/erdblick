@@ -51,11 +51,18 @@ public:
      */
     void readFieldDictUpdate(SharedUint8Array const& buffer);
 
+    /**
+     * Set layer info which will be used if the external doesn't fit.
+     * Used for test data.
+     */
+    void setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info);
+
 private:
     std::map<std::string, mapget::DataSourceInfo> info_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::CachedFieldsProvider> cachedFieldDicts_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
+    std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
 };
 
 }

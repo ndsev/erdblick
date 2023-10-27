@@ -98,8 +98,12 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 }
 
 /** Create a test tile over New York. */
-std::shared_ptr<mapget::TileFeatureLayer> generateTestTile() {
-    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 9);
+void generateTestTile(SharedUint8Array& output, TileLayerParser& parser) {
+    auto tile = TestDataProvider().getTestLayer(-74.0060, 40.7128, 9);
+    std::stringstream blob;
+    tile->write(blob);
+    output.writeToArray(blob.str());
+    parser.setFallbackLayerInfo(tile->layerInfo());
 }
 
 /** Create a test style. */

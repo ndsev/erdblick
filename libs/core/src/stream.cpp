@@ -47,8 +47,13 @@ NativeJsValue TileLayerParser::getFieldDictOffsets()
 void TileLayerParser::reset()
 {
     reader_ = std::make_unique<TileLayerStream::Reader>(
-        [this](auto&& mapId, auto&& layerId){
-            return info_[std::string(mapId)].getLayer(std::string(layerId));
+        [this](auto&& mapId, auto&& layerId)
+        {
+            auto& map = info_[std::string(mapId)];
+            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
+            if (it != map.layers_.end())
+                return it->second;
+            return fallbackLayerInfo_;
         },
         [this](auto&& layer){
             if (tileParsedFun_)
@@ -64,7 +69,13 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
     auto result = std::make_shared<TileFeatureLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
-        { return info_[std::string(mapId)].getLayer(std::string(layerId)); },
+        {
+            auto& map = info_[std::string(mapId)];
+            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
+            if (it != map.layers_.end())
+                return it->second;
+            return fallbackLayerInfo_;
+        },
         [this](auto&& nodeId) { return cachedFieldDicts_->operator()(nodeId); });
     return result;
 }
@@ -79,7 +90,14 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     TileLayer tileLayer(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
-        { return info_[std::string(mapId)].getLayer(std::string(layerId)); });
+        {
+            auto& map = info_[std::string(mapId)];
+            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
+            if (it != map.layers_.end())
+                return it->second;
+            return fallbackLayerInfo_;
+        }
+    );
     auto numFeatures = -1;
     auto layerInfo = tileLayer.info();
     if (layerInfo.is_object()) {
@@ -90,6 +108,10 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.tileId().value_,
         numFeatures
     };
+}
+
+void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info) {
+    fallbackLayerInfo_ = std::move(info);
 }
 
 }
