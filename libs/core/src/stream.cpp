@@ -69,7 +69,7 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
     return result;
 }
 
-NativeJsValue TileLayerParser::readTileLayerKeyAndTileId(const SharedUint8Array& buffer)
+TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const SharedUint8Array& buffer)
 {
     std::stringstream inputStream;
     inputStream << buffer.toString();
@@ -80,10 +80,16 @@ NativeJsValue TileLayerParser::readTileLayerKeyAndTileId(const SharedUint8Array&
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         { return info_[std::string(mapId)].getLayer(std::string(layerId)); });
-    auto resultTuple = JsValue::List({
-        JsValue(tileLayer.id().toString()),
-        JsValue(tileLayer.tileId().value_)});
-    return *resultTuple;
+    auto numFeatures = -1;
+    auto layerInfo = tileLayer.info();
+    if (layerInfo.is_object()) {
+        numFeatures = layerInfo.value<int32_t>("num-features", -1);
+    }
+    return {
+        tileLayer.id().toString(),
+        tileLayer.tileId().value_,
+        numFeatures
+    };
 }
 
 }

@@ -3,9 +3,7 @@
 import {uint8ArrayToWasm} from "./wasm.js";
 
 /**
- * Bundle of a WASM TileFeatureLayer and a rendered representation
- * in the form of a Cesium PrimitiveCollection.
- *
+ * JS interface of a WASM TileFeatureLayer.
  * The WASM TileFeatureLayer object is stored as a blob when not needed,
  * to keep the memory usage within reasonable limits. To use the wrapped
  * WASM TileFeatureLayer, use the peek()-function.
@@ -23,11 +21,12 @@ export class FeatureTile
      */
     constructor(coreLib, parser, tileFeatureLayerBlob, preventCulling)
     {
-        let mapTileKeyAndTileId = uint8ArrayToWasm(coreLib, wasmBlob => {
-            return parser.readTileLayerKeyAndTileId(wasmBlob);
+        let mapTileMetadata = uint8ArrayToWasm(coreLib, wasmBlob => {
+            return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
-        this.id = mapTileKeyAndTileId[0];
-        this.tileId = mapTileKeyAndTileId[1];
+        this.id = mapTileMetadata.id;
+        this.tileId = mapTileMetadata.tileId;
+        this.numFeatures = mapTileMetadata.numFeatures;
         this.coreLib = coreLib;
         this.parser = parser;
         this.preventCulling = preventCulling;

@@ -27,7 +27,12 @@ public:
      * Parse only the stringified MapTileKey and tile id from the tile layer blob.
      * Returns two-element JS list, containing both.
      */
-    NativeJsValue readTileLayerKeyAndTileId(SharedUint8Array const& buffer);
+    struct TileLayerMetadata {
+        std::string id;
+        uint64_t tileId;
+        int32_t numFeatures;
+    };
+    TileLayerMetadata readTileLayerMetadata(SharedUint8Array const& buffer);
 
     /**
      * Reset the parser by removing any buffered unparsed stream chunks.

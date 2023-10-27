@@ -192,6 +192,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
 
+    ////////// TileLayerMetadata
+    em::value_object<TileLayerParser::TileLayerMetadata>("Point")
+        .field("id", &TileLayerParser::TileLayerMetadata::id)
+        .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures);
+
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
@@ -199,7 +205,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
-        .function("readTileLayerKeyAndTileId", &TileLayerParser::readTileLayerKeyAndTileId)
+        .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
         .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation
