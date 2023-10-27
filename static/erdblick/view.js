@@ -2,6 +2,7 @@
 
 import {ErdblickModel} from "./model.js";
 import {FeatureWrapper} from "./features.js";
+import {TileVisualization} from "./visualization.js"
 
 export class ErdblickView
 {
@@ -50,7 +51,7 @@ export class ErdblickView
         // Add a handler for selection.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.position);
-            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileVisForPrimitive.has(feature.primitive))
                 this.setPickedCesiumFeature(feature);
             else
                 this.setPickedCesiumFeature(null);
@@ -59,7 +60,7 @@ export class ErdblickView
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
-            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileVisForPrimitive.has(feature.primitive))
                 this.setHoveredCesiumFeature(feature);
             else
                 this.setHoveredCesiumFeature(null);
@@ -71,27 +72,27 @@ export class ErdblickView
             this.updateViewport();
         });
 
-        this.tileLayerForPrimitive = new Map();
+        this.tileVisForPrimitive = new Map();
 
-        model.tileLayerAddedTopic.subscribe(tileLayer => {
-            this.viewer.scene.primitives.add(tileLayer.primitiveCollection);
-            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
-                this.tileLayerForPrimitive.set(tileLayer.primitiveCollection.get(i), tileLayer);
+        model.tileVisualizationTopic.subscribe(tileVis => {
+            tileVis.render(this.viewer);
+            tileVis.forEachPrimitive(primitive => {
+                this.tileVisForPrimitive.set(primitive, tileVis);
+            })
             this.viewer.scene.requestRender();
         });
 
-        model.tileLayerRemovedTopic.subscribe(tileLayer => {
-            if (!tileLayer.primitiveCollection)
-                return;
-            if (this.pickedFeature && this.pickedFeature.primitive === tileLayer.primitiveCollection) {
+        model.tileVisualizationDestructionTopic.subscribe(tileVis => {
+            if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
                 this.setPickedCesiumFeature(null);
             }
-            if (this.hoveredFeature && this.hoveredFeature.primitive === tileLayer.primitiveCollection) {
+            if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
                 this.setHoveredCesiumFeature(null);
             }
-            this.viewer.scene.primitives.remove(tileLayer.primitiveCollection);
-            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
-                this.tileLayerForPrimitive.delete(tileLayer.primitiveCollection.get(i));
+            tileVis.forEachPrimitive(primitive => {
+                this.tileVisForPrimitive.delete(primitive);
+            })
+            tileVis.destroy(this.viewer);
             this.viewer.scene.requestRender();
         });
 
@@ -181,12 +182,12 @@ export class ErdblickView
 
     /** Get a mapget feature from a cesium feature. */
     resolveFeature(primitive, index) {
-        let tileLayer = this.tileLayerForPrimitive.get(primitive);
-        if (!tileLayer) {
+        let tileVis = this.tileVisForPrimitive.get(primitive);
+        if (!tileVis) {
             console.error("Failed find tileLayer for primitive!");
             return null;
         }
-        return new FeatureWrapper(index, tileLayer);
+        return new FeatureWrapper(index, tileVis.tile);
     }
 
     /**
@@ -234,57 +235,6 @@ export class ErdblickView
             camPosLon: centerLon,
             camPosLat: centerLat,
             orientation: this.viewer.camera.heading,
-        });
-        this.visualizeTileIds();
-    }
-
-    /**
-     * Show a grid of dots for each tile that is currently determined
-     * as visible, according to the associated model.
-     */
-    visualizeTileIds() {
-        // Remove previous points.
-        if (this.points) {
-            for (let i = 0; i < this.points.length; i++) {
-                this.viewer.entities.remove(this.points[i]);
-            }
-        }
-
-        // Get the tile IDs for the current viewport.
-        let tileIds = this.model.currentVisibleTileIds;
-
-        // Calculate total number of tile IDs.
-        let totalTileIds = tileIds.size;
-
-        // Initialize points array.
-        this.points = [];
-
-        // Counter for iteration over Set.
-        let i = 0;
-
-        // Iterate through each tile ID using Set's forEach method.
-        tileIds.forEach(tileId => {
-            // Get WGS84 coordinates for the tile ID
-            let position = this.model.coreLib.getTilePosition(tileId);
-
-            // Calculate the color based on the position in the list.
-            let colorValue = i / totalTileIds;
-            let color = Cesium.Color.fromHsl(0.6 - colorValue * 0.5, 1.0, 0.5);
-
-            // Create a point and add it to the Cesium scene.
-            let point = this.viewer.entities.add({
-                position: Cesium.Cartesian3.fromDegrees(position.x, position.y),
-                point: {
-                    pixelSize: 5,
-                    color: color
-                }
-            });
-
-            // Add the point to the points array.
-            this.points.push(point);
-
-            // Increment counter.
-            i++;
         });
     }
 }

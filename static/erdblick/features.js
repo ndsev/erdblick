@@ -36,34 +36,6 @@ export class FeatureTile
     }
 
     /**
-     * Convert this TileFeatureLayer to a Cesium Primitive which
-     * contains all visuals for this tile, given the style.
-     * Returns a promise which resolves to true, if there is a freshly baked
-     * Cesium Primitive under this.primitiveCollection, or false,
-     * if no output was generated because the tile is empty.
-     * @param {null} style The style that is used to make the conversion.
-     */
-    async render(style)
-    {
-        // Do not try to render if the underlying data is disposed.
-        if (this.disposed)
-            return false;
-
-        // Remove any previous render-result, as a new one is generated.
-        // TODO: Ensure that the View also takes note of the removed PrimitiveCollection.
-        //  This will become apparent once interactive re-styling is a prime use-case.
-        this.disposeRenderResult();
-
-        this.peek(tileFeatureLayer => {
-            let visualization = new this.coreLib.FeatureLayerVisualization(style, tileFeatureLayer);
-            this.primitiveCollection = visualization.primitiveCollection();
-        });
-
-        // The primitive collection will be null if there were no features to render.
-        return this.primitiveCollection !== null && this.primitiveCollection !== undefined;
-    }
-
-    /**
      * Deserialize the wrapped TileFeatureLayer, run a callback, then
      * delete the deserialized WASM representation.
      * @returns The value returned by the callback.
@@ -82,23 +54,10 @@ export class FeatureTile
     }
 
     /**
-     * Remove all data associated with a previous call to this.render().
+     * Mark this tile as "not available anymore".
      */
-    disposeRenderResult()
+    destroy()
     {
-        if (!this.primitiveCollection)
-            return;
-        if (!this.primitiveCollection.isDestroyed())
-            this.primitiveCollection.destroy();
-        this.primitiveCollection = null;
-    }
-
-    /**
-     * Clean up all data associated with this FeatureTile instance.
-     */
-    dispose()
-    {
-        this.disposeRenderResult();
         this.disposed = true;
     }
 }
