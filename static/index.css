@@ -90,6 +90,10 @@ body {
     left: 10px;
 }
 
+#info > #controls {
+    display: none;
+}
+
 #info > #maps {
     display: none;
 }
@@ -97,6 +101,10 @@ body {
 #info > #maps > div {
     margin-top: 0.5em;
     margin-bottom: 0;
+}
+
+#info.expanded > #controls {
+    display: block;
 }
 
 #info.expanded > #maps {

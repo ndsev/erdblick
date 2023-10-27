@@ -22,7 +22,7 @@ const tileUrl = "/tiles";
  */
 export class ErdblickModel
 {
-    static MAX_NUM_TILES_TO_LOAD = 32768*2;
+    static MAX_NUM_TILES_TO_LOAD = 2048;
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
 
     constructor(coreLibrary)
@@ -46,6 +46,8 @@ export class ErdblickModel
         this.currentHighDetailTileIds = new Set();
         this.tileStreamParsingQueue = [];
         this.tileVisualizationQueue = [];
+        this.maxLoadTiles = ErdblickModel.MAX_NUM_TILES_TO_LOAD;
+        this.maxVisuTiles = ErdblickModel.MAX_NUM_TILES_TO_VISUALIZE;
 
         // Instantiate the TileLayerParser, and set its callback
         // for when a new tile is received.
@@ -170,9 +172,9 @@ export class ErdblickModel
     update()
     {
         // Get the tile IDs for the current viewport.
-        const allViewportTileIds = this.coreLib.getTileIds(this.currentViewport, 13, ErdblickModel.MAX_NUM_TILES_TO_LOAD);
+        const allViewportTileIds = this.coreLib.getTileIds(this.currentViewport, 13, this.maxLoadTiles);
         this.currentVisibleTileIds = new Set(allViewportTileIds);
-        this.currentHighDetailTileIds = new Set(allViewportTileIds.slice(0, ErdblickModel.MAX_NUM_TILES_TO_VISUALIZE))
+        this.currentHighDetailTileIds = new Set(allViewportTileIds.slice(0, this.maxVisuTiles))
 
         // Abort previous fetch operation.
         if (this.currentFetch) {
