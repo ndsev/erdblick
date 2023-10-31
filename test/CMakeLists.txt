@@ -10,7 +10,7 @@ if (NOT TARGET Catch2)
 endif()
 
 add_executable(test.erdblick
-  renderer.cpp)
+  test-visualization.cpp)
 
 target_link_libraries(test.erdblick
   PUBLIC

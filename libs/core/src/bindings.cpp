@@ -2,7 +2,7 @@
 
 #include "aabb.h"
 #include "buffer.h"
-#include "renderer.h"
+#include "visualization.h"
 #include "stream.h"
 #include "style.h"
 #include "testdataprovider.h"
@@ -97,17 +97,17 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     return tileKey.toString();
 }
 
-/** Create a test polyline. */
-NativeJsValue makeTestLine() {
-    CesiumPrimitive result;
-    result.addLine(JsValue::newList({
-        JsValue(wgsToCartesian<mapget::Point>({42., 11., 0.})),
-        JsValue(wgsToCartesian<mapget::Point>({42., 12., 0.}))
-    }), YAML::Load("{geometry: ['line'], color: red}"), 0);
-    return result.toJsObject();
+/** Create a test tile over New York. */
+std::shared_ptr<mapget::TileFeatureLayer> generateTestTile() {
+    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 10);
 }
 
-EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
+/** Create a test style. */
+FeatureLayerStyle generateTestStyle() {
+    return TestDataProvider::style();
+}
+
+EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
@@ -187,15 +187,10 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
                     return self.at(i);
                 }));
 
-    ////////// FeatureLayerRenderer
-    em::class_<FeatureLayerRenderer>("FeatureLayerRenderer")
-        .constructor()
-        .function("render", &FeatureLayerRenderer::render);
-
-    ////////// TestDataProvider
-    em::class_<TestDataProvider>("TestDataProvider")
-        .constructor()
-        .function("getTestLayer", &TestDataProvider::getTestLayer);
+    ////////// FeatureLayerVisualization
+    em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
+        .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
+        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
 
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
@@ -228,6 +223,7 @@ EMSCRIPTEN_BINDINGS(FeatureLayerRendererBind)
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
 
-    ////////// Get a test line
-    em::function("makeTestLine", &makeTestLine);
+    ////////// Get a test tile/style
+    em::function("generateTestTile", &generateTestTile);
+    em::function("generateTestStyle", &generateTestStyle);
 }

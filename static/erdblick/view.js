@@ -50,7 +50,7 @@ export class ErdblickView
         // Add a handler for selection.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.position);
-            if (feature && feature.id && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
                 this.setPickedCesiumFeature(feature);
             else
                 this.setPickedCesiumFeature(null);
@@ -59,7 +59,7 @@ export class ErdblickView
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
-            if (feature && feature.id && this.tileLayerForPrimitive.has(feature.primitive))
+            if (feature && feature.id !== undefined && this.tileLayerForPrimitive.has(feature.primitive))
                 this.setHoveredCesiumFeature(feature);
             else
                 this.setHoveredCesiumFeature(null);
@@ -75,11 +75,14 @@ export class ErdblickView
 
         model.tileLayerAddedTopic.subscribe(tileLayer => {
             this.viewer.scene.primitives.add(tileLayer.primitiveCollection);
-            this.tileLayerForPrimitive.set(tileLayer.primitiveCollection, tileLayer);
+            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
+                this.tileLayerForPrimitive.set(tileLayer.primitiveCollection.get(i), tileLayer);
             this.viewer.scene.requestRender();
-        })
+        });
 
         model.tileLayerRemovedTopic.subscribe(tileLayer => {
+            if (!tileLayer.primitiveCollection)
+                return;
             if (this.pickedFeature && this.pickedFeature.primitive === tileLayer.primitiveCollection) {
                 this.setPickedCesiumFeature(null);
             }
@@ -87,8 +90,10 @@ export class ErdblickView
                 this.setHoveredCesiumFeature(null);
             }
             this.viewer.scene.primitives.remove(tileLayer.primitiveCollection);
-            this.tileLayerForPrimitive.delete(tileLayer.primitiveCollection);
-        })
+            for (let i = 0; i < tileLayer.primitiveCollection.length; ++i)
+                this.tileLayerForPrimitive.delete(tileLayer.primitiveCollection.get(i));
+            this.viewer.scene.requestRender();
+        });
 
         model.zoomToWgs84PositionTopic.subscribe(pos => {
             this.viewer.camera.setView({
@@ -101,8 +106,6 @@ export class ErdblickView
             });
         });
 
-        let polylines = new Cesium.PolylineCollection();
-        this.viewer.scene.primitives.add(polylines);
         this.viewer.scene.globe.baseColor = new Cesium.Color(0.1, 0.1, 0.1, 1);
     }
 

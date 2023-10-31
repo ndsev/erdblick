@@ -25,7 +25,6 @@ export class ErdblickModel
         this.coreLib = coreLibrary;
         this.style = null;
         this.maps = null;
-        this.glbConverter = new coreLibrary.FeatureLayerRenderer();
         this.loadedTileLayers = new Map();
         this.currentFetch = null;
         this.currentViewport = {
@@ -46,10 +45,8 @@ export class ErdblickModel
         this.tileParser.onTileParsedFromStream(tileFeatureLayer => {
             const isInViewport = this.currentVisibleTileIds.has(tileFeatureLayer.tileId());
             const alreadyLoaded = this.loadedTileLayers.has(tileFeatureLayer.id());
-            if (isInViewport && !alreadyLoaded) {
-                let tile = new FeatureTile(this.coreLib, this.tileParser, tileFeatureLayer);
-                this.addTileLayer(tile);
-            }
+            if (isInViewport && !alreadyLoaded)
+                this.addTileLayer(tileFeatureLayer);
             else
                 tileFeatureLayer.delete();
         });
@@ -148,7 +145,7 @@ export class ErdblickModel
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
-            if (!this.currentVisibleTileIds.has(tileLayer.tileId)) {
+            if (!tileLayer.preventCulling && !this.currentVisibleTileIds.has(tileLayer.tileId)) {
                 this.tileLayerRemovedTopic.next(tileLayer);
                 tileLayer.dispose();
             }
@@ -196,7 +193,8 @@ export class ErdblickModel
         this.currentFetch.go();
     }
 
-    addTileLayer(tileLayer) {
+    addTileLayer(wasmTileLayer, style, preventCulling) {
+        let tileLayer = new FeatureTile(this.coreLib, this.tileParser, wasmTileLayer, preventCulling);
         if (this.loadedTileLayers.has(tileLayer.id)) {
             throw new Error(`Refusing to add tile layer ${tileLayer.id}, which is already present.`);
         }
@@ -204,22 +202,23 @@ export class ErdblickModel
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
         setTimeout(() => {
-            this.renderTileLayer(tileLayer);
+            this.renderTileLayer(tileLayer, false, style);
         })
     }
 
-    renderTileLayer(tileLayer, removeFirst) {
+    renderTileLayer(tileLayer, removeFirst, style) {
+        style = style || this.style;
         if (removeFirst) {
             this.tileLayerRemovedTopic.next(tileLayer);
         }
-        tileLayer.render(this.glbConverter, this.style).then(wasRendered => {
+        tileLayer.render(style).then(wasRendered => {
             if (!wasRendered)
                 return;
 
             // It is possible, that the tile went out of view while
             // we took our time to visualize it. In this case, don't
             // add it to the viewport.
-            const isInViewport = this.currentVisibleTileIds.has(tileLayer.tileId);
+            const isInViewport = tileLayer.preventCulling || this.currentVisibleTileIds.has(tileLayer.tileId);
             if (isInViewport)
                 this.tileLayerAddedTopic.next(tileLayer);
             else

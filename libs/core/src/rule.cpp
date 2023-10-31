@@ -17,16 +17,16 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
     for (auto const& geometryStr : yaml["geometry"]) {
         auto g = geometryStr.as<std::string>();
         if (g == "point") {
-            geometryTypes_.push_back(simfil::Geometry::GeomType::Points);
+            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Points);
         }
         else if (g == "mesh") {
-            geometryTypes_.push_back(simfil::Geometry::GeomType::Mesh);
+            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Mesh);
         }
         else if (g == "line") {
-            geometryTypes_.push_back(simfil::Geometry::GeomType::Line);
+            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Line);
         }
         else if (g == "polygon") {
-            geometryTypes_.push_back(simfil::Geometry::GeomType::Polygon);
+            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Polygon);
         }
         else {
             std::cout << "Unsupported geometry type: " << g << std::endl;
@@ -75,9 +75,9 @@ bool FeatureStyleRule::match(mapget::Feature& feature) const
     return true;
 }
 
-const std::vector<simfil::Geometry::GeomType>& FeatureStyleRule::geometryTypes() const
+bool FeatureStyleRule::supports(const mapget::GeomType& g) const
 {
-    return geometryTypes_;
+    return geometryTypes_ & geomTypeBit(g);
 }
 
 glm::fvec4 const& FeatureStyleRule::color() const

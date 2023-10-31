@@ -20,7 +20,7 @@ JsValue JsValue::fromGlobal(std::string const& globalName)
 #endif
 }
 
-JsValue JsValue::newDict(std::initializer_list<std::pair<std::string, JsValue>> initializers)
+JsValue JsValue::Dict(std::initializer_list<std::pair<std::string, JsValue>> initializers)
 {
 #ifdef EMSCRIPTEN
     auto obj = emscripten::val::object();
@@ -37,7 +37,7 @@ JsValue JsValue::newDict(std::initializer_list<std::pair<std::string, JsValue>> 
 #endif
 }
 
-JsValue JsValue::newList(std::initializer_list<JsValue> initializers)
+JsValue JsValue::List(std::initializer_list<JsValue> initializers)
 {
 #ifdef EMSCRIPTEN
     emscripten::val array = emscripten::val::array();
@@ -52,6 +52,20 @@ JsValue JsValue::newList(std::initializer_list<JsValue> initializers)
         jsonArray.push_back(item.value_);
     }
     return JsValue(jsonArray);
+#endif
+}
+
+JsValue JsValue::Float64Array(const std::vector<double>& coordinates)
+{
+#ifdef EMSCRIPTEN
+    static thread_local auto JsFloat64ArrayType = emscripten::val::global("Float64Array");
+    // Create a typed memory view directly pointing to the vector's data
+    auto memoryView = emscripten::typed_memory_view(coordinates.size(), coordinates.data());
+    // Create a Float64Array from the memory view
+    auto float64Array = JsFloat64ArrayType.new_(memoryView);
+    return JsValue(float64Array);
+#else
+    return JsValue(coordinates);
 #endif
 }
 
@@ -82,6 +96,11 @@ CesiumClass::CesiumClass(const std::string& className)
 {
     static thread_local auto cesiumLibrary = JsValue::fromGlobal("Cesium");
     value_ = cesiumLibrary.value_[className];
+}
+
+JsValue CesiumClass::New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs) const
+{
+    return New(*JsValue::Dict(kwArgs));
 }
 
 } // namespace erdblick

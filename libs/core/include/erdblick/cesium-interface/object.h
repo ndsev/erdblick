@@ -36,14 +36,19 @@ struct JsValue
      * Construct an Object as a new JS or JSON dictionary with provided initializers.
      * @param initializers An initializer list of key-value pairs.
      */
-    static JsValue
-    newDict(std::initializer_list<std::pair<std::string, JsValue>> initializers = {});
+    static JsValue Dict(std::initializer_list<std::pair<std::string, JsValue>> initializers = {});
 
     /**
      * Construct an Object as a new JS or JSON list with provided initializers.
      * @param initializers An initializer list of CesiumObject items.
      */
-    static JsValue newList(std::initializer_list<JsValue> initializers = {});
+    static JsValue List(std::initializer_list<JsValue> initializers = {});
+
+    /**
+     * Construct an Object as a new JS Float64 TypedArray.
+     * @param coordinates Float64 buffer to fill the typed array.
+     */
+    static JsValue Float64Array(std::vector<double> const& coordinates);
 
     /**
      * Constructs a JavaScript or JSON null value.
@@ -122,6 +127,7 @@ public:
      * For EMSCRIPTEN, it utilizes value_.new_(Args...).
      * For the mock version, it will return an empty nlohmann JSON object.
      */
+    JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
     template<typename... Args>
     JsValue New(Args... args) const;
 
