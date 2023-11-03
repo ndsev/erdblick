@@ -55,6 +55,19 @@ export class ErdblickDebugApi {
         return JSON.stringify({ position, orientation });
     }
 
+    /** Flies to the specified location. */
+    flyTo(lon, lat) {
+        this.view.viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(lon, lat, 1000),
+            orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-90),
+                roll: 0.0
+            },
+            duration: 1
+        });
+    }
+
     /**
      * Generate a test TileFeatureLayer, and show it.
      */
