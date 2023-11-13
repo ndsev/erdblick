@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <list>
+#include <functional>
 
 namespace erdblick
 {

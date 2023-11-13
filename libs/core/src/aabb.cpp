@@ -1,6 +1,7 @@
 #include "aabb.h"
-
 #include "glm/ext.hpp"
+
+
 
 namespace erdblick
 {
@@ -107,7 +108,7 @@ double Wgs84AABB::avgMercatorStretch()
     auto latBottom = glm::radians(sw_.y);
     auto radToMercatorLat = [](double wgs84Lat)
     {
-        return atanh(sin(wgs84Lat - M_PI_2));
+        return atanh(sin(wgs84Lat - glm::half_pi<double>()));
     };
     return (radToMercatorLat(latTop) - radToMercatorLat(latBottom)) / glm::radians(size_.y);
 }

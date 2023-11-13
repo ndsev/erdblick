@@ -20,9 +20,9 @@ SharedUint8Array::SharedUint8Array(const std::string& data)
     array_.assign(data.begin(), data.end());
 }
 
-__UINT64_TYPE__ SharedUint8Array::getPointer()
+uintptr_t SharedUint8Array::getPointer()
 {
-    return reinterpret_cast<__UINT64_TYPE__>(array_.data());
+    return reinterpret_cast<uintptr_t>(array_.data());
 }
 
 void SharedUint8Array::writeToArray(const char* start, const char* end)
