@@ -138,22 +138,27 @@ export class Fetch
     async handleChunkedResponse(response) {
         const reader = response.body.getReader();
         let accumulatedData = new Uint8Array(0);
+        let readIndex = 0;
 
         const processAccumulatedData = () => {
-            while (accumulatedData.length >= Fetch.CHUNK_HEADER_SIZE) {
-                const type = accumulatedData[6];
-                const length = new DataView(accumulatedData.buffer, 7, 4).getUint32(0, true);
+            while (readIndex + Fetch.CHUNK_HEADER_SIZE <= accumulatedData.length) {
+                const type = accumulatedData[readIndex + 6];
+                const length = new DataView(accumulatedData.buffer, readIndex + 7, 4).getUint32(0, true);
 
-                // Check if we have the full chunk.
-                if (accumulatedData.length >= Fetch.CHUNK_HEADER_SIZE + length) {
-                    const chunkFrame = accumulatedData.slice(0, Fetch.CHUNK_HEADER_SIZE + length);
-                    this.runBufferCallback(chunkFrame, type);
-
-                    // Remove the processed data from the beginning of accumulatedData.
-                    accumulatedData = accumulatedData.slice(Fetch.CHUNK_HEADER_SIZE + length);
+                if (readIndex + Fetch.CHUNK_HEADER_SIZE + length <= accumulatedData.length) {
+                    // Create a view for the current chunk frame
+                    const chunkFrameView = new Uint8Array(accumulatedData.buffer, readIndex, Fetch.CHUNK_HEADER_SIZE + length);
+                    this.runBufferCallback(chunkFrameView, type);
+                    readIndex += Fetch.CHUNK_HEADER_SIZE + length;
                 } else {
                     break;
                 }
+            }
+
+            // If readIndex is not at the start, adjust the accumulatedData
+            if (readIndex > 0) {
+                accumulatedData = accumulatedData.slice(readIndex);
+                readIndex = 0;
             }
         }
 
