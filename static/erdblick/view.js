@@ -210,6 +210,10 @@ export class ErdblickView
         }
 
         let rectangle = this.viewer.camera.computeViewRectangle();
+        if (!rectangle) {
+            // This might happen when looking into space.
+            return;
+        }
 
         let west = Cesium.Math.toDegrees(rectangle.west);
         let south = Cesium.Math.toDegrees(rectangle.south);
