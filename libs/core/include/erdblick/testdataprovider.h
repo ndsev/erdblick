@@ -3,6 +3,7 @@
 #include "mapget/model/featurelayer.h"
 #include <iostream>
 #include "style.h"
+#include "stream.h"
 
 namespace erdblick
 {
@@ -10,7 +11,7 @@ namespace erdblick
 class TestDataProvider
 {
 public:
-    TestDataProvider()
+    TestDataProvider(TileLayerParser& tileLayerParser)
     {
         layerInfo_ = mapget::LayerInfo::fromJson(R"({
             "layerId": "WayLayer",
@@ -70,8 +71,11 @@ public:
             ]
         })"_json);
 
-        // Create empty shared autofilled field-name dictionary
-        fieldNames_ = std::make_shared<mapget::Fields>("TastyTomatoSaladNode");
+        // Get a field dictionary which the parser can later pick up again,
+        // and also inform the parser about the layer info used by features
+        // in the test data.
+        fieldNames_ = tileLayerParser.cachedFieldDicts_->operator()("TestDataNode");
+        tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
     std::shared_ptr<mapget::TileFeatureLayer> getTestLayer(double camX, double camY, uint16_t level)
@@ -87,8 +91,8 @@ public:
         // Create a basic TileFeatureLayer
         auto result = std::make_shared<mapget::TileFeatureLayer>(
             tileId,
-            "TastyTomatoSaladNode",
-            "GarlicChickenMap",
+            "TestDataNode",
+            "TestMap",
             layerInfo_,
             fieldNames_);
         result->setPrefix({{"areaId", "TheBestArea"}});

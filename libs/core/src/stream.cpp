@@ -49,11 +49,7 @@ void TileLayerParser::reset()
     reader_ = std::make_unique<TileLayerStream::Reader>(
         [this](auto&& mapId, auto&& layerId)
         {
-            auto& map = info_[std::string(mapId)];
-            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
-            if (it != map.layers_.end())
-                return it->second;
-            return fallbackLayerInfo_;
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
         [this](auto&& layer){
             if (tileParsedFun_)
@@ -70,11 +66,7 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         {
-            auto& map = info_[std::string(mapId)];
-            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
-            if (it != map.layers_.end())
-                return it->second;
-            return fallbackLayerInfo_;
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
         [this](auto&& nodeId) { return cachedFieldDicts_->operator()(nodeId); });
     return result;
@@ -91,11 +83,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         {
-            auto& map = info_[std::string(mapId)];
-            auto it = info_[std::string(mapId)].layers_.find(std::string(layerId));
-            if (it != map.layers_.end())
-                return it->second;
-            return fallbackLayerInfo_;
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         }
     );
     auto numFeatures = -1;
@@ -112,6 +100,17 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
 
 void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info) {
     fallbackLayerInfo_ = std::move(info);
+}
+
+std::shared_ptr<mapget::LayerInfo>
+TileLayerParser::resolveMapLayerInfo(std::string const& mapId, std::string const& layerId)
+{
+    auto& map = info_[mapId];
+    auto it = info_[mapId].layers_.find(layerId);
+    if (it != map.layers_.end())
+        return it->second;
+    std::cout << "Using fallback layer info: " << fallbackLayerInfo_->layerId_ << std::endl;
+    return fallbackLayerInfo_;
 }
 
 }

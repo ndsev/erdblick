@@ -9,6 +9,8 @@ namespace erdblick
 
 class TileLayerParser
 {
+    friend class TestDataProvider;
+
 public:
     explicit TileLayerParser();
 
@@ -53,7 +55,8 @@ public:
 
     /**
      * Set layer info which will be used if the external doesn't fit.
-     * Used for test data.
+     * Used for test data, which does not have layer info among the
+     * info fetched from the connected mapget service.
      */
     void setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info);
 
@@ -63,6 +66,9 @@ private:
     std::shared_ptr<mapget::TileLayerStream::CachedFieldsProvider> cachedFieldDicts_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
+
+    std::shared_ptr<mapget::LayerInfo>
+    resolveMapLayerInfo(std::string const& mapId, std::string const& layerId);
 };
 
 }
