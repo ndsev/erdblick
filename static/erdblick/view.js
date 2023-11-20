@@ -238,7 +238,7 @@ export class ErdblickView
             height: sizeLat + expandLat*2,
             camPosLon: centerLon,
             camPosLat: centerLat,
-            orientation: this.viewer.camera.heading,
+            orientation: -this.viewer.camera.heading + Math.PI * .5,
         });
     }
 }
