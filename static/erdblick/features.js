@@ -1,11 +1,9 @@
 "use strict";
 
-import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
+import {uint8ArrayToWasm} from "./wasm.js";
 
 /**
- * Bundle of a WASM TileFeatureLayer and a rendered representation
- * in the form of a Cesium PrimitiveCollection.
- *
+ * JS interface of a WASM TileFeatureLayer.
  * The WASM TileFeatureLayer object is stored as a blob when not needed,
  * to keep the memory usage within reasonable limits. To use the wrapped
  * WASM TileFeatureLayer, use the peek()-function.
@@ -13,54 +11,28 @@ import {uint8ArrayFromWasm, uint8ArrayToWasm} from "./wasm.js";
 export class FeatureTile
 {
 // public:
-    forceShow;
+
     /**
      * Construct a FeatureTile object.
      * @param coreLib Reference to the WASM erdblick library.
      * @param parser Singleton TileLayerStream WASM object.
-     * @param tileFeatureLayer Deserialized WASM TileFeatureLayer.
+     * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib, parser, tileFeatureLayer, preventCulling)
+    constructor(coreLib, parser, tileFeatureLayerBlob, preventCulling)
     {
+        let mapTileMetadata = uint8ArrayToWasm(coreLib, wasmBlob => {
+            return parser.readTileLayerMetadata(wasmBlob);
+        }, tileFeatureLayerBlob);
+        this.id = mapTileMetadata.id;
+        this.tileId = mapTileMetadata.tileId;
+        this.numFeatures = mapTileMetadata.numFeatures;
         this.coreLib = coreLib;
         this.parser = parser;
         this.preventCulling = preventCulling;
-        this.id = tileFeatureLayer.id();
-        this.tileId = tileFeatureLayer.tileId();
-        this.children = undefined;
-        this.tileFeatureLayerInitDeserialized = tileFeatureLayer;
-        this.tileFeatureLayerSerialized = null;
+        this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         this.primitiveCollection = null;
         this.disposed = false;
-    }
-
-    /**
-     * Convert this TileFeatureLayer to a Cesium Primitive which
-     * contains all visuals for this tile, given the style.
-     * Returns a promise which resolves to true, if there is a freshly baked
-     * Cesium Primitive under this.primitiveCollection, or false,
-     * if no output was generated because the tile is empty.
-     * @param {null} style The style that is used to make the conversion.
-     */
-    async render(style)
-    {
-        // Do not try to render if the underlying data is disposed.
-        if (this.disposed)
-            return false;
-
-        // Remove any previous render-result, as a new one is generated.
-        // TODO: Ensure that the View also takes note of the removed PrimitiveCollection.
-        //  This will become apparent once interactive re-styling is a prime use-case.
-        this.disposeRenderResult();
-
-        this.peek(tileFeatureLayer => {
-            let visualization = new this.coreLib.FeatureLayerVisualization(style, tileFeatureLayer);
-            this.primitiveCollection = visualization.primitiveCollection();
-        });
-
-        // The primitive collection will be null if there were no features to render.
-        return this.primitiveCollection !== null && this.primitiveCollection !== undefined;
     }
 
     /**
@@ -69,59 +41,23 @@ export class FeatureTile
      * @returns The value returned by the callback.
      */
     peek(callback) {
-        // For the first call to peek, the tileFeatureLayerInitDeserialized member
-        // is still set, and the tileFeatureLayerSerialized is not yet set.
-        let deserializedLayer = this.tileFeatureLayerInitDeserialized;
-        if (this.tileFeatureLayerInitDeserialized) {
-            this.tileFeatureLayerInitDeserialized = null;
-            this.tileFeatureLayerSerialized = uint8ArrayFromWasm(this.coreLib, bufferToWrite => {
-                this.parser.writeTileFeatureLayer(deserializedLayer, bufferToWrite);
-            });
-        }
-
-        if (!deserializedLayer) {
-            // Deserialize the WASM tileFeatureLayer from the blob.
-            console.assert(this.tileFeatureLayerSerialized);
-            uint8ArrayToWasm(this.coreLib, bufferToRead => {
-                deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            }, this.tileFeatureLayerSerialized);
-        }
-
-        // Run the callback with the deserialized layer, and
-        // store the result as the return value.
-        let result = null;
-        if (callback) {
-            result = callback(deserializedLayer);
-        }
-
-        // Clean up.
-        deserializedLayer.delete();
-        return result;
+        // Deserialize the WASM tileFeatureLayer from the blob.
+        return uint8ArrayToWasm(this.coreLib, bufferToRead => {
+            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            // Run the callback with the deserialized layer, and
+            // provide the result as the return value.
+            if (callback) {
+                return callback(deserializedLayer);
+            }
+            deserializedLayer.delete();
+        }, this.tileFeatureLayerBlob);
     }
 
     /**
-     * Remove all data associated with a previous call to this.render().
+     * Mark this tile as "not available anymore".
      */
-    disposeRenderResult()
+    destroy()
     {
-        if (!this.primitiveCollection)
-            return;
-        if (!this.primitiveCollection.isDestroyed())
-            this.primitiveCollection.destroy();
-
-        this.primitiveCollection = null;
-    }
-
-    /**
-     * Clean up all data associated with this FeatureTile instance.
-     */
-    dispose()
-    {
-        this.disposeRenderResult();
-        if (this.tileFeatureLayerInitDeserialized) {
-            this.tileFeatureLayerInitDeserialized.delete();
-            this.tileFeatureLayerInitDeserialized = null;
-        }
         this.disposed = true;
     }
 }

@@ -17,6 +17,29 @@ libErdblickCore().then(coreLib =>
         mapModel.reloadStyle();
     }
 
+    document.getElementById("tilesToLoadInput").value = mapModel.maxLoadTiles;
+    document.getElementById("tilesToVisualizeInput").value = mapModel.maxVisuTiles;
+    // Prevent event propagation for input fields
+    $("#tilesToLoadInput, #tilesToVisualizeInput").on("click", function(event) {
+        event.stopPropagation();
+    });
+    window.applyTileLimits = () => {
+        const tilesToLoad = parseInt(document.getElementById("tilesToLoadInput").value);
+        const tilesToVisualize = parseInt(document.getElementById("tilesToVisualizeInput").value);
+
+        if (isNaN(tilesToLoad) || isNaN(tilesToVisualize)) {
+            alert("Please enter valid tile limits!");
+            return;
+        }
+
+        mapModel.maxLoadTiles = tilesToLoad;
+        mapModel.maxVisuTiles = tilesToVisualize;
+        mapModel.update();
+
+        console.log(`Max tiles to load set to ${tilesToLoad}`);
+        console.log(`Max tiles to visualize set to ${tilesToVisualize}`);
+    }
+
     // Add debug API that can be easily called
     // from browser's debug console
     const debugApi = new ErdblickDebugApi(mapView);

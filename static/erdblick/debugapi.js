@@ -1,5 +1,7 @@
 "use strict";
 
+import {uint8ArrayFromWasm} from "./wasm.js";
+
 /**
  * Debugging utility class designed for usage with the browser's debug console.
  *
@@ -59,8 +61,10 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     showTestTile() {
-        let tile = this.coreLib.generateTestTile();
+        let tile = uint8ArrayFromWasm(this.coreLib, sharedArr => {
+            this.coreLib.generateTestTile(sharedArr, this.model.tileParser);
+        })
         let style = this.coreLib.generateTestStyle();
-        this.model.addTileLayer(tile, style, true);
+        this.model.addTileFeatureLayer(tile, style, true);
     }
 }

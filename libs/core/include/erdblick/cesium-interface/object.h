@@ -84,6 +84,11 @@ struct JsValue
     JsValue operator[](std::string const& propertyName);
 
     /**
+     * Set an object field or dictionary entry to a given value.
+     */
+    void set(std::string const& key, JsValue const& value);
+
+    /**
      * Push a value to a JS list.
      * For EMSCRIPTEN, it will use value_.push(o.value_).
      * For the mock version, it will append the push action to `methodCalls`.

@@ -7,9 +7,7 @@
     <!-- Non-Module 3rd-party sources -->
     <script src="./deps/jquery-3.2.1-min.js"></script>
     <script src="https://unpkg.com/rxjs@^7/dist/bundles/rxjs.umd.min.js"></script>
-    <script src="https://cesium.com/downloads/cesiumjs/releases/1.108/Build/Cesium/Cesium.js"></script>
-    <!-- Enable for debugging with CesiumUnminified folder from Cesium Release zip. -->
-    <!-- <script src="./deps/CesiumUnminified/Cesium.js"></script> -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
 
     <!-- Erdblick WASM library -->
     <script type="module" src="./libs/core/erdblick-core.js"></script>
@@ -25,7 +23,7 @@
 
     <!-- Style sheets -->
     <link rel="stylesheet" href="./index.css">
-    <link href="https://cesium.com/downloads/cesiumjs/releases/1.108/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 </head>
 <body>
 
@@ -35,6 +33,18 @@
     <span class="toggle-indicator"></span>
     erdblick v0.3.0 //
     <button onclick="reloadStyle()">Reload Style</button><br>
+    <div id="controls">
+        <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
+        <label for="tilesToLoadInput">Max Tiles to Load:</label>
+        <input type="number" id="tilesToLoadInput" placeholder="Enter max tiles to load" min="1"><br>
+
+        <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
+        <label for="tilesToVisualizeInput">Max Tiles to Visualize:</label>
+        <input type="number" id="tilesToVisualizeInput" placeholder="Enter max tiles to visualize" min="1"><br>
+
+        <!-- Apply button -->
+        <button onclick="applyTileLimits()">Apply Tile Limits</button>
+    </div>
     <div id="maps"></div>
 </div>
 

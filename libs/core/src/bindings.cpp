@@ -98,8 +98,11 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
 }
 
 /** Create a test tile over New York. */
-std::shared_ptr<mapget::TileFeatureLayer> generateTestTile() {
-    return TestDataProvider().getTestLayer(-74.0060, 40.7128, 10);
+void generateTestTile(SharedUint8Array& output, TileLayerParser& parser) {
+    auto tile = TestDataProvider(parser).getTestLayer(-74.0060, 40.7128, 9);
+    std::stringstream blob;
+    tile->write(blob);
+    output.writeToArray(blob.str());
 }
 
 /** Create a test style. */
@@ -192,29 +195,21 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
 
+    ////////// TileLayerMetadata
+    em::value_object<TileLayerParser::TileLayerMetadata>("Point")
+        .field("id", &TileLayerParser::TileLayerMetadata::id)
+        .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures);
+
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
-        .function(
-            "onTileParsedFromStream",
-            std::function<void(TileLayerParser&, em::val)>(
-                [](TileLayerParser& self, em::val cb)
-                { self.onTileParsedFromStream([cb](auto&& tile) { cb(tile); }); }))
-        .function("parseFromStream", &TileLayerParser::parseFromStream)
-        .function("reset", &TileLayerParser::reset)
-        .function(
-            "fieldDictOffsets",
-            std::function<em::val(TileLayerParser&)>(
-                [](TileLayerParser& self)
-                {
-                    auto result = em::val::object();
-                    for (auto const& [nodeId, fieldId] : self.fieldDictOffsets())
-                        result.set(nodeId, fieldId);
-                    return result;
-                }))
+        .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
+        .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
-        .function("writeTileFeatureLayer", &TileLayerParser::writeTileFeatureLayer);
+        .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);

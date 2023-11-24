@@ -33,16 +33,16 @@ rule that matches it.
 > to edit and toggle multiple style sheets, the current alpha version loads
 > its style sheet from the hard-coded path [static/styles/demo-style.yaml](static/styles/demo-style.yaml).
 
-Each rule within the YAML `rules` array can have the following fields:
+Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is optional:
 
-| Field      | Description                                                                                          | Type                                         | Optional? | Example Value                         |
-|------------|------------------------------------------------------------------------------------------------------|----------------------------------------------|-----------|---------------------------------------|
-| `geometry` | List of feature geometry type(s) the rule applies to.                                                | [`"point"`\|`"mesh"`\|`"line"`\|`"polygon"`] | No        | `["point", "mesh"]`                   |
-| `type`     | A regular expression to match against a feature type.                                                | String                                       | Yes       | `"Lane\|Boundary"`                    |
-| `filter`   | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                         | String                                       | Yes       | `properties.functionalRoadClass == 4` |
-| `color`    | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                       | Yes       | `"#FF5733"`, `red`                    |
-| `opacity`  | A float value between 0 and 1 indicating the opacity.                                                | Float                                        | Yes       | `0.8`                                 |
-| `width`    | Specifies the line width or point diameter (default in pixels).                                      | Float                                        | Yes       | `4.5`                                 |
+| Field          | Description                                                                                          | Type                                                       | Example Value       |
+|----------------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------|---------------------|
+| `geometry`     | List of feature geometry type(s) the rule applies to.                                                | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]` |
+| `type`__*__    | A regular expression to match against a feature type.                                                | String                                                     | `"Lane\|Boundary"`  |
+| `filter`__*__  | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                         | String                                                     | `*roadClass == 4`   |
+| `color`__*__   | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                                     | `"#FF5733"`, `red`  |
+| `opacity`__*__ | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`               |
+| `width`__*__   | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`               |
 
 **A brief example:**
 

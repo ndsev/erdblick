@@ -3,6 +3,7 @@
 #include "mapget/model/featurelayer.h"
 #include <iostream>
 #include "style.h"
+#include "stream.h"
 
 namespace erdblick
 {
@@ -10,7 +11,7 @@ namespace erdblick
 class TestDataProvider
 {
 public:
-    TestDataProvider()
+    TestDataProvider(TileLayerParser& tileLayerParser)
     {
         layerInfo_ = mapget::LayerInfo::fromJson(R"({
             "layerId": "WayLayer",
@@ -70,8 +71,11 @@ public:
             ]
         })"_json);
 
-        // Create empty shared autofilled field-name dictionary
-        fieldNames_ = std::make_shared<mapget::Fields>("TastyTomatoSaladNode");
+        // Get a field dictionary which the parser can later pick up again,
+        // and also inform the parser about the layer info used by features
+        // in the test data.
+        fieldNames_ = tileLayerParser.cachedFieldDicts_->operator()("TestDataNode");
+        tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
     std::shared_ptr<mapget::TileFeatureLayer> getTestLayer(double camX, double camY, uint16_t level)
@@ -87,8 +91,8 @@ public:
         // Create a basic TileFeatureLayer
         auto result = std::make_shared<mapget::TileFeatureLayer>(
             tileId,
-            "TastyTomatoSaladNode",
-            "GarlicChickenMap",
+            "TestDataNode",
+            "TestMap",
             layerInfo_,
             fieldNames_);
         result->setPrefix({{"areaId", "TheBestArea"}});
@@ -115,7 +119,7 @@ public:
         };
 
         // Create 10 random Way features inside the bounding box defined by NE and SW
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 2; i++) {
             std::cout << "Generated Way " << i << std::endl;
             // Create a feature with line geometry
             auto feature = result->newFeature("Way", {{"wayId", 42 + i}});
@@ -134,7 +138,7 @@ public:
         }
 
         // Create 10 random Sign features inside the bounding box defined by NE and SW
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 2; i++) {
             std::cout << "Generated Sign " << i << std::endl;
 
             // Create a feature with polygon geometry

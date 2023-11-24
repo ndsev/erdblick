@@ -2,6 +2,7 @@
 
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
+#include "erdblick/stream.h"
 
 #include <iostream>
 
@@ -9,7 +10,8 @@ using namespace erdblick;
 
 TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
 {
-    auto testLayer = TestDataProvider().getTestLayer(42., 11., 13);
+    TileLayerParser tlp;
+    auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     FeatureLayerVisualization visualization(TestDataProvider::style(), testLayer);
     auto result = visualization.primitiveCollection();
     std::cout << result << std::endl;

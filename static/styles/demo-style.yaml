@@ -1,6 +1,7 @@
 name: DemoStyle
 version: 1.0
 rules:
-  - geometry: ["line"]
-    color: "#ff0000"
+  - geometry: ["line", "mesh", "polygon"]
+    color: red
     opacity: 1.0
+    width: 2.0

@@ -91,6 +91,15 @@ void JsValue::push(const JsValue& o)
 #endif
 }
 
+void JsValue::set(const std::string& key, const JsValue& value)
+{
+#ifdef EMSCRIPTEN
+    value_.set(key, *value);
+#else
+    value_[key] = *value;
+#endif
+}
+
 CesiumClass::CesiumClass(const std::string& className)
     : className_(className)
 {

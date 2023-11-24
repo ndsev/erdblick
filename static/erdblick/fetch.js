@@ -6,21 +6,24 @@
  */
 export class Fetch
 {
+    // The chunk header is 6B Version, 1B Type, 4B length
+    static CHUNK_HEADER_SIZE = 11;
+    static CHUNK_TYPE_FIELDS = 1;
+    static CHUNK_TYPE_FEATURES = 2;
+
     /**
      * Constructor to initialize the fetch processor with the required parameters.
      * @param {object} coreLib - The WebAssembly core library.
      * @param {string} url - The URL from where to fetch data.
      */
-    constructor(coreLib, url) {
-        this.coreLib = coreLib;
+    constructor(url) {
         this.url = url;
         this.method = 'GET';
         this.body = null;
         this.abortController = new AbortController();
         this.processChunks = false;
         this.jsonCallback = null;
-        this.wasmCallback = null;
-        this.wasmBufferDeletedByUser = false;
+        this.bufferCallback = null;
         this.aborted = false;
     }
 
@@ -65,16 +68,13 @@ export class Fetch
 
     /**
      * Method to set the callback for handling the WASM response.
-     * @param {Function} callback - The callback function.
-     * @param {boolean} deletionByUser - Whether the passed WASM shared
-     *  buffer should not be immediately deleted after the callback is
-     *  called - this is used to in the streaming viewport response
-     *  handling to ensure that the fetch operation is not stalled.
+     * @param {Function} callback - The callback function. Takes
+     *  a Uint8Array buffer, and an optional message type parameter
+     *  if chunk processing is enabled for this Fetch operation.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withWasmCallback(callback, deletionByUser) {
-        this.wasmCallback = callback;
-        this.wasmBufferDeletedByUser = deletionByUser;
+    withBufferCallback(callback) {
+        this.bufferCallback = callback;
         return this;
     }
 
@@ -138,35 +138,40 @@ export class Fetch
     async handleChunkedResponse(response) {
         const reader = response.body.getReader();
         let accumulatedData = new Uint8Array(0);
+        let readIndex = 0;
 
         const processAccumulatedData = () => {
-            while (accumulatedData.length >= 11) {  // Ensure we have at least VTL header
-                const type = accumulatedData[6];
-                const length = new DataView(accumulatedData.buffer, 7, 4).getUint32(0, true); // Little-endian
+            while (readIndex + Fetch.CHUNK_HEADER_SIZE <= accumulatedData.length) {
+                const type = accumulatedData[readIndex + 6];
+                const length = new DataView(accumulatedData.buffer, readIndex + 7, 4).getUint32(0, true);
 
-                // Check if we have the full VTLV frame
-                if (accumulatedData.length >= 6 + 1 + 4 + length) {
-                    const vtlvFrame = accumulatedData.slice(0, 11 + length);
-                    this.runWasmCallback(vtlvFrame);
-
-                    // Remove the processed data from the beginning of accumulatedData
-                    accumulatedData = accumulatedData.slice(11 + length);
+                if (readIndex + Fetch.CHUNK_HEADER_SIZE + length <= accumulatedData.length) {
+                    // Create a view for the current chunk frame
+                    const chunkFrameView = new Uint8Array(accumulatedData.buffer, readIndex, Fetch.CHUNK_HEADER_SIZE + length);
+                    this.runBufferCallback(chunkFrameView, type);
+                    readIndex += Fetch.CHUNK_HEADER_SIZE + length;
                 } else {
                     break;
                 }
+            }
+
+            // If readIndex is not at the start, adjust the accumulatedData
+            if (readIndex > 0) {
+                accumulatedData = accumulatedData.slice(readIndex);
+                readIndex = 0;
             }
         }
 
         while (true) {
             const { done, value } = await reader.read();
             if (value && value.length) {
-                // Append new data to accumulatedData
+                // Append new data to accumulatedData.
                 const temp = new Uint8Array(accumulatedData.length + value.length);
                 temp.set(accumulatedData);
                 temp.set(value, accumulatedData.length);
                 accumulatedData = temp;
 
-                // Try to process any complete VTLV frames
+                // Try to process any complete chunks.
                 processAccumulatedData();
             }
             if (done) break;
@@ -186,7 +191,7 @@ export class Fetch
 
                 let jsonString = JSON.stringify(jsonData);
                 let uint8Array = new TextEncoder().encode(jsonString);
-                this.runWasmCallback(uint8Array)
+                this.runBufferCallback(uint8Array)
             });
     }
 
@@ -199,7 +204,7 @@ export class Fetch
         fileReader.onloadend = () => {
             let arrayBuffer = fileReader.result;
             let uint8Array = new Uint8Array(arrayBuffer);
-            this.runWasmCallback(uint8Array)
+            this.runBufferCallback(uint8Array)
         };
         fileReader.onerror = (error) => {
             console.error('Error occurred while reading blob:', error);
@@ -210,24 +215,12 @@ export class Fetch
     /**
      * If there is a WASM callback, construct the shared buffer and call the callback.
      */
-    runWasmCallback(uint8Array)
+    runBufferCallback(uint8Array, messageType)
     {
-        if (!this.wasmCallback || this.aborted)
+        if (!this.bufferCallback || this.aborted)
             return;
-
-        let sharedArr = new this.coreLib.SharedUint8Array(uint8Array.length);
-        let dataPtr = Number(sharedArr.getPointer());
-
-        // Creating an Uint8Array on top of the buffer is essential!
-        let memoryView = new Uint8Array(this.coreLib.HEAPU8.buffer);
-        memoryView.set(uint8Array, dataPtr);
-
-        if (this.wasmCallback) {
-            this.wasmCallback(sharedArr);
-        }
-
-        if (!this.wasmBufferDeletedByUser) {
-            sharedArr.delete();
+        if (this.bufferCallback) {
+            this.bufferCallback(uint8Array, messageType);
         }
     }
 
@@ -251,8 +244,8 @@ export class Fetch
      * Log an error if it does not relate to an intentional abort-call.
      */
     handleError(e) {
-        if (e !== "User abort.") {
-            console.error(e);
-        }
+        if (e === "User abort." || (e && e.name === "AbortError"))
+            return;
+        console.error(e);
     }
 }
