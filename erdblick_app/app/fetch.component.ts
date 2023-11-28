@@ -10,13 +10,21 @@ export class Fetch
     static CHUNK_HEADER_SIZE = 11;
     static CHUNK_TYPE_FIELDS = 1;
     static CHUNK_TYPE_FEATURES = 2;
+    private url: string;
+    private method: string;
+    private body: Object | null;
+    private abortController: AbortController;
+    private processChunks: boolean;
+    private jsonCallback: any;
+    private bufferCallback: any;
+    private aborted: boolean;
 
     /**
      * Constructor to initialize the fetch processor with the required parameters.
      * @param {object} coreLib - The WebAssembly core library.
      * @param {string} url - The URL from where to fetch data.
      */
-    constructor(url) {
+    constructor(url: string) {
         this.url = url;
         this.method = 'GET';
         this.body = null;
@@ -32,7 +40,7 @@ export class Fetch
      * @param {string} method - The HTTP method ('GET', 'POST', etc.)
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withMethod(method) {
+    withMethod(method: string) {
         this.method = method;
         return this;
     }
@@ -42,7 +50,7 @@ export class Fetch
      * @param {object} body - The body of the request.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withBody(body) {
+    withBody(body: any) {
         this.body = body;
         return this;
     }
@@ -61,7 +69,7 @@ export class Fetch
      * @param {Function} callback - The callback function.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withJsonCallback(callback) {
+    withJsonCallback(callback: any) {
         this.jsonCallback = callback;
         return this;
     }
@@ -73,7 +81,7 @@ export class Fetch
      *  if chunk processing is enabled for this Fetch operation.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withBufferCallback(callback) {
+    withBufferCallback(callback: any) {
         this.bufferCallback = callback;
         return this;
     }
@@ -82,22 +90,25 @@ export class Fetch
      * Method to start the fetch request and process the response.
      */
     go() {
-        let requestOptions = {
+        let requestOptions: Record<string, any> = {
             method: this.method,
-            headers: {
-                // TODO: Investigate why fetch actually refuses to pass this header.
-                //  Currently, the connection stays open for five seconds.
-                'Connection': 'close'
-            },
             signal: this.abortController.signal,
             keepalive: false,
             mode: "same-origin"
         };
 
-        if (this.body !== null) {
-            requestOptions["body"] = JSON.stringify(this.body)
-            requestOptions.headers['Content-Type'] = 'application/json'
+        let headers: Record<string, any> = {
+            // TODO: Investigate why fetch actually refuses to pass this header.
+            //  Currently, the connection stays open for five seconds.
+            'Connection': 'close'
         }
+
+        if (this.body) {
+            requestOptions["body"] = JSON.stringify(this.body);
+            requestOptions["headers"]['Content-Type'] = 'application/json';
+        }
+
+        requestOptions["headers"] = headers
 
         fetch(this.url, requestOptions)
             .then(response => {
@@ -121,7 +132,7 @@ export class Fetch
      * Method to handle and process a Blob response.
      * @param {Response} response - The fetch response.
      */
-    handleBlobResponse(response) {
+    private handleBlobResponse(response: Response) {
         response.blob()
             .then(blob => {
                 this.processBlob(blob);
@@ -135,46 +146,48 @@ export class Fetch
      * This is the chunk encoding used by the mapget TileLayerStream.
      * @param {Response} response - The fetch response.
      */
-    async handleChunkedResponse(response) {
-        const reader = response.body.getReader();
-        let accumulatedData = new Uint8Array(0);
-        let readIndex = 0;
+    private async handleChunkedResponse(response: Response) {
+        if (response.body) {
+            const reader = response.body.getReader();
+            let accumulatedData = new Uint8Array(0);
+            let readIndex = 0;
 
-        const processAccumulatedData = () => {
-            while (readIndex + Fetch.CHUNK_HEADER_SIZE <= accumulatedData.length) {
-                const type = accumulatedData[readIndex + 6];
-                const length = new DataView(accumulatedData.buffer, readIndex + 7, 4).getUint32(0, true);
+            const processAccumulatedData = () => {
+                while (readIndex + Fetch.CHUNK_HEADER_SIZE <= accumulatedData.length) {
+                    const type = accumulatedData[readIndex + 6];
+                    const length = new DataView(accumulatedData.buffer, readIndex + 7, 4).getUint32(0, true);
 
-                if (readIndex + Fetch.CHUNK_HEADER_SIZE + length <= accumulatedData.length) {
-                    // Create a view for the current chunk frame
-                    const chunkFrameView = new Uint8Array(accumulatedData.buffer, readIndex, Fetch.CHUNK_HEADER_SIZE + length);
-                    this.runBufferCallback(chunkFrameView, type);
-                    readIndex += Fetch.CHUNK_HEADER_SIZE + length;
-                } else {
-                    break;
+                    if (readIndex + Fetch.CHUNK_HEADER_SIZE + length <= accumulatedData.length) {
+                        // Create a view for the current chunk frame
+                        const chunkFrameView = new Uint8Array(accumulatedData.buffer, readIndex, Fetch.CHUNK_HEADER_SIZE + length);
+                        this.runBufferCallback(chunkFrameView, type);
+                        readIndex += Fetch.CHUNK_HEADER_SIZE + length;
+                    } else {
+                        break;
+                    }
+                }
+
+                // If readIndex is not at the start, adjust the accumulatedData
+                if (readIndex > 0) {
+                    accumulatedData = accumulatedData.slice(readIndex);
+                    readIndex = 0;
                 }
             }
 
-            // If readIndex is not at the start, adjust the accumulatedData
-            if (readIndex > 0) {
-                accumulatedData = accumulatedData.slice(readIndex);
-                readIndex = 0;
-            }
-        }
+            while (true) {
+                const {done, value} = await reader.read();
+                if (value && value.length) {
+                    // Append new data to accumulatedData.
+                    const temp = new Uint8Array(accumulatedData.length + value.length);
+                    temp.set(accumulatedData);
+                    temp.set(value, accumulatedData.length);
+                    accumulatedData = temp;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (value && value.length) {
-                // Append new data to accumulatedData.
-                const temp = new Uint8Array(accumulatedData.length + value.length);
-                temp.set(accumulatedData);
-                temp.set(value, accumulatedData.length);
-                accumulatedData = temp;
-
-                // Try to process any complete chunks.
-                processAccumulatedData();
+                    // Try to process any complete chunks.
+                    processAccumulatedData();
+                }
+                if (done) break;
             }
-            if (done) break;
         }
     }
 
@@ -182,7 +195,7 @@ export class Fetch
      * Method to handle and process a JSON response.
      * @param {Response} response - The fetch response.
      */
-    handleJsonResponse(response) {
+    handleJsonResponse(response: Response) {
         response.json()
             .then(jsonData => {
                 if (this.jsonCallback) {
@@ -199,12 +212,14 @@ export class Fetch
      * Method to process a Blob and pass it to the WASM callback.
      * @param {Blob} blob - The blob to process.
      */
-    processBlob(blob) {
+    processBlob(blob: Blob) {
         let fileReader = new FileReader();
         fileReader.onloadend = () => {
             let arrayBuffer = fileReader.result;
-            let uint8Array = new Uint8Array(arrayBuffer);
-            this.runBufferCallback(uint8Array)
+            if (arrayBuffer && typeof arrayBuffer !== "string") {
+                let uint8Array = new Uint8Array(arrayBuffer);
+                this.runBufferCallback(uint8Array);
+            }
         };
         fileReader.onerror = (error) => {
             console.error('Error occurred while reading blob:', error);
@@ -215,7 +230,7 @@ export class Fetch
     /**
      * If there is a WASM callback, construct the shared buffer and call the callback.
      */
-    runBufferCallback(uint8Array, messageType)
+    runBufferCallback(uint8Array: Uint8Array, messageType: number = 0)
     {
         if (!this.bufferCallback || this.aborted)
             return;
@@ -243,7 +258,7 @@ export class Fetch
     /**
      * Log an error if it does not relate to an intentional abort-call.
      */
-    handleError(e) {
+    handleError(e: any) {
         if (e === "User abort." || (e && e.name === "AbortError"))
             return;
         console.error(e);

@@ -1,6 +1,6 @@
 "use strict";
 
-import {uint8ArrayToWasm} from "./wasm.js";
+import { uint8ArrayToWasm } from "./wasm";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -8,9 +8,17 @@ import {uint8ArrayToWasm} from "./wasm.js";
  * to keep the memory usage within reasonable limits. To use the wrapped
  * WASM TileFeatureLayer, use the peek()-function.
  */
-export class FeatureTile
-{
-// public:
+export class FeatureTile {
+    // public:
+    id: number;
+    tileId: number;
+    numFeatures: number;
+    coreLib: any;
+    private parser: any;
+    preventCulling: boolean;
+    private tileFeatureLayerBlob: any;
+    private primitiveCollection: any;
+    disposed: boolean;
 
     /**
      * Construct a FeatureTile object.
@@ -19,9 +27,8 @@ export class FeatureTile
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib, parser, tileFeatureLayerBlob, preventCulling)
-    {
-        let mapTileMetadata = uint8ArrayToWasm(coreLib, wasmBlob => {
+    constructor(coreLib: any, parser: any, tileFeatureLayerBlob: any, preventCulling: any) {
+        let mapTileMetadata = uint8ArrayToWasm(coreLib, (wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
@@ -40,9 +47,9 @@ export class FeatureTile
      * delete the deserialized WASM representation.
      * @returns The value returned by the callback.
      */
-    peek(callback) {
+    peek(callback: any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasm(this.coreLib, bufferToRead => {
+        return uint8ArrayToWasm(this.coreLib, (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
@@ -56,8 +63,7 @@ export class FeatureTile
     /**
      * Mark this tile as "not available anymore".
      */
-    destroy()
-    {
+    private destroy() {
         this.disposed = true;
     }
 }
@@ -67,15 +73,17 @@ export class FeatureTile
  * a feature within the tileset. Using the peek-function, it is
  * possible to access the WASM feature view in a memory-safe way.
  */
-export class FeatureWrapper
-{
+export class FeatureWrapper {
+    private index: number;
+    private featureTile: FeatureTile;
+
     /**
      * Construct a feature wrapper from a featureTile and a feature index
      * within that tile.
      * @param index The index of the feature within the tile.
      * @param featureTile {FeatureTile} The feature tile container.
      */
-    constructor(index, featureTile) {
+    constructor(index: number, featureTile: FeatureTile) {
         this.index = index;
         this.featureTile = featureTile;
     }
@@ -85,11 +93,11 @@ export class FeatureWrapper
      * The feature object will be deleted after the callback is called.
      * @returns The value returned by the callback.
      */
-    peek(callback) {
+    peek(callback: any) {
         if (this.featureTile.disposed) {
             throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
         }
-        return this.featureTile.peek(tileFeatureLayer => {
+        return this.featureTile.peek((tileFeatureLayer: any) => {
             let feature = tileFeatureLayer.at(this.index);
             let result = null;
             if (callback) {

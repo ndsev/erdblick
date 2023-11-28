@@ -4,6 +4,7 @@ project(erdblick)
 include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_OSX_ARCHITECTURES "x86_64")
 
 # Treat warnings as errors, with some exceptions for Cesium.
 set (ERDBLICK_CXX_FLAGS

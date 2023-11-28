@@ -2,15 +2,18 @@
 
 export class SingleShotTimer
 {
-    constructor(interval, callback, waitForRestart) {
+    private interval: number;
+    private timer: number | null;
+    private callback: any;
+
+    constructor(interval: number, callback: any, waitForRestart: boolean) {
         this.interval = interval;
         this.callback = callback;
         this.timer = null;
-        if (!waitForRestart)
-            this.restart();
+        if (!waitForRestart) this.restart(interval);
     }
 
-    restart(interval) {
+    restart(interval: number | undefined = undefined) {
         if (interval === undefined)
             interval = this.interval;
         this.stop();

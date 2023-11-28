@@ -1,22 +1,43 @@
 "use strict";
 
-import {ErdblickModel} from "./model.js";
-import {FeatureWrapper} from "./features.js";
-import {TileVisualization} from "./visualization.js"
+import {ErdblickModel} from "./erdblick.model";
+import {FeatureWrapper} from "./features.component";
+import {TileVisualization} from "./visualization.component"
+import {BehaviorSubject} from "rxjs"
+import {
+    Viewer,
+    UrlTemplateImageryProvider,
+    ScreenSpaceEventHandler,
+    ScreenSpaceEventType,
+    Color,
+    ColorGeometryInstanceAttribute,
+    Math,
+    Cartesian2,
+    Cartesian3,
+    Cartographic,
+    defined
+} from "cesium";
 
-export class ErdblickView
-{
+export class ErdblickComponent {
+    private viewer: Viewer;
+    private model: ErdblickModel;
+    private pickedFeature: any = null;
+    private pickedFeatureOrigColor: Color | null = null;
+    private hoveredFeature: any = null;
+    private hoveredFeatureOrigColor: Color | null = null;
+    private mouseHandler: ScreenSpaceEventHandler;
+    selectionTopic: BehaviorSubject<FeatureWrapper | null>;
+    private tileVisForPrimitive: Map<any, TileVisualization>;
+
     /**
      * Construct a Cesium View with a Model.
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
      */
-    constructor(model, containerDomElementId)
-    {
+    constructor(model: ErdblickModel, containerDomElementId: string) {
         this.model = model;
-        this.viewer = new Cesium.Viewer(containerDomElementId,
+        this.viewer = new Viewer(containerDomElementId,
             {
-                imageryProvider: false,
                 baseLayerPicker: false,
                 animation: false,
                 geocoder: false,
@@ -32,39 +53,35 @@ export class ErdblickView
             }
         );
 
-        let openStreetMap = new Cesium.UrlTemplateImageryProvider({
+        let openStreetMap = new UrlTemplateImageryProvider({
             url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
             maximumLevel: 19,
         });
         let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
         openStreetMapLayer.alpha = 0.3;
 
-        this.pickedFeature = null;
-        this.pickedFeatureOrigColor = null;
-        this.hoveredFeature = null;
-        this.hoveredFeatureOrigColor = null;
-        this.mouseHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+        this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
         // Holds the currently selected feature.
-        this.selectionTopic = new rxjs.BehaviorSubject(null); // {FeatureWrapper}
+        this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
 
         // Add a handler for selection.
-        this.mouseHandler.setInputAction(movement => {
+        this.mouseHandler.setInputAction((movement: any) => {
             let feature = this.viewer.scene.pick(movement.position);
             if (this.isKnownCesiumFeature(feature))
                 this.setPickedCesiumFeature(feature);
             else
                 this.setPickedCesiumFeature(null);
-        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+        }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
-        this.mouseHandler.setInputAction(movement => {
+        this.mouseHandler.setInputAction((movement: any) => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
             if (this.isKnownCesiumFeature(feature))
                 this.setHoveredCesiumFeature(feature);
             else
                 this.setHoveredCesiumFeature(null);
-        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+        }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
@@ -74,47 +91,47 @@ export class ErdblickView
 
         this.tileVisForPrimitive = new Map();
 
-        model.tileVisualizationTopic.subscribe(tileVis => {
+        model.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer);
-            tileVis.forEachPrimitive(primitive => {
+            tileVis.forEachPrimitive((primitive: any) => {
                 this.tileVisForPrimitive.set(primitive, tileVis);
             })
             this.viewer.scene.requestRender();
         });
 
-        model.tileVisualizationDestructionTopic.subscribe(tileVis => {
+        model.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
             if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
                 this.setPickedCesiumFeature(null);
             }
             if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
                 this.setHoveredCesiumFeature(null);
             }
-            tileVis.forEachPrimitive(primitive => {
+            tileVis.forEachPrimitive((primitive: any) => {
                 this.tileVisForPrimitive.delete(primitive);
             })
             tileVis.destroy(this.viewer);
             this.viewer.scene.requestRender();
         });
 
-        model.zoomToWgs84PositionTopic.subscribe(pos => {
+        model.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
             this.viewer.camera.setView({
-                destination: Cesium.Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
+                destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {
-                    heading: Cesium.Math.toRadians(0), // East, in radians.
-                    pitch: Cesium.Math.toRadians(-90), // Directly looking down.
+                    heading: Math.toRadians(0), // East, in radians.
+                    pitch: Math.toRadians(-90), // Directly looking down.
                     roll: 0 // No rotation
                 }
             });
         });
 
-        this.viewer.scene.globe.baseColor = new Cesium.Color(0.1, 0.1, 0.1, 1);
+        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
     }
 
     /**
      * Check if two cesium features are equal. A cesium feature is a
      * combination of a feature id and a primitive which contains it.
      */
-    cesiumFeaturesAreEqual(f1, f2) {
+    private cesiumFeaturesAreEqual(f1: any, f2: any) {
         return (!f1 && !f2) || (f1 && f2 && f1.id === f2.id && f1.primitive === f1.primitive);
     }
 
@@ -128,17 +145,19 @@ export class ErdblickView
     /**
      * Set or re-set the hovered feature.
      */
-    setHoveredCesiumFeature(feature) {
+    private setHoveredCesiumFeature(feature: any) {
         if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature))
             return;
         // Restore the previously hovered feature to its original color.
         if (this.hoveredFeature)
-            this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
+            if (this.hoveredFeatureOrigColor) {
+                this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
+            }
         this.hoveredFeature = null;
         if (feature && !this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
             // Highlight the new hovered feature and remember its original color.
             this.hoveredFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Cesium.Color.YELLOW);
+            this.setFeatureColor(feature, Color.YELLOW);
             this.hoveredFeature = feature;
         }
     }
@@ -146,12 +165,14 @@ export class ErdblickView
     /**
      * Set or re-set the picked feature.
      */
-    setPickedCesiumFeature(feature) {
+    private setPickedCesiumFeature(feature: any) {
         if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
             return;
         // Restore the previously picked feature to its original color.
         if (this.pickedFeature)
-            this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
+            if (this.pickedFeatureOrigColor) {
+                this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
+            }
         this.pickedFeature = null;
         if (feature) {
             // Highlight the new picked feature and remember its original color.
@@ -161,11 +182,10 @@ export class ErdblickView
                 this.setHoveredCesiumFeature(null);
             }
             this.pickedFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Cesium.Color.YELLOW);
+            this.setFeatureColor(feature, Color.YELLOW);
             this.pickedFeature = feature;
             this.selectionTopic.next(this.resolveFeature(feature.primitive, feature.id));
-        }
-        else {
+        } else {
             this.selectionTopic.next(null);
         }
     }
@@ -181,7 +201,7 @@ export class ErdblickView
         if (feature.primitive.isDestroyed())
             return;
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(color);
+        attributes.color = ColorGeometryInstanceAttribute.toValue(color);
         this.viewer.scene.requestRender();
     }
 
@@ -191,14 +211,15 @@ export class ErdblickView
             // Special treatment for point primitives.
             return feature.primitive.color.clone();
         }
-        if (feature.primitive.isDestroyed())
+        if (feature.primitive.isDestroyed()) {
             return null;
+        }
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        return Cesium.Color.fromBytes(...attributes.color);
+        return Color.fromBytes(...attributes.color);
     }
 
     /** Get a mapget feature from a cesium feature. */
-    resolveFeature(primitive, index) {
+    private resolveFeature(primitive: any, index: number) {
         let tileVis = this.tileVisForPrimitive.get(primitive);
         if (!tileVis) {
             tileVis = this.tileVisForPrimitive.get(primitive._pointPrimitiveCollection);
@@ -213,20 +234,20 @@ export class ErdblickView
     /**
      * Update the visible viewport, and communicate it to the model.
      */
-    updateViewport() {
+    private updateViewport() {
         let canvas = this.viewer.scene.canvas;
-        let center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+        let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
         let centerLon, centerLat;
 
-        if (Cesium.defined(centerCartesian)) {
-            let centerCartographic = Cesium.Cartographic.fromCartesian(centerCartesian);
-            centerLon = Cesium.Math.toDegrees(centerCartographic.longitude);
-            centerLat = Cesium.Math.toDegrees(centerCartographic.latitude);
+        if (defined(centerCartesian)) {
+            let centerCartographic = Cartographic.fromCartesian(centerCartesian);
+            centerLon = Math.toDegrees(centerCartographic.longitude);
+            centerLat = Math.toDegrees(centerCartographic.latitude);
         } else {
-            let cameraCartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.positionWC);
-            centerLon = Cesium.Math.toDegrees(cameraCartographic.longitude);
-            centerLat = Cesium.Math.toDegrees(cameraCartographic.latitude);
+            let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
+            centerLon = Math.toDegrees(cameraCartographic.longitude);
+            centerLat = Math.toDegrees(cameraCartographic.latitude);
         }
 
         let rectangle = this.viewer.camera.computeViewRectangle();
@@ -235,10 +256,10 @@ export class ErdblickView
             return;
         }
 
-        let west = Cesium.Math.toDegrees(rectangle.west);
-        let south = Cesium.Math.toDegrees(rectangle.south);
-        let east = Cesium.Math.toDegrees(rectangle.east);
-        let north = Cesium.Math.toDegrees(rectangle.north);
+        let west = Math.toDegrees(rectangle.west);
+        let south = Math.toDegrees(rectangle.south);
+        let east = Math.toDegrees(rectangle.east);
+        let north = Math.toDegrees(rectangle.north);
         let sizeLon = east - west;
         let sizeLat = north - south;
 
@@ -254,8 +275,8 @@ export class ErdblickView
         this.model.setViewport({
             south: south - expandLat,
             west: west - expandLon,
-            width: sizeLon + expandLon*2,
-            height: sizeLat + expandLat*2,
+            width: sizeLon + expandLon * 2,
+            height: sizeLat + expandLat * 2,
             camPosLon: centerLon,
             camPosLat: centerLat,
             orientation: -this.viewer.camera.heading + Math.PI * .5,
