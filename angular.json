@@ -53,6 +53,8 @@
                             }
                         ],
                         "styles": [
+                            "node_modules/primeng/resources/themes/lara-light-blue/theme.css",
+                            "node_modules/primeng/resources/primeng.min.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
                             "erdblick_app/styles.css"
                         ],
