@@ -67,6 +67,40 @@ public:
                             }
                         ]
                     ]
+                },
+                {
+                    "name": "PointOfInterest",
+                    "uniqueIdCompositions": [
+                        [
+                            {
+                                "partId": "areaId",
+                                "description": "String which identifies the map area.",
+                                "datatype": "STR"
+                            },
+                            {
+                                "partId": "pointId",
+                                "description": "Globally Unique 32b integer.",
+                                "datatype": "U32"
+                            }
+                        ]
+                    ]
+                },
+                {
+                    "name": "PointOfNoInterest",
+                    "uniqueIdCompositions": [
+                        [
+                            {
+                                "partId": "areaId",
+                                "description": "String which identifies the map area.",
+                                "datatype": "STR"
+                            },
+                            {
+                                "partId": "pointId",
+                                "description": "Globally Unique 32b integer.",
+                                "datatype": "U32"
+                            }
+                        ]
+                    ]
                 }
             ]
         })"_json);
@@ -151,6 +185,28 @@ public:
             feature->attributes()->addField("signType", signTypes[randomIndex]);
         }
 
+        // Add some points of interest...
+        for (int i = 0; i < 5; i++) {
+            std::cout << "Generated POI " << i << std::endl;
+
+            auto feature = result->newFeature("PointOfInterest", {{"pointId", 200 + i}});
+            auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
+            feature->addPoints(points);
+            
+            // TODO add point attributes
+        }
+
+        // ...and points of no interest.
+        for (int i = 0; i < 5; i++) {
+            std::cout << "Generated PONI " << i << std::endl;
+
+            auto feature = result->newFeature("PointOfInterest", {{"pointId", 300 + i}});
+            auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
+            feature->addPoints(points);
+            
+            // TODO add point attributes
+        }
+
         // Add a diamond mesh in the center of the tile.
         auto diamondMeshFeature = result->newFeature("Diamond", {{"diamondId", 999}});
         auto center = tileId.center();
@@ -187,6 +243,7 @@ public:
     static FeatureLayerStyle style()
     {
         return FeatureLayerStyle(SharedUint8Array(R"yaml(
+        name: "TestDataProviderStyle"
         rules:
           - geometry:
               - line
@@ -265,6 +322,18 @@ public:
             type: "Diamond"
             color: gold
             opacity: 0.5
+
+          - geometry:
+              - point
+            type: "PointOfInterest"
+            color: "#2ecc71" # Green color for Points of Interest
+            width: 10
+
+          - geometry:
+              - point
+            type: "PointOfNoInterest"
+            color: "#e74c3c" # Red color for Points of No Interest
+            width: 5
         )yaml"));
     }
 

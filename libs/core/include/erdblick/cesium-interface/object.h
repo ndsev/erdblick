@@ -17,8 +17,8 @@ using NativeJsValue = nlohmann::json;
 
 /**
  * Class representing an emscripten JavaScript object,
- * or a mock object based on an nlohmann::json value when compiling
- * without emscripten support.
+ * or a mock object based on an nlohmann::json value 
+ * for debugging or compiling without emscripten support.
  *
  * The mock object has two JSON fields:
  * - `properties` is a dict recording all field accesses.

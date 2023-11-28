@@ -12,6 +12,7 @@ FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& st
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true))
+      /* coloredPoints_ = default */
 {
     uint32_t featureId = 0;
     for (auto&& feature : *layer) {
@@ -39,6 +40,8 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
         collection.call<void>("add", coloredGroundLines_.toJsObject());
     if (!coloredGroundMeshes_.empty())
         collection.call<void>("add", coloredGroundMeshes_.toJsObject());
+    if (!coloredPoints_.empty())
+        collection.call<void>("add", coloredPoints_.toJsObject());
     return *collection;
 }
 
@@ -75,7 +78,8 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
         }
         break;
     case mapget::Geometry::GeomType::Points:
-        // TODO: Implement point support.
+        // TODO should points each have their own ID? How to adapt addGeometry?
+        coloredPoints_.visualizePoints(geom, rule, id);
         break;
     }
 }

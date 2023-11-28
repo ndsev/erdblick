@@ -29,6 +29,7 @@ struct CesiumLib
     CesiumClass GroundPolylineGeometry;
     CesiumClass GroundPolylinePrimitive;
     CesiumClass GroundPrimitive;
+    CesiumClass PointPrimitiveCollection;
 
     [[nodiscard]] JsValue MaterialFromType(std::string const& type, JsValue const& options);
 

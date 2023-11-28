@@ -24,7 +24,9 @@ CesiumLib::CesiumLib() :
     PrimitiveType("PrimitiveType"),
     GroundPolylineGeometry("GroundPolylineGeometry"),
     GroundPolylinePrimitive("GroundPolylinePrimitive"),
-    GroundPrimitive("GroundPrimitive")
+    GroundPrimitive("GroundPrimitive"),
+    PrimitiveType("PrimitiveType"),
+    PointPrimitiveCollection("PointPrimitiveCollection")
 {
 }
 
