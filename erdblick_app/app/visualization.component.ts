@@ -1,5 +1,6 @@
 import {Cartesian3, Color, Viewer} from "cesium";
 import {FeatureTile} from "./features.component";
+import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
 /** Bundle of a FeatureTile and a rendered */
 export class TileVisualization {
@@ -47,9 +48,13 @@ export class TileVisualization {
 
         // Create potential high-detail visualization
         if (this.isHighDetailAndNotEmpty()) {
-            this.tile.peek((tileFeatureLayer: any) => {
-                let visualization = new this.tile.coreLib.FeatureLayerVisualization(this.style, tileFeatureLayer);
-                this.primitiveCollection = visualization.primitiveCollection();
+            this.tile.peek((tileFeatureLayer: TileFeatureLayer) => {
+                console.log(this.style);
+                console.log(tileFeatureLayer);
+                if (this.style !== undefined && tileFeatureLayer !== undefined) {
+                    let visualization = new this.tile.coreLib.FeatureLayerVisualization(this.style, tileFeatureLayer);
+                    this.primitiveCollection = visualization.primitiveCollection();
+                }
             });
             if (this.primitiveCollection)
                 viewer.scene.primitives.add(this.primitiveCollection);

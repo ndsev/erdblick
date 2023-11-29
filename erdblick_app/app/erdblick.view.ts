@@ -18,7 +18,7 @@ import {
     defined
 } from "cesium";
 
-export class ErdblickComponent {
+export class ErdblickView {
     private viewer: Viewer;
     private model: ErdblickModel;
     private pickedFeature: any = null;

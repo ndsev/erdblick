@@ -1,5 +1,6 @@
 "use strict";
 
+
 /**
  * A class to fetch data from a URL and process the response
  * for usage in JavaScript and WebAssembly.
@@ -96,18 +97,15 @@ export class Fetch
             keepalive: false,
             mode: "same-origin"
         };
-
         let headers: Record<string, any> = {
             // TODO: Investigate why fetch actually refuses to pass this header.
             //  Currently, the connection stays open for five seconds.
             'Connection': 'close'
         }
-
-        if (this.body) {
-            requestOptions["body"] = JSON.stringify(this.body);
-            requestOptions["headers"]['Content-Type'] = 'application/json';
-        }
-
+        // if (this.body) {
+        //     requestOptions["body"] = JSON.stringify(this.body);
+        //     requestOptions["headers"]["Content-Type"] = "application/json";
+        // }
         requestOptions["headers"] = headers
 
         fetch(this.url, requestOptions)

@@ -1,8 +1,9 @@
 import { Component } from '@angular/core';
-import { ErdblickComponent } from "./erdblick.component";
+import { ErdblickView } from "./erdblick.view";
 import { ErdblickModel } from "./erdblick.model";
 import { DebugWindow, ErdblickDebugApi } from "./debugapi.component";
 import { HttpClient } from "@angular/common/http";
+import libErdblickCore from '../../build/libs/core/erdblick-core';
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -15,7 +16,7 @@ declare let window: DebugWindow;
         <div id="info" class="panel">
             <span class="toggle-indicator"></span>
             {{title}} {{version}} //
-            <button onclick="reloadStyle()">Reload Style</button><br>
+            <button (click)="reloadStyle()">Reload Style</button><br>
             <div id="controls">
                 <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
@@ -47,7 +48,7 @@ export class AppComponent {
     title: string = 'erdblick';
     version: string = "v0.3.0";
     mapModel: ErdblickModel | undefined;
-    mapView: ErdblickComponent | undefined;
+    mapView: ErdblickView | undefined;
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     selectedFeatureGeoJsonText: string = "";
@@ -67,7 +68,7 @@ export class AppComponent {
             this.coreLib = coreLib;
 
             this.mapModel = new ErdblickModel(coreLib);
-            this.mapView = new ErdblickComponent(this.mapModel, 'mapViewContainer');
+            this.mapView = new ErdblickView(this.mapModel, 'mapViewContainer');
 
             this.reloadStyle();
 

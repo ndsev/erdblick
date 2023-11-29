@@ -2,6 +2,8 @@ import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
 import { AppModule } from './app/app.module';
 import { SingleShotTimer } from "./app/timer.service";
 
+(window as Record<string, any>)['CESIUM_BASE_URL'] = '/bundle/cesium/';
+
 export var platform = function() {
     let currentState = new URL(window.location.toString());
 

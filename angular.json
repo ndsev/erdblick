@@ -23,11 +23,6 @@
                         "assets": [
                             {
                                 "glob": "**/*",
-                                "input": "build",
-                                "output": "/bundle/"
-                            },
-                            {
-                                "glob": "**/*",
                                 "input": "node_modules/cesium/Build/Cesium/Workers",
                                 "output": "/bundle/cesium/Workers"
                             },
@@ -47,6 +42,16 @@
                                 "output": "/bundle/cesium/Widgets"
                             },
                             {
+                                "glob": "**/*",
+                                "input": "styles",
+                                "output": "/bundle/styles"
+                            },
+                            {
+                                "glob": "**/*",
+                                "input": "images",
+                                "output": "/bundle/images"
+                            },
+                            {
                                 "glob": "VERSION",
                                 "input": ".",
                                 "output": "/bundle/"
@@ -59,7 +64,7 @@
                             "erdblick_app/styles.css"
                         ],
                         "scripts": [
-                            "build/libs/core/erdblick-core.js"
+
                         ],
                         "customWebpackConfig": {
                             "path": "./webpack.config.js"
@@ -83,17 +88,21 @@
                         },
                         "development": {
                             "buildOptimizer": false,
-                            "optimization": false,
+                            "optimization": {
+                                "scripts": false,
+                                "styles": false,
+                                "fonts": false
+                            },
                             "vendorChunk": true,
                             "extractLicenses": false,
                             "sourceMap": true,
                             "namedChunks": true
                         }
                     },
-                    "defaultConfiguration": "production"
+                    "defaultConfiguration": "development"
                 },
                 "serve": {
-                    "builder": "@angular-devkit/build-angular:dev-server",
+                    "builder": "@angular-builders/custom-webpack:dev-server",
                     "configurations": {
                         "production": {
                             "browserTarget": "erdblick:build:production"
@@ -105,13 +114,13 @@
                     "defaultConfiguration": "development"
                 },
                 "extract-i18n": {
-                    "builder": "@angular-devkit/build-angular:extract-i18n",
+                    "builder": "@angular-builders/custom-webpack:extract-i18n",
                     "options": {
                         "browserTarget": "erdblick:build"
                     }
                 },
                 "test": {
-                    "builder": "@angular-devkit/build-angular:karma",
+                    "builder": "@angular-builders/custom-webpack:karma",
                     "options": {
                         "polyfills": [
                             "zone.js",

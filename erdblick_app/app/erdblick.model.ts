@@ -6,7 +6,7 @@ import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {Subject} from "rxjs";
 
-const styleUrl = "/styles/demo-style.yaml";
+const styleUrl = "/bundle/styles/default-style.yaml";
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
