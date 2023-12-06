@@ -21,7 +21,7 @@ struct CesiumPrimitive
      * Create a primitive which uses the PolylineColorAppearance.
      * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
      */
-    static CesiumPrimitive withPolylineColorAppearance();
+    static CesiumPrimitive withPolylineColorAppearance(bool clampToGround = false);
 
     /**
      * Create a primitive which uses the PerInstanceColorAppearance.
@@ -32,7 +32,7 @@ struct CesiumPrimitive
      * smoothly shaded triangle meshes by calling Cesium.GeometryPipeline.computeNormal
      * and Cesium.GeometryPipeline.compressVertices on the mesh geometry.
      */
-    static CesiumPrimitive withPerInstanceColorAppearance(bool flatAndSynchronous = false);
+    static CesiumPrimitive withPerInstanceColorAppearance(bool flatAndSynchronous = false, bool clampToGround = false);
 
     /**
      * Add a 3D polyline to the primitive. The provided vertices
@@ -90,6 +90,10 @@ private:
 
     /** Flag which enables the direct triangle display required for addTriangles. */
     bool flatAndSynchronous_ = false;
+
+    /** Flags to clamp geometries to ground. */
+    bool clampToGround_ = false;
+    bool polyLinePrimitive_ = false;
 };
 
 }

@@ -20,6 +20,7 @@ public:
     [[nodiscard]] bool supports(mapget::Geometry::GeomType const& g) const;
     [[nodiscard]] glm::fvec4 const& color() const;
     [[nodiscard]] float width() const;
+    [[nodiscard]] bool flat() const;
 
 private:
     static inline uint32_t geomTypeBit(mapget::Geometry::GeomType const& g) {
@@ -31,6 +32,7 @@ private:
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
     float width_ = 1.;
+    bool flat_ = false;
 };
 
 }

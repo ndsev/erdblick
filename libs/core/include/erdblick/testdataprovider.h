@@ -217,6 +217,14 @@ public:
             width: 3.0
 
           - geometry:
+              - line
+            type: "Way"
+            filter: "properties.wayType == 'Vehicle'"
+            color: "#17e38e"
+            width: 3.0
+            flat: true
+
+          - geometry:
               - polygon
             type: "Sign"
             filter: "properties.signType == 'Stop'"
@@ -245,6 +253,12 @@ public:
             type: "Sign"
             filter: "properties.signType == 'Speed Limit'"
             color: "#2c3e50" # Dark color for Speed Limit Sign
+
+          - geometry:
+              - polygon
+            type: "Sign"
+            color: "#e342f5" # Dark color for Speed Limit Sign
+            flat: true
 
           - geometry:
               - mesh

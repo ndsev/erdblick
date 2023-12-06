@@ -21,7 +21,10 @@ CesiumLib::CesiumLib() :
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
     Primitive("Primitive"),
     PrimitiveCollection("PrimitiveCollection"),
-    PrimitiveType("PrimitiveType")
+    PrimitiveType("PrimitiveType"),
+    GroundPolylineGeometry("GroundPolylineGeometry"),
+    GroundPolylinePrimitive("GroundPolylinePrimitive"),
+    GroundPrimitive("GroundPrimitive")
 {
 }
 

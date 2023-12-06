@@ -43,6 +43,7 @@ Each rule within the YAML `rules` array can have the following fields. Any field
 | `color`__*__   | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                                     | `"#FF5733"`, `red`  |
 | `opacity`__*__ | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`               |
 | `width`__*__   | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`               |
+| `flat`__*__    | Clamps the feature to the ground (meshes not supported)                                              | Boolean                                                    | `true`, `false`     |
 
 **A brief example:**
 
