@@ -5,7 +5,11 @@
     "projects": {
         "erdblick": {
             "projectType": "application",
-            "schematics": {},
+            "schematics": {
+                "@schematics/angular:component": {
+                    "style": "scss"
+                }
+            },
             "root": "",
             "sourceRoot": "erdblick_app",
             "prefix": "app",
@@ -61,7 +65,7 @@
                             "node_modules/primeng/resources/themes/lara-light-blue/theme.css",
                             "node_modules/primeng/resources/primeng.min.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
-                            "erdblick_app/styles.css"
+                            "erdblick_app/styles.scss"
                         ],
                         "scripts": [
 
@@ -130,7 +134,7 @@
                         "assets": [
                         ],
                         "styles": [
-                            "erdblick_app/styles.css"
+                            "erdblick_app/styles.scss"
                         ],
                         "scripts": []
                     }

@@ -1,3 +1,5 @@
+@import "primeicons/primeicons.css";
+
 body {
     overflow: hidden;
     height: 100% !important;
@@ -87,29 +89,47 @@ body {
 /* Specific styles for the info panel */
 
 #info {
-    left: 10px;
+    position: absolute;
+    left: 40%;
+    top: 0.5em;
+    width: 20%;
+    justify-content: center;
+    color: #fff;
+    display: flex;
+
+    .p-button {
+        margin-left: 0.5em;
+        height: 1.25em;
+        padding: 0.5rem;
+        border-radius: 3px;
+
+        .p-button-label {
+            font-weight: normal;
+            font-size: small;
+        }
+    }
 }
 
-#info > #controls {
-    display: none;
-}
+//#info > #controls {
+//    display: block;
+//}
 
-#info > #maps {
-    display: none;
-}
+//#info > #maps {
+//    display: block;
+//}
 
-#info > #maps > div {
-    margin-top: 0.5em;
-    margin-bottom: 0;
-}
+//#info > #maps > div {
+//    margin-top: 0.5em;
+//    margin-bottom: 0;
+//}
 
-#info.expanded > #controls {
-    display: block;
-}
-
-#info.expanded > #maps {
-    display: block;
-}
+//#info.expanded > #controls {
+//    display: block;
+//}
+//
+//#info.expanded > #maps {
+//    display: block;
+//}
 
 /* Specific styles for the selection panel */
 
@@ -129,4 +149,95 @@ body {
 
 #selectionPanel.expanded > pre {
     display: block;
+}
+
+.p-speeddial-direction-up {
+    &.speeddial-left {
+        left: 0.5em;
+        bottom: 2em;
+    }
+
+    .p-speeddial-button {
+        width: 3.5rem;
+        height: 3.5rem;
+    }
+}
+
+.card {
+    background-color: rgba(#fff, 1.0);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+
+    .p-tree {
+        border: none;
+    }
+}
+
+.inspect-panel {
+    position: absolute;
+    top: 1.5em;
+    right: 1.5em;
+    width: 30em;
+    height: 90%;
+
+    .p-tree {
+        border: none;
+        padding: 0;
+    }
+
+    .p-accordion-header .p-accordion-header-link {
+        padding: 1rem;
+    }
+
+    .p-accordion-content {
+        padding: 0;
+    }
+
+    .filter-input {
+        height: 2rem;
+        width: 29rem;
+        padding-left: 2rem;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+    }
+
+    .p-treetable-header {
+        padding: 0.5rem;
+    }
+
+    table {
+        font-size: smaller;
+
+        td {
+            padding: 0;
+        }
+
+        .p-treetable-toggler {
+            margin: 0;
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+    }
+}
+
+.search-input {
+    width: 20%;
+    height: 2.5em;
+    position: absolute;
+    top: 2.3em;
+    left: 40%;
+
+    input {
+        width: 100%;
+        height: 100%;
+        padding-left: 2rem;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+    }
+}
+
+.map-layer-dialog {
+    .p-dialog-content {
+        padding: 1rem;
+    }
 }

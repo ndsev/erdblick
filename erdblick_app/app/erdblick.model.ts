@@ -44,7 +44,7 @@ export class ErdblickModel {
     private currentVisibleTileIds: Set<any>;
     private currentHighDetailTileIds: Set<any>;
     private tileStreamParsingQueue: any[];
-    private tileVisualizationQueue: any[];
+    private tileVisualizationQueue: TileVisualization[];
     maxLoadTiles: number;
     maxVisuTiles: number;
     private tileParser: any;
@@ -124,8 +124,7 @@ export class ErdblickModel {
                     this.tileParser.readFieldDictUpdate(wasmBuffer);
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
-                let params = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                this.addTileFeatureLayer(params[0], params[1], params[2]);
+                this.addTileFeatureLayer(message.slice(Fetch.CHUNK_HEADER_SIZE), null, null);
             } else {
                 console.error(`Encountered unknown message type ${messageType}!`);
             }

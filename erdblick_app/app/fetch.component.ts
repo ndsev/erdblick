@@ -102,10 +102,10 @@ export class Fetch
             //  Currently, the connection stays open for five seconds.
             'Connection': 'close'
         }
-        // if (this.body) {
-        //     requestOptions["body"] = JSON.stringify(this.body);
-        //     requestOptions["headers"]["Content-Type"] = "application/json";
-        // }
+        if (this.body) {
+            requestOptions["body"] = JSON.stringify(this.body);
+            headers["Content-Type"] = "application/json";
+        }
         requestOptions["headers"] = headers
 
         fetch(this.url, requestOptions)

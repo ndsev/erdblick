@@ -9,6 +9,7 @@ import {Cartesian3} from "cesium";
 export interface DebugWindow extends Window {
     ebDebug: ErdblickDebugApi;
 }
+
 /**
  * Debugging utility class designed for usage with the browser's debug console.
  *

@@ -14,3 +14,5 @@ mkdir deps
 mkdir assets
 emcmake cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ..
 cmake --build . -- -j
+# Patch the TS bindings
+printf "\n declare var libErdblickCore: any; \n export default libErdblickCore; \n" >> ./libs/core/erdblick-core.d.ts
