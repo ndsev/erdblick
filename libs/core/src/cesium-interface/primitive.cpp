@@ -5,20 +5,24 @@
 namespace erdblick
 {
 
-CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance()
+CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
 {
     CesiumPrimitive result;
     result.appearance_ = Cesium().PolylineColorAppearance.New();
+    result.clampToGround_ = clampToGround;
+    result.polyLinePrimitive_ = true;
     return result;
 }
 
-CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous)
+CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous, bool clampToGround)
 {
     CesiumPrimitive result;
     result.flatAndSynchronous_ = flatAndSynchronous;
     result.appearance_ = Cesium().PerInstanceColorAppearance.New({
         {"flat", JsValue(flatAndSynchronous)}
     });
+    result.clampToGround_ = clampToGround;
+    result.polyLinePrimitive_ = false;
     return result;
 }
 
@@ -27,11 +31,18 @@ void CesiumPrimitive::addPolyLine(
     FeatureStyleRule const& style,
     uint32_t id)
 {
-    auto polyline = Cesium().PolylineGeometry.New({
-        {"positions", vertices},
-        {"width", JsValue(style.width())},
-        {"arcType", Cesium().ArcType["NONE"]}
-    });
+    JsValue polyline;
+    if (clampToGround_) {
+        polyline = Cesium().GroundPolylineGeometry.New(
+            {{"positions", vertices},
+             {"width", JsValue(style.width())}});
+    }
+    else {
+        polyline = Cesium().PolylineGeometry.New(
+            {{"positions", vertices},
+             {"width", JsValue(style.width())},
+             {"arcType", Cesium().ArcType["NONE"]}});
+    }
     addGeometryInstance(style, id, polyline);
 }
 
@@ -86,11 +97,20 @@ void CesiumPrimitive::addGeometryInstance(
 
 NativeJsValue CesiumPrimitive::toJsObject() const
 {
-    auto result = Cesium().Primitive.New(*JsValue::Dict(
+    JsValue result;
+    auto primitiveOptions = JsValue::Dict(
         {{"geometryInstances", geometryInstances_},
          {"appearance", appearance_},
          {"releaseGeometryInstances", JsValue(true)},
-         {"asynchronous", JsValue(!flatAndSynchronous_)}}));
+         {"asynchronous", JsValue(!flatAndSynchronous_)}});
+
+    if (clampToGround_ && polyLinePrimitive_)
+        result = Cesium().GroundPolylinePrimitive.New(*primitiveOptions);
+    else if (clampToGround_)
+        result = Cesium().GroundPrimitive.New(*primitiveOptions);
+    else
+        result = Cesium().Primitive.New(*primitiveOptions);
+
     return *result;
 }
 

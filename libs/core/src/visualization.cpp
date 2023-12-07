@@ -7,9 +7,11 @@ using namespace mapget;
 namespace erdblick {
 
 FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& style, const std::shared_ptr<mapget::TileFeatureLayer>& layer)
-    : coloredLines_(CesiumPrimitive::withPolylineColorAppearance()),
-      coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false)),
-      coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true))
+    : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
+      coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
+      coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
+      coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
+      coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true))
 {
     uint32_t featureId = 0;
     for (auto&& feature : *layer) {
@@ -33,6 +35,10 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
         collection.call<void>("add", coloredNontrivialMeshes_.toJsObject());
     if (!coloredTrivialMeshes_.empty())
         collection.call<void>("add", coloredTrivialMeshes_.toJsObject());
+    if (!coloredGroundLines_.empty())
+        collection.call<void>("add", coloredGroundLines_.toJsObject());
+    if (!coloredGroundMeshes_.empty())
+        collection.call<void>("add", coloredGroundMeshes_.toJsObject());
     return *collection;
 }
 
@@ -49,12 +55,18 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
     switch (geom->geomType()) {
     case mapget::Geometry::GeomType::Polygon:
         if (auto verts = encodeVerticesAsList(geom)) {
-            coloredNontrivialMeshes_.addPolygon(*verts, rule, id);
+            if (rule.flat())
+                coloredGroundMeshes_.addPolygon(*verts, rule, id);
+            else
+                coloredNontrivialMeshes_.addPolygon(*verts, rule, id);
         }
         break;
     case mapget::Geometry::GeomType::Line:
         if (auto verts = encodeVerticesAsList(geom)) {
-            coloredLines_.addPolyLine(*verts, rule, id);
+            if (rule.flat())
+                coloredGroundLines_.addPolyLine(*verts, rule, id);
+            else
+                coloredLines_.addPolyLine(*verts, rule, id);
         }
         break;
     case mapget::Geometry::GeomType::Mesh:

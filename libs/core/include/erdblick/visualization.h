@@ -54,6 +54,9 @@ private:
     CesiumPrimitive coloredLines_;
     CesiumPrimitive coloredNontrivialMeshes_;
     CesiumPrimitive coloredTrivialMeshes_;
+    CesiumPrimitive coloredGroundLines_;
+    CesiumPrimitive coloredGroundMeshes_;
+
 };
 
 }  // namespace erdblick

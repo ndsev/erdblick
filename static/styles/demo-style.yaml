@@ -5,3 +5,4 @@ rules:
     color: red
     opacity: 1.0
     width: 2.0
+    flat: false

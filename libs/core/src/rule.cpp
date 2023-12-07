@@ -55,6 +55,10 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
         // Parse a line width, defaults to pixels
         width_ = yaml["width"].as<float>();
     }
+    if (yaml["flat"].IsDefined()) {
+        // Parse option to clamp feature to ground (ignoring height), defaults to false
+        flat_ = yaml["flat"].as<bool>();
+    }
 }
 
 bool FeatureStyleRule::match(mapget::Feature& feature) const
@@ -88,6 +92,11 @@ glm::fvec4 const& FeatureStyleRule::color() const
 float FeatureStyleRule::width() const
 {
     return width_;
+}
+
+bool FeatureStyleRule::flat() const
+{
+    return flat_;
 }
 
 }
