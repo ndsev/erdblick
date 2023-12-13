@@ -1,6 +1,4 @@
 cmake_minimum_required(VERSION 3.24)
-project(erdblick)
-
 include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,11 +16,8 @@ endif()
 
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
-FetchContent_Declare(glm
-    GIT_REPOSITORY "https://github.com/g-truc/glm.git"
-    GIT_TAG        "0.9.9.8"
-    GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(glm)
+find_package(glm REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
@@ -41,11 +36,11 @@ FetchContent_Declare(
   GIT_SHALLOW ON)
 FetchContent_MakeAvailable(cesiumnative)
 
-FetchContent_Declare(yaml-cpp
-  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "yaml-cpp-0.7.0"
+FetchContent_Declare(mapget
+  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+  GIT_TAG        "main"
   GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(yaml-cpp)
+FetchContent_MakeAvailable(mapget)
 
 # Erdblick Core Library
 
