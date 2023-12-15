@@ -1,11 +1,11 @@
-import {Component, OnInit, ViewChild} from '@angular/core';
+import {Component, OnInit} from '@angular/core';
 import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
 import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
-import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
-import {TreeTable, TreeTableLazyLoadEvent} from "primeng/treetable";
+import {MenuItem, MessageService, TreeNode, TreeTableNode} from "primeng/api";
+import {Cartesian3} from "cesium";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -35,6 +35,18 @@ interface Column {
     header: string;
 }
 
+interface ErdblickMap {
+    coverage: BigInt;
+    level: number;
+    mapLayers: Array<ErdblickLayer>;
+}
+
+interface ErdblickLayer {
+    name: string;
+    coverage: BigInt;
+    level: number;
+}
+
 @Component({
     selector: 'app-root',
     template: `
@@ -45,9 +57,49 @@ interface Column {
         <!--            <span>Selected Feature: </span><span id="selectedFeatureId">{{selectedFeatureIdText}}</span>-->
         <!--            <pre id="selectedFeatureGeoJson">{{selectedFeatureGeoJsonText}}</pre> &lt;!&ndash; Use <pre> for preserving whitespace &ndash;&gt;-->
         <!--        </div>-->
-        <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible"
-                  [position]="'topleft'" [style]="{ width: '30em', padding: '0' }">
-            <p-panelMenu [model]="items" [style]="{width:'100%', margin: '0'}" [multiple]="true"></p-panelMenu>
+        <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '30em', padding: '0' }">
+            <p-accordion>
+                <p-accordionTab class="map-tab" *ngFor="let mapItem of mapItems | keyvalue">
+                    <ng-template pTemplate="header">
+                        <span class="flex align-items-center gap-2 w-full">
+                            <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapItem.key }}</span>
+                        </span>
+                    </ng-template>
+                    <div class="flex align-items-center gap-2 w-full" style="padding: 0.5rem 1.25rem;">
+                        <p-button (click)="focus(mapItem.value.coverage, $event)" icon="pi pi-fw pi-eye" label=""
+                                  [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
+                        </p-button>
+                        <p-inputNumber [(ngModel)]="mapItem.value.level" (ngModelChange)="onMapLevelChanged($event, mapItem.key)"
+                                       [style]="{'width': '2rem'}" [showButtons]="true"
+                                       buttonLayout="horizontal" spinnerMode="vertical" inputId="vertical"
+                                       decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
+                                       incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15"
+                                       pTooltip="Change zoom level" tooltipPosition="bottom">
+                        </p-inputNumber>
+                    </div>
+                    <p-accordion>
+                        <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
+                            <ng-template pTemplate="header">
+                                <span class="flex align-items-center gap-2 w-full">
+                                    <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
+                                </span>
+                            </ng-template>
+                            <div class="flex align-items-center gap-2 w-full" style="padding: 0.5rem 1.25rem;">
+                                <p-button (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" label=""
+                                          [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
+                                </p-button>
+                                <p-inputNumber [(ngModel)]="mapLayer.level" (ngModelChange)="onLayerLevelChanged($event, mapLayer.name)" 
+                                               [style]="{'width': '2rem'}" [showButtons]="true"
+                                               buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
+                                               decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
+                                               incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15" 
+                                               pTooltip="Change zoom level" tooltipPosition="bottom">
+                                </p-inputNumber>
+                            </div>
+                        </p-accordionTab>
+                    </p-accordion>
+                </p-accordionTab>
+            </p-accordion>
         </p-dialog>
         <p-button (click)="showLayerDialog()" icon="pi pi-images" label=""
                   [style]="{position: 'absolute', top: '1.5em', left: '0.5em', width: '3.25em', height: '3.25em'}"></p-button>
@@ -55,16 +107,12 @@ interface Column {
             {{title}} {{version}} //
             <p-button (click)="reloadStyle()" label="Reload Style"></p-button>
         </div>
+        <p-toast position="bottom-center" key="tc"></p-toast>
         <p-overlayPanel #searchoverlay>
-            <p>Tile ID<br>Jump to NDS Tile by its Packed ID</p>
-            <p-divider></p-divider>
-            <p>New View Filter<br>Constant Expression matches all visible features</p>
-            <p-divider></p-divider>
-            <p>WGS84 Lat-Lon Coordinates<br>Jump to WGS84 Coordinates</p>
-            <p-divider></p-divider>
-            <p>Open in Google Maps<br>Open Location in External Map Service</p>
-            <p-divider></p-divider>
-            <p>Find Feature by Generic ID<br>Find all features which are identified by number</p>
+            <div *ngFor="let item of searchItems">
+                <p-divider></p-divider>
+                <p (click)="item.fun()" class="search-option"><span>{{item.name}}</span><br>{{item.label}}</p>
+            </div>
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
@@ -102,11 +150,18 @@ interface Column {
                                  [columns]="cols" [scrollable]="true" [scrollHeight]="'calc(100vh - 11em)'"
                                  class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
                         <ng-template pTemplate="caption">
-                            <div class="flex justify-content-end align-items-center">
+                            <div class="flex justify-content-end align-items-center" 
+                                 style="display: flex; align-content: center; justify-content: center">
                                 <div class="p-input-icon-left">
                                     <i class="pi pi-search"></i>
                                     <input class="filter-input" type="text" pInputText placeholder="Filter"
                                            (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>
+                                </div>
+                                <div>
+                                    <p-button (click)="copyGeoJsonToClipboard()" icon="pi pi-fw pi-copy" label=""
+                                              [style]="{'margin-left': '0.8rem', width: '2rem', height: '2rem'}"
+                                              pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                                    </p-button>
                                 </div>
                             </div>
                         </ng-template>
@@ -147,16 +202,17 @@ export class AppComponent implements OnInit {
     searchValue: string = ""
 
     leftTooltipItems: MenuItem[] | null = null;
-    items: MenuItem[] = [];
+    mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
     cols: Column[] = [];
 
-    constructor(private httpClient: HttpClient) {
+    searchItems: Array<any> = [];
+
+    constructor(private httpClient: HttpClient,
+                private messageService: MessageService) {
         httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
             });
-
-        // this.files = this.getMockUpTreeData();
 
         libErdblickCore().then((coreLib: any) => {
             console.log("  ...done.")
@@ -190,30 +246,32 @@ export class AppComponent implements OnInit {
             })
 
             this.mapModel.mapInfoTopic.subscribe((mapInfo: Object) => {
-                this.items = [];
+                this.mapItems = new Map<string, ErdblickMap>();
                 Object.entries(mapInfo).forEach(([mapName, mapInfoItem]) => {
+                    let mapLayers: Array<ErdblickLayer> = new Array<ErdblickLayer>();
+                    let firstCoverage = 0n;
                     Object.entries((mapInfoItem as MapInfoItem).layers).forEach(([layerName, layer]) => {
-                        let coverage = (layer as MapItemLayer).coverage;
-                        if (coverage !== undefined && coverage[0] !== undefined) {
-                            this.items.push(
-                                {
-                                    label: mapName + ' / ' + layerName,
-                                    icon: '',
-                                    items: [
-                                        {
-                                            label: 'Focus',
-                                            icon: 'pi pi-fw pi-eye',
-                                            command: () => {
-                                                if (this.mapModel !== undefined && this.coreLib !== undefined) {
-                                                    this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(BigInt(coverage[0])));
-                                                }
-                                            }
-                                        }
-                                    ]
-                                }
-                            )
+                        let layerCoverage = (layer as MapItemLayer).coverage;
+                        if (layerCoverage.length > 0) {
+                            firstCoverage = BigInt(layerCoverage[0]);
                         }
+                        mapLayers.push(
+                            {
+                                name: mapName + '/' + layerName,
+                                coverage: firstCoverage,
+                                level: 13
+                            }
+                        );
+                        this.mapModel?.layerIdToLevel.set(mapName + '/' + layerName, 13);
                     })
+                    this.mapItems.set(
+                        mapName,
+                        {
+                            coverage: firstCoverage,
+                            level: 13,
+                            mapLayers: mapLayers
+                        }
+                    );
                 });
                 console.log("MapInfo", mapInfo);
             });
@@ -248,6 +306,34 @@ export class AppComponent implements OnInit {
             { field: 'k', header: 'Key' },
             { field: 'v', header: 'Value' }
         ];
+
+        this.searchItems = [
+            {
+                name: "Tile ID",
+                label: "Jump to WGS84 Tile by its ID",
+                fun: () => { this.jumpToWGS84Tile() }
+            },
+            {
+                name: "WGS84 Lat-Lon Coordinates",
+                label: "Jump to WGS84 Coordinates",
+                fun: () => { this.jumpToWGS84() }
+            },
+            {
+                name: "WGS84 Lon-Lat Coordinates",
+                label: "Jump to WGS84 Coordinates",
+                fun: () => { this.jumpToWGS84(true) }
+            },
+            {
+                name: "Open Lat-Lon in Google Maps",
+                label: "Open Location in External Map Service",
+                fun: () => { this.openInGM() }
+            },
+            {
+                name: "Open Lat-Lon in Open Street Maps",
+                label: "Open Location in External Map Service",
+                fun: () => { this.openInOSM() }
+            }
+        ]
     }
 
     applyTileLimits() {
@@ -278,9 +364,38 @@ export class AppComponent implements OnInit {
         event.stopPropagation()
     }
 
-    focus(layer: any) {
-        if (layer.coverage[0] !== undefined && this.mapModel !== undefined && this.coreLib !== undefined) {
-            this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(BigInt(layer.coverage[0])));
+    focus(tileId: BigInt, event: any) {
+        event.stopPropagation();
+        if (this.mapModel !== undefined && this.coreLib !== undefined) {
+            this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(tileId));
+        }
+    }
+
+    onMapLevelChanged(event: Event, mapName: string) {
+        let level = Number(event.toString());
+        let mapItem = this.mapItems.get(mapName);
+        if (mapItem !== undefined) {
+            mapItem.mapLayers.forEach((layer: ErdblickLayer) => {
+                layer.level = level;
+            });
+            if (this.mapModel !== undefined) {
+                mapItem.mapLayers.forEach((layer: ErdblickLayer) => {
+                    this.mapModel?.layerIdToLevel.set(layer.name, level);
+                });
+                this.mapModel.update();
+            } else {
+                this.showError("Cannot access the map model. The model is not available.");
+            }
+        }
+    }
+
+    onLayerLevelChanged(event: Event, layerName: string) {
+        let level = Number(event.toString());
+        if (this.mapModel !== undefined) {
+            this.mapModel.layerIdToLevel.set(layerName, level);
+            this.mapModel.update();
+        } else {
+            this.showError("Cannot access the map model. The model is not available.");
         }
     }
 
@@ -343,5 +458,179 @@ export class AppComponent implements OnInit {
 
     loadFeatureData() {
         this.featureTree = this.getFeatureTreeData();
+    }
+
+    jumpToWGS84Tile() {
+        if (!this.searchValue) {
+            this.showError("No value provided!");
+            return;
+        }
+        if (this.mapModel !== undefined) {
+            try {
+                let wgs84TileId = BigInt(this.searchValue);
+                this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(wgs84TileId));
+            } catch (e) {
+                this.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+            }
+        } else {
+            this.showError("Cannot access the map model. The model is not available.");
+        }
+    }
+
+    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean)
+    {
+        let lon = 0;
+        let lat = 0;
+        let level = 0;
+        let isMatched = false;
+        coordinateString = coordinateString.trim();
+
+        // WGS (decimal)
+        let exp = /^[^\d-]*(-?\d+(?:\.\d*)?)[^\d-]+(-?\d+(?:\.\d*)?)[^\d\.]*(\d+)?[^\d]*$/g;
+        let matches = [...coordinateString.matchAll(exp)];
+        if (matches.length > 0) {
+            let matchResults = matches[0];
+            if (matchResults.length >= 3) {
+                if (isLonLat) {
+                    lon = Number(matchResults[1]);
+                    lat = Number(matchResults[2]);
+                } else {
+                    lon = Number(matchResults[2]);
+                    lat = Number(matchResults[1]);
+                }
+
+                if (matchResults.length >= 4 && matchResults[3] !== undefined) {
+                    // Zoom level provided.
+                    level = Math.max(1, Math.min(Number(matchResults[3].toString()), 14));
+                }
+                isMatched = true;
+            }
+        }
+
+        // WGS (degree)
+        if (isLonLat) {
+            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g;
+        } else {
+            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+        }
+        matches = [...coordinateString.matchAll(exp)];
+        if (!isMatched && matches.length > 0) {
+            let matchResults = matches[0];
+            if (matchResults.length >= 9) {
+                let degreeLon = isLonLat ? Number(matchResults[1]) : Number(matchResults[5]);
+                let minutesLon = isLonLat ? Number(matchResults[2]) : Number(matchResults[6]);
+                let secondsLon = isLonLat ? Number(matchResults[3]) : Number(matchResults[7]);
+                let degreeLat = isLonLat ? Number(matchResults[5]) : Number(matchResults[1]);
+                let minutesLat = isLonLat ? Number(matchResults[6]) : Number(matchResults[2]);
+                let secondsLat = isLonLat ? Number(matchResults[7]) : Number(matchResults[3]);
+
+                lat = degreeLat + (minutesLat * 60.0 + secondsLat) / 3600.0;
+                if (matchResults[4][0] == 'S') {
+                    lat = -lat;
+                }
+
+                lon = degreeLon + (minutesLon * 60.0 + secondsLon) / 3600.0;
+                if (matchResults[8][0] == 'W') {
+                    lon = -lon;
+                }
+
+                if (matchResults.length >= 10 && matchResults[9] !== undefined) {
+                    // Zoom level provided.
+                    level = Math.max(1, Math.min(Number(matchResults[9].toString()), 14));
+                }
+
+                isMatched = true;
+            }
+        }
+
+        if (isMatched) {
+            return [lat, lon, level];
+        }
+        this.showError("Could not parse coordinates from the input.");
+        return undefined;
+    }
+
+    jumpToWGS84(isLonLat: boolean = false) {
+        if (!this.searchValue) {
+            this.showError("No value provided!");
+            return;
+        }
+        let result = this.parseWgs84Coordinates(this.searchValue, isLonLat);
+        if (result !== undefined) {
+            let lat = result[0];
+            let lon = result[1];
+            let position = Cartesian3.fromDegrees(lon, lat, 15000);
+            let orientation = this.collectCameraInfo();
+            if (orientation) {
+                if (this.mapView !== undefined) {
+                    this.mapView.viewer.camera.setView({
+                        destination: position,
+                        orientation: orientation
+                    });
+                } else {
+                    this.showError("Cannot set camera information. The view is not available.");
+                }
+            }
+        }
+    }
+
+    openInGM() {
+        if (!this.searchValue) {
+            this.showError("No value provided!");
+            return;
+        }
+        let result = this.parseWgs84Coordinates(this.searchValue, false);
+        if (result !== undefined) {
+            let lat = result[0];
+            let lon = result[1];
+            window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
+        }
+    }
+
+    openInOSM() {
+        if (!this.searchValue) {
+            this.showError("No value provided!");
+            return;
+        }
+        let result = this.parseWgs84Coordinates(this.searchValue, false);
+        if (result !== undefined) {
+            let lat = result[0];
+            let lon = result[1];
+            window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
+        }
+    }
+
+    showError(content: string) {
+        this.messageService.add({ key: 'tc', severity: 'error', summary: 'Error', detail: content });
+        return;
+    }
+
+    showSuccess(content: string) {
+        this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: content });
+        return;
+    }
+
+    collectCameraInfo() {
+        if (this.mapView !== undefined) {
+            return {
+                heading: this.mapView.viewer.camera.heading,
+                pitch: this.mapView.viewer.camera.pitch,
+                roll: this.mapView.viewer.camera.roll
+            };
+        } else {
+            this.showError("Cannot get camera information. The view is not available.");
+        }
+        return null;
+    }
+
+    copyGeoJsonToClipboard() {
+        navigator.clipboard.writeText(this.selectedFeatureGeoJsonText).then(
+            () => {
+                this.showSuccess("Copied GeoJSON content to clipboard!");
+            },
+            () => {
+                this.showError("Could not copy GeoJSON content to clipboard.");
+            },
+        );
     }
 }

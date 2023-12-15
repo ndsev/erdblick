@@ -19,7 +19,7 @@ import {
 } from "cesium";
 
 export class ErdblickView {
-    private viewer: Viewer;
+    viewer: Viewer;
     private model: ErdblickModel;
     private pickedFeature: any = null;
     private pickedFeatureOrigColor: Color | null = null;

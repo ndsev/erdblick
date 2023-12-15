@@ -195,7 +195,7 @@ body {
 
     .filter-input {
         height: 2rem;
-        width: 29rem;
+        width: 25rem;
         padding-left: 2rem;
         border-radius: 6px;
         border: solid 1px lightgray;
@@ -236,8 +236,53 @@ body {
     }
 }
 
+
+
+.p-overlaypanel-content {
+    & > div:first-child {
+        .p-divider {
+            display: none;
+        }
+    }
+
+    .search-option {
+        text-align: left;
+        font-size: medium;
+        margin: 0;
+        background: none;
+        border: none;
+        cursor: pointer;
+
+        span {
+            font-weight: bold;
+        }
+    }
+}
+
 .map-layer-dialog {
     .p-dialog-content {
         padding: 1rem;
     }
 }
+
+.map-tab {
+    .p-accordion-header-link {
+        padding: 0.8rem;
+    }
+
+    .p-accordion-content {
+        padding: 0;
+    }
+
+    .layer-tab {
+        .p-accordion-tab {
+            margin-bottom: 0;
+        }
+
+        .p-accordion-content {
+            border: none;
+        }
+    }
+}
+
+

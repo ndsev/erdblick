@@ -41,8 +41,8 @@ export class ErdblickModel {
     private visualizedTileLayers: any[];
     private currentFetch: any;
     private currentViewport: ViewportProperties;
-    private currentVisibleTileIds: Set<any>;
-    private currentHighDetailTileIds: Set<any>;
+    private currentVisibleTileIds: Set<number>;
+    private currentHighDetailTileIds: Set<number>;
     private tileStreamParsingQueue: any[];
     private tileVisualizationQueue: TileVisualization[];
     maxLoadTiles: number;
@@ -52,6 +52,8 @@ export class ErdblickModel {
     tileVisualizationDestructionTopic: Subject<any>;
     zoomToWgs84PositionTopic: Subject<any>;
     mapInfoTopic: Subject<any>;
+    allViewportTileIds: Map<number, number> = new Map<number, number>();
+    layerIdToLevel: Map<string, number> = new Map<string, number>();
 
     constructor(coreLibrary: any) {
         this.coreLib = coreLibrary;
@@ -197,9 +199,24 @@ export class ErdblickModel {
 
     update() {
         // Get the tile IDs for the current viewport.
-        const allViewportTileIds = this.coreLib.getTileIds(this.currentViewport, 13, this.maxLoadTiles);
-        this.currentVisibleTileIds = new Set(allViewportTileIds);
-        this.currentHighDetailTileIds = new Set(allViewportTileIds.slice(0, this.maxVisuTiles))
+        this.currentVisibleTileIds = new Set<number>();
+        this.currentHighDetailTileIds = new Set<number>();
+        // Level: array of tileIds
+        let tileIdPerLevel = new Map<number, Array<number>>();
+        for (let [_, level] of this.layerIdToLevel) {
+            if (!tileIdPerLevel.has(level)) {
+                const allViewportTileIds = this.coreLib.getTileIds(this.currentViewport, level, this.maxLoadTiles) as number[];
+                tileIdPerLevel.set(level, allViewportTileIds);
+                this.currentVisibleTileIds = new Set([
+                    ...this.currentVisibleTileIds,
+                    ...new Set<number>(allViewportTileIds)
+                ]);
+                this.currentHighDetailTileIds = new Set([
+                    ...this.currentVisibleTileIds,
+                    ...new Set<number>(allViewportTileIds.slice(0, this.maxVisuTiles))
+                ])
+            }
+        }
 
         // Abort previous fetch operation.
         if (this.currentFetch) {
@@ -229,19 +246,25 @@ export class ErdblickModel {
                 for (let [layerName, layer] of Object.entries(map.layers)) {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
-                    for (let tileId of allViewportTileIds) {
-                        const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
-                        if (!this.loadedTileLayers.has(tileMapLayerKey))
-                            requestTilesForMapLayer.push(Number(tileId));
-                    }
+                    let level = this.layerIdToLevel.get(mapName + '/' + layerName);
+                    if (level !== undefined) {
+                        let tileIds = tileIdPerLevel.get(level);
+                        if (tileIds !== undefined) {
+                            for (let tileId of tileIds) {
+                                const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
+                                if (!this.loadedTileLayers.has(tileMapLayerKey))
+                                    requestTilesForMapLayer.push(Number(tileId));
+                            }
 
-                    // Only add a request if there are tiles to be loaded.
-                    if (requestTilesForMapLayer)
-                        requests.push({
-                            mapId: mapName,
-                            layerId: layerName,
-                            tileIds: requestTilesForMapLayer
-                        });
+                            // Only add a request if there are tiles to be loaded.
+                            if (requestTilesForMapLayer)
+                                requests.push({
+                                    mapId: mapName,
+                                    layerId: layerName,
+                                    tileIds: requestTilesForMapLayer
+                                });
+                        }
+                    }
                 }
             }
         }

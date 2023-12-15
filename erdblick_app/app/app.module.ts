@@ -16,6 +16,9 @@ import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
 import {PanelMenuModule} from "primeng/panelmenu";
 import {TreeTableModule} from "primeng/treetable";
+import {ToastModule} from "primeng/toast";
+import {MessageService} from "primeng/api";
+import {InputNumberModule} from "primeng/inputnumber";
 
 @NgModule({
     declarations: [
@@ -36,9 +39,12 @@ import {TreeTableModule} from "primeng/treetable";
         OverlayPanelModule,
         DividerModule,
         PanelMenuModule,
-        TreeTableModule
+        TreeTableModule,
+        ToastModule,
+        InputNumberModule
     ],
     providers: [
+        MessageService
     ],
     bootstrap: [AppComponent]
 })
