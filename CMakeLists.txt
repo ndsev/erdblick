@@ -36,11 +36,13 @@ FetchContent_Declare(
   GIT_SHALLOW ON)
 FetchContent_MakeAvailable(cesiumnative)
 
-FetchContent_Declare(mapget
-  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "main"
-  GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(mapget)
+if (NOT TARGET mapget)
+  FetchContent_Declare(mapget
+    GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+    GIT_TAG        "main"
+    GIT_SHALLOW    ON)
+  FetchContent_MakeAvailable(mapget)
+endif()
 
 # Erdblick Core Library
 
