@@ -16,6 +16,6 @@ echo "Patch erblick-core TS definitions."
 printf "\ndeclare var libErdblickCore: any; \nexport default libErdblickCore; \n" >> "$SOURCE_LOC/build/libs/core/erdblick-core.d.ts"
 
 echo "Building Angular distribution files."
-ng build
+ng build -c production
 
 exit 0
