@@ -12,8 +12,13 @@ CesiumLib::CesiumLib() :
     Geometry("Geometry"),
     GeometryAttribute("GeometryAttribute"),
     GeometryInstance("GeometryInstance"),
+    GroundPolylineGeometry("GroundPolylineGeometry"),
+    GroundPolylinePrimitive("GroundPolylinePrimitive"),
+    GroundPrimitive("GroundPrimitive"),
     Material("Material"),
+    NearFarScalar("NearFarScalar"),
     PerInstanceColorAppearance("PerInstanceColorAppearance"),
+    PointPrimitiveCollection("PointPrimitiveCollection"),
     PolygonGeometry("PolygonGeometry"),
     PolygonHierarchy("PolygonHierarchy"),
     PolylineColorAppearance("PolylineColorAppearance"),
@@ -21,12 +26,7 @@ CesiumLib::CesiumLib() :
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
     Primitive("Primitive"),
     PrimitiveCollection("PrimitiveCollection"),
-    PrimitiveType("PrimitiveType"),
-    GroundPolylineGeometry("GroundPolylineGeometry"),
-    GroundPolylinePrimitive("GroundPolylinePrimitive"),
-    GroundPrimitive("GroundPrimitive"),
-    PrimitiveType("PrimitiveType"),
-    PointPrimitiveCollection("PointPrimitiveCollection")
+    PrimitiveType("PrimitiveType")
 {
 }
 

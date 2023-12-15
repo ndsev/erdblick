@@ -59,6 +59,22 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
         // Parse option to clamp feature to ground (ignoring height), defaults to false
         flat_ = yaml["flat"].as<bool>();
     }
+    if (yaml["outline-color"].IsDefined()) {
+        // Parse option to have a feature outline color.
+        outlineColor_ = Color(yaml["outline-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["outline-width"].IsDefined()) {
+        // Parse option for the width of the feature outline color.
+        outlineWidth_ = yaml["outline-width"].as<float>();
+    }
+    if (yaml["near-far-scale"].IsDefined()) {
+        // Parse option for the scale of the feature depending on camera distance.
+        auto components = yaml["near-far-scale"].as<std::vector<float>>();
+        if (components.size() >= 4) {
+            nearFarScale_ = {.0};
+            std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
+        }
+    }
 }
 
 bool FeatureStyleRule::match(mapget::Feature& feature) const
@@ -97,6 +113,21 @@ float FeatureStyleRule::width() const
 bool FeatureStyleRule::flat() const
 {
     return flat_;
+}
+
+glm::fvec4 const& FeatureStyleRule::outlineColor() const
+{
+    return outlineColor_;
+}
+
+float FeatureStyleRule::outlineWidth() const
+{
+    return outlineWidth_;
+}
+
+std::optional<std::array<float, 4>> const& FeatureStyleRule::nearFarScale() const
+{
+    return nearFarScale_;
 }
 
 }

@@ -330,6 +330,9 @@ public:
             type: "PointOfNoInterest"
             color: "#e74c3c" # Red color for Points of No Interest
             width: 5
+            outline-color: orange
+            outline-width: 3
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
         )yaml"));
     }
 

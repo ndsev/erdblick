@@ -35,15 +35,18 @@ rule that matches it.
 
 Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is optional:
 
-| Field          | Description                                                                                          | Type                                                       | Example Value       |
-|----------------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------|---------------------|
-| `geometry`     | List of feature geometry type(s) the rule applies to.                                                | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]` |
-| `type`__*__    | A regular expression to match against a feature type.                                                | String                                                     | `"Lane\|Boundary"`  |
-| `filter`__*__  | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                         | String                                                     | `*roadClass == 4`   |
-| `color`__*__   | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                                     | `"#FF5733"`, `red`  |
-| `opacity`__*__ | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`               |
-| `width`__*__   | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`               |
-| `flat`__*__    | Clamps the feature to the ground (meshes not supported)                                              | Boolean                                                    | `true`, `false`     |
+| Field                 | Description                                                                                          | Type                                                       | Example Value        |
+|-----------------------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------|----------------------|
+| `geometry`            | List of feature geometry type(s) the rule applies to.                                                | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]`  |
+| `type`__*__           | A regular expression to match against a feature type.                                                | String                                                     | `"Lane\|Boundary"`   |
+| `filter`__*__         | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                         | String                                                     | `*roadClass == 4`    |
+| `color`__*__          | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords). | String                                                     | `"#FF5733"`, `red`   |
+| `opacity`__*__        | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`                |
+| `width`__*__          | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`                |
+| `flat`__*__           | Clamps the feature to the ground (Does not work for meshes).                                         | Boolean                                                    | `true`, `false`      |
+| `outline-color`__*__  | Feature outline color (works only for points).                                                       | String                                                     | `green`, `#fff`      |
+| `outline-width`__*__  | Point outline width in px.                                                                           | Float                                                      | `3.6`                |
+| `near-far-scale`__*__ | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).               | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]` |
 
 **A brief example:**
 

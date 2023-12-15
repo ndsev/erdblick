@@ -18,19 +18,24 @@ void CesiumPointPrimitiveCollection::addPoint(
     uint32_t id)
 {
     auto const& color = style.color();
+    auto const& oColor = style.outlineColor();
 
-    pointPrimitiveCollection_.call<void>("add",
-        *JsValue::Dict({
-            {"position", position},
-            {"color", Cesium().Color.New(
-                color.r,
-                color.g,
-                color.b,
-                color.a)
-            },
-            {"pixelSize", JsValue(style.width())},
-            {"id", JsValue(id)}
-        }));
+    auto options = JsValue::Dict({
+        {"position", position},
+        {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
+        {"pixelSize", JsValue(style.width())},
+        {"id", JsValue(id)},
+        {"outlineColor", Cesium().Color.New(oColor.r, oColor.g, oColor.b, oColor.a)},
+        {"outlineWidth", JsValue(style.outlineWidth())},
+    });
+
+    if (auto const& nfs = style.nearFarScale()) {
+        options.set(
+            "scaleByDistance",
+            Cesium().NearFarScalar.New((*nfs)[0], (*nfs)[1], (*nfs)[2], (*nfs)[3]));
+    }
+
+    pointPrimitiveCollection_.call<void>("add", *options);
     ++numGeometryInstances_;
 }
 
