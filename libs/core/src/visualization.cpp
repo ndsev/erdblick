@@ -78,8 +78,12 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
         }
         break;
     case mapget::Geometry::GeomType::Points:
-        // TODO should points each have their own ID? How to adapt addGeometry?
-        coloredPoints_.visualizePoints(geom, rule, id);
+        geom->forEachPoint(
+            [this, &rule, &id](auto&& vertex) {
+                auto cartesian = JsValue(wgsToCartesian<mapget::Point>(vertex));
+                coloredPoints_.addPoint(cartesian, rule, id);
+                return true;
+            });
         break;
     }
 }

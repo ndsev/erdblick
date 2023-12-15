@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cesium-interface/cesium.h"
+#include "cesium.h"
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
 #include "../rule.h"
@@ -13,21 +13,9 @@ struct CesiumPointPrimitiveCollection
     CesiumPointPrimitiveCollection();
 
     /**
-     * Add points to the collection.
-     * Left to do:
-     *  - add IDs to the points,
-     *  - apply styling.
-     */
-    void visualizePoints(
-        mapget::model_ptr<mapget::Geometry> const& geom,
-        FeatureStyleRule const& style,
-        uint32_t id);
-
-    /**
      * Add an individual point to the collection
-     * (used by visualizePoints).
      */
-    void visualizePoint(
+    void addPoint(
         const JsValue& position,
         FeatureStyleRule const& style,
         uint32_t id);
@@ -45,6 +33,7 @@ struct CesiumPointPrimitiveCollection
 private:
     /** Number of points in this collection. */
     size_t numGeometryInstances_ = 0;
+
     /** Wrapped point primitive object from Cesium */
     JsValue pointPrimitiveCollection_;
 };

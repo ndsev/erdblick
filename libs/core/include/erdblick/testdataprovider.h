@@ -192,19 +192,15 @@ public:
             auto feature = result->newFeature("PointOfInterest", {{"pointId", 200 + i}});
             auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
             feature->addPoints(points);
-            
-            // TODO add point attributes
         }
 
         // ...and points of no interest.
         for (int i = 0; i < 5; i++) {
             std::cout << "Generated PONI " << i << std::endl;
 
-            auto feature = result->newFeature("PointOfInterest", {{"pointId", 300 + i}});
+            auto feature = result->newFeature("PointOfNoInterest", {{"pointId", 300 + i}});
             auto points = generateRandomPoints(1, 1, tileId.ne(), tileId.sw());
             feature->addPoints(points);
-            
-            // TODO add point attributes
         }
 
         // Add a diamond mesh in the center of the tile.

@@ -2,10 +2,10 @@
 
 #include <map>
 #include <vector>
-#include "style.h"
 #include "cesium-interface/point-conversion.h"
+#include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
-#include "cesium-interface/pointprimitives.h"
+#include "style.h"
 
 namespace erdblick
 {
