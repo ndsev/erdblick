@@ -2,9 +2,10 @@
 
 #include <map>
 #include <vector>
-#include "style.h"
 #include "cesium-interface/point-conversion.h"
+#include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
+#include "style.h"
 
 namespace erdblick
 {
@@ -56,7 +57,7 @@ private:
     CesiumPrimitive coloredTrivialMeshes_;
     CesiumPrimitive coloredGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
-
+    CesiumPointPrimitiveCollection coloredPoints_;
 };
 
 }  // namespace erdblick

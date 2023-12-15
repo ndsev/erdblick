@@ -14,7 +14,8 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
     return result;
 }
 
-CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous, bool clampToGround)
+CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(
+    bool flatAndSynchronous, bool clampToGround)
 {
     CesiumPrimitive result;
     result.flatAndSynchronous_ = flatAndSynchronous;
@@ -86,9 +87,15 @@ void CesiumPrimitive::addGeometryInstance(
     auto geometryInstance = Cesium().GeometryInstance.New({
         {"geometry", geom},
         {"attributes",
-         JsValue::Dict(
-             {{"color",
-               Cesium().ColorGeometryInstanceAttribute.New(color.r, color.g, color.b, color.a)}})},
+            JsValue::Dict({{
+                "color",
+                Cesium().ColorGeometryInstanceAttribute.New(
+                    color.r,
+                    color.g,
+                    color.b,
+                    color.a)
+            }})
+        },
         {"id", JsValue(id)}
     });
     ++numGeometryInstances_;

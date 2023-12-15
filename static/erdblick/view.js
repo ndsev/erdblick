@@ -51,7 +51,7 @@ export class ErdblickView
         // Add a handler for selection.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.position);
-            if (feature && feature.id !== undefined && this.tileVisForPrimitive.has(feature.primitive))
+            if (this.isKnownCesiumFeature(feature))
                 this.setPickedCesiumFeature(feature);
             else
                 this.setPickedCesiumFeature(null);
@@ -60,7 +60,7 @@ export class ErdblickView
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction(movement => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
-            if (feature && feature.id !== undefined && this.tileVisForPrimitive.has(feature.primitive))
+            if (this.isKnownCesiumFeature(feature))
                 this.setHoveredCesiumFeature(feature);
             else
                 this.setHoveredCesiumFeature(null);
@@ -118,6 +118,13 @@ export class ErdblickView
         return (!f1 && !f2) || (f1 && f2 && f1.id === f2.id && f1.primitive === f1.primitive);
     }
 
+    /** Check if the given feature is known and can be selected. */
+    isKnownCesiumFeature(f) {
+        return f && f.id !== undefined && f.primitive !== undefined && (
+            this.tileVisForPrimitive.has(f.primitive) ||
+            this.tileVisForPrimitive.has(f.primitive._pointPrimitiveCollection))
+    }
+
     /**
      * Set or re-set the hovered feature.
      */
@@ -148,7 +155,7 @@ export class ErdblickView
         this.pickedFeature = null;
         if (feature) {
             // Highlight the new picked feature and remember its original color.
-            // Make sure that the if the hovered feature is picked, we don't
+            // Make sure that if the hovered feature is picked, we don't
             // remember the hover color as the original color.
             if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
                 this.setHoveredCesiumFeature(null);
@@ -165,6 +172,12 @@ export class ErdblickView
 
     /** Set the color of a cesium feature through its associated primitive. */
     setFeatureColor(feature, color) {
+        if (feature.primitive.color !== undefined) {
+            // Special treatment for point primitives.
+            feature.primitive.color = color;
+            this.viewer.scene.requestRender();
+            return;
+        }
         if (feature.primitive.isDestroyed())
             return;
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
@@ -174,6 +187,10 @@ export class ErdblickView
 
     /** Read the color of a cesium feature through its associated primitive. */
     getFeatureColor(feature) {
+        if (feature.primitive.color !== undefined) {
+            // Special treatment for point primitives.
+            return feature.primitive.color.clone();
+        }
         if (feature.primitive.isDestroyed())
             return null;
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
@@ -184,8 +201,11 @@ export class ErdblickView
     resolveFeature(primitive, index) {
         let tileVis = this.tileVisForPrimitive.get(primitive);
         if (!tileVis) {
-            console.error("Failed find tileLayer for primitive!");
-            return null;
+            tileVis = this.tileVisForPrimitive.get(primitive._pointPrimitiveCollection);
+            if (!tileVis) {
+                console.error("Failed find tileLayer for primitive!");
+                return null;
+            }
         }
         return new FeatureWrapper(index, tileVis.tile);
     }

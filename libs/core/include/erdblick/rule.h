@@ -21,6 +21,9 @@ public:
     [[nodiscard]] glm::fvec4 const& color() const;
     [[nodiscard]] float width() const;
     [[nodiscard]] bool flat() const;
+    [[nodiscard]] glm::fvec4 const& outlineColor() const;
+    [[nodiscard]] float outlineWidth() const;
+    [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
 
 private:
     static inline uint32_t geomTypeBit(mapget::Geometry::GeomType const& g) {
@@ -33,6 +36,10 @@ private:
     glm::fvec4 color_{.0, .0, .0, 1.};
     float width_ = 1.;
     bool flat_ = false;
+
+    glm::fvec4 outlineColor_{.0, .0, .0, .0};
+    float outlineWidth_ = .0;
+    std::optional<std::array<float, 4>> nearFarScale_;
 };
 
 }
