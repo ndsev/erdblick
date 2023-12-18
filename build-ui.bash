@@ -13,7 +13,11 @@ echo "Collecting npm modules."
 npm install
 
 echo "Patch erblick-core TS definitions."
-printf "\ndeclare var libErdblickCore: any; \nexport default libErdblickCore; \n" >> "$SOURCE_LOC/build/libs/core/erdblick-core.d.ts"
+if grep -q "export default libErdblickCore" "$SOURCE_LOC/build/libs/core/erdblick-core.d.ts"; then
+    echo "The TS definitions are already patched."
+else
+    printf "\ndeclare var libErdblickCore: any; \nexport default libErdblickCore; \n" >> "$SOURCE_LOC/build/libs/core/erdblick-core.d.ts"
+fi
 
 echo "Building Angular distribution files."
 ng build -c production
