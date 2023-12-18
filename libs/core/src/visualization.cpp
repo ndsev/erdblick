@@ -17,8 +17,8 @@ FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& st
     uint32_t featureId = 0;
     for (auto&& feature : *layer) {
         for (auto&& rule : style.rules()) {
-            if (rule.match(*feature)) {
-                addFeature(feature, featureId, rule);
+            if (auto* matchingSubRule = rule.match(*feature)) {
+                addFeature(feature, featureId, *matchingSubRule);
                 featuresAdded_ = true;
             }
         }
