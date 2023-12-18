@@ -49,7 +49,8 @@ export class ErdblickView {
                 navigationInstructionsInitiallyVisible: false,
                 requestRenderMode: true,
                 maximumRenderTimeChange: Infinity,
-                infoBox: false
+                infoBox: false,
+                baseLayer: false
             }
         );
 
@@ -151,10 +152,9 @@ export class ErdblickView {
         if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature))
             return;
         // Restore the previously hovered feature to its original color.
-        if (this.hoveredFeature)
-            if (this.hoveredFeatureOrigColor) {
-                this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
-            }
+        if (this.hoveredFeature && this.hoveredFeatureOrigColor) {
+            this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
+        }
         this.hoveredFeature = null;
         if (feature && !this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
             // Highlight the new hovered feature and remember its original color.
@@ -171,10 +171,9 @@ export class ErdblickView {
         if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
             return;
         // Restore the previously picked feature to its original color.
-        if (this.pickedFeature)
-            if (this.pickedFeatureOrigColor) {
-                this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
-            }
+        if (this.pickedFeature && this.pickedFeatureOrigColor) {
+            this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
+        }
         this.pickedFeature = null;
         if (feature) {
             // Highlight the new picked feature and remember its original color.
