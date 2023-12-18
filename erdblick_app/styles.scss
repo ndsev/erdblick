@@ -90,24 +90,17 @@ body {
 
 #info {
     position: absolute;
-    left: 40%;
-    top: 0.5em;
-    width: 20%;
+    right: 38px;
+    bottom: 0;
     justify-content: center;
-    color: #fff;
     display: flex;
-
-    .p-button {
-        margin-left: 0.5em;
-        height: 1.25em;
-        padding: 0.5rem;
-        border-radius: 3px;
-
-        .p-button-label {
-            font-weight: normal;
-            font-size: small;
-        }
-    }
+    font-size: smaller;
+    background-color: rgba(#fff, 0.25);
+    color: black;
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+    line-height: 1.5rem;
+    padding-bottom: 0.25rem;
 }
 
 //#info > #controls {
@@ -153,14 +146,35 @@ body {
 
 .p-speeddial-direction-up {
     &.speeddial-left {
-        left: 0.5em;
-        bottom: 2em;
+        left: 0.5rem;
+        bottom: 5rem;
     }
 
     .p-speeddial-button {
-        width: 3.5rem;
-        height: 3.5rem;
+        width: 3rem;
+        height: 3rem;
     }
+}
+
+.help-button {
+    width: 3rem;
+    height: 3rem;
+    left: 0.5rem;
+    bottom: 1.5rem;
+    position: absolute;
+
+    .p-button {
+        border-radius: 50%;
+        padding: 0.8rem 0;
+    }
+}
+
+.layers-button {
+    position: absolute;
+    top: 1.5rem;
+    left: 0.5rem;
+    width: 3rem;
+    height: 3rem;
 }
 
 .card {
@@ -171,6 +185,10 @@ body {
     .p-tree {
         border: none;
     }
+}
+
+.p-tooltip {
+    max-width: none;
 }
 
 .inspect-panel {
@@ -186,7 +204,7 @@ body {
     }
 
     .p-accordion-header .p-accordion-header-link {
-        padding: 1rem;
+        padding: 0.8rem;
     }
 
     .p-accordion-content {
@@ -222,9 +240,9 @@ body {
 
 .search-input {
     width: 20%;
-    height: 2.5em;
+    height: 3rem;
     position: absolute;
-    top: 2.3em;
+    top: 1.5rem;
     left: 40%;
 
     input {
@@ -235,8 +253,6 @@ body {
         border: solid 1px lightgray;
     }
 }
-
-
 
 .p-overlaypanel-content {
     & > div:first-child {

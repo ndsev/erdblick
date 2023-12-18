@@ -68,19 +68,21 @@ export class ErdblickView {
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
             let feature = this.viewer.scene.pick(movement.position);
-            if (this.isKnownCesiumFeature(feature))
+            if (this.isKnownCesiumFeature(feature)) {
                 this.setPickedCesiumFeature(feature);
-            else
+            } else {
                 this.setPickedCesiumFeature(null);
+            }
         }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
             let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
-            if (this.isKnownCesiumFeature(feature))
+            if (this.isKnownCesiumFeature(feature)) {
                 this.setHoveredCesiumFeature(feature);
-            else
+            } else {
                 this.setHoveredCesiumFeature(null);
+            }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.

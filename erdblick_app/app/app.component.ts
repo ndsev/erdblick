@@ -51,12 +51,6 @@ interface ErdblickLayer {
     selector: 'app-root',
     template: `
         <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-
-        <!--        <div [hidden]="!isSelectionPanelVisible" id="selectionPanel" class="panel">-->
-        <!--            <span class="toggle-indicator"></span>-->
-        <!--            <span>Selected Feature: </span><span id="selectedFeatureId">{{selectedFeatureIdText}}</span>-->
-        <!--            <pre id="selectedFeatureGeoJson">{{selectedFeatureGeoJsonText}}</pre> &lt;!&ndash; Use <pre> for preserving whitespace &ndash;&gt;-->
-        <!--        </div>-->
         <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '30em', padding: '0' }">
             <p-accordion>
                 <p-accordionTab class="map-tab" *ngFor="let mapItem of mapItems | keyvalue">
@@ -101,12 +95,8 @@ interface ErdblickLayer {
                 </p-accordionTab>
             </p-accordion>
         </p-dialog>
-        <p-button (click)="showLayerDialog()" icon="pi pi-images" label=""
-                  [style]="{position: 'absolute', top: '1.5em', left: '0.5em', width: '3.25em', height: '3.25em'}"></p-button>
-        <div id="info">
-            {{title}} {{version}} //
-            <p-button (click)="reloadStyle()" label="Reload Style"></p-button>
-        </div>
+        <p-button (click)="showLayerDialog()" icon="pi pi-images" label="" pTooltip="Show map layers" tooltipPosition="right"
+                  class="layers-button"></p-button>
         <p-toast position="bottom-center" key="tc"></p-toast>
         <p-overlayPanel #searchoverlay>
             <div *ngFor="let item of searchItems">
@@ -119,33 +109,29 @@ interface ErdblickLayer {
             <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"/>
         </span>
         <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>
+        <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help" tooltipPosition="right"></p-button>
         <p-dialog header="Tile Loading Limits" [(visible)]="dialogVisible" [position]="'bottomleft'"
                   [style]="{ width: '25em' }">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
             <input type="number" pInputText [id]="tilesToLoadInput" placeholder="Enter max tiles to load" min="1"
                    [(ngModel)]="tilesToLoadInput"/><br>
-
             <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
             <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
             <input type="number" pInputText [id]="tilesToVisualizeInput" placeholder="Enter max tiles to load" min="1"
                    [(ngModel)]="tilesToVisualizeInput"/><br>
-
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
         </p-dialog>
-
-        <p-accordion *ngIf="featureTree.length" class="w-full inspect-panel">
+        <p-accordion *ngIf="featureTree.length && isInspectionPanelVisible" class="w-full inspect-panel" [activeIndex]="0">
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">
                         <i class="pi pi-sitemap mr-2"></i>&nbsp;
-                        <span class="vertical-align-middle">Inspect</span>
+                        <span class="vertical-align-middle">{{selectedFeatureIdText}}</span>
                     </div>
                 </ng-template>
                 <ng-template pTemplate="content" style="height: 90%">
-                    <!--                    <p *ngIf="!featureTree.length">No feature selected!</p>-->
-                    <!--                    <p-tree *ngIf="featureTree.length" [value]="featureTree" class="w-full panel-tree" [filter]="true" filterMode="strict" filterPlaceholder="Filter"></p-tree>-->
                     <p-treeTable #tt [value]="featureTree"
                                  [columns]="cols" [scrollable]="true" [scrollHeight]="'calc(100vh - 11em)'"
                                  class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
@@ -153,8 +139,8 @@ interface ErdblickLayer {
                             <div class="flex justify-content-end align-items-center" 
                                  style="display: flex; align-content: center; justify-content: center">
                                 <div class="p-input-icon-left">
-                                    <i class="pi pi-search"></i>
-                                    <input class="filter-input" type="text" pInputText placeholder="Filter"
+                                    <i class="pi pi-filter"></i>
+                                    <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
                                            (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>
                                 </div>
                                 <div>
@@ -168,8 +154,10 @@ interface ErdblickLayer {
                         <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                             <tr [ttRow]="rowNode">
                                 <td *ngFor="let col of cols; let i = index">
-                                    <p-treeTableToggler [rowNode]="rowNode" *ngIf="i === 0"></p-treeTableToggler>
-                                    <span>{{ rowData[col.field] }}</span>
+                                    <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;" [pTooltip]="rowData[col.field].toString()" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
+                                        <p-treeTableToggler [rowNode]="rowNode" *ngIf="i === 0"></p-treeTableToggler>
+                                        <span>{{ rowData[col.field] }}</span>
+                                    </div>
                                 </td>
                             </tr>
                         </ng-template>
@@ -182,6 +170,9 @@ interface ErdblickLayer {
                 </ng-template>
             </p-accordionTab>
         </p-accordion>
+        <div id="info">
+            {{title}} {{version}}
+        </div>
         <router-outlet></router-outlet>
     `,
     styles: []
@@ -196,7 +187,7 @@ export class AppComponent implements OnInit {
     tilesToVisualizeInput: number = 0;
     selectedFeatureGeoJsonText: string = "";
     selectedFeatureIdText: string = "";
-    isSelectionPanelVisible: boolean = false;
+    isInspectionPanelVisible: boolean = false;
     layers: Array<[string, string, any]> = new Array<[string, string, any]>();
     coreLib: any
     searchValue: string = ""
@@ -206,6 +197,11 @@ export class AppComponent implements OnInit {
     cols: Column[] = [];
 
     searchItems: Array<any> = [];
+
+    tooltipOptions = {
+        showDelay: 1500,
+        autoHide: false
+    };
 
     constructor(private httpClient: HttpClient,
                 private messageService: MessageService) {
@@ -233,14 +229,14 @@ export class AppComponent implements OnInit {
 
             this.mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
                 if (!selectedFeatureWrapper) {
-                    this.isSelectionPanelVisible = false;
+                    this.isInspectionPanelVisible = false;
                     return;
                 }
 
                 selectedFeatureWrapper.peek((feature: Feature) => {
                     this.selectedFeatureGeoJsonText = feature.geojson() as string;
                     this.selectedFeatureIdText = feature.id() as string;
-                    this.isSelectionPanelVisible = true;
+                    this.isInspectionPanelVisible = true;
                     this.loadFeatureData();
                 })
             })
@@ -292,12 +288,22 @@ export class AppComponent implements OnInit {
         this.leftTooltipItems = [
             {
                 tooltipOptions: {
+                    tooltipLabel: 'Reload Style',
+                    tooltipPosition: 'left'
+                },
+                icon: 'pi pi-replay',
+                command: () => {
+                    this.reloadStyle();
+                }
+            },
+            {
+                tooltipOptions: {
                     tooltipLabel: 'Tile Loading Limits',
                     tooltipPosition: 'left'
                 },
                 icon: 'pi pi-pencil',
                 command: () => {
-                    this.showDialog()
+                    this.showDialog();
                 }
             }
         ];
@@ -400,7 +406,27 @@ export class AppComponent implements OnInit {
     }
 
     getFeatureTreeData() {
-        let jsonData: Object = JSON.parse(this.selectedFeatureGeoJsonText);
+        let jsonData = JSON.parse(this.selectedFeatureGeoJsonText);
+        if (jsonData.hasOwnProperty("id")) {
+            delete jsonData["id"];
+        }
+        if (jsonData.hasOwnProperty("properties")) {
+            jsonData["attributes"] = jsonData["properties"];
+            delete jsonData["properties"];
+        }
+        // Push leaf values up
+        const sortedJson: Record<string, any> = {};
+        for (const key in jsonData) {
+            if (typeof jsonData[key] === "string" || typeof jsonData[key] === "number") {
+                sortedJson[key] = jsonData[key];
+            }
+        }
+        for (const key in jsonData) {
+            if (typeof jsonData[key] !== "string" && typeof jsonData[key] !== "number") {
+                sortedJson[key] = jsonData[key];
+            }
+        }
+
 
         let convertToTreeTableNodes = (json: any): TreeTableNode[] => {
             const treeTableNodes: TreeTableNode[] = [];
@@ -438,10 +464,7 @@ export class AppComponent implements OnInit {
             return treeTableNodes;
         }
 
-        return [{
-            data: {k: this.selectedFeatureIdText, v: "", t: ""},
-            children: convertToTreeTableNodes(jsonData)
-        }];
+        return convertToTreeTableNodes(sortedJson);
     }
 
     typeToBackground(type: string) {
@@ -632,5 +655,9 @@ export class AppComponent implements OnInit {
                 this.showError("Could not copy GeoJSON content to clipboard.");
             },
         );
+    }
+
+    openHelp() {
+        window.open("https://developer.nds.live/tools/mapviewer-user-guide", "_blank");
     }
 }
