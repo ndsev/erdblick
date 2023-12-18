@@ -132,11 +132,12 @@ interface ErdblickLayer {
                     </div>
                 </ng-template>
                 <ng-template pTemplate="content" style="height: 90%">
+                    <div class="resizable-container">
                     <p-treeTable #tt [value]="featureTree"
                                  [columns]="cols" [scrollable]="true" [scrollHeight]="'calc(100vh - 11em)'"
                                  class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
                         <ng-template pTemplate="caption">
-                            <div class="flex justify-content-end align-items-center" 
+                            <div class="flex justify-content-end align-items-center"
                                  style="display: flex; align-content: center; justify-content: center">
                                 <div class="p-input-icon-left">
                                     <i class="pi pi-filter"></i>
@@ -167,6 +168,7 @@ interface ErdblickLayer {
                             </tr>
                         </ng-template>
                     </p-treeTable>
+                    </div>
                 </ng-template>
             </p-accordionTab>
         </p-accordion>
