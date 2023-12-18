@@ -138,7 +138,7 @@ export class ErdblickView {
     }
 
     /** Check if the given feature is known and can be selected. */
-    isKnownCesiumFeature(f) {
+    isKnownCesiumFeature(f: any) {
         return f && f.id !== undefined && f.primitive !== undefined && (
             this.tileVisForPrimitive.has(f.primitive) ||
             this.tileVisForPrimitive.has(f.primitive._pointPrimitiveCollection))
@@ -193,7 +193,7 @@ export class ErdblickView {
     }
 
     /** Set the color of a cesium feature through its associated primitive. */
-    setFeatureColor(feature, color) {
+    private setFeatureColor(feature: any, color: Color) {
         if (feature.primitive.color !== undefined) {
             // Special treatment for point primitives.
             feature.primitive.color = color;
@@ -208,7 +208,7 @@ export class ErdblickView {
     }
 
     /** Read the color of a cesium feature through its associated primitive. */
-    getFeatureColor(feature) {
+    private getFeatureColor(feature: any) {
         if (feature.primitive.color !== undefined) {
             // Special treatment for point primitives.
             return feature.primitive.color.clone();
@@ -242,7 +242,7 @@ export class ErdblickView {
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
         let centerLon, centerLat;
 
-        if (defined(centerCartesian)) {
+        if (centerCartesian !== undefined) {
             let centerCartographic = Cartographic.fromCartesian(centerCartesian);
             centerLon = Math.toDegrees(centerCartographic.longitude);
             centerLat = Math.toDegrees(centerCartographic.latitude);
