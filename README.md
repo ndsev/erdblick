@@ -44,9 +44,31 @@ Each rule within the YAML `rules` array can have the following fields. Any field
 | `opacity`__*__        | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`                |
 | `width`__*__          | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`                |
 | `flat`__*__           | Clamps the feature to the ground (Does not work for meshes).                                         | Boolean                                                    | `true`, `false`      |
-| `outline-color`__*__  | Feature outline color (works only for points).                                                       | String                                                     | `green`, `#fff`      |
+| `outline-color`__*__  | Point outline color.                                                                                 | String                                                     | `green`, `#fff`      |
 | `outline-width`__*__  | Point outline width in px.                                                                           | Float                                                      | `3.6`                |
 | `near-far-scale`__*__ | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).               | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]` |
+| `first-of`__*__       | Mark a rule as a parent of a fallback rule list. See description below.                              | Array of Rule objects.                                     | See example below.   |
+
+**About `first-of`:**
+
+Normally, all style rules from a style sheet are naively applied to all matching features.
+However, usually, it will be sufficient if only the first matching rule from a list
+is applied. This allows a simple fallback rule at the bottom of the list. For this purpose,
+the `first-of` style rule field exists. It may be applied as follows:
+
+```yaml
+rules:
+- type: Road
+  first-of:
+    - (subrule-1...)
+    - (subrule-2...)
+    - (subrule-n)
+```
+
+Note, that all attributes except for `type`, `filter` and `first-of` are propagated
+from the parent rule to the subrules. For example, a parent rule `color` will be applied
+to the child, unless the child overrides the color. It is explicitly allowed
+that sub-rules may have sub-rules themselves.
 
 **A brief example:**
 
