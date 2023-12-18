@@ -133,8 +133,7 @@ interface ErdblickLayer {
                 </ng-template>
                 <ng-template pTemplate="content" style="height: 90%">
                     <div class="resizable-container">
-                    <p-treeTable #tt [value]="featureTree"
-                                 [columns]="cols" [scrollable]="true" [scrollHeight]="'calc(100vh - 11em)'"
+                    <p-treeTable #tt [value]="featureTree" [columns]="cols"
                                  class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
                         <ng-template pTemplate="caption">
                             <div class="flex justify-content-end align-items-center"
