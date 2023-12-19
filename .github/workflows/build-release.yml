@@ -20,7 +20,7 @@ jobs:
           node-version: '21.x'
 
       - name: Install npm dependencies
-          run: npm install -g
+        run: npm ci
 
       - name: Build demo with Emscripten
         run: |
