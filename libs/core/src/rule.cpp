@@ -12,8 +12,10 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
 
 void FeatureStyleRule::parse(const YAML::Node& yaml)
 {
+    if (yaml["geometry"].IsDefined())
+        geometryTypes_ = 0; // Reset inherited geometry types.
+
     for (auto const& geometryStr : yaml["geometry"]) {
-        geometryTypes_ = 0;
         auto g = geometryStr.as<std::string>();
         if (g == "point") {
             geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Points);
@@ -93,14 +95,16 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
     // Filter by feature type regular expression.
     if (type_) {
         auto typeId = feature.typeId();
-        if (!std::regex_match(typeId.begin(), typeId.end(), *type_))
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
             return nullptr;
+        }
     }
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>())
+        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
+        }
     }
 
     // Return matching sub-rule or this.
