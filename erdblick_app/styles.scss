@@ -295,27 +295,69 @@ body {
 }
 
 .map-layer-dialog {
+    .p-dialog-mask {
+        width: 27rem;
+    }
+
+    .p-dialog-header {
+        padding: 1.5rem 1.5rem 0 1.5rem;
+    }
+
     .p-dialog-content {
-        padding: 1rem;
+        padding: 0.5rem;
+    }
+
+    .tabs-container {
+        overflow: auto;
+        max-height: 72vh;
     }
 }
 
 .map-tab {
-    .p-accordion-header-link {
-        padding: 0.8rem;
-    }
+    .p-fieldset {
+        margin-top: 5px;
 
-    .p-accordion-content {
-        padding: 0;
+        .p-fieldset-legend {
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            color: #343a40;
+            background: #f8f9fa;
+            font-weight: 700;
+            border-radius: 6px;
+            font-size: small;
+        }
+
+        .p-fieldset-content {
+            padding: 0;
+        }
     }
 
     .layer-tab {
         .p-accordion-tab {
-            margin-bottom: 0;
+            margin-bottom: 4px;
+        }
+
+        .p-accordion-header-link {
+            padding: 0.8rem;
+            font-size: small;
         }
 
         .p-accordion-content {
-            border: none;
+            padding: 0;
+
+            button {
+                width: 2.5rem;
+                height: 2.5rem;
+            }
+
+            .p-inputnumber-buttons-horizontal .p-inputnumber-input {
+                order: 2;
+                border-radius: 0;
+                width: 5rem;
+                text-align: center;
+                height: 2.5rem;
+            }
         }
     }
 }
+

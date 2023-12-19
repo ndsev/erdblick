@@ -19,6 +19,7 @@ import {TreeTableModule} from "primeng/treetable";
 import {ToastModule} from "primeng/toast";
 import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
+import {FieldsetModule} from "primeng/fieldset";
 
 @NgModule({
     declarations: [
@@ -41,7 +42,8 @@ import {InputNumberModule} from "primeng/inputnumber";
         PanelMenuModule,
         TreeTableModule,
         ToastModule,
-        InputNumberModule
+        InputNumberModule,
+        FieldsetModule
     ],
     providers: [
         MessageService

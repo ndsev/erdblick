@@ -52,36 +52,31 @@ interface ErdblickLayer {
     template: `
         <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '30em', padding: '0' }">
-            <p-accordion>
-                <p-accordionTab class="map-tab" *ngFor="let mapItem of mapItems | keyvalue">
-                    <ng-template pTemplate="header">
-                        <span class="flex align-items-center gap-2 w-full">
-                            <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapItem.key }}</span>
-                        </span>
-                    </ng-template>
-                    <p-accordion>
-                        <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
-                            <ng-template pTemplate="header">
+            <div class="tabs-container">
+            <p-fieldset class="map-tab" *ngFor="let mapItem of mapItems | keyvalue" [legend]="mapItem.key">
+                <p-accordion [multiple]="true" [activeIndex]="[0]">
+                    <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
+                        <ng-template pTemplate="header">
                                 <span class="flex align-items-center gap-2 w-full">
                                     <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
                                 </span>
-                            </ng-template>
-                            <div class="flex align-items-center gap-2 w-full" style="padding: 0.5rem 1.25rem;">
-                                <p-button (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" label=""
-                                          [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
-                                </p-button>
-                                <p-inputNumber [(ngModel)]="mapLayer.level" (ngModelChange)="onLayerLevelChanged($event, mapLayer.name)" 
-                                               [style]="{'width': '2rem'}" [showButtons]="true"
-                                               buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
-                                               decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
-                                               incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15" 
-                                               pTooltip="Change zoom level" tooltipPosition="bottom">
-                                </p-inputNumber>
-                            </div>
-                        </p-accordionTab>
-                    </p-accordion>
-                </p-accordionTab>
-            </p-accordion>
+                        </ng-template>
+                        <div class="flex-container" style="padding: 0.5rem 1.25rem;">
+                            <p-button (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" label=""
+                                      [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
+                            </p-button>
+                            <p-inputNumber [(ngModel)]="mapLayer.level" (ngModelChange)="onLayerLevelChanged($event, mapLayer.name)"
+                                           [style]="{'width': '2rem'}" [showButtons]="true"
+                                           buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
+                                           decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
+                                           incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15"
+                                           pTooltip="Change zoom level" tooltipPosition="bottom">
+                            </p-inputNumber>
+                        </div>
+                    </p-accordionTab>
+                </p-accordion>
+            </p-fieldset>
+            </div>
         </p-dialog>
         <p-button (click)="showLayerDialog()" icon="pi pi-images" label="" pTooltip="Show map layers" tooltipPosition="right"
                   class="layers-button"></p-button>
