@@ -22,7 +22,7 @@ Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/kl
 so make sure to serve it up with the `mapget serve` command. 
 Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with 
 ```bash
-mapget serve -w <path-to-unpacked-erdblick>/static
+mapget serve -w <path-to-unpacked-erdblick>
 ```
 
 If you would like to build erdblick from its source code, you would need to install the required dependencies 
