@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install npm dependencies
-        run: npm install --force --include=dev
+        run: npm -g install --force --include=dev
 
       - name: Build demo with Emscripten
         run: |
