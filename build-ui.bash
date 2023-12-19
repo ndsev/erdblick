@@ -20,6 +20,6 @@ else
 fi
 
 echo "Building Angular distribution files."
-ng build -c production
+npm run build -- -c production
 
 exit 0
