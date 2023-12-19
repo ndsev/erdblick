@@ -29,6 +29,9 @@ jobs:
           $GITHUB_WORKSPACE/ci/00_linux_setup.bash
           $GITHUB_WORKSPACE/ci/10_linux_build.bash
 
+      - name: Build Angular
+        run: ng build -c production
+
       - name: Release artifacts
         uses: actions/upload-artifact@v3.1.2
         with:
