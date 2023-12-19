@@ -19,8 +19,8 @@ jobs:
         with:
           node-version: '21.x'
 
-      - name: Install Angular CLI
-          run: npm install -g @angular/cli@16.0.4
+      - name: Install npm dependencies
+          run: npm install -g
 
       - name: Build demo with Emscripten
         run: |
