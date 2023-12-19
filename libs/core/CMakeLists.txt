@@ -70,7 +70,7 @@ target_link_libraries(erdblick-core
     yaml-cpp)
 
 add_custom_target(erdblick-ui ALL
-    COMMAND bash ${CMAKE_SOURCE_DIR}/build-ui.bash ${CMAKE_SOURCE_DIR}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS erdblick-core
 )
