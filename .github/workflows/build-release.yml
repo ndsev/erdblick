@@ -19,6 +19,9 @@ jobs:
         with:
           node-version: '21.x'
 
+      - name: Install Angular CLI
+          run: npm install -g @angular/cli@16.0.4
+
       - name: Build demo with Emscripten
         run: |
           $GITHUB_WORKSPACE/ci/00_linux_setup.bash
