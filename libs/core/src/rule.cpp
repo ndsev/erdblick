@@ -90,29 +90,26 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
 FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
 {
-    // Filter by feature type regular expression
+    // Filter by feature type regular expression.
     if (type_) {
         auto typeId = feature.typeId();
         if (!std::regex_match(typeId.begin(), typeId.end(), *type_))
             return nullptr;
     }
 
-    // Filter by simfil expression
+    // Filter by simfil expression.
     if (!filter_.empty()) {
         if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>())
             return nullptr;
     }
 
-    // Return matching sub-rule or this
+    // Return matching sub-rule or this.
     if (!firstOfRules_.empty()) {
         for (auto const& rule : firstOfRules_) {
-            std::cout << "first-of-rule" << std::endl;
             if (auto matchingRule = rule.match(feature)) {
-                std::cout << "matched" << std::endl;
                 return matchingRule;
             }
         }
-        std::cout << "no match" << std::endl;
         return nullptr;
     }
 
