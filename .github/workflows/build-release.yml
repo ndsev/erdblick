@@ -18,13 +18,11 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '21.x'
+          cache: "npm"
+          cache-dependency-path: package-lock.json
 
       - name: Install npm dependencies
-        run: npm install --include=dev
-
-      - name: Find Angular CLI path
-        run: echo "::set-output name=ngpath::$(which ng)"
-        id: find_ng
+        run: npm install --force --include=dev
 
       - name: Build demo with Emscripten
         run: |
