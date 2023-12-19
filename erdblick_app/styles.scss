@@ -60,33 +60,7 @@ body {
     }
 }
 
-/* Base style for the toggle-indicator */
-.toggle-indicator::before {
-    content: '';
-    border-style: solid;
-    display: inline-block;
-    margin-right: 5px; /* A bit of margin for spacing */
-    vertical-align: middle; /* Align with the text */
-}
-
-.panel .toggle-indicator {
-    width: 18px;
-    display: inline-block;
-}
-
-/* Triangle pointing right for the collapsed state */
-.panel .toggle-indicator::before {
-    border-width: 5px 5px 5px 8px;
-    border-color: transparent transparent transparent white;
-}
-
-/* Triangle pointing down for the expanded state */
-.panel.expanded .toggle-indicator::before {
-    border-width: 8px 5px 0 5px;
-    border-color: white transparent transparent transparent;
-}
-
-/* Specific styles for the info panel */
+/* Specific styles for the info block */
 
 #info {
     position: absolute;
@@ -101,47 +75,6 @@ body {
     padding-left: 0.5rem;
     line-height: 1.5rem;
     padding-bottom: 0.25rem;
-}
-
-//#info > #controls {
-//    display: block;
-//}
-
-//#info > #maps {
-//    display: block;
-//}
-
-//#info > #maps > div {
-//    margin-top: 0.5em;
-//    margin-bottom: 0;
-//}
-
-//#info.expanded > #controls {
-//    display: block;
-//}
-//
-//#info.expanded > #maps {
-//    display: block;
-//}
-
-/* Specific styles for the selection panel */
-
-#selectionPanel {
-    right: 30px;
-}
-
-#selectionPanel.expanded {
-    overflow-y: scroll;
-    scrollbar-width: thin;
-    overflow-x: hidden;
-}
-
-#selectionPanel > pre {
-    display: none;
-}
-
-#selectionPanel.expanded > pre {
-    display: block;
 }
 
 .p-speeddial-direction-up {
@@ -295,10 +228,6 @@ body {
 }
 
 .map-layer-dialog {
-    .p-dialog-mask {
-        width: 27rem;
-    }
-
     .p-dialog-header {
         padding: 1.5rem 1.5rem 0 1.5rem;
     }

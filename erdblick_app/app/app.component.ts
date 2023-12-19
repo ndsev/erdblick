@@ -51,15 +51,15 @@ interface ErdblickLayer {
     selector: 'app-root',
     template: `
         <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '30em', padding: '0' }">
+        <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '25rem', 'min-width': '25rem', margin: '0' }">
             <div class="tabs-container">
             <p-fieldset class="map-tab" *ngFor="let mapItem of mapItems | keyvalue" [legend]="mapItem.key">
                 <p-accordion [multiple]="true" [activeIndex]="[0]">
                     <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
                         <ng-template pTemplate="header">
-                                <span class="flex align-items-center gap-2 w-full">
-                                    <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
-                                </span>
+                            <span class="flex align-items-center gap-2 w-full">
+                                <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
+                            </span>
                         </ng-template>
                         <div class="flex-container" style="padding: 0.5rem 1.25rem;">
                             <p-button (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" label=""
