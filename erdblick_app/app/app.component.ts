@@ -126,7 +126,7 @@ interface ErdblickLayer {
                         <ng-template pTemplate="caption">
                             <div class="flex justify-content-end align-items-center"
                                  style="display: flex; align-content: center; justify-content: center">
-                                <div class="p-input-icon-left">
+                                <div class="p-input-icon-left filter-container">
                                     <i class="pi pi-filter"></i>
                                     <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
                                            (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>

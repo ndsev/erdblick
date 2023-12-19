@@ -213,8 +213,8 @@ body {
         resize: both;
         overflow: auto;
         direction: rtl;
-        max-width: calc(100vw - 5rem);
-        max-height: calc(100vh - 5rem);
+        max-width: calc(100vw - 6rem);
+        max-height: calc(100vh - 6rem);
 
         .p-tree {
             border: none;
@@ -222,9 +222,13 @@ body {
             direction: ltr;
         }
 
+        .filter-container {
+            width: 100%;
+        }
+
         .filter-input {
             height: 2rem;
-            width: 25rem;
+            width: 100%;
             padding-left: 2rem;
             border-radius: 6px;
             border: solid 1px lightgray;
