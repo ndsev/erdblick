@@ -300,7 +300,7 @@ export class AppComponent implements OnInit {
         this.searchItems = [
             {
                 name: "Tile ID",
-                label: "Jump to WGS84 Tile by its ID",
+                label: "Jump to Tile by its Mapget ID",
                 fun: () => { this.jumpToWGS84Tile() }
             },
             {

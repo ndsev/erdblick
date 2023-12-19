@@ -16,7 +16,31 @@
 
 ## Setup
 
-Ready to try out the latest version? While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, so make sure to serve it up with the `mapget serve` command. Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with `mapget serve -w path-to-unpacked-erdblick`.
+Ready to try out the latest version? 
+While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. 
+Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, 
+so make sure to serve it up with the `mapget serve` command. 
+Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with 
+```bash
+mapget serve -w <path-to-unpacked-erdblick>/static
+```
+
+If you would like to build erdblick from its source code, you would need to install the required dependencies 
+and run the following commands prior to starting up a mapget server:
+```bash
+cd <path-to-unpacked-erdblick>
+npm install
+ng build
+```
+
+#### Required dependencies
+
+To sucessfully build from the source code, the following dependencies are prerequisite:
+
+| Dependency | Version |
+|------------|---------|
+| Node.js    | 21.3.0+ |
+| npm        | 10.2.4+ |
 
 ![mapget alpha ui](./docs/erdblick-alpha.png)
 
