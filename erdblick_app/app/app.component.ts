@@ -59,18 +59,6 @@ interface ErdblickLayer {
                             <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapItem.key }}</span>
                         </span>
                     </ng-template>
-                    <div class="flex align-items-center gap-2 w-full" style="padding: 0.5rem 1.25rem;">
-                        <p-button (click)="focus(mapItem.value.coverage, $event)" icon="pi pi-fw pi-eye" label=""
-                                  [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
-                        </p-button>
-                        <p-inputNumber [(ngModel)]="mapItem.value.level" (ngModelChange)="onMapLevelChanged($event, mapItem.key)"
-                                       [style]="{'width': '2rem'}" [showButtons]="true"
-                                       buttonLayout="horizontal" spinnerMode="vertical" inputId="vertical"
-                                       decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
-                                       incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15"
-                                       pTooltip="Change zoom level" tooltipPosition="bottom">
-                        </p-inputNumber>
-                    </div>
                     <p-accordion>
                         <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
                             <ng-template pTemplate="header">
@@ -375,24 +363,6 @@ export class AppComponent implements OnInit {
         event.stopPropagation();
         if (this.mapModel !== undefined && this.coreLib !== undefined) {
             this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(tileId));
-        }
-    }
-
-    onMapLevelChanged(event: Event, mapName: string) {
-        let level = Number(event.toString());
-        let mapItem = this.mapItems.get(mapName);
-        if (mapItem !== undefined) {
-            mapItem.mapLayers.forEach((layer: ErdblickLayer) => {
-                layer.level = level;
-            });
-            if (this.mapModel !== undefined) {
-                mapItem.mapLayers.forEach((layer: ErdblickLayer) => {
-                    this.mapModel?.layerIdToLevel.set(layer.name, level);
-                });
-                this.mapModel.update();
-            } else {
-                this.showError("Cannot access the map model. The model is not available.");
-            }
         }
     }
 
