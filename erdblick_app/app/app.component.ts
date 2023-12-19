@@ -94,7 +94,7 @@ interface ErdblickLayer {
         <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>
         <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help" tooltipPosition="right"></p-button>
         <p-dialog header="Tile Loading Limits" [(visible)]="dialogVisible" [position]="'bottomleft'"
-                  [style]="{ width: '25em' }">
+                  [style]="{ width: '25em', margin: '0' }">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
             <input type="number" pInputText [id]="tilesToLoadInput" placeholder="Enter max tiles to load" min="1"
