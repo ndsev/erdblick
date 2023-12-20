@@ -2,7 +2,7 @@
 
 `erdblick` is a dynamic mapviewer built on the `mapget` feature service.
 
-> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase. Our goal is to launch a fully functional Desktop app by the end of 2023. Stay tuned! 🚀
+> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase.
 
 **Capabilities:** 🛠️
 
@@ -13,6 +13,8 @@
 * 🔍 Select multiple features at once using filter or lasso selection tools **(Planned)**.
 * 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter **(Planned)**.
 * 🔎 View multiple map layer tile zoom levels all at once **(Planned)**.
+
+![mapget ui](./docs/erdblick.png)
 
 ## Setup
 
@@ -41,8 +43,6 @@ To sucessfully build from the source code, the following dependencies are prereq
 |------------|---------|
 | Node.js    | 21.3.0+ |
 | npm        | 10.2.4+ |
-
-![mapget alpha ui](./docs/erdblick-alpha.png)
 
 ## Styling System
 
