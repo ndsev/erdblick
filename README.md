@@ -129,6 +129,8 @@ To rebuild the project (skipping checkouts and CMake initialization), run:
 ./ci/20_linux_rebuild.bash
 ```
 
+You will find the resulting built web app under the directory `./static`.
+
 You can also build the `erdblick-core` library with a standard C++ compiler
 in an IDE of your choice. This is also useful to run the unit-tests.
 
