@@ -1,6 +1,14 @@
 "use strict";
 
-import {uint8ArrayFromWasm} from "./wasm.js";
+import {uint8ArrayFromWasm} from "./wasm";
+import {Cartesian3} from "cesium";
+
+/**
+ * Extend Window interface to allow custom ErdblickDebugApi property
+ */
+export interface DebugWindow extends Window {
+    ebDebug: ErdblickDebugApi;
+}
 
 /**
  * Debugging utility class designed for usage with the browser's debug console.
@@ -10,12 +18,15 @@ import {uint8ArrayFromWasm} from "./wasm.js";
  * GUI.
  */
 export class ErdblickDebugApi {
+    private view: any;
+    private model: any;
+    private coreLib: any;
 
     /**
      * Initialize a new ErdblickDebugApi instance.
      * @param mapView Reference to a ErdblickView instance
      */
-    constructor(mapView) {
+    constructor(mapView: any) {
         this.view = mapView;
         this.model = mapView.model;
         this.coreLib = mapView.model.coreLib;
@@ -26,10 +37,10 @@ export class ErdblickDebugApi {
      *
      * @param cameraInfoStr A JSON-formatted string containing camera information.
      */
-    setCamera(cameraInfoStr) {
+    private setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
         this.view.viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromArray(cameraInfo.position),
+            destination: Cartesian3.fromArray(cameraInfo.position),
             orientation: {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
@@ -43,7 +54,7 @@ export class ErdblickDebugApi {
      *
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
-    getCamera() {
+    private getCamera() {
         const position = [
             this.view.viewer.camera.position.x,
             this.view.viewer.camera.position.y,
@@ -54,14 +65,14 @@ export class ErdblickDebugApi {
             pitch: this.view.viewer.camera.pitch,
             roll: this.view.viewer.camera.roll
         };
-        return JSON.stringify({ position, orientation });
+        return JSON.stringify({position, orientation});
     }
 
     /**
      * Generate a test TileFeatureLayer, and show it.
      */
-    showTestTile() {
-        let tile = uint8ArrayFromWasm(this.coreLib, sharedArr => {
+    private showTestTile() {
+        let tile = uint8ArrayFromWasm(this.coreLib, (sharedArr: any) => {
             this.coreLib.generateTestTile(sharedArr, this.model.tileParser);
         })
         let style = this.coreLib.generateTestStyle();

@@ -15,8 +15,9 @@ class FeatureStyleRule
 {
 public:
     explicit FeatureStyleRule(YAML::Node const& yaml);
+    FeatureStyleRule(FeatureStyleRule const& other) = default;
 
-    [[nodiscard]] bool match(mapget::Feature& feature) const;
+    FeatureStyleRule const* match(mapget::Feature& feature) const;
     [[nodiscard]] bool supports(mapget::Geometry::GeomType const& g) const;
     [[nodiscard]] glm::fvec4 const& color() const;
     [[nodiscard]] float width() const;
@@ -26,6 +27,8 @@ public:
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
 
 private:
+    void parse(YAML::Node const& yaml);
+
     static inline uint32_t geomTypeBit(mapget::Geometry::GeomType const& g) {
         return 1 << static_cast<std::underlying_type_t<mapget::Geometry::GeomType>>(g);
     }
@@ -40,6 +43,8 @@ private:
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
+
+    std::vector<FeatureStyleRule> firstOfRules_;
 };
 
 }

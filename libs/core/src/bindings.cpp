@@ -196,7 +196,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
 
     ////////// TileLayerMetadata
-    em::value_object<TileLayerParser::TileLayerMetadata>("Point")
+    em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures);

@@ -38,6 +38,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
     --profiling \
+    --embind-emit-tsd erdblick-core.d.ts \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
@@ -46,6 +47,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     -s NO_DISABLE_EXCEPTION_CATCHING \
     -s JS_MATH=0 \
     -s ALLOW_MEMORY_GROWTH=1 \
+    -s SINGLE_FILE=1 \
   ")
 else()
   add_library(erdblick-core ${ERDBLICK_SOURCE_FILES})
@@ -66,3 +68,9 @@ target_link_libraries(erdblick-core
     glm
     mapget-model
     yaml-cpp)
+
+add_custom_target(erdblick-ui ALL
+    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    DEPENDS erdblick-core
+)

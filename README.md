@@ -2,7 +2,7 @@
 
 `erdblick` is a dynamic mapviewer built on the `mapget` feature service.
 
-> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase. Our goal is to launch a fully functional Desktop app by the end of 2023. Stay tuned! 🚀
+> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase.
 
 **Capabilities:** 🛠️
 
@@ -14,11 +14,18 @@
 * 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter **(Planned)**.
 * 🔎 View multiple map layer tile zoom levels all at once **(Planned)**.
 
+![mapget ui](./docs/erdblick.png)
+
 ## Setup
 
-Ready to try out the latest version? While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, so make sure to serve it up with the `mapget serve` command. Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with `mapget serve -w path-to-unpacked-erdblick`.
-
-![mapget alpha ui](./docs/erdblick-alpha.png)
+Ready to try out the latest version? 
+While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. 
+Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, 
+so make sure to serve it up with the `mapget serve` command. 
+Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with 
+```bash
+mapget serve -w <path-to-unpacked-erdblick>
+```
 
 ## Styling System
 
@@ -44,9 +51,31 @@ Each rule within the YAML `rules` array can have the following fields. Any field
 | `opacity`__*__        | A float value between 0 and 1 indicating the opacity.                                                | Float                                                      | `0.8`                |
 | `width`__*__          | Specifies the line width or point diameter (default in pixels).                                      | Float                                                      | `4.5`                |
 | `flat`__*__           | Clamps the feature to the ground (Does not work for meshes).                                         | Boolean                                                    | `true`, `false`      |
-| `outline-color`__*__  | Feature outline color (works only for points).                                                       | String                                                     | `green`, `#fff`      |
+| `outline-color`__*__  | Point outline color.                                                                                 | String                                                     | `green`, `#fff`      |
 | `outline-width`__*__  | Point outline width in px.                                                                           | Float                                                      | `3.6`                |
 | `near-far-scale`__*__ | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).               | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]` |
+| `first-of`__*__       | Mark a rule as a parent of a fallback rule list. See description below.                              | Array of Rule objects.                                     | See example below.   |
+
+**About `first-of`:**
+
+Normally, all style rules from a style sheet are naively applied to all matching features.
+However, usually, it will be sufficient if only the first matching rule from a list
+is applied. This allows a simple fallback rule at the bottom of the list. For this purpose,
+the `first-of` style rule field exists. It may be applied as follows:
+
+```yaml
+rules:
+- type: Road
+  first-of:
+    - (subrule-1...)
+    - (subrule-2...)
+    - (subrule-n)
+```
+
+Note, that all attributes except for `type`, `filter` and `first-of` are propagated
+from the parent rule to the subrules. For example, a parent rule `color` will be applied
+to the child, unless the child overrides the color. It is explicitly allowed
+that sub-rules may have sub-rules themselves.
 
 **A brief example:**
 
@@ -74,6 +103,14 @@ rules:
 <details>
 <summary>Show instructions</summary>
 
+Make sure that these prerequisite dependencies are installed:
+
+| Dependency | Version |
+|------------|---------|
+| `node`     | 21.3.0+ |
+| `npm`      | 10.2.4+ |
+| `cmake`    | 3.24+ |
+
 Run the setup script once to pull Emscripten SDK:
 
 ```bash
@@ -91,6 +128,8 @@ To rebuild the project (skipping checkouts and CMake initialization), run:
 ```bash
 ./ci/20_linux_rebuild.bash
 ```
+
+You will find the resulting built web app under the directory `./static`.
 
 You can also build the `erdblick-core` library with a standard C++ compiler
 in an IDE of your choice. This is also useful to run the unit-tests.

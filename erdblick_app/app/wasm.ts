@@ -5,7 +5,7 @@
  * and then retrieve this data as a Uint8Array. Will return null
  * if the user function returns false.
  */
-export function uint8ArrayFromWasm(coreLib, fun) {
+export function uint8ArrayFromWasm(coreLib: any, fun: any) {
     let sharedGlbArray = new coreLib.SharedUint8Array();
     if (fun(sharedGlbArray) === false) {
         sharedGlbArray.delete();
@@ -23,7 +23,7 @@ export function uint8ArrayFromWasm(coreLib, fun) {
  * through a SharedUint8Array. If the operation fails or the WASM function
  * returns false, null is returned.
  */
-export function uint8ArrayToWasm(coreLib, fun, inputData) {
+export function uint8ArrayToWasm(coreLib: any, fun: any, inputData: any) {
     let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
     let bufferPtr = Number(sharedGlbArray.getPointer());
     coreLib.HEAPU8.set(inputData, bufferPtr);

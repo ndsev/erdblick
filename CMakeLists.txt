@@ -4,6 +4,7 @@ project(erdblick)
 include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_OSX_ARCHITECTURES "x86_64")
 
 # Treat warnings as errors, with some exceptions for Cesium.
 set (ERDBLICK_CXX_FLAGS
@@ -49,9 +50,6 @@ FetchContent_Declare(yaml-cpp
 FetchContent_MakeAvailable(yaml-cpp)
 
 add_subdirectory(libs/core)
-
-add_custom_target(static-web-files ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/static" "${CMAKE_CURRENT_BINARY_DIR}")
 
 if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_subdirectory(test)

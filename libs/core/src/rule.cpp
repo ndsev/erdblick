@@ -7,12 +7,13 @@ namespace erdblick
 
 FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
 {
-    // Parse the geometry specifiers into a vector of simfil geometry types.
-    if (!yaml["geometry"] || !(yaml["geometry"].IsSequence())) {
-        std::cout << "YAML stylesheet error: Every rule must specify a 'geometry' sequence!"
-                  << std::endl;
-        return;
-    }
+    parse(yaml);
+}
+
+void FeatureStyleRule::parse(const YAML::Node& yaml)
+{
+    if (yaml["geometry"].IsDefined())
+        geometryTypes_ = 0; // Reset inherited geometry types.
 
     for (auto const& geometryStr : yaml["geometry"]) {
         auto g = geometryStr.as<std::string>();
@@ -75,24 +76,48 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+
+    // Parse sub-rules
+    if (yaml["first-of"].IsDefined()) {
+        for (auto yamlSubRule : yaml["first-of"]) {
+            // The sub-rule adopts all attributes except type and filter
+            auto& subRule = firstOfRules_.emplace_back(*this);
+            subRule.type_.reset();
+            subRule.filter_.clear();
+            subRule.firstOfRules_.clear();
+            subRule.parse(yamlSubRule);
+        }
+    }
 }
 
-bool FeatureStyleRule::match(mapget::Feature& feature) const
+FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
 {
-    // Filter by feature type regular expression
+    // Filter by feature type regular expression.
     if (type_) {
         auto typeId = feature.typeId();
-        if (!std::regex_match(typeId.begin(), typeId.end(), *type_))
-            return false;
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+            return nullptr;
+        }
     }
 
-    // Filter by simfil expression
+    // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>())
-            return false;
+        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
+            return nullptr;
+        }
     }
 
-    return true;
+    // Return matching sub-rule or this.
+    if (!firstOfRules_.empty()) {
+        for (auto const& rule : firstOfRules_) {
+            if (auto matchingRule = rule.match(feature)) {
+                return matchingRule;
+            }
+        }
+        return nullptr;
+    }
+
+    return this;
 }
 
 bool FeatureStyleRule::supports(const mapget::GeomType& g) const
@@ -129,5 +154,6 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::nearFarScale() cons
 {
     return nearFarScale_;
 }
+
 
 }

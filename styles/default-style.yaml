@@ -1,0 +1,7 @@
+name: DefaultStyle
+version: 1.0
+rules:
+  - geometry: ["line", "mesh", "polygon"]
+    color: red
+    opacity: 1.0
+    width: 2.0

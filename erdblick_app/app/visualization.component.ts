@@ -1,8 +1,17 @@
-import {FeatureTile} from "./features.js";
+import {Cartesian3, Color, Viewer} from "cesium";
+import {FeatureTile} from "./features.component";
+import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
 /** Bundle of a FeatureTile and a rendered */
-export class TileVisualization
-{
+export class TileVisualization {
+    tile: FeatureTile;
+    private style: any;
+    private isHighDetail: boolean;
+    private entity: any;
+    private primitiveCollection: any;
+    private hasHighDetailVisualization: boolean;
+    private hasLowDetailVisualization: boolean;
+
     /**
      * Create a tile visualization.
      * @param tile {FeatureTile} The tile to visualize.
@@ -12,7 +21,7 @@ export class TileVisualization
      *  will result in a dot representation. A high-detail representation
      *  based on the style can be triggered using `true`.
      */
-    constructor(tile, style, highDetail) {
+    constructor(tile: FeatureTile, style: any, highDetail: any) {
         this.tile = tile;
         this.style = style;
         this.isHighDetail = highDetail;
@@ -28,44 +37,45 @@ export class TileVisualization
      * Actually create the visualization.
      * @param viewer {Cesium.Viewer} The viewer to add the rendered entity to.
      */
-    render(viewer) {
+    render(viewer: Viewer) {
         // Remove any previous render-result, as a new one is generated.
         this.destroy(viewer);
 
         // Do not try to render if the underlying data is disposed.
-        if (this.tile.disposed)
+        if (this.tile.disposed) {
             return false;
+        }
 
         // Create potential high-detail visualization
         if (this.isHighDetailAndNotEmpty()) {
-            this.tile.peek(tileFeatureLayer => {
+            this.tile.peek((tileFeatureLayer: TileFeatureLayer) => {
                 let visualization = new this.tile.coreLib.FeatureLayerVisualization(this.style, tileFeatureLayer);
                 this.primitiveCollection = visualization.primitiveCollection();
             });
             if (this.primitiveCollection)
                 viewer.scene.primitives.add(this.primitiveCollection);
             this.hasHighDetailVisualization = true;
-            return;
+        } else {
+            // Else: Low-detail dot representation
+            let position = this.tile.coreLib.getTilePosition(this.tile.tileId);
+            let color = (this.tile.numFeatures <= 0) ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
+            this.entity = viewer.entities.add({
+                position: Cartesian3.fromDegrees(position.x, position.y),
+                point: {
+                    pixelSize: 5,
+                    color: color
+                }
+            });
+            this.hasLowDetailVisualization = true;
         }
-
-        // Else: Low-detail dot representation
-        let position = this.tile.coreLib.getTilePosition(this.tile.tileId);
-        let color = (this.tile.numFeatures <= 0) ? Cesium.Color.ALICEBLUE.withAlpha(.5) : Cesium.Color.LAWNGREEN.withAlpha(.5);
-        this.entity = viewer.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(position.x, position.y),
-            point: {
-                pixelSize: 5,
-                color: color
-            }
-        });
-        this.hasLowDetailVisualization = true;
+        return true;
     }
 
     /**
      * Destroy any current visualization.
      * @param viewer {Cesium.Viewer} The viewer to remove the rendered entity from.
      */
-    destroy(viewer) {
+    destroy(viewer: Viewer) {
         if (this.primitiveCollection) {
             viewer.scene.primitives.remove(this.primitiveCollection);
             if (!this.primitiveCollection.isDestroyed())
@@ -83,7 +93,7 @@ export class TileVisualization
     /**
      * Iterate over all Cesium primitives of this visualization.
      */
-    forEachPrimitive(callback) {
+    forEachPrimitive(callback: any) {
         if (this.primitiveCollection)
             for (let i = 0; i < this.primitiveCollection.length; ++i)
                 callback(this.primitiveCollection.get(i));
@@ -93,7 +103,7 @@ export class TileVisualization
      * Check if the visualization is high-detail, and the
      * underlying data is not empty.
      */
-    isHighDetailAndNotEmpty() {
+    private isHighDetailAndNotEmpty() {
         return this.isHighDetail && (this.tile.numFeatures > 0 || this.tile.preventCulling);
     }
 
@@ -101,8 +111,10 @@ export class TileVisualization
      * Check if this visualization needs re-rendering, based on
      * whether the isHighDetail flag changed.
      */
-    isDirty() {
+    private isDirty() {
         return (
-            (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) || (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization));
+            (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
+            (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization)
+        );
     }
 }

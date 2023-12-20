@@ -1,0 +1,292 @@
+@import "primeicons/primeicons.css";
+
+body {
+    overflow: hidden;
+    height: 100% !important;
+    width: 100% !important;
+    position: absolute;
+}
+
+.mapviewer-renderlayer {
+    width: 100%;
+    height: 100%;
+    position: fixed;
+    left: 0;
+    top: 0;
+    overflow: hidden;
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select:none;
+    -o-user-select:none;
+}
+
+#mapViewContainer .cesium-widget-credits {
+    display:none !important;
+}
+
+/* Shared styles for both panels */
+.panel {
+    color: white;
+    font-size: large;
+    background-color: rgba(91, 91, 91, 0.7);
+    font-family: monospace;
+    position: absolute;
+    top: 10px;
+    border-radius: 10px;
+    overflow: hidden;
+    height: 22px;
+    padding: 1em;
+    width: calc(50% - 65px);
+}
+
+.panel.expanded {
+    max-height: calc(100vh - 60px);
+    height: auto;
+}
+
+@media (max-width: 768px) {
+    .panel {
+        width: calc(100% - 70px);
+        position: relative;
+        left: auto !important;
+        right: auto !important;
+        top: auto;
+        margin: 10px;
+    }
+
+    .panel.expanded {
+        max-height: calc(100vh - 120px);
+    }
+}
+
+/* Specific styles for the info block */
+
+#info {
+    position: absolute;
+    right: 38px;
+    bottom: 0;
+    justify-content: center;
+    display: flex;
+    font-size: smaller;
+    background-color: rgba(#fff, 0.25);
+    color: black;
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+    line-height: 1.5rem;
+    padding-bottom: 0.25rem;
+}
+
+.p-speeddial-direction-up {
+    &.speeddial-left {
+        left: 0.5rem;
+        bottom: 5rem;
+    }
+
+    .p-speeddial-button {
+        width: 3rem;
+        height: 3rem;
+    }
+}
+
+.help-button {
+    width: 3rem;
+    height: 3rem;
+    left: 0.5rem;
+    bottom: 1.5rem;
+    position: absolute;
+
+    .p-button {
+        border-radius: 50%;
+        padding: 0.8rem 0;
+    }
+}
+
+.layers-button {
+    position: absolute;
+    top: 1rem;
+    left: 0.5rem;
+    width: 3rem;
+    height: 3rem;
+}
+
+.card {
+    background-color: rgba(#fff, 1.0);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+
+    .p-tree {
+        border: none;
+    }
+}
+
+.p-tooltip {
+    max-width: none;
+}
+
+.inspect-panel {
+    position: absolute;
+    top: 1rem;
+    right: 1.5rem;
+    min-width: 30rem;
+
+    .p-accordion-header .p-accordion-header-link {
+        padding: 0.8rem;
+    }
+
+    .p-accordion-content {
+        padding: 0;
+    }
+
+    .resizable-container {
+        width: 30rem;
+        min-width: 30rem;
+        height: 20rem;
+        min-height: 12rem;
+        resize: both;
+        overflow: auto;
+        direction: rtl;
+        max-width: calc(100vw - 6rem);
+        max-height: calc(100vh - 6rem);
+
+        .p-tree {
+            border: none;
+            padding: 0;
+            direction: ltr;
+        }
+
+        .filter-container {
+            width: 100%;
+        }
+
+        .filter-input {
+            height: 2rem;
+            width: 100%;
+            padding-left: 2rem;
+            border-radius: 6px;
+            border: solid 1px lightgray;
+            direction: ltr;
+        }
+
+        .p-treetable-header {
+            padding: 0.5rem;
+            direction: ltr;
+        }
+
+        table {
+            direction: ltr;
+            font-size: smaller;
+
+            td {
+                padding: 0;
+            }
+
+            .p-treetable-toggler {
+                margin: 0;
+                width: 1.25rem;
+                height: 1.25rem;
+            }
+        }
+    }
+}
+
+.search-input {
+    width: 20%;
+    height: 3rem;
+    position: absolute;
+    top: 1rem;
+    left: 40%;
+
+    input {
+        width: 100%;
+        height: 100%;
+        padding-left: 2rem;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+    }
+}
+
+.p-overlaypanel-content {
+    & > div:first-child {
+        .p-divider {
+            display: none;
+        }
+    }
+
+    .search-option {
+        text-align: left;
+        font-size: medium;
+        margin: 0;
+        background: none;
+        border: none;
+        cursor: pointer;
+
+        span {
+            font-weight: bold;
+        }
+    }
+}
+
+.map-layer-dialog {
+    .p-dialog-header {
+        padding: 1.5rem 1.5rem 0 1.5rem;
+    }
+
+    .p-dialog-content {
+        padding: 0.5rem;
+    }
+
+    .tabs-container {
+        overflow: auto;
+        max-height: 72vh;
+    }
+}
+
+.map-tab {
+    .p-fieldset {
+        margin-top: 5px;
+
+        .p-fieldset-legend {
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            color: #343a40;
+            background: #f8f9fa;
+            font-weight: 700;
+            border-radius: 6px;
+            font-size: small;
+        }
+
+        .p-fieldset-content {
+            padding: 0;
+        }
+    }
+
+    .layer-tab {
+        .p-accordion-tab {
+            margin-bottom: 4px;
+        }
+
+        .p-accordion-header-link {
+            padding: 0.8rem;
+            font-size: small;
+        }
+
+        .p-accordion-content {
+            padding: 0;
+
+            button {
+                width: 2.5rem;
+                height: 2.5rem;
+            }
+
+            .p-inputnumber-buttons-horizontal .p-inputnumber-input {
+                order: 2;
+                border-radius: 0;
+                width: 5rem;
+                text-align: center;
+                height: 2.5rem;
+            }
+        }
+    }
+}
+

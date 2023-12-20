@@ -1,8 +1,0 @@
-name: DemoStyle
-version: 1.0
-rules:
-  - geometry: ["line", "mesh", "polygon", "point"]
-    color: red
-    opacity: 1.0
-    width: 2.0
-    flat: false
