@@ -1,4 +1,4 @@
-import {Component, OnInit} from '@angular/core';
+import {Component, OnInit, QueryList, ViewChildren} from '@angular/core';
 import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
@@ -6,6 +6,7 @@ import {HttpClient} from "@angular/common/http";
 import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
 import {MenuItem, MessageService, TreeNode, TreeTableNode} from "primeng/api";
 import {Cartesian3} from "cesium";
+import {Accordion, AccordionTab} from "primeng/accordion";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -54,16 +55,16 @@ interface ErdblickLayer {
         <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '25rem', 'min-width': '25rem', margin: '0' }">
             <div class="tabs-container">
             <p-fieldset class="map-tab" *ngFor="let mapItem of mapItems | keyvalue" [legend]="mapItem.key">
-                <p-accordion [multiple]="true" [activeIndex]="[0]">
-                    <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers" >
+                <p-accordion [multiple]="true" #accordions>
+                    <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers">
                         <ng-template pTemplate="header">
                             <span class="flex align-items-center gap-2 w-full">
                                 <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
                             </span>
                         </ng-template>
                         <div class="flex-container" style="padding: 0.5rem 1.25rem;">
-                            <p-button (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" label=""
-                                      [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
+                            <p-button *ngIf="mapLayer.coverage" (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" 
+                                      label="" [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
                             </p-button>
                             <p-inputNumber [(ngModel)]="mapLayer.level" (ngModelChange)="onLayerLevelChanged($event, mapLayer.name)"
                                            [style]="{'width': '2rem'}" [showButtons]="true"
@@ -187,6 +188,8 @@ export class AppComponent implements OnInit {
         autoHide: false
     };
 
+    @ViewChildren('accordions') accordions!: QueryList<Accordion>;
+
     constructor(private httpClient: HttpClient,
                 private messageService: MessageService) {
         httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
@@ -265,6 +268,7 @@ export class AppComponent implements OnInit {
     layerDialogVisible: boolean = false;
     showLayerDialog() {
         this.layerDialogVisible = true;
+        this.expandAccordions();
     }
 
     ngOnInit(): void {
@@ -624,5 +628,15 @@ export class AppComponent implements OnInit {
 
     openHelp() {
         window.open("https://developer.nds.live/tools/mapviewer-user-guide", "_blank");
+    }
+
+    expandAccordions() {
+        if (this.accordions) {
+            this.accordions.forEach(accordion => {
+                accordion.tabs.forEach((tab: AccordionTab) => {
+                    tab.selected = true;
+                });
+            });
+        }
     }
 }
