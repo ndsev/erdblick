@@ -2,7 +2,7 @@
 
 `erdblick` is a dynamic mapviewer built on the `mapget` feature service.
 
-> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase. Our goal is to launch a fully functional Desktop app by the end of 2023. Stay tuned! 🚀
+> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase.
 
 **Capabilities:** 🛠️
 
@@ -14,6 +14,8 @@
 * 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter **(Planned)**.
 * 🔎 View multiple map layer tile zoom levels all at once **(Planned)**.
 
+![mapget ui](./docs/erdblick.png)
+
 ## Setup
 
 Ready to try out the latest version? 
@@ -24,25 +26,6 @@ Not sure how to do that? Start off with a simple `pip install mapget` and then f
 ```bash
 mapget serve -w <path-to-unpacked-erdblick>
 ```
-
-If you would like to build erdblick from its source code, you would need to install the required dependencies 
-and run the following commands prior to starting up a mapget server:
-```bash
-cd <path-to-unpacked-erdblick>
-npm install
-ng build
-```
-
-#### Required dependencies
-
-To sucessfully build from the source code, the following dependencies are prerequisite:
-
-| Dependency | Version |
-|------------|---------|
-| Node.js    | 21.3.0+ |
-| npm        | 10.2.4+ |
-
-![mapget alpha ui](./docs/erdblick-alpha.png)
 
 ## Styling System
 
@@ -120,6 +103,14 @@ rules:
 <details>
 <summary>Show instructions</summary>
 
+Make sure that these prerequisite dependencies are installed:
+
+| Dependency | Version |
+|------------|---------|
+| `node`     | 21.3.0+ |
+| `npm`      | 10.2.4+ |
+| `cmake`    | 3.24+ |
+
 Run the setup script once to pull Emscripten SDK:
 
 ```bash
@@ -137,6 +128,8 @@ To rebuild the project (skipping checkouts and CMake initialization), run:
 ```bash
 ./ci/20_linux_rebuild.bash
 ```
+
+You will find the resulting built web app under the directory `./static`.
 
 You can also build the `erdblick-core` library with a standard C++ compiler
 in an IDE of your choice. This is also useful to run the unit-tests.
