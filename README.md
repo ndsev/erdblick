@@ -27,23 +27,6 @@ Not sure how to do that? Start off with a simple `pip install mapget` and then f
 mapget serve -w <path-to-unpacked-erdblick>
 ```
 
-If you would like to build erdblick from its source code, you would need to install the required dependencies 
-and run the following commands prior to starting up a mapget server:
-```bash
-cd <path-to-cloned-repo>
-npm install
-ng build
-```
-
-#### Required dependencies
-
-To sucessfully build from the source code, the following dependencies are prerequisite:
-
-| Dependency | Version |
-|------------|---------|
-| Node.js    | 21.3.0+ |
-| npm        | 10.2.4+ |
-
 ## Styling System
 
 Erdblick styles are defined as *YAML*-files, which must have a `rules` key that contains an array of
@@ -119,6 +102,14 @@ rules:
 
 <details>
 <summary>Show instructions</summary>
+
+Make sure that these prerequisite dependencies are installed:
+
+| Dependency | Version |
+|------------|---------|
+| `node`     | 21.3.0+ |
+| `npm`      | 10.2.4+ |
+| `cmake`    | 3.24+ |
 
 Run the setup script once to pull Emscripten SDK:
 
