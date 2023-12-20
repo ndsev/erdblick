@@ -28,7 +28,7 @@ mapget serve -w <path-to-unpacked-erdblick>
 If you would like to build erdblick from its source code, you would need to install the required dependencies 
 and run the following commands prior to starting up a mapget server:
 ```bash
-cd <path-to-unpacked-erdblick>
+cd <path-to-cloned-repo>
 npm install
 ng build
 ```
