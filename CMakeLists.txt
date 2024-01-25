@@ -37,10 +37,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cesiumnative)
 
 if (NOT TARGET mapget)
-  FetchContent_Declare(mapget
-    GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "main"
-    GIT_SHALLOW    ON)
+  if (MAPGET_DIR)
+    FetchContent_Declare(mapget
+      SOURCE_DIR "${MAPGET_DIR}"
+      PATCH_COMMAND conan install "${MAPGET_DIR}" -of "${CMAKE_BINARY_DIR}" --build=missing)
+  else()
+    FetchContent_Declare(mapget
+      GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+      GIT_TAG        "main"
+      GIT_SHALLOW    ON
+      PATCH_COMMAND conan install "${MAPGET_DIR}" -of "${CMAKE_BINARY_DIR}" --build=missing)
+  endif()
   FetchContent_MakeAvailable(mapget)
 endif()
 
