@@ -20,10 +20,15 @@ import {ToastModule} from "primeng/toast";
 import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
+import {InfoMessageService} from "./info.service";
+import {MenuComponent} from "./menu.component";
+import {JumpTargetService} from "./jump.service";
+import {MapService} from "./map.service";
 
 @NgModule({
     declarations: [
-        AppComponent
+        AppComponent,
+        MenuComponent
     ],
     imports: [
         BrowserModule,
@@ -46,7 +51,10 @@ import {FieldsetModule} from "primeng/fieldset";
         FieldsetModule
     ],
     providers: [
-        MessageService
+        MapService,
+        MessageService,
+        InfoMessageService,
+        JumpTargetService
     ],
     bootstrap: [AppComponent]
 })

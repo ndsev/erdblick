@@ -7,6 +7,9 @@ import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
 import {MenuItem, MessageService, TreeNode, TreeTableNode} from "primeng/api";
 import {Cartesian3} from "cesium";
 import {Accordion, AccordionTab} from "primeng/accordion";
+import {InfoMessageService} from "./info.service";
+import {JumpTargetService} from "./jump.service";
+import {MapService} from "./map.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -83,14 +86,11 @@ interface ErdblickLayer {
                   class="layers-button"></p-button>
         <p-toast position="bottom-center" key="tc"></p-toast>
         <p-overlayPanel #searchoverlay>
-            <div *ngFor="let item of searchItems">
-                <p-divider></p-divider>
-                <p (click)="item.fun()" class="search-option"><span>{{item.name}}</span><br>{{item.label}}</p>
-            </div>
+            <search-menu-items></search-menu-items>
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"/>
+            <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)" (ngModelChange)="setSubjectValue(searchValue)"/>
         </span>
         <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>
         <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help" tooltipPosition="right"></p-button>
@@ -166,22 +166,17 @@ export class AppComponent implements OnInit {
     featureTree: TreeNode[] = [];
     title: string = 'erdblick';
     version: string = "v0.3.0";
-    mapModel: ErdblickModel | undefined;
-    mapView: ErdblickView | undefined;
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     selectedFeatureGeoJsonText: string = "";
     selectedFeatureIdText: string = "";
     isInspectionPanelVisible: boolean = false;
     layers: Array<[string, string, any]> = new Array<[string, string, any]>();
-    coreLib: any
     searchValue: string = ""
 
     leftTooltipItems: MenuItem[] | null = null;
     mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
     cols: Column[] = [];
-
-    searchItems: Array<any> = [];
 
     tooltipOptions = {
         showDelay: 1500,
@@ -191,7 +186,9 @@ export class AppComponent implements OnInit {
     @ViewChildren('accordions') accordions!: QueryList<Accordion>;
 
     constructor(private httpClient: HttpClient,
-                private messageService: MessageService) {
+                private mapService: MapService,
+                private messageService: InfoMessageService,
+                private jumpToTargetService: JumpTargetService) {
         httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
@@ -199,22 +196,22 @@ export class AppComponent implements OnInit {
 
         libErdblickCore().then((coreLib: any) => {
             console.log("  ...done.")
-            this.coreLib = coreLib;
+            this.mapService.coreLib = coreLib;
 
-            this.mapModel = new ErdblickModel(coreLib);
-            this.mapView = new ErdblickView(this.mapModel, 'mapViewContainer');
+            this.mapService.mapModel = new ErdblickModel(coreLib);
+            this.mapService.mapView = new ErdblickView(this.mapService.mapModel, 'mapViewContainer');
 
             this.reloadStyle();
 
-            this.tilesToLoadInput = this.mapModel.maxLoadTiles;
-            this.tilesToVisualizeInput = this.mapModel.maxVisuTiles;
+            this.tilesToLoadInput = this.mapService.mapModel.maxLoadTiles;
+            this.tilesToVisualizeInput = this.mapService.mapModel.maxVisuTiles;
 
             this.applyTileLimits();
 
             // Add debug API that can be easily called from browser's debug console
-            window.ebDebug = new ErdblickDebugApi(this.mapView);
+            window.ebDebug = new ErdblickDebugApi(this.mapService.mapView);
 
-            this.mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
+            this.mapService.mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
                 if (!selectedFeatureWrapper) {
                     this.isInspectionPanelVisible = false;
                     return;
@@ -228,7 +225,7 @@ export class AppComponent implements OnInit {
                 })
             })
 
-            this.mapModel.mapInfoTopic.subscribe((mapInfo: Object) => {
+            this.mapService.mapModel.mapInfoTopic.subscribe((mapInfo: Object) => {
                 this.mapItems = new Map<string, ErdblickMap>();
                 Object.entries(mapInfo).forEach(([mapName, mapInfoItem]) => {
                     let mapLayers: Array<ErdblickLayer> = new Array<ErdblickLayer>();
@@ -245,7 +242,7 @@ export class AppComponent implements OnInit {
                                 level: 13
                             }
                         );
-                        this.mapModel?.layerIdToLevel.set(mapName + '/' + layerName, 13);
+                        this.mapService.mapModel?.layerIdToLevel.set(mapName + '/' + layerName, 13);
                     })
                     this.mapItems.set(
                         mapName,
@@ -299,34 +296,6 @@ export class AppComponent implements OnInit {
             { field: 'k', header: 'Key' },
             { field: 'v', header: 'Value' }
         ];
-
-        this.searchItems = [
-            {
-                name: "Tile ID",
-                label: "Jump to Tile by its Mapget ID",
-                fun: () => { this.jumpToWGS84Tile() }
-            },
-            {
-                name: "WGS84 Lat-Lon Coordinates",
-                label: "Jump to WGS84 Coordinates",
-                fun: () => { this.jumpToWGS84() }
-            },
-            {
-                name: "WGS84 Lon-Lat Coordinates",
-                label: "Jump to WGS84 Coordinates",
-                fun: () => { this.jumpToWGS84(true) }
-            },
-            {
-                name: "Open Lat-Lon in Google Maps",
-                label: "Open Location in External Map Service",
-                fun: () => { this.openInGM() }
-            },
-            {
-                name: "Open Lat-Lon in Open Street Maps",
-                label: "Open Location in External Map Service",
-                fun: () => { this.openInOSM() }
-            }
-        ]
     }
 
     applyTileLimits() {
@@ -338,10 +307,10 @@ export class AppComponent implements OnInit {
             return;
         }
 
-        if (this.mapModel !== undefined) {
-            this.mapModel.maxLoadTiles = tilesToLoad;
-            this.mapModel.maxVisuTiles = tilesToVisualize;
-            this.mapModel.update();
+        if (this.mapService.mapModel !== undefined) {
+            this.mapService.mapModel.maxLoadTiles = tilesToLoad;
+            this.mapService.mapModel.maxVisuTiles = tilesToVisualize;
+            this.mapService.mapModel.update();
         }
 
         console.log(`Max tiles to load set to ${tilesToLoad}`);
@@ -349,7 +318,7 @@ export class AppComponent implements OnInit {
     }
 
     reloadStyle() {
-        if (this.mapModel !== undefined) this.mapModel.reloadStyle();
+        if (this.mapService.mapModel !== undefined) this.mapService.mapModel.reloadStyle();
     }
 
     tilesInputOnClick(event: Event) {
@@ -359,18 +328,18 @@ export class AppComponent implements OnInit {
 
     focus(tileId: BigInt, event: any) {
         event.stopPropagation();
-        if (this.mapModel !== undefined && this.coreLib !== undefined) {
-            this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(tileId));
+        if (this.mapService.mapModel !== undefined && this.mapService.coreLib !== undefined) {
+            this.mapService.mapModel.zoomToWgs84PositionTopic.next(this.mapService.coreLib.getTilePosition(tileId));
         }
     }
 
     onLayerLevelChanged(event: Event, layerName: string) {
         let level = Number(event.toString());
-        if (this.mapModel !== undefined) {
-            this.mapModel.layerIdToLevel.set(layerName, level);
-            this.mapModel.update();
+        if (this.mapService.mapModel !== undefined) {
+            this.mapService.mapModel.layerIdToLevel.set(layerName, level);
+            this.mapService.mapModel.update();
         } else {
-            this.showError("Cannot access the map model. The model is not available.");
+            this.messageService.showError("Cannot access the map model. The model is not available.");
         }
     }
 
@@ -452,176 +421,13 @@ export class AppComponent implements OnInit {
         this.featureTree = this.getFeatureTreeData();
     }
 
-    jumpToWGS84Tile() {
-        if (!this.searchValue) {
-            this.showError("No value provided!");
-            return;
-        }
-        if (this.mapModel !== undefined) {
-            try {
-                let wgs84TileId = BigInt(this.searchValue);
-                this.mapModel.zoomToWgs84PositionTopic.next(this.coreLib.getTilePosition(wgs84TileId));
-            } catch (e) {
-                this.showError("Possibly malformed TileId: " + (e as Error).message.toString());
-            }
-        } else {
-            this.showError("Cannot access the map model. The model is not available.");
-        }
-    }
-
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean)
-    {
-        let lon = 0;
-        let lat = 0;
-        let level = 0;
-        let isMatched = false;
-        coordinateString = coordinateString.trim();
-
-        // WGS (decimal)
-        let exp = /^[^\d-]*(-?\d+(?:\.\d*)?)[^\d-]+(-?\d+(?:\.\d*)?)[^\d\.]*(\d+)?[^\d]*$/g;
-        let matches = [...coordinateString.matchAll(exp)];
-        if (matches.length > 0) {
-            let matchResults = matches[0];
-            if (matchResults.length >= 3) {
-                if (isLonLat) {
-                    lon = Number(matchResults[1]);
-                    lat = Number(matchResults[2]);
-                } else {
-                    lon = Number(matchResults[2]);
-                    lat = Number(matchResults[1]);
-                }
-
-                if (matchResults.length >= 4 && matchResults[3] !== undefined) {
-                    // Zoom level provided.
-                    level = Math.max(1, Math.min(Number(matchResults[3].toString()), 14));
-                }
-                isMatched = true;
-            }
-        }
-
-        // WGS (degree)
-        if (isLonLat) {
-            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g;
-        } else {
-            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
-        }
-        matches = [...coordinateString.matchAll(exp)];
-        if (!isMatched && matches.length > 0) {
-            let matchResults = matches[0];
-            if (matchResults.length >= 9) {
-                let degreeLon = isLonLat ? Number(matchResults[1]) : Number(matchResults[5]);
-                let minutesLon = isLonLat ? Number(matchResults[2]) : Number(matchResults[6]);
-                let secondsLon = isLonLat ? Number(matchResults[3]) : Number(matchResults[7]);
-                let degreeLat = isLonLat ? Number(matchResults[5]) : Number(matchResults[1]);
-                let minutesLat = isLonLat ? Number(matchResults[6]) : Number(matchResults[2]);
-                let secondsLat = isLonLat ? Number(matchResults[7]) : Number(matchResults[3]);
-
-                lat = degreeLat + (minutesLat * 60.0 + secondsLat) / 3600.0;
-                if (matchResults[4][0] == 'S') {
-                    lat = -lat;
-                }
-
-                lon = degreeLon + (minutesLon * 60.0 + secondsLon) / 3600.0;
-                if (matchResults[8][0] == 'W') {
-                    lon = -lon;
-                }
-
-                if (matchResults.length >= 10 && matchResults[9] !== undefined) {
-                    // Zoom level provided.
-                    level = Math.max(1, Math.min(Number(matchResults[9].toString()), 14));
-                }
-
-                isMatched = true;
-            }
-        }
-
-        if (isMatched) {
-            return [lat, lon, level];
-        }
-        this.showError("Could not parse coordinates from the input.");
-        return undefined;
-    }
-
-    jumpToWGS84(isLonLat: boolean = false) {
-        if (!this.searchValue) {
-            this.showError("No value provided!");
-            return;
-        }
-        let result = this.parseWgs84Coordinates(this.searchValue, isLonLat);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
-            let position = Cartesian3.fromDegrees(lon, lat, 15000);
-            let orientation = this.collectCameraInfo();
-            if (orientation) {
-                if (this.mapView !== undefined) {
-                    this.mapView.viewer.camera.setView({
-                        destination: position,
-                        orientation: orientation
-                    });
-                } else {
-                    this.showError("Cannot set camera information. The view is not available.");
-                }
-            }
-        }
-    }
-
-    openInGM() {
-        if (!this.searchValue) {
-            this.showError("No value provided!");
-            return;
-        }
-        let result = this.parseWgs84Coordinates(this.searchValue, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
-            window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
-        }
-    }
-
-    openInOSM() {
-        if (!this.searchValue) {
-            this.showError("No value provided!");
-            return;
-        }
-        let result = this.parseWgs84Coordinates(this.searchValue, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
-            window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
-        }
-    }
-
-    showError(content: string) {
-        this.messageService.add({ key: 'tc', severity: 'error', summary: 'Error', detail: content });
-        return;
-    }
-
-    showSuccess(content: string) {
-        this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: content });
-        return;
-    }
-
-    collectCameraInfo() {
-        if (this.mapView !== undefined) {
-            return {
-                heading: this.mapView.viewer.camera.heading,
-                pitch: this.mapView.viewer.camera.pitch,
-                roll: this.mapView.viewer.camera.roll
-            };
-        } else {
-            this.showError("Cannot get camera information. The view is not available.");
-        }
-        return null;
-    }
-
     copyGeoJsonToClipboard() {
         navigator.clipboard.writeText(this.selectedFeatureGeoJsonText).then(
             () => {
-                this.showSuccess("Copied GeoJSON content to clipboard!");
+                this.messageService.showSuccess("Copied GeoJSON content to clipboard!");
             },
             () => {
-                this.showError("Could not copy GeoJSON content to clipboard.");
+                this.messageService.showError("Could not copy GeoJSON content to clipboard.");
             },
         );
     }
@@ -638,5 +444,9 @@ export class AppComponent implements OnInit {
                 });
             });
         }
+    }
+
+    setSubjectValue(value: string) {
+        this.jumpToTargetService.targetValueSubject.next(value);
     }
 }

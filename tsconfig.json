@@ -4,6 +4,7 @@
     "compilerOptions": {
         "baseUrl": "./",
         "outDir": "./static/out-tsc",
+        "allowJs": true,
         "forceConsistentCasingInFileNames": true,
         "strict": true,
         "strictNullChecks": true,
