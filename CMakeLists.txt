@@ -51,6 +51,12 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 add_subdirectory(libs/core)
 
-if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+  add_custom_target(erdblick-ui ALL
+      COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      DEPENDS erdblick-core
+  )
+else()
   add_subdirectory(test)
 endif()
