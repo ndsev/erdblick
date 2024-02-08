@@ -24,11 +24,16 @@ import {InfoMessageService} from "./info.service";
 import {MenuComponent} from "./menu.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
+import {InputSwitchModule} from "primeng/inputswitch";
+import {SliderModule} from "primeng/slider";
+import {StyleService} from "./style.service";
+import {MapPanelComponent} from "./map.panel.component";
 
 @NgModule({
     declarations: [
         AppComponent,
-        MenuComponent
+        MenuComponent,
+        MapPanelComponent
     ],
     imports: [
         BrowserModule,
@@ -48,13 +53,16 @@ import {MapService} from "./map.service";
         TreeTableModule,
         ToastModule,
         InputNumberModule,
-        FieldsetModule
+        FieldsetModule,
+        InputSwitchModule,
+        SliderModule
     ],
     providers: [
         MapService,
         MessageService,
         InfoMessageService,
-        JumpTargetService
+        JumpTargetService,
+        StyleService
     ],
     bootstrap: [AppComponent]
 })

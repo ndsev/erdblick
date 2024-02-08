@@ -52,6 +52,11 @@
                             },
                             {
                                 "glob": "**/*",
+                                "input": "config/styles",
+                                "output": "/bundle/styles"
+                            },
+                            {
+                                "glob": "**/*",
                                 "input": "images",
                                 "output": "/bundle/images"
                             },

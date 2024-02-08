@@ -5,8 +5,9 @@ import {FeatureTile} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {Subject} from "rxjs";
+import {StyleService} from "./style.service";
+import {ErdblickLayer, ErdblickMap} from "./map.service";
 
-const styleUrl = "/bundle/styles/default-style.yaml";
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
@@ -54,8 +55,11 @@ export class ErdblickModel {
     mapInfoTopic: Subject<any>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
     layerIdToLevel: Map<string, number> = new Map<string, number>();
+    availableMapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
 
-    constructor(coreLibrary: any) {
+    private textEncoder: TextEncoder = new TextEncoder();
+
+    constructor(coreLibrary: any, private styleService: StyleService) {
         this.coreLib = coreLibrary;
         this.style = null;
         this.maps = null;
@@ -158,24 +162,30 @@ export class ErdblickModel {
 
     reloadStyle() {
         // Delete the old style if present.
-        if (this.style)
+        if (this.style) {
             this.style.delete();
+        }
 
-        // FetchComponent the new one.
-        new Fetch(styleUrl).withBufferCallback((styleYamlBuffer: any) => {
-            // Parse the style description into a WASM style object.
-            uint8ArrayToWasm(this.coreLib, (wasmBuffer: any) => {
+        let styleString = this.styleService.getUnifiedStyleData();
+        if (!styleString) {
+            return;
+        }
+        const styleUint8Array = this.textEncoder.encode(styleString);
+
+        // Parse the style description into a WASM style object.
+        uint8ArrayToWasm(this.coreLib,
+            (wasmBuffer: any) => {
                 this.style = new this.coreLib.FeatureLayerStyle(wasmBuffer);
-            }, styleYamlBuffer)
+            },
+            styleUint8Array);
 
-            // Re-render all present batches with the new style.
-            this.tileVisualizationQueue = [];
-            this.visualizedTileLayers.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
-            for (let [tileLayerId, tileLayer] of this.loadedTileLayers.entries()) {
-                this.renderTileLayer(tileLayer, null);
-            }
-            console.log("Loaded style.");
-        }).go();
+        // Re-render all present batches with the new style.
+        this.tileVisualizationQueue = [];
+        this.visualizedTileLayers.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
+        for (let [tileLayerId, tileLayer] of this.loadedTileLayers.entries()) {
+            this.renderTileLayer(tileLayer, null);
+        }
+        console.log("Loaded style.");
     }
 
     private reloadDataSources() {
@@ -239,30 +249,33 @@ export class ErdblickModel {
         this.loadedTileLayers = newTileLayers;
 
         // Request non-present required tile layers.
-        //  TODO: Consider tile TTL.
-        let requests = []
+        // TODO: Consider tile TTL.
+        let requests = [];
         if (this.maps) {
             for (let [mapName, map] of Object.entries(this.maps)) {
                 for (let [layerName, layer] of Object.entries(map.layers)) {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
-                    let level = this.layerIdToLevel.get(mapName + '/' + layerName);
-                    if (level !== undefined) {
-                        let tileIds = tileIdPerLevel.get(level);
-                        if (tileIds !== undefined) {
-                            for (let tileId of tileIds) {
-                                const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
-                                if (!this.loadedTileLayers.has(tileMapLayerKey))
-                                    requestTilesForMapLayer.push(Number(tileId));
-                            }
+                    const mapItem = this.availableMapItems.get(mapName);
+                    if (mapItem !== undefined && mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible)) {
+                        let level = this.layerIdToLevel.get(mapName + '/' + layerName);
+                        if (level !== undefined) {
+                            let tileIds = tileIdPerLevel.get(level);
+                            if (tileIds !== undefined) {
+                                for (let tileId of tileIds) {
+                                    const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
+                                    if (!this.loadedTileLayers.has(tileMapLayerKey))
+                                        requestTilesForMapLayer.push(Number(tileId));
+                                }
 
-                            // Only add a request if there are tiles to be loaded.
-                            if (requestTilesForMapLayer)
-                                requests.push({
-                                    mapId: mapName,
-                                    layerId: layerName,
-                                    tileIds: requestTilesForMapLayer
-                                });
+                                // Only add a request if there are tiles to be loaded.
+                                if (requestTilesForMapLayer)
+                                    requests.push({
+                                        mapId: mapName,
+                                        layerId: layerName,
+                                        tileIds: requestTilesForMapLayer
+                                    });
+                            }
                         }
                     }
                 }

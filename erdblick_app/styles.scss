@@ -2,9 +2,8 @@
 
 body {
     overflow: hidden;
-    height: 100% !important;
-    width: 100% !important;
-    position: absolute;
+    height: 100vh !important;
+    width: 100vw !important;
 }
 
 .mapviewer-renderlayer {
@@ -60,60 +59,76 @@ body {
     }
 }
 
-/* Specific styles for the info block */
-
 #info {
     position: absolute;
-    right: 38px;
+    right: 0;
     bottom: 0;
     justify-content: center;
     display: flex;
     font-size: smaller;
     background-color: rgba(#fff, 0.25);
     color: black;
-    padding-right: 0.5rem;
-    padding-left: 0.5rem;
-    line-height: 1.5rem;
-    padding-bottom: 0.25rem;
+    padding-right: 0.5em;
+    padding-left: 0.5em;
+    line-height: 1.5em;
+    padding-bottom: 0.25em;
+    border-radius: 5px 0 0 0;
 }
 
 .p-speeddial-direction-up {
     &.speeddial-left {
-        left: 0.5rem;
-        bottom: 5rem;
+        left: 0.5em;
+        bottom: 5em;
     }
 
     .p-speeddial-button {
-        width: 3rem;
-        height: 3rem;
+        width: 3em;
+        height: 3em;
     }
 }
 
 .help-button {
-    width: 3rem;
-    height: 3rem;
-    left: 0.5rem;
-    bottom: 1.5rem;
-    position: absolute;
+    width: 3em;
+    height: 3em;
+    //left: 0.5em;
+    //bottom: 1em;
+    //position: absolute;
+    margin-left: 0.5em;
+    margin-bottom: 0.5em;
 
     .p-button {
         border-radius: 50%;
-        padding: 0.8rem 0;
+        padding: 0.8em 0;
+    }
+}
+
+.pref-button {
+    width: 3em;
+    height: 3em;
+    //left: 4em;
+    //bottom: 1em;
+    //position: absolute;
+    margin-left: 0.5em;
+    margin-bottom: 0.5em;
+
+    .p-button {
+        border-radius: 50%;
+        padding: 0.8em 0;
     }
 }
 
 .layers-button {
     position: absolute;
-    top: 1rem;
-    left: 0.5rem;
-    width: 3rem;
-    height: 3rem;
+    top: 0.5em;
+    left: 0.5em;
+    width: 3em;
+    height: 3em;
 }
 
 .card {
     background-color: rgba(#fff, 1.0);
     border-radius: 10px;
-    margin-bottom: 1rem;
+    margin-bottom: 1em;
 
     .p-tree {
         border: none;
@@ -126,12 +141,12 @@ body {
 
 .inspect-panel {
     position: absolute;
-    top: 1rem;
-    right: 1.5rem;
-    min-width: 30rem;
+    top: 0.5em;
+    right: 1em;
+    min-width: 30em;
 
     .p-accordion-header .p-accordion-header-link {
-        padding: 0.8rem;
+        padding: 0.8em;
     }
 
     .p-accordion-content {
@@ -139,15 +154,19 @@ body {
     }
 
     .resizable-container {
-        width: 30rem;
-        min-width: 30rem;
-        height: 20rem;
-        min-height: 12rem;
+        width: 30em;
+        min-width: 30em;
+        height: 20em;
+        min-height: 12em;
         resize: both;
         overflow: auto;
         direction: rtl;
-        max-width: calc(100vw - 6rem);
-        max-height: calc(100vh - 6rem);
+        max-width: calc(100vw - 25.5em);
+        max-height: calc(100vh - 4.5em);
+
+        .resize-handle {
+            display: none;
+        }
 
         .p-tree {
             border: none;
@@ -160,16 +179,16 @@ body {
         }
 
         .filter-input {
-            height: 2rem;
+            height: 2.5em;
             width: 100%;
-            padding-left: 2rem;
+            padding-left: 2.5em;
             border-radius: 6px;
             border: solid 1px lightgray;
             direction: ltr;
         }
 
         .p-treetable-header {
-            padding: 0.5rem;
+            padding: 0.5em;
             direction: ltr;
         }
 
@@ -183,24 +202,24 @@ body {
 
             .p-treetable-toggler {
                 margin: 0;
-                width: 1.25rem;
-                height: 1.25rem;
+                width: 1.25em;
+                height: 1.25em;
             }
         }
     }
 }
 
 .search-input {
-    width: 20%;
-    height: 3rem;
+    width: 21.5em;
+    height: 3em;
     position: absolute;
-    top: 1rem;
-    left: 40%;
+    top: 0.5em;
+    left: 4em;
 
     input {
         width: 100%;
         height: 100%;
-        padding-left: 2rem;
+        padding-left: 2em;
         border-radius: 6px;
         border: solid 1px lightgray;
     }
@@ -228,32 +247,41 @@ body {
 }
 
 .map-layer-dialog {
+    .p-dialog {
+        width: 25em;
+        min-width: 25em;
+        margin: 0;
+        position: absolute;
+        top: 4.5em;
+        left: 1em;
+    }
+
     .p-dialog-header {
-        padding: 1.5rem 1.5rem 0 1.5rem;
+        padding: 1em 1em 0 1em;
+
+        span {
+            font-size: 1rem;
+        }
     }
 
     .p-dialog-content {
-        padding: 0.5rem;
-    }
-
-    .tabs-container {
-        overflow: auto;
-        max-height: 72vh;
+        padding: 0 0.5em 0 0.5em;
     }
 }
 
 .map-tab {
     .p-fieldset {
-        margin-top: 5px;
+        margin-bottom: 0.5em;
+        padding-right: 0;
 
         .p-fieldset-legend {
-            padding: 0.5rem;
+            padding: 0.5em;
             border: 1px solid #dee2e6;
             color: #343a40;
             background: #f8f9fa;
             font-weight: 700;
             border-radius: 6px;
-            font-size: small;
+            font-size: 0.9em;
         }
 
         .p-fieldset-content {
@@ -261,32 +289,274 @@ body {
         }
     }
 
-    .layer-tab {
-        .p-accordion-tab {
-            margin-bottom: 4px;
+    .maps-container {
+        overflow: auto;
+        max-height: calc(100vh - 30.5em);
+        padding-right: 0.75em;
+    }
+
+    .styles-container {
+        overflow: auto;
+        max-height: 10em;
+        padding-right: 0.75em;
+    }
+
+    .map-header {
+        font-size: 0.9em;
+    }
+
+    .flex-container {
+        margin-top: 0.25em;
+        padding: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+
+        &:first-child {
+            margin-top: 0;
         }
 
-        .p-accordion-header-link {
-            padding: 0.8rem;
-            font-size: small;
+        span {
+            font-size: 0.9em;
         }
 
-        .p-accordion-content {
-            padding: 0;
+        .layer-controls {
+            display: flex;
+            gap: 0.5em;
+            width: 12em;
 
             button {
-                width: 2.5rem;
-                height: 2.5rem;
+                width: 2em;
+                height: 2em;
             }
 
             .p-inputnumber-buttons-horizontal .p-inputnumber-input {
                 order: 2;
                 border-radius: 0;
-                width: 5rem;
+                width: 3em;
                 text-align: center;
-                height: 2.5rem;
+                height: 2em;
             }
+        }
+
+        .style-controls {
+            justify-content: end;
         }
     }
 }
 
+.pref-dialog {
+    width: 25em;
+    margin: 0;
+
+    .p-button {
+        margin: 0.5em 0.5em 0.5em 0;
+    }
+}
+
+.bttn-container {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    padding-bottom: 0.5em;
+    display: flex;
+    flex-direction: row;
+}
+
+
+@media only screen and (max-width: 56em) {
+    .help-button {
+        width: 3em;
+        height: 3em;
+        //left: 0.5em;
+        //bottom: 1em;
+        //position: absolute;
+
+        .p-button {
+            border-radius: 50%;
+            padding: 0.8em 0;
+        }
+    }
+
+    .pref-button {
+        //position: absolute;
+        //left: 0.5em;
+        //bottom: 4.5em;
+        width: 3em;
+        height: 3em;
+
+        .p-button {
+            border-radius: 50%;
+            padding: 0.8em 0;
+        }
+    }
+
+    .bttn-container {
+        flex-direction: column-reverse;
+    }
+
+    .layers-button {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 3em;
+
+        .p-button {
+            border-radius: 0;
+            height: 3em;
+        }
+    }
+
+    .search-input {
+        width: calc(100vw - 3em);
+        height: 3em;
+        position: absolute;
+        top: 0;
+        left: 3em;
+
+        input {
+            width: 100%;
+            height: 100%;
+            padding-left: 2em;
+            border-radius: 0;
+            border: none;
+        }
+    }
+
+    .pref-dialog {
+        .p-dialog {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            margin: 0;
+        }
+
+        .p-button {
+            margin: 0.5em 0.5em 0.5em 0;
+        }
+    }
+
+    .map-layer-dialog {
+        .p-dialog {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            margin: 0;
+            top: 0;
+            left: 0;
+        }
+
+        .p-dialog-header {
+            padding: 1.5em 1.5em 0 1.5em;
+        }
+
+        .p-dialog-content {
+            padding: 0.5em;
+        }
+
+        .tabs-container {
+            overflow: auto;
+            max-height: 100vh;
+        }
+
+        .maps-container {
+            overflow: auto;
+            max-height: calc(100vh - 23em);
+            min-height: 10em;
+        }
+
+        .styles-container {
+            overflow: auto;
+            max-height: 10em;
+        }
+    }
+
+    //
+    //.p-overlaypanel {
+    //    width: 100vw !important;
+    //
+    //}
+
+    .p-overlaypanel:after, .p-overlaypanel:before{
+        left: unset !important;
+        right: 1.25rem !important;
+    }
+
+    .search-menu-wrapper {
+        width: calc(100vw - 2.5rem);
+        max-height: 55vh;
+        overflow: auto;
+        margin: 0;
+
+        .search-menu {
+            .search-option {
+                font-size: medium;
+            }
+        }
+    }
+
+    .inspect-panel {
+        position: absolute;
+        top: inherit;
+        left: 0;
+        bottom: 0;
+        right: inherit;
+        min-width: 100vw;
+        width: 100vw;
+        transform: rotate(180deg);
+        z-index: 1;
+
+        .resizable-container {
+            min-width: 100vw;
+            max-width: 100vw;
+            max-height: calc(100vh - 3em);
+            margin: 0;
+            resize: none;
+            overflow: auto;
+            direction: ltr;
+
+
+            .resize-handle {
+                display: block;
+                width: 100vw;
+                height: 1.5em;
+                background-color: var(--surface-b);
+                text-align: center;
+
+                i {
+                    font-size: 1em;
+                    font-weight: bolder;
+                    color: darkgrey;
+                    margin-top: 0.25em;
+                }
+            }
+        }
+
+        /* Individual accordion tab content */
+        //.p-accordion .p-accordion-content {
+            //position: absolute;
+            //bottom: 100%; /* Positions the content above the headers */
+            //width: 100%;
+            /* Add additional styling as needed */
+            //transform: rotate(180deg);
+        //}
+
+        .p-accordion .p-accordion-header,
+        .p-accordion .p-accordion-content {
+            transform: rotate(180deg);
+            border-radius: 0;
+        }
+
+        .p-accordion-header {
+            .p-accordion-toggle-icon {
+                transform: scaleY(-1);
+            }
+
+            .p-accordion-header-link {
+                border-radius: 0;
+            }
+        }
+    }
+}

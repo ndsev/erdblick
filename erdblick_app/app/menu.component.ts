@@ -8,9 +8,11 @@ import {MapService} from "./map.service";
 @Component({
     selector: 'search-menu-items',
     template: `
-        <div class="search-menu" *ngFor="let item of searchItems">
-            <p-divider></p-divider>
-            <p (click)="jumpToWGS84(item.jump(value))" class="search-option" [ngClass]="{'item-disabled': !item.enabled }"><span>{{item.name}}</span><br>{{item.label}}</p>
+        <div class="search-menu-wrapper">
+            <div class="search-menu" *ngFor="let item of searchItems">
+                <p-divider></p-divider>
+                <p (click)="jumpToWGS84(item.jump(value))" class="search-option" [ngClass]="{'item-disabled': !item.enabled }"><span>{{item.name}}</span><br>{{item.label}}</p>
+            </div>
         </div>
     `,
     styles: [`
@@ -179,7 +181,7 @@ export class MenuComponent {
             let lon = coordinates[1];
             let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
             let position = Cartesian3.fromDegrees(lon, lat, alt);
-            let orientation = this.mapService.collectCameraInfo();
+            let orientation = this.mapService.collectCameraOrientation();
             if (orientation) {
                 if (this.mapService.mapView !== undefined) {
                     this.mapService.mapView.viewer.camera.setView({

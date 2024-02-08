@@ -17,24 +17,28 @@ export class JumpTargetService {
     availableOptions = new Subject<Array<JumpTarget>>();
 
     constructor(private httpClient: HttpClient) {
-        this.targetValueSubject.subscribe(event => {
-            console.log("EVENT: ", event);
-        });
-
         httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
-                    let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
-                    if (jumpTargetsConfig !== undefined) {
-                        // Using string interpolation so webpack can trace imports from the location
-                        import(`../../config/${ jumpTargetsConfig }.js`).then(function (plugin) {
-                            return plugin.default() as Array<JumpTarget>;
-                        }).then((jumpTargets: Array<JumpTarget>) => {
-                            this.availableOptions.next(jumpTargets);
-                        }).catch((error) => {
-                            console.log(error);
-                            this.availableOptions.next([]);
-                        });
+                    try {
+                        if (data !== undefined &&
+                            data["extensionModules"] !== undefined &&
+                            data["extensionModules"]["jumpTargets"] !== undefined) {
+                            let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
+                            if (jumpTargetsConfig !== undefined) {
+                                // Using string interpolation so webpack can trace imports from the location
+                                import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
+                                    return plugin.default() as Array<JumpTarget>;
+                                }).then((jumpTargets: Array<JumpTarget>) => {
+                                    this.availableOptions.next(jumpTargets);
+                                }).catch((error) => {
+                                    console.log(error);
+                                    this.availableOptions.next([]);
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.log(e);
                     }
                 },
                 error: error => {

@@ -4,12 +4,13 @@ import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
 import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
-import {MenuItem, MessageService, TreeNode, TreeTableNode} from "primeng/api";
-import {Cartesian3} from "cesium";
-import {Accordion, AccordionTab} from "primeng/accordion";
+import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InfoMessageService} from "./info.service";
 import {JumpTargetService} from "./jump.service";
-import {MapService} from "./map.service";
+import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
+import {ActivatedRoute, Params} from "@angular/router";
+import {Cartesian3} from "cesium";
+import {StyleService} from "./style.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -39,63 +40,29 @@ interface Column {
     header: string;
 }
 
-interface ErdblickMap {
-    coverage: BigInt;
-    level: number;
-    mapLayers: Array<ErdblickLayer>;
-}
-
-interface ErdblickLayer {
-    name: string;
-    coverage: BigInt;
-    level: number;
-}
-
 @Component({
     selector: 'app-root',
     template: `
         <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-dialog class="map-layer-dialog" header="Maps Layers Selection" [(visible)]="layerDialogVisible" [position]="'topleft'" [style]="{ width: '25rem', 'min-width': '25rem', margin: '0' }">
-            <div class="tabs-container">
-            <p-fieldset class="map-tab" *ngFor="let mapItem of mapItems | keyvalue" [legend]="mapItem.key">
-                <p-accordion [multiple]="true" #accordions>
-                    <p-accordionTab class="layer-tab" *ngFor="let mapLayer of mapItem.value.mapLayers">
-                        <ng-template pTemplate="header">
-                            <span class="flex align-items-center gap-2 w-full">
-                                <span class="font-bold white-space-nowrap" class="ml-auto">{{ mapLayer.name }}</span>
-                            </span>
-                        </ng-template>
-                        <div class="flex-container" style="padding: 0.5rem 1.25rem;">
-                            <p-button *ngIf="mapLayer.coverage" (click)="focus(mapLayer.coverage, $event)" icon="pi pi-fw pi-eye" 
-                                      label="" [style]="{'margin-right': '1rem'}" pTooltip="Focus" tooltipPosition="bottom">
-                            </p-button>
-                            <p-inputNumber [(ngModel)]="mapLayer.level" (ngModelChange)="onLayerLevelChanged($event, mapLayer.name)"
-                                           [style]="{'width': '2rem'}" [showButtons]="true"
-                                           buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
-                                           decrementButtonClass="p-button-secondary" incrementButtonClass="p-button-secondary"
-                                           incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus" [min]="0" [max]="15"
-                                           pTooltip="Change zoom level" tooltipPosition="bottom">
-                            </p-inputNumber>
-                        </div>
-                    </p-accordionTab>
-                </p-accordion>
-            </p-fieldset>
-            </div>
-        </p-dialog>
-        <p-button (click)="showLayerDialog()" icon="pi pi-images" label="" pTooltip="Show map layers" tooltipPosition="right"
-                  class="layers-button"></p-button>
+        <map-panel></map-panel>
         <p-toast position="bottom-center" key="tc"></p-toast>
         <p-overlayPanel #searchoverlay>
             <search-menu-items></search-menu-items>
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)" (ngModelChange)="setSubjectValue(searchValue)"/>
+            <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"
+                   (ngModelChange)="setSubjectValue(searchValue)"/>
         </span>
-        <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>
-        <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help" tooltipPosition="right"></p-button>
-        <p-dialog header="Tile Loading Limits" [(visible)]="dialogVisible" [position]="'bottomleft'"
-                  [style]="{ width: '25em', margin: '0' }">
+        <!--        <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>-->
+        <div class="bttn-container" [ngClass]="{'elevated': isInspectionPanelVisible }">
+            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help"
+                      tooltipPosition="right"></p-button>
+            <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
+                      pTooltip="Preferences" tooltipPosition="right"></p-button>
+        </div>
+        <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
             <input type="number" pInputText [id]="tilesToLoadInput" placeholder="Enter max tiles to load" min="1"
@@ -106,8 +73,10 @@ interface ErdblickLayer {
                    [(ngModel)]="tilesToVisualizeInput"/><br>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
+            <p-button (click)="pref.close($event)" label="Cancel" icon="pi pi-times"></p-button>
         </p-dialog>
-        <p-accordion *ngIf="featureTree.length && isInspectionPanelVisible" class="w-full inspect-panel" [activeIndex]="0">
+        <p-accordion *ngIf="featureTree.length && isInspectionPanelVisible" class="w-full inspect-panel"
+                     [activeIndex]="0">
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">
@@ -115,42 +84,50 @@ interface ErdblickLayer {
                         <span class="vertical-align-middle">{{selectedFeatureIdText}}</span>
                     </div>
                 </ng-template>
-                <ng-template pTemplate="content" style="height: 90%">
-                    <div class="resizable-container">
-                    <p-treeTable #tt [value]="featureTree" [columns]="cols"
-                                 class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
-                        <ng-template pTemplate="caption">
-                            <div class="flex justify-content-end align-items-center"
-                                 style="display: flex; align-content: center; justify-content: center">
-                                <div class="p-input-icon-left filter-container">
-                                    <i class="pi pi-filter"></i>
-                                    <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                                           (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>
-                                </div>
-                                <div>
-                                    <p-button (click)="copyGeoJsonToClipboard()" icon="pi pi-fw pi-copy" label=""
-                                              [style]="{'margin-left': '0.8rem', width: '2rem', height: '2rem'}"
-                                              pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                                    </p-button>
-                                </div>
-                            </div>
-                        </ng-template>
-                        <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                            <tr [ttRow]="rowNode">
-                                <td *ngFor="let col of cols; let i = index">
-                                    <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;" [pTooltip]="rowData[col.field].toString()" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
-                                        <p-treeTableToggler [rowNode]="rowNode" *ngIf="i === 0"></p-treeTableToggler>
-                                        <span>{{ rowData[col.field] }}</span>
+                <ng-template pTemplate="content">
+                    <div class="resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }">
+                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
+                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
+                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
+                        </div>
+                        <p-treeTable #tt [value]="featureTree" [columns]="cols"
+                                     class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
+                            <ng-template pTemplate="caption">
+                                <div class="flex justify-content-end align-items-center"
+                                     style="display: flex; align-content: center; justify-content: center">
+                                    <div class="p-input-icon-left filter-container">
+                                        <i class="pi pi-filter"></i>
+                                        <input class="filter-input" type="text" pInputText
+                                               placeholder="Filter data for selected feature"
+                                               (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>
                                     </div>
-                                </td>
-                            </tr>
-                        </ng-template>
-                        <ng-template pTemplate="emptymessage">
-                            <tr>
-                                <td [attr.colspan]="cols.length">No data found.</td>
-                            </tr>
-                        </ng-template>
-                    </p-treeTable>
+                                    <div>
+                                        <p-button (click)="copyGeoJsonToClipboard()" icon="pi pi-fw pi-copy" label=""
+                                                  [style]="{'margin-left': '0.8rem', width: '2rem', height: '2rem'}"
+                                                  pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                                        </p-button>
+                                    </div>
+                                </div>
+                            </ng-template>
+                            <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
+                                <tr [ttRow]="rowNode">
+                                    <td *ngFor="let col of cols; let i = index">
+                                        <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
+                                             [pTooltip]="rowData[col.field].toString()" tooltipPosition="left"
+                                             [tooltipOptions]="tooltipOptions">
+                                            <p-treeTableToggler [rowNode]="rowNode"
+                                                                *ngIf="i === 0"></p-treeTableToggler>
+                                            <span>{{ rowData[col.field] }}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </ng-template>
+                            <ng-template pTemplate="emptymessage">
+                                <tr>
+                                    <td [attr.colspan]="cols.length">No data found.</td>
+                                </tr>
+                            </ng-template>
+                        </p-treeTable>
                     </div>
                 </ng-template>
             </p-accordionTab>
@@ -160,7 +137,18 @@ interface ErdblickLayer {
         </div>
         <router-outlet></router-outlet>
     `,
-    styles: []
+    styles: [`
+        @media only screen and (max-width: 56em) {
+            .elevated {
+                bottom: 3.5em;
+                padding-bottom: 0;
+            }
+            
+            .resizable-container-expanded {
+                height: calc(100vh - 3em);;
+            }
+        }
+    `]
 })
 export class AppComponent implements OnInit {
     featureTree: TreeNode[] = [];
@@ -175,7 +163,7 @@ export class AppComponent implements OnInit {
     searchValue: string = ""
 
     leftTooltipItems: MenuItem[] | null = null;
-    mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
+
     cols: Column[] = [];
 
     tooltipOptions = {
@@ -183,12 +171,14 @@ export class AppComponent implements OnInit {
         autoHide: false
     };
 
-    @ViewChildren('accordions') accordions!: QueryList<Accordion>;
+    isExpanded: boolean = false;
 
     constructor(private httpClient: HttpClient,
+                private activatedRoute: ActivatedRoute,
                 private mapService: MapService,
                 private messageService: InfoMessageService,
-                private jumpToTargetService: JumpTargetService) {
+                private jumpToTargetService: JumpTargetService,
+                public styleService: StyleService) {
         httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
@@ -198,10 +188,10 @@ export class AppComponent implements OnInit {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
 
-            this.mapService.mapModel = new ErdblickModel(coreLib);
+            this.mapService.mapModel = new ErdblickModel(coreLib, styleService);
             this.mapService.mapView = new ErdblickView(this.mapService.mapModel, 'mapViewContainer');
 
-            this.reloadStyle();
+            this.mapService.reloadStyle();
 
             this.tilesToLoadInput = this.mapService.mapModel.maxLoadTiles;
             this.tilesToVisualizeInput = this.mapService.mapModel.maxVisuTiles;
@@ -226,7 +216,7 @@ export class AppComponent implements OnInit {
             })
 
             this.mapService.mapModel.mapInfoTopic.subscribe((mapInfo: Object) => {
-                this.mapItems = new Map<string, ErdblickMap>();
+                this.mapService.mapModel!.availableMapItems = new Map<string, ErdblickMap>();
                 Object.entries(mapInfo).forEach(([mapName, mapInfoItem]) => {
                     let mapLayers: Array<ErdblickLayer> = new Array<ErdblickLayer>();
                     let firstCoverage = 0n;
@@ -237,61 +227,99 @@ export class AppComponent implements OnInit {
                         }
                         mapLayers.push(
                             {
-                                name: mapName + '/' + layerName,
+                                name: layerName,
                                 coverage: firstCoverage,
-                                level: 13
+                                level: 13,
+                                visible: true
                             }
                         );
-                        this.mapService.mapModel?.layerIdToLevel.set(mapName + '/' + layerName, 13);
+                        this.mapService.mapModel!.layerIdToLevel.set(mapName + '/' + layerName, 13);
                     })
-                    this.mapItems.set(
+                    this.mapService.mapModel!.availableMapItems.set(
                         mapName,
                         {
                             coverage: firstCoverage,
                             level: 13,
-                            mapLayers: mapLayers
+                            mapLayers: mapLayers,
+                            visible: true
                         }
                     );
                 });
+            });
+
+            this.activatedRoute.queryParams.subscribe((params: Params) => {
+                let currentOrientation = this.mapService.collectCameraOrientation();
+                let currentPosition = this.mapService.collectCameraPosition();
+
+                if (currentOrientation && currentPosition) {
+                    let newPosition = {
+                        x: params["x"] ? params["x"] : currentPosition.x,
+                        y: params["y"] ? params["y"] : currentPosition.y,
+                        z: params["z"] ? params["z"] : currentPosition.z
+                    }
+                    let newOrientation = {
+                        heading: params["heading"] ? params["heading"] : currentOrientation.heading,
+                        pitch: params["pitch"] ? params["pitch"] : currentOrientation.pitch,
+                        roll: params["roll"] ? params["roll"] : currentOrientation.roll
+                    }
+                    if (this.mapService.mapView !== undefined) {
+                        this.mapService.mapView.viewer.camera.setView({
+                            destination: Cartesian3.fromElements(newPosition.x, newPosition.y, newPosition.z),
+                            orientation: newOrientation
+                        });
+                    }
+                }
+
+                if (params["osm"]) {
+                    let osmOpacity = Number(params["osm"]);
+                    this.mapService.osmEnabled = !!osmOpacity;
+                    this.mapService.osmOpacityValue = osmOpacity;
+                    this.mapService.mapView?.updateOpenStreetMapLayer(osmOpacity / 100);
+                }
+
+                if (params["layers"]) {
+                    let mapLayerNamesLevels: Array<Array<string>> = JSON.parse(params["layers"]);
+                    mapLayerNamesLevels.forEach((nameLevel: Array<string>) => {
+                        if (this.mapService.mapModel !== undefined) {
+                            const name = nameLevel[0];
+                            const level = Number(nameLevel[1]);
+                            this.mapService.mapModel.layerIdToLevel.set(name, level);
+                            const [mapName, layerName] = name.split('/');
+                            this.mapService.mapModel.availableMapItems.forEach((mapItem: ErdblickMap, name: string) => {
+                                if (name == mapName) {
+                                    mapItem.visible = true;
+                                    mapItem.mapLayers.forEach((mapLayer: ErdblickLayer) => {
+                                        if (mapLayer.name == layerName) {
+                                            mapLayer.visible = true;
+                                        }
+                                    });
+                                }
+                            })
+                        }
+                    });
+                }
+
+                if (params["styles"]) {
+                    let styles: Array<Array<string>> = JSON.parse(params["styles"]);
+                    styles.forEach((style: Array<string>) => {
+                        const name = style[0];
+                        const activated = style[1] == "true";
+                        if (this.styleService.activatedStyles.has(name)) {
+                            this.styleService.activatedStyles.set(name, activated);
+                        }
+                        this.mapService.reloadStyle();
+                    });
+                }
             });
         })
     }
 
     dialogVisible: boolean = false;
-    showDialog() {
+    showPreferencesDialog() {
         this.dialogVisible = true;
     }
 
-    layerDialogVisible: boolean = false;
-    showLayerDialog() {
-        this.layerDialogVisible = true;
-        this.expandAccordions();
-    }
-
     ngOnInit(): void {
-        this.leftTooltipItems = [
-            {
-                tooltipOptions: {
-                    tooltipLabel: 'Reload Style',
-                    tooltipPosition: 'left'
-                },
-                icon: 'pi pi-replay',
-                command: () => {
-                    this.reloadStyle();
-                }
-            },
-            {
-                tooltipOptions: {
-                    tooltipLabel: 'Tile Loading Limits',
-                    tooltipPosition: 'left'
-                },
-                icon: 'pi pi-pencil',
-                command: () => {
-                    this.showDialog();
-                }
-            }
-        ];
-
         this.cols = [
             { field: 'k', header: 'Key' },
             { field: 'v', header: 'Value' }
@@ -317,30 +345,9 @@ export class AppComponent implements OnInit {
         console.log(`Max tiles to visualize set to ${tilesToVisualize}`);
     }
 
-    reloadStyle() {
-        if (this.mapService.mapModel !== undefined) this.mapService.mapModel.reloadStyle();
-    }
-
     tilesInputOnClick(event: Event) {
         // Prevent event propagation for input fields
         event.stopPropagation()
-    }
-
-    focus(tileId: BigInt, event: any) {
-        event.stopPropagation();
-        if (this.mapService.mapModel !== undefined && this.mapService.coreLib !== undefined) {
-            this.mapService.mapModel.zoomToWgs84PositionTopic.next(this.mapService.coreLib.getTilePosition(tileId));
-        }
-    }
-
-    onLayerLevelChanged(event: Event, layerName: string) {
-        let level = Number(event.toString());
-        if (this.mapService.mapModel !== undefined) {
-            this.mapService.mapModel.layerIdToLevel.set(layerName, level);
-            this.mapService.mapModel.update();
-        } else {
-            this.messageService.showError("Cannot access the map model. The model is not available.");
-        }
     }
 
     getFeatureTreeData() {
@@ -434,16 +441,6 @@ export class AppComponent implements OnInit {
 
     openHelp() {
         window.open("https://developer.nds.live/tools/the-new-mapviewer/user-guide", "_blank");
-    }
-
-    expandAccordions() {
-        if (this.accordions) {
-            this.accordions.forEach(accordion => {
-                accordion.tabs.forEach((tab: AccordionTab) => {
-                    tab.selected = true;
-                });
-            });
-        }
     }
 
     setSubjectValue(value: string) {

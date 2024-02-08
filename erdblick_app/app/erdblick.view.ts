@@ -5,17 +5,17 @@ import {FeatureWrapper} from "./features.component";
 import {TileVisualization} from "./visualization.component"
 import {BehaviorSubject} from "rxjs"
 import {
-    Viewer,
-    UrlTemplateImageryProvider,
-    ScreenSpaceEventHandler,
-    ScreenSpaceEventType,
-    Color,
-    ColorGeometryInstanceAttribute,
-    Math,
     Cartesian2,
     Cartesian3,
     Cartographic,
-    defined
+    Color,
+    ColorGeometryInstanceAttribute,
+    ImageryLayer,
+    Math,
+    ScreenSpaceEventHandler,
+    ScreenSpaceEventType,
+    UrlTemplateImageryProvider,
+    Viewer
 } from "cesium";
 
 export class ErdblickView {
@@ -28,6 +28,7 @@ export class ErdblickView {
     private mouseHandler: ScreenSpaceEventHandler;
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
+    private openStreetMapLayer: ImageryLayer;
 
     /**
      * Construct a Cesium View with a Model.
@@ -53,13 +54,8 @@ export class ErdblickView {
                 baseLayer: false
             }
         );
-
-        let openStreetMap = new UrlTemplateImageryProvider({
-            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            maximumLevel: 19,
-        });
-        let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
-        openStreetMapLayer.alpha = 0.3;
+        this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
+        this.openStreetMapLayer.alpha = 0.3;
 
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
@@ -128,6 +124,9 @@ export class ErdblickView {
         });
 
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+        // Remove fullscreen button as unnecessary
+        this.viewer.fullscreenButton.destroy();
     }
 
     /**
@@ -282,5 +281,17 @@ export class ErdblickView {
             camPosLat: centerLat,
             orientation: -this.viewer.camera.heading + Math.PI * .5,
         });
+    }
+
+    private getOpenStreetMapLayerProvider() {
+        return new UrlTemplateImageryProvider({
+            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            maximumLevel: 19,
+        });
+    }
+
+    updateOpenStreetMapLayer(opacity: number) {
+        this.openStreetMapLayer.alpha = opacity;
+        this.viewer.scene.requestRender();
     }
 }
