@@ -7,18 +7,18 @@ import {StyleService} from "./style.service";
 @Component({
     selector: 'map-panel',
     template: `
-        <p-dialog class="map-layer-dialog" header="Maps Layers" [(visible)]="layerDialogVisible"
+        <p-dialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false">
-            <div class="osm-controls">
-                <span style="font-size: 0.9em">OSM Overlay:</span>
-                <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>
-                <div *ngIf="mapService.osmEnabled" style="display: inline-block">
-                    <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue" class="w-full"/>
-                    <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                              class="w-full"></p-slider>
+            <p-fieldset class="map-tab" legend="Maps and Layers">
+                <div class="osm-controls">
+                    <span style="font-size: 0.9em">OSM Overlay:</span>
+                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>
+                    <div *ngIf="mapService.osmEnabled" style="display: inline-block">
+                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue" class="w-full slider-input"/>
+                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                                  class="w-full"></p-slider>
+                    </div>
                 </div>
-            </div>
-            <p-fieldset class="map-tab" legend="Maps">
                 <div *ngIf="!mapService.mapModel!.availableMapItems.size">No maps loaded.</div>
                 <div *ngIf="mapService.mapModel!.availableMapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapService.mapModel!.availableMapItems | keyvalue">
@@ -68,14 +68,19 @@ import {StyleService} from "./style.service";
                                       label="" pTooltip="Toggle style"
                                       tooltipPosition="bottom">
                             </p-button>
+                            <p-button (click)="reloadStyle(style.key)"
+                                      icon="pi pi-refresh"
+                                      label="" pTooltip="Reload style"
+                                      tooltipPosition="bottom">
+                            </p-button>
                         </div>
                     </div>
                 </div>
             </p-fieldset>
         </p-dialog>
-        <p-button (click)="showLayerDialog()" icon="pi pi-images" label="" pTooltip="Show map layers"
-                  tooltipPosition="right"
-                  class="layers-button">
+        <p-button (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
+                  pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}" 
+                  icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
     `,
     styles: [`
@@ -83,7 +88,11 @@ import {StyleService} from "./style.service";
             display: flex;
             align-items: center;
             gap: 1em;
-            margin-left: 1em;
+            margin-bottom: 0.5em;
+        }
+        
+        .slider-input {
+            width: 14em;
         }
     `]
 })
@@ -134,9 +143,14 @@ export class MapPanelComponent {
         }
     }
 
-    toggleStyle(style: string) {
-        const isAvailable = this.styleService.activatedStyles.get(style);
-        this.styleService.activatedStyles.set(style, !isAvailable);
+    toggleStyle(styleId: string) {
+        const isAvailable = this.styleService.activatedStyles.get(styleId);
+        this.styleService.activatedStyles.set(styleId, !isAvailable);
+        this.mapService.reloadStyle();
+    }
+
+    reloadStyle(styleId: string) {
+        this.styleService.activatedStyles.set(styleId, true);
         this.mapService.reloadStyle();
     }
 }

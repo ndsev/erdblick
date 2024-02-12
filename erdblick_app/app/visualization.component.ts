@@ -42,7 +42,7 @@ export class TileVisualization {
         this.destroy(viewer);
 
         // Do not try to render if the underlying data is disposed.
-        if (this.tile.disposed) {
+        if (this.tile.disposed || this.style.isDeleted()) {
             return false;
         }
 

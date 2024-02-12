@@ -38,7 +38,7 @@ rule that matches it.
 
 > **Note ⚠️:** While the mature product envisions a rich UI with the ability
 > to edit and toggle multiple style sheets, the current alpha version loads
-> its style sheet from the hard-coded path [static/styles/demo-style.yaml](static/styles/demo-style.yaml).
+> its style sheet from the hard-coded path [styles/default-style.yaml](styles/default-style.yaml) bundled in `/bundle/styles`.
 
 Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is optional:
 

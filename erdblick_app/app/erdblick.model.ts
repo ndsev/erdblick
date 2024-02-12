@@ -36,7 +36,7 @@ export class ErdblickModel {
     static MAX_NUM_TILES_TO_LOAD = 2048;
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
     private coreLib: any;
-    private style: any;
+    private styles: Map<string, any> | null;
     private maps: Object | null;
     private loadedTileLayers: Map<any, any>;
     private visualizedTileLayers: any[];
@@ -61,7 +61,7 @@ export class ErdblickModel {
 
     constructor(coreLibrary: any, private styleService: StyleService) {
         this.coreLib = coreLibrary;
-        this.style = null;
+        this.styles = null;
         this.maps = null;
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = [];
@@ -160,24 +160,26 @@ export class ErdblickModel {
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
-    reloadStyle() {
+    reloadStyle(styleId: string = "") {
         // Delete the old style if present.
-        if (this.style) {
-            this.style.delete();
+        if (this.styles) {
+            this.styles.forEach((style: any, id: string) => {
+                if (style) style.delete()
+            });
         }
+        this.styles = new Map<string, any>();
 
-        let styleString = this.styleService.getUnifiedStyleData();
-        if (!styleString) {
-            return;
-        }
-        const styleUint8Array = this.textEncoder.encode(styleString);
-
-        // Parse the style description into a WASM style object.
-        uint8ArrayToWasm(this.coreLib,
-            (wasmBuffer: any) => {
-                this.style = new this.coreLib.FeatureLayerStyle(wasmBuffer);
-            },
-            styleUint8Array);
+        this.styleService.styleData.forEach((styleString: string, id: string) => {
+            if (this.styleService.activatedStyles.has(id) && this.styleService.activatedStyles.get(id)) {
+                const styleUint8Array = this.textEncoder.encode(styleString);
+                // Parse the style description into a WASM style object.
+                uint8ArrayToWasm(this.coreLib,
+                    (wasmBuffer: any) => {
+                        this.styles?.set(id, new this.coreLib.FeatureLayerStyle(wasmBuffer));
+                    },
+                    styleUint8Array);
+            }
+        });
 
         // Re-render all present batches with the new style.
         this.tileVisualizationQueue = [];
@@ -185,7 +187,7 @@ export class ErdblickModel {
         for (let [tileLayerId, tileLayer] of this.loadedTileLayers.entries()) {
             this.renderTileLayer(tileLayer, null);
         }
-        console.log("Loaded style.");
+        console.log("Loaded styles.");
     }
 
     private reloadDataSources() {
@@ -349,13 +351,23 @@ export class ErdblickModel {
     }
 
     private renderTileLayer(tileLayer: any, style: any) {
-        style = style || this.style;
-        let visu = new TileVisualization(
-            tileLayer,
-            style,
-            tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
-        this.tileVisualizationQueue.push(visu);
-        this.visualizedTileLayers.push(visu);
+        if (style) {
+            let visu = new TileVisualization(
+                tileLayer,
+                style,
+                tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
+            this.tileVisualizationQueue.push(visu);
+            this.visualizedTileLayers.push(visu);
+            return;
+        }
+        this.styles?.forEach((style: any, id: string) => {
+            let visu = new TileVisualization(
+                tileLayer,
+                style,
+                tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
+            this.tileVisualizationQueue.push(visu);
+            this.visualizedTileLayers.push(visu);
+        })
     }
 
     // public:

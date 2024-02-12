@@ -152,12 +152,13 @@ export class InspectionPanelComponent implements OnInit  {
         const filterNodes = (nodes: TreeTableNode[]): TreeTableNode[] => {
             return nodes.reduce<TreeTableNode[]>((filtered, node) => {
                 const key = node.data.k.toString().toLowerCase();
-                const value = node.data.v.toString().toLowerCase()
+                const value = node.data.v.toString().toLowerCase();
                 let matches = key.includes(query) || value.includes(query);
 
                 if (node.children) {
-                    node.children = filterNodes(node.children);
-                    matches = matches || node.children.length > 0;
+                    let filteredChildren = filterNodes(node.children);
+                    // node.children = filterNodes(node.children);
+                    matches = matches || filteredChildren.length > 0;
                     if (matches) {
                         node.expanded = true;
                     }

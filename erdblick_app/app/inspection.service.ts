@@ -46,22 +46,22 @@ export class InspectionService {
                     if (typeof value === 'object' && value !== null) {
                         if (Array.isArray(value)) {
                             // If it's an array, iterate through its elements and convert them to TreeTableNodes
-                            node.data = {k: key, v: "", t: "", visible: true};
+                            node.data = {k: key, v: "", t: ""};
                             node.children = value.map((item: any, index: number) => {
                                 if (typeof item === 'object') {
-                                    return {data: {k: index, v: "", t: typeof item, visible: true}, children: convertToTreeTableNodes(item)};
+                                    return {data: {k: index, v: "", t: typeof item}, children: convertToTreeTableNodes(item)};
                                 } else {
-                                    return {data: {k: index, v: item.toString(), t: typeof item, visible: true}};
+                                    return {data: {k: index, v: item.toString(), t: typeof item}};
                                 }
                             });
                         } else {
                             // If it's an object, recursively call the function to convert it to TreeTableNodes
-                            node.data = {k: key, v: "", t: "", visible: true}
+                            node.data = {k: key, v: "", t: ""}
                             node.children = convertToTreeTableNodes(value);
                         }
                     } else {
                         // If it's a primitive value, set it as the node's data
-                        node.data = {k: key, v: value, t: typeof value, visible: true};
+                        node.data = {k: key, v: value, t: typeof value};
                     }
 
                     treeTableNodes.push(node);

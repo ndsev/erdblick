@@ -33,7 +33,6 @@ export class MenuComponent {
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.value = event;
-            console.log("VALUE: ", this.value);
             this.validateMenuItems();
         });
 

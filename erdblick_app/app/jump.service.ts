@@ -32,18 +32,21 @@ export class JumpTargetService {
                                 }).then((jumpTargets: Array<JumpTarget>) => {
                                     this.availableOptions.next(jumpTargets);
                                 }).catch((error) => {
-                                    console.log(error);
                                     this.availableOptions.next([]);
+                                    console.log(error);
                                 });
+                                return;
                             }
                         }
-                    } catch (e) {
-                        console.log(e);
+                        this.availableOptions.next([]);
+                    } catch (error) {
+                        this.availableOptions.next([]);
+                        console.log(error);
                     }
                 },
                 error: error => {
-                    console.log(error);
                     this.availableOptions.next([]);
+                    console.log(error);
                 }
             });
     }
