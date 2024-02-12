@@ -11,6 +11,7 @@ import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
 import {ActivatedRoute, Params} from "@angular/router";
 import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
+import {InspectionService} from "./inspection.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -35,11 +36,6 @@ export interface MapInfoItem extends Object {
     protocolVersion: Map<string, number>;
 }
 
-interface Column {
-    field: string;
-    header: string;
-}
-
 @Component({
     selector: 'app-root',
     template: `
@@ -54,8 +50,7 @@ interface Column {
             <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"
                    (ngModelChange)="setSubjectValue(searchValue)"/>
         </span>
-        <!--        <p-speedDial [model]="leftTooltipItems" className="speeddial-left" direction="up"></p-speedDial>-->
-        <div class="bttn-container" [ngClass]="{'elevated': isInspectionPanelVisible }">
+        <div class="bttn-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
             <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help"
                       tooltipPosition="right"></p-button>
             <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
@@ -75,63 +70,7 @@ interface Column {
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-button (click)="pref.close($event)" label="Cancel" icon="pi pi-times"></p-button>
         </p-dialog>
-        <p-accordion *ngIf="featureTree.length && isInspectionPanelVisible" class="w-full inspect-panel"
-                     [activeIndex]="0">
-            <p-accordionTab>
-                <ng-template pTemplate="header">
-                    <div class="flex align-items-center">
-                        <i class="pi pi-sitemap mr-2"></i>&nbsp;
-                        <span class="vertical-align-middle">{{selectedFeatureIdText}}</span>
-                    </div>
-                </ng-template>
-                <ng-template pTemplate="content">
-                    <div class="resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }">
-                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-                        </div>
-                        <p-treeTable #tt [value]="featureTree" [columns]="cols"
-                                     class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
-                            <ng-template pTemplate="caption">
-                                <div class="flex justify-content-end align-items-center"
-                                     style="display: flex; align-content: center; justify-content: center">
-                                    <div class="p-input-icon-left filter-container">
-                                        <i class="pi pi-filter"></i>
-                                        <input class="filter-input" type="text" pInputText
-                                               placeholder="Filter data for selected feature"
-                                               (input)="tt.filterGlobal(getFilterValue($event), 'contains')"/>
-                                    </div>
-                                    <div>
-                                        <p-button (click)="copyGeoJsonToClipboard()" icon="pi pi-fw pi-copy" label=""
-                                                  [style]="{'margin-left': '0.8rem', width: '2rem', height: '2rem'}"
-                                                  pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                                        </p-button>
-                                    </div>
-                                </div>
-                            </ng-template>
-                            <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                                <tr [ttRow]="rowNode">
-                                    <td *ngFor="let col of cols; let i = index">
-                                        <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                             [pTooltip]="rowData[col.field].toString()" tooltipPosition="left"
-                                             [tooltipOptions]="tooltipOptions">
-                                            <p-treeTableToggler [rowNode]="rowNode"
-                                                                *ngIf="i === 0"></p-treeTableToggler>
-                                            <span>{{ rowData[col.field] }}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </ng-template>
-                            <ng-template pTemplate="emptymessage">
-                                <tr>
-                                    <td [attr.colspan]="cols.length">No data found.</td>
-                                </tr>
-                            </ng-template>
-                        </p-treeTable>
-                    </div>
-                </ng-template>
-            </p-accordionTab>
-        </p-accordion>
+        <inspection-panel></inspection-panel>
         <div id="info">
             {{title}} {{version}}
         </div>
@@ -143,42 +82,26 @@ interface Column {
                 bottom: 3.5em;
                 padding-bottom: 0;
             }
-            
-            .resizable-container-expanded {
-                height: calc(100vh - 3em);;
-            }
         }
     `]
 })
-export class AppComponent implements OnInit {
-    featureTree: TreeNode[] = [];
+export class AppComponent {
+
     title: string = 'erdblick';
     version: string = "v0.3.0";
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
-    selectedFeatureGeoJsonText: string = "";
-    selectedFeatureIdText: string = "";
-    isInspectionPanelVisible: boolean = false;
     layers: Array<[string, string, any]> = new Array<[string, string, any]>();
     searchValue: string = ""
 
     leftTooltipItems: MenuItem[] | null = null;
 
-    cols: Column[] = [];
-
-    tooltipOptions = {
-        showDelay: 1500,
-        autoHide: false
-    };
-
-    isExpanded: boolean = false;
-
     constructor(private httpClient: HttpClient,
                 private activatedRoute: ActivatedRoute,
-                private mapService: MapService,
-                private messageService: InfoMessageService,
-                private jumpToTargetService: JumpTargetService,
-                public styleService: StyleService) {
+                public mapService: MapService,
+                public jumpToTargetService: JumpTargetService,
+                public styleService: StyleService,
+                public inspectionService: InspectionService) {
         httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
@@ -203,15 +126,15 @@ export class AppComponent implements OnInit {
 
             this.mapService.mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
                 if (!selectedFeatureWrapper) {
-                    this.isInspectionPanelVisible = false;
+                    this.inspectionService.isInspectionPanelVisible = false;
                     return;
                 }
 
                 selectedFeatureWrapper.peek((feature: Feature) => {
-                    this.selectedFeatureGeoJsonText = feature.geojson() as string;
-                    this.selectedFeatureIdText = feature.id() as string;
-                    this.isInspectionPanelVisible = true;
-                    this.loadFeatureData();
+                    this.inspectionService.selectedFeatureGeoJsonText = feature.geojson() as string;
+                    this.inspectionService.selectedFeatureIdText = feature.id() as string;
+                    this.inspectionService.isInspectionPanelVisible = true;
+                    this.inspectionService.loadFeatureData();
                 })
             })
 
@@ -319,13 +242,6 @@ export class AppComponent implements OnInit {
         this.dialogVisible = true;
     }
 
-    ngOnInit(): void {
-        this.cols = [
-            { field: 'k', header: 'Key' },
-            { field: 'v', header: 'Value' }
-        ];
-    }
-
     applyTileLimits() {
         const tilesToLoad = this.tilesToLoadInput;
         const tilesToVisualize = this.tilesToVisualizeInput;
@@ -348,95 +264,6 @@ export class AppComponent implements OnInit {
     tilesInputOnClick(event: Event) {
         // Prevent event propagation for input fields
         event.stopPropagation()
-    }
-
-    getFeatureTreeData() {
-        let jsonData = JSON.parse(this.selectedFeatureGeoJsonText);
-        if (jsonData.hasOwnProperty("id")) {
-            delete jsonData["id"];
-        }
-        if (jsonData.hasOwnProperty("properties")) {
-            jsonData["attributes"] = jsonData["properties"];
-            delete jsonData["properties"];
-        }
-        // Push leaf values up
-        const sortedJson: Record<string, any> = {};
-        for (const key in jsonData) {
-            if (typeof jsonData[key] === "string" || typeof jsonData[key] === "number") {
-                sortedJson[key] = jsonData[key];
-            }
-        }
-        for (const key in jsonData) {
-            if (typeof jsonData[key] !== "string" && typeof jsonData[key] !== "number") {
-                sortedJson[key] = jsonData[key];
-            }
-        }
-
-
-        let convertToTreeTableNodes = (json: any): TreeTableNode[] => {
-            const treeTableNodes: TreeTableNode[] = [];
-
-            for (const key in json) {
-                if (json.hasOwnProperty(key)) {
-                    const value = json[key];
-                    const node: TreeTableNode = {};
-
-                    if (typeof value === 'object' && value !== null) {
-                        if (Array.isArray(value)) {
-                            // If it's an array, iterate through its elements and convert them to TreeTableNodes
-                            node.data = {k: key, v: "", t: ""};
-                            node.children = value.map((item: any, index: number) => {
-                                if (typeof item === 'object') {
-                                    return {data: {k: index, v: "", t: typeof item}, children: convertToTreeTableNodes(item)};
-                                } else {
-                                    return {data: {k: index, v: item.toString(), t: typeof item}};
-                                }
-                            });
-                        } else {
-                            // If it's an object, recursively call the function to convert it to TreeTableNodes
-                            node.data = {k: key, v: "", t: ""}
-                            node.children = convertToTreeTableNodes(value);
-                        }
-                    } else {
-                        // If it's a primitive value, set it as the node's data
-                        node.data = {k: key, v: value, t: typeof value};
-                    }
-
-                    treeTableNodes.push(node);
-                }
-            }
-
-            return treeTableNodes;
-        }
-
-        return convertToTreeTableNodes(sortedJson);
-    }
-
-    typeToBackground(type: string) {
-        if (type == "string") {
-            return "#4а4";
-        } else {
-            return "#ad8";
-        }
-    }
-
-    getFilterValue(event: Event) {
-        return (event.target as HTMLInputElement).value;
-    }
-
-    loadFeatureData() {
-        this.featureTree = this.getFeatureTreeData();
-    }
-
-    copyGeoJsonToClipboard() {
-        navigator.clipboard.writeText(this.selectedFeatureGeoJsonText).then(
-            () => {
-                this.messageService.showSuccess("Copied GeoJSON content to clipboard!");
-            },
-            () => {
-                this.messageService.showError("Could not copy GeoJSON content to clipboard.");
-            },
-        );
     }
 
     openHelp() {

@@ -1,11 +1,7 @@
-import {Component, OnInit} from "@angular/core";
-import {Cartesian3} from "cesium";
+import {Component} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {JumpTarget, JumpTargetService} from "./jump.service";
 import {ErdblickLayer, MapService} from "./map.service";
-import {ErdblickStyle, StyleService} from "./style.service";
-import {HttpClient} from "@angular/common/http";
-import {ActivatedRoute} from "@angular/router";
+import {StyleService} from "./style.service";
 
 
 @Component({

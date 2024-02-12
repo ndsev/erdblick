@@ -28,12 +28,15 @@ import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./style.service";
 import {MapPanelComponent} from "./map.panel.component";
+import {InspectionPanelComponent} from "./inspection.panel.component";
+import {InspectionService} from "./inspection.service";
 
 @NgModule({
     declarations: [
         AppComponent,
         MenuComponent,
-        MapPanelComponent
+        MapPanelComponent,
+        InspectionPanelComponent
     ],
     imports: [
         BrowserModule,
@@ -62,7 +65,8 @@ import {MapPanelComponent} from "./map.panel.component";
         MessageService,
         InfoMessageService,
         JumpTargetService,
-        StyleService
+        StyleService,
+        InspectionService
     ],
     bootstrap: [AppComponent]
 })
