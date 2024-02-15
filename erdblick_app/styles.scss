@@ -206,8 +206,8 @@ body {
     }
 }
 
-.p-overlaypanel-content {
-    & > div:first-child {
+.search-menu {
+    &:first-child {
         .p-divider {
             display: none;
         }
@@ -215,7 +215,7 @@ body {
 
     .search-option {
         text-align: left;
-        font-size: medium;
+        font-size: small;
         margin: 0;
         background: none;
         border: none;
