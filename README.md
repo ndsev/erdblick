@@ -38,7 +38,26 @@ rule that matches it.
 
 > **Note ⚠️:** While the mature product envisions a rich UI with the ability
 > to edit and toggle multiple style sheets, the current alpha version loads
-> its style sheet from the hard-coded path [styles/default-style.yaml](styles/default-style.yaml) bundled in `/bundle/styles`.
+> its style sheet from the hard-coded path [styles/default-style.yaml](styles/default-style.yaml) bundled in `static/bundle/styles`.
+
+### Custom Style Declarations
+
+It is possible to apply own custom styles easily. 
+On build, Erdblick automatically picks up .yaml style files from `styles` directory (where you can drop your custom files) 
+and bundles them in `static/bundle/styles`.
+
+For Erdblick to apply custom styles, it expects the following declarations for the styles in `config/config.json`:
+```json
+{
+   "styles": [
+       { "id": "your_style_id", "url": "style_url" },
+       { "id": "your_style_id_2", "url": "style_url_2" }
+   ]
+}
+```
+where `url` field must be a path relative to `static/bundle/styles` and `id` is used to identify the particular style in GUI.
+
+### Style Definitions
 
 Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is optional:
 
