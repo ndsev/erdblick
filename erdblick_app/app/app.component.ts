@@ -173,40 +173,7 @@ export class AppComponent {
                         visible: true
                     });
                 });
-                let mapLayers = [
-                    {
-                        name: "layerName1",
-                        coverage: 1n,
-                        level: 13,
-                        visible: true
-                    },
-                    {
-                        name: "layerName2",
-                        coverage: 1n,
-                        level: 13,
-                        visible: true
-                    }
-                ]
-                mapItems.set("mapName1", {
-                    coverage: 1n,
-                    level: 13,
-                    mapLayers: mapLayers,
-                    visible: true
-                });
-                mapItems.set("mapName2", {
-                    coverage: 1n,
-                    level: 13,
-                    mapLayers: mapLayers,
-                    visible: true
-                });
-                mapItems.set("mapName3", {
-                    coverage: 1n,
-                    level: 13,
-                    mapLayers: mapLayers,
-                    visible: true
-                });
                 this.mapService.mapModel.getValue()!.availableMapItems.next(mapItems);
-                console.log(this.mapService.mapModel.getValue()!.availableMapItems.getValue());
             });
 
             // this.activatedRoute.queryParams.subscribe((params: Params) => {
