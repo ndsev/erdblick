@@ -174,21 +174,20 @@ export class MenuComponent {
         if (coordinates === undefined) {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
-        } else {
-            let lat = coordinates[0];
-            let lon = coordinates[1];
-            let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
-            let position = Cartesian3.fromDegrees(lon, lat, alt);
-            let orientation = this.mapService.collectCameraOrientation();
-            if (orientation) {
-                if (this.mapService.mapView !== undefined) {
-                    this.mapService.mapView.viewer.camera.setView({
-                        destination: position,
-                        orientation: orientation
-                    });
-                } else {
-                    this.messageService.showError("Cannot set camera information. The view is not available.");
-                }
+        }
+        let lat = coordinates[0];
+        let lon = coordinates[1];
+        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
+        let position = Cartesian3.fromDegrees(lon, lat, alt);
+        let orientation = this.mapService.collectCameraOrientation();
+        if (orientation) {
+            if (this.mapService.mapView !== undefined) {
+                this.mapService.mapView.viewer.camera.setView({
+                    destination: position,
+                    orientation: orientation
+                });
+            } else {
+                this.messageService.showError("Cannot set camera information. The view is not available.");
             }
         }
     }
