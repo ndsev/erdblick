@@ -23,7 +23,6 @@ export class ParametersService {
 
      constructor(public mapService: MapService,
                  public styleService: StyleService) {
-          this.saveParameters();
           let parameters = this.loadSavedParameters();
           if (!parameters) {
                const currentOrientation = this.mapService.collectCameraOrientation();
@@ -34,7 +33,9 @@ export class ParametersService {
                if (mapModel) {
                     mapModel.availableMapItems.getValue().forEach((mapItem, mapName) => {
                          mapItem.mapLayers.forEach(mapLayer => {
-                              currentLayers.push([`${mapName}/${mapLayer.name}`, mapLayer.level.toString()]);
+                              if (mapLayer.visible) {
+                                   currentLayers.push([`${mapName}/${mapLayer.name}`, mapLayer.level.toString()]);
+                              }
                          });
                     });
                }
@@ -53,21 +54,23 @@ export class ParametersService {
           } else {
                this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
           }
+          this.saveParameters();
+          this.parameters.subscribe(parameters => {
+               if (parameters) {
+                    this.saveParameters();
+               }
+          });
      }
 
      loadSavedParameters(): ErdblickParameters | null {
-          // const parameters = localStorage.getItem('erdblickParameters');
-          // if (parameters) {
-          //      return JSON.parse(parameters);
-          // }
+          const parameters = localStorage.getItem('erdblickParameters');
+          if (parameters) {
+               return JSON.parse(parameters);
+          }
           return null;
      }
 
-     saveParameters() {
-          if (this.parameters !== undefined) {
-               this.parameters.subscribe(parameters => {
-                    localStorage.setItem('erdblickParameters', JSON.stringify(parameters));
-               });
-          }
+     private saveParameters() {
+          localStorage.setItem('erdblickParameters', JSON.stringify(this.parameters.getValue()));
      }
 }

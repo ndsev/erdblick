@@ -3,6 +3,8 @@ import {InfoMessageService} from "./info.service";
 import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {ErdblickModel} from "./erdblick.model";
+import {ParametersService} from "./parameters.service";
+import {map} from "rxjs";
 
 
 @Component({
@@ -24,7 +26,7 @@ import {ErdblickModel} from "./erdblick.model";
                     </div>
                 </div>
                 <p-divider></p-divider>
-                <div *ngIf="!mapItems.size">No maps loaded.</div>
+                <div *ngIf="!mapItems.size" style="margin-top: 0.75em">No maps loaded.</div>
                 <div *ngIf="mapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
@@ -35,7 +37,7 @@ import {ErdblickModel} from "./erdblick.model";
                                 {{ mapLayer.name }}
                             </span>
                             <div class="layer-controls">
-                                <p-button (click)="toggleLayer(mapLayer)"
+                                <p-button (click)="toggleLayer(mapItem.key, mapLayer)"
                                           icon="{{mapLayer.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                           label="" pTooltip="Toggle layer" tooltipPosition="bottom">
                                 </p-button>
@@ -44,7 +46,7 @@ import {ErdblickModel} from "./erdblick.model";
                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom">
                                 </p-button>
                                 <p-inputNumber [(ngModel)]="mapLayer.level"
-                                               (ngModelChange)="onLayerLevelChanged($event, mapItem.key + '/' + mapLayer.name)"
+                                               (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.name)"
                                                [showButtons]="true" [min]="0" [max]="15"
                                                buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
                                                decrementButtonClass="p-button-secondary"
@@ -94,7 +96,8 @@ export class MapPanelComponent {
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
-                public styleService: StyleService) {
+                public styleService: StyleService,
+                public parameterService: ParametersService) {
         this.mapService.mapModel.subscribe(mapModel => {
             if (mapModel) {
                 mapModel.availableMapItems.subscribe(mapItems => this.mapItems = mapItems);
@@ -115,10 +118,28 @@ export class MapPanelComponent {
         }
     }
 
-    onLayerLevelChanged(event: Event, layerName: string) {
-        let level = Number(event.toString());
+    onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
+        const mapLayerName = `${mapName}/${layerName}`;
+        const level = Number(event.toString());
         if (this.mapService.mapModel.getValue()) {
-            this.mapService.mapModel.getValue()!.layerIdToLevel.set(layerName, level);
+            this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapLayerName, level);
+            const parameters = this.parameterService.parameters.getValue();
+            if (parameters) {
+                const mapItem = this.mapItems.get(mapName);
+                if (mapItem !== undefined) {
+                    mapItem.mapLayers.forEach(mapLayer => {
+                        if (mapLayer.name == layerName && mapLayer.visible) {
+                            let includes = false;
+                            parameters.layers.forEach(layer => {
+                                includes = layer[0] == mapLayerName;
+                                if (includes) layer[1] = level.toString();
+                            })
+                            if (!includes) parameters.layers.push([mapLayerName, level.toString()]);
+                            this.parameterService.parameters.next(parameters);
+                        }
+                    });
+                }
+            }
             this.mapService.mapModel.getValue()!.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
@@ -136,11 +157,27 @@ export class MapPanelComponent {
         } else {
             this.mapService.mapView?.updateOpenStreetMapLayer(0);
         }
+        const parameters = this.parameterService.parameters.getValue();
+        if (parameters) {
+            parameters.osmEnabled = this.mapService.osmEnabled;
+            parameters.osmOpacity = this.mapService.osmOpacityValue;
+            this.parameterService.parameters.next(parameters);
+        }
     }
 
-    toggleLayer(mapLayer: ErdblickLayer) {
+    toggleLayer(mapName: string, mapLayer: ErdblickLayer) {
+        const mapLayerName =`${mapName}/${mapLayer.name}`;
         mapLayer.visible = !mapLayer.visible;
         if (this.mapService.mapModel.getValue()) {
+            const parameters = this.parameterService.parameters.getValue();
+            if (parameters) {
+                if (mapLayer.visible) {
+                    parameters.layers.push([mapLayerName, mapLayer.level.toString()]);
+                } else {
+                    parameters.layers = parameters.layers.filter(layer => layer[0] != mapLayerName);
+                }
+                this.parameterService.parameters.next(parameters);
+            }
             this.mapService.mapModel.getValue()!.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
@@ -148,8 +185,19 @@ export class MapPanelComponent {
     }
 
     toggleStyle(styleId: string) {
-        const isAvailable = this.styleService.activatedStyles.get(styleId);
-        this.styleService.activatedStyles.set(styleId, !isAvailable);
+        const isAvailable = !this.styleService.activatedStyles.get(styleId);
+        this.styleService.activatedStyles.set(styleId, isAvailable);
+        const parameters = this.parameterService.parameters.getValue();
+        console.log(styleId, isAvailable);
+        if (parameters) {
+            if (isAvailable) {
+                parameters.styles.push(styleId);
+            } else {
+                parameters.styles = parameters.styles.filter(style => style != styleId);
+                console.log(parameters.styles);
+            }
+            this.parameterService.parameters.next(parameters);
+        }
         this.mapService.reloadStyle();
     }
 

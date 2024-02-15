@@ -17,6 +17,7 @@ import {
     UrlTemplateImageryProvider,
     Viewer
 } from "cesium";
+import {ParametersService} from "./parameters.service";
 
 export class ErdblickView {
     viewer: Viewer;
@@ -35,7 +36,9 @@ export class ErdblickView {
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
      */
-    constructor(model: ErdblickModel, containerDomElementId: string) {
+    constructor(model: ErdblickModel,
+                containerDomElementId: string,
+                public parameterService: ParametersService) {
         this.model = model;
         this.viewer = new Viewer(containerDomElementId,
             {
@@ -85,6 +88,16 @@ export class ErdblickView {
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
+            const parameters = this.parameterService.parameters.getValue();
+            if (parameters) {
+                parameters.x = this.viewer.camera.position.x;
+                parameters.y = this.viewer.camera.position.y;
+                parameters.z = this.viewer.camera.position.z;
+                parameters.heading = this.viewer.camera.heading;
+                parameters.pitch = this.viewer.camera.pitch;
+                parameters.roll = this.viewer.camera.roll;
+                this.parameterService.parameters.next(parameters);
+            }
             this.updateViewport();
         });
 
