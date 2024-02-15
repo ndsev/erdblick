@@ -94,7 +94,7 @@ export class InspectionPanelComponent implements OnInit  {
                 public inspectionService: InspectionService) {
         this.inspectionService.featureTree.subscribe((tree: string) => {
             this.jsonTree = tree;
-            this.filteredTree = JSON.parse(tree);
+            this.filteredTree = tree ? JSON.parse(tree) : [];
             this.expandTreeNodes(this.filteredTree);
         });
     }

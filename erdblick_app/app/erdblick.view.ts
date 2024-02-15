@@ -113,6 +113,7 @@ export class ErdblickView {
         });
 
         model.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
+            this.viewer.camera.position
             this.viewer.camera.setView({
                 destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {

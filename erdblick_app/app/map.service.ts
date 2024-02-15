@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
 import {ErdblickModel} from "./erdblick.model";
 import {ErdblickView} from "./erdblick.view";
+import {BehaviorSubject} from "rxjs";
 
 export interface ErdblickMap {
     coverage: BigInt;
@@ -20,7 +20,7 @@ export interface ErdblickLayer {
 @Injectable({providedIn: 'root'})
 export class MapService {
 
-    mapModel: ErdblickModel | undefined;
+    mapModel: BehaviorSubject<ErdblickModel | null> = new BehaviorSubject<ErdblickModel | null>(null);
     mapView: ErdblickView | undefined;
     coreLib: any;
     osmEnabled: boolean = true;
@@ -51,8 +51,8 @@ export class MapService {
     }
 
     reloadStyle() {
-        if (this.mapModel !== undefined) {
-            this.mapModel.reloadStyle();
+        if (this.mapModel.getValue()) {
+            this.mapModel.getValue()!.reloadStyle();
         }
     }
 }

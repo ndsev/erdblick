@@ -85,10 +85,9 @@ export class MenuComponent {
             this.messageService.showError("No value provided!");
             return;
         }
-        if (this.mapService.mapModel !== undefined) {
+        if (this.mapService.coreLib) {
             try {
                 let wgs84TileId = BigInt(value);
-                // this.mapService.mapModel.zoomToWgs84PositionTopic.next(this.mapService.coreLib.getTilePosition(wgs84TileId));
                 let position = this.mapService.coreLib.getTilePosition(wgs84TileId);
                 return [position.x, position.y, position.z]
             } catch (e) {

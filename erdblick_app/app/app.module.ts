@@ -30,6 +30,7 @@ import {StyleService} from "./style.service";
 import {MapPanelComponent} from "./map.panel.component";
 import {InspectionPanelComponent} from "./inspection.panel.component";
 import {InspectionService} from "./inspection.service";
+import {ParametersService} from "./parameters.service";
 
 @NgModule({
     declarations: [
@@ -66,7 +67,8 @@ import {InspectionService} from "./inspection.service";
         InfoMessageService,
         JumpTargetService,
         StyleService,
-        InspectionService
+        InspectionService,
+        ParametersService
     ],
     bootstrap: [AppComponent]
 })

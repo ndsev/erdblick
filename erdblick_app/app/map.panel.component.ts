@@ -1,7 +1,8 @@
 import {Component} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {ErdblickLayer, MapService} from "./map.service";
+import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
 import {StyleService} from "./style.service";
+import {ErdblickModel} from "./erdblick.model";
 
 
 @Component({
@@ -12,16 +13,20 @@ import {StyleService} from "./style.service";
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
                     <span style="font-size: 0.9em">OSM Overlay:</span>
-                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>
+                    <p-button (click)="toggleOSMOverlay()" class="osm-button"
+                              icon="{{mapService.osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
+                    </p-button>
+<!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
                     <div *ngIf="mapService.osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue" class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                                  class="w-full"></p-slider>
+                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()" class="w-full"></p-slider>
                     </div>
                 </div>
-                <div *ngIf="!mapService.mapModel!.availableMapItems.size">No maps loaded.</div>
-                <div *ngIf="mapService.mapModel!.availableMapItems.size" class="maps-container">
-                    <div *ngFor="let mapItem of mapService.mapModel!.availableMapItems | keyvalue">
+                <p-divider></p-divider>
+                <div *ngIf="!mapItems.size">No maps loaded.</div>
+                <div *ngIf="mapItems.size" class="maps-container">
+                    <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
                             {{ mapItem.key }}
                         </span>
@@ -32,22 +37,19 @@ import {StyleService} from "./style.service";
                             <div class="layer-controls">
                                 <p-button (click)="toggleLayer(mapLayer)"
                                           icon="{{mapLayer.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                          label="" pTooltip="Toggle layer"
-                                          tooltipPosition="bottom">
+                                          label="" pTooltip="Toggle layer" tooltipPosition="bottom">
                                 </p-button>
                                 <p-button *ngIf="mapLayer.coverage" (click)="focus(mapLayer.coverage, $event)"
                                           icon="pi pi-search"
-                                          label="" pTooltip="Focus on layer"
-                                          tooltipPosition="bottom">
+                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom">
                                 </p-button>
                                 <p-inputNumber [(ngModel)]="mapLayer.level"
                                                (ngModelChange)="onLayerLevelChanged($event, mapItem.key + '/' + mapLayer.name)"
-                                               [style]="{'width': '2rem'}" [showButtons]="true"
+                                               [showButtons]="true" [min]="0" [max]="15"
                                                buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
                                                decrementButtonClass="p-button-secondary"
                                                incrementButtonClass="p-button-secondary"
                                                incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
-                                               [min]="0" [max]="15"
                                                pTooltip="Change zoom level" tooltipPosition="bottom">
                                 </p-inputNumber>
                             </div>
@@ -83,26 +85,21 @@ import {StyleService} from "./style.service";
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
     `,
-    styles: [`
-        .osm-controls {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            margin-bottom: 0.5em;
-        }
-        
-        .slider-input {
-            width: 14em;
-        }
-    `]
+    styles: [``]
 })
 export class MapPanelComponent {
 
     layerDialogVisible: boolean = false;
+    mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService) {
+        this.mapService.mapModel.subscribe(mapModel => {
+            if (mapModel) {
+                mapModel.availableMapItems.subscribe(mapItems => this.mapItems = mapItems);
+            }
+        });
     }
 
     showLayerDialog() {
@@ -111,19 +108,26 @@ export class MapPanelComponent {
 
     focus(tileId: BigInt, event: any) {
         event.stopPropagation();
-        if (this.mapService.mapModel !== undefined && this.mapService.coreLib !== undefined) {
-            this.mapService.mapModel.zoomToWgs84PositionTopic.next(this.mapService.coreLib.getTilePosition(tileId));
+        if (this.mapService.mapModel.getValue() && this.mapService.coreLib !== undefined) {
+            this.mapService.mapModel.getValue()!.zoomToWgs84PositionTopic.next(
+                this.mapService.coreLib.getTilePosition(tileId)
+            );
         }
     }
 
     onLayerLevelChanged(event: Event, layerName: string) {
         let level = Number(event.toString());
-        if (this.mapService.mapModel !== undefined) {
-            this.mapService.mapModel.layerIdToLevel.set(layerName, level);
-            this.mapService.mapModel.update();
+        if (this.mapService.mapModel.getValue()) {
+            this.mapService.mapModel.getValue()!.layerIdToLevel.set(layerName, level);
+            this.mapService.mapModel.getValue()!.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
         }
+    }
+
+    toggleOSMOverlay() {
+        this.mapService.osmEnabled = !this.mapService.osmEnabled;
+        this.updateOSMOverlay();
     }
 
     updateOSMOverlay() {
@@ -136,8 +140,8 @@ export class MapPanelComponent {
 
     toggleLayer(mapLayer: ErdblickLayer) {
         mapLayer.visible = !mapLayer.visible;
-        if (this.mapService.mapModel !== undefined) {
-            this.mapService.mapModel.update();
+        if (this.mapService.mapModel.getValue()) {
+            this.mapService.mapModel.getValue()!.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
         }

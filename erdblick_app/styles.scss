@@ -90,9 +90,6 @@ body {
 .help-button {
     width: 3em;
     height: 3em;
-    //left: 0.5em;
-    //bottom: 1em;
-    //position: absolute;
     margin-left: 0.5em;
     margin-bottom: 0.5em;
 
@@ -105,9 +102,6 @@ body {
 .pref-button {
     width: 3em;
     height: 3em;
-    //left: 4em;
-    //bottom: 1em;
-    //position: absolute;
     margin-left: 0.5em;
     margin-bottom: 0.5em;
 
@@ -160,7 +154,6 @@ body {
     .resizable-container {
         width: 30em;
         min-width: 30em;
-        //height: 20em;
         min-height: 18em;
         resize: both;
         overflow: auto;
@@ -273,9 +266,25 @@ body {
 }
 
 .map-tab {
+    .osm-controls {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+        margin-top: 0.25em;
+
+        button {
+            width: 2em;
+            height: 2em;
+            box-shadow: none;
+        }
+
+        .slider-input {
+            width: 14em;
+        }
+    }
+
     .p-fieldset {
         margin-bottom: 0.5em;
-        padding-right: 0;
 
         .p-fieldset-legend {
             padding: 0.5em;
@@ -293,20 +302,30 @@ body {
         }
     }
 
+    .p-divider.p-divider-horizontal {
+        margin: 0.5em 0;
+    }
+
     .maps-container {
         overflow: auto;
         max-height: calc(100vh - 30.5em);
-        padding-right: 0.75em;
+
+        .map-container {
+            margin-top: 0.75em;
+
+            .map-header {
+                font-size: 0.9em;
+            }
+
+            &:first-child {
+                margin-top: 0.25em;
+            }
+        }
     }
 
     .styles-container {
         overflow: auto;
         max-height: 10em;
-        padding-right: 0.75em;
-    }
-
-    .map-header {
-        font-size: 0.9em;
     }
 
     .flex-container {
@@ -317,7 +336,7 @@ body {
         align-items: center;
 
         &:first-child {
-            margin-top: 0em;
+            margin-top: 0;
         }
 
         span {
@@ -328,6 +347,7 @@ body {
             display: flex;
             gap: 0.5em;
             width: 12em;
+            justify-content: flex-end;
 
             button {
                 width: 2em;
@@ -345,7 +365,7 @@ body {
         }
 
         .style-controls {
-            justify-content: end;
+            justify-content: flex-end;
         }
     }
 }
@@ -373,9 +393,6 @@ body {
     .help-button {
         width: 3em;
         height: 3em;
-        //left: 0.5em;
-        //bottom: 1em;
-        //position: absolute;
 
         .p-button {
             border-radius: 50%;
@@ -384,9 +401,6 @@ body {
     }
 
     .pref-button {
-        //position: absolute;
-        //left: 0.5em;
-        //bottom: 4.5em;
         width: 3em;
         height: 3em;
 
@@ -479,12 +493,6 @@ body {
         }
     }
 
-    //
-    //.p-overlaypanel {
-    //    width: 100vw !important;
-    //
-    //}
-
     .p-overlaypanel:after, .p-overlaypanel:before{
         left: unset !important;
         right: 1.25rem !important;
@@ -539,15 +547,6 @@ body {
                 }
             }
         }
-
-        /* Individual accordion tab content */
-        //.p-accordion .p-accordion-content {
-            //position: absolute;
-            //bottom: 100%; /* Positions the content above the headers */
-            //width: 100%;
-            /* Add additional styling as needed */
-            //transform: rotate(180deg);
-        //}
 
         .p-accordion .p-accordion-header,
         .p-accordion .p-accordion-content {

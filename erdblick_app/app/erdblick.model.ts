@@ -4,7 +4,7 @@ import {Fetch} from "./fetch.component";
 import {FeatureTile} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
-import {Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {StyleService} from "./style.service";
 import {ErdblickLayer, ErdblickMap} from "./map.service";
 
@@ -55,7 +55,7 @@ export class ErdblickModel {
     mapInfoTopic: Subject<any>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
     layerIdToLevel: Map<string, number> = new Map<string, number>();
-    availableMapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
+    availableMapItems: BehaviorSubject<Map<string, ErdblickMap>> = new BehaviorSubject<Map<string, ErdblickMap>>(new Map<string, ErdblickMap>());
 
     private textEncoder: TextEncoder = new TextEncoder();
 
@@ -258,7 +258,7 @@ export class ErdblickModel {
                 for (let [layerName, layer] of Object.entries(map.layers)) {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
-                    const mapItem = this.availableMapItems.get(mapName);
+                    const mapItem = this.availableMapItems.getValue().get(mapName);
                     if (mapItem !== undefined && mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible)) {
                         let level = this.layerIdToLevel.get(mapName + '/' + layerName);
                         if (level !== undefined) {
