@@ -52,17 +52,12 @@
                             },
                             {
                                 "glob": "**/*",
-                                "input": "config/styles",
-                                "output": "/bundle/styles"
-                            },
-                            {
-                                "glob": "**/*",
                                 "input": "images",
                                 "output": "/bundle/images"
                             },
                             {
-                                "glob": "config/config.json",
-                                "input": ".",
+                                "glob": "**/*.json",
+                                "input": "config",
                                 "output": "/"
                             },
                             {
