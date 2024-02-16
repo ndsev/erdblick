@@ -30,7 +30,7 @@ export class StyleService {
             this.styleData = dataMap;
         });
         let styleUrls: Array<ErdblickStyle> = [];
-        httpClient.get("/config.json", {responseType: "json"}).subscribe({
+        httpClient.get("/config/config.json", {responseType: "json"}).subscribe({
             next: (data: any) => {
                 styleUrls = [...styleUrls, ...data["styles"]];
                 styleUrls.forEach((styleUrl: ErdblickStyle) => {
