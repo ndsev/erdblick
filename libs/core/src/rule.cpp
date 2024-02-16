@@ -13,7 +13,7 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
 void FeatureStyleRule::parse(const YAML::Node& yaml)
 {
     if (yaml["geometry"].IsDefined())
-        geometryTypes_ = 0; // Reset inherited geometry types.
+        geometryTypes_ = 0;  // Reset inherited geometry types.
 
     for (auto const& geometryStr : yaml["geometry"]) {
         auto g = geometryStr.as<std::string>();
@@ -31,11 +31,26 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
         else {
             std::cout << "Unsupported geometry type: " << g << std::endl;
-            return;
         }
     }
 
     // Parse optional fields.
+    if (yaml["aspect"].IsDefined()) {
+        auto aspectStr = yaml["aspect"].as<std::string>();
+        if (aspectStr == "feature") {
+            aspect_ = Feature;
+        }
+        else if (aspectStr == "relation") {
+            aspect_ = Relation;
+        }
+        else if (aspectStr == "attribute") {
+            aspect_ = Attribute;
+        }
+        else {
+            std::cout << "Unsupported aspect: " << aspectStr << std::endl;
+            return;
+        }
+    }
     if (yaml["type"].IsDefined()) {
         // Parse a feature type regular expression, e.g. `Lane|Boundary`
         type_ = yaml["type"].as<std::string>();
@@ -212,5 +227,19 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::nearFarScale() cons
     return nearFarScale_;
 }
 
+float FeatureStyleRule::relationLineHeightOffset() const
+{
+    return relationLineHeightOffset_;
+}
+
+bool FeatureStyleRule::relationLineEndMarkers() const
+{
+    return relationLineEndMarkers_;
+}
+
+FeatureStyleRule::Aspect FeatureStyleRule::aspect() const
+{
+    return aspect_;
+}
 
 }

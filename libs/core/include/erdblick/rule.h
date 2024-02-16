@@ -17,7 +17,14 @@ public:
     explicit FeatureStyleRule(YAML::Node const& yaml);
     FeatureStyleRule(FeatureStyleRule const& other) = default;
 
+    enum Aspect {
+        Feature,
+        Relation,
+        Attribute
+    };
+
     FeatureStyleRule const* match(mapget::Feature& feature) const;
+    [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] bool supports(mapget::Geometry::GeomType const& g) const;
     [[nodiscard]] glm::fvec4 const& color() const;
     [[nodiscard]] float width() const;
@@ -32,6 +39,8 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
+    [[nodiscard]] float relationLineHeightOffset() const;
+    [[nodiscard]] bool relationLineEndMarkers() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -40,6 +49,7 @@ private:
         return 1 << static_cast<std::underlying_type_t<mapget::Geometry::GeomType>>(g);
     }
 
+    Aspect aspect_ = Feature;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::regex> type_;
     std::string filter_;
@@ -58,6 +68,15 @@ private:
     std::optional<std::array<float, 4>> nearFarScale_;
 
     std::vector<FeatureStyleRule> firstOfRules_;
+
+    float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
+    bool relationLineEndMarkers_ = false; // Show start/end marker lines?
+
+    // TODO:
+    //  - Relation recursion
+    //  - Relation bi-directionality detection
+    //  - Relation source rule
+    //  - Relation destination rule
 };
 
 }

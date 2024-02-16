@@ -78,6 +78,8 @@ private:
     std::map<std::string, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
+
+    mapget::TileFeatureLayer::Ptr tile_;
 };
 
 }  // namespace erdblick

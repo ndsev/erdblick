@@ -1,22 +1,41 @@
 #include "visualization.h"
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
+#include "simfil/overlay.h"
+
 #include <iostream>
 
 using namespace mapget;
 
 namespace erdblick {
 
+namespace {
+mapget::Point geometryCenter(mapget::model_ptr<Geometry> const& g) {
+    // First, find average position of the geometry.
+    // Then, sort points by distance to center.
+
+    // If it is a line, and the number of points is even, return average of the two closest.
+    // Otherwise, return just the closest.
+
+    // There is an optimization we can do here for meshes:
+    // If the center is not inside the mesh:
+    // Take a line from the center through the closest point.
+    // Average the positions of all triangles which intersect this line.
+
+    return {};
+}
+}
+
 FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& style, const std::shared_ptr<mapget::TileFeatureLayer>& layer)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
-      coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true))
-      /* coloredPoints_ = default */
+      coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
+      tile_(layer)
 {
     uint32_t featureId = 0;
-    for (auto&& feature : *layer) {
+    for (auto&& feature : *tile_) {
         for (auto&& rule : style.rules()) {
             if (auto* matchingSubRule = rule.match(*feature)) {
                 addFeature(feature, featureId, *matchingSubRule);
@@ -62,13 +81,45 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
     return *collection;
 }
 
-void FeatureLayerVisualization::addFeature(model_ptr<Feature>& feature, uint32_t id, FeatureStyleRule const& rule) {
-    feature->geom()->forEachGeometry(
-        [this, id, &rule](auto&& geom) {
-            if (rule.supports(geom->geomType()))
-                addGeometry(geom, id, rule);
+void FeatureLayerVisualization::addFeature(model_ptr<Feature>& feature, uint32_t id, FeatureStyleRule const& rule)
+{
+    if (rule.aspect() == FeatureStyleRule::Feature) {
+        feature->geom()->forEachGeometry(
+            [this, id, &rule](auto&& geom)
+            {
+                if (rule.supports(geom->geomType()))
+                    addGeometry(geom, id, rule);
+                return true;
+            });
+    }
+    else if (rule.aspect() == FeatureStyleRule::Relation) {
+        feature->forEachRelation([&](auto&& relation) {
+            // Resolve target feature.
+            // Future: Recursively collect relations, merge pairs.
+            auto targetRef = relation->target();
+            auto targetFeature = tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+
+            if (!targetFeature) {
+                // TODO: Use locate for unresolvable features.
+                std::cerr << "Unresolved relation target." << std::endl;
+                return true;
+            }
+
+            // Create simfil evaluation context for the rule.
+            // Based on relation, annotate with $source and $target.
+            // Future: Annotate with $bidirectional
+
+            // Create line geometry which connects source and
+            // target feature. TODO: geom()->center()
+
+            // If sourceRule is set:
+            // Run source geometry visualization.
+
+            // If targetRule is set:
+            // Run target geometry visualization.
             return true;
         });
+    }
 }
 
 void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule) {
@@ -179,6 +230,7 @@ std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVert
 
 std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsFloat64Array(model_ptr<Geometry> const& geom) {
     std::vector<double> cartesianCoords;
+    cartesianCoords.reserve(geom->numPoints()*3);
     geom->forEachPoint(
         [&cartesianCoords](auto&& vertex) {
             auto cartesian = wgsToCartesian<mapget::Point>(vertex);
