@@ -258,6 +258,7 @@ export class AppComponent {
 
                 if (Object.keys(params).length && this.firstParamUpdate) {
                     this.mapService.mapModel.getValue()?.update();
+                    this.mapService.mapModel.getValue()?.reloadStyle();
                     this.firstParamUpdate = false;
                 }
             });
