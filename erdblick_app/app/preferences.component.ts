@@ -66,7 +66,7 @@ export interface MapInfoItem extends Object {
             </div>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
-            <p-button (click)="pref.close($event)" label="Cancel" icon="pi pi-times"></p-button>
+            <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
 
         
