@@ -25,8 +25,10 @@ export class MapService {
     coreLib: any;
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
+    tilesToLoadLimit: number = 0;
+    tilesToVisualizeLimit: number = 0;
 
-    constructor() { }
+    constructor() {}
 
     collectCameraOrientation() {
         if (this.mapView !== undefined) {
@@ -54,5 +56,23 @@ export class MapService {
         if (this.mapModel.getValue()) {
             this.mapModel.getValue()!.reloadStyle();
         }
+    }
+
+    applyTileLimits(tilesToLoadLimit: number, tilesToVisualizeLimit: number) {
+        if (isNaN(tilesToLoadLimit) || isNaN(tilesToVisualizeLimit)) {
+            return false;
+        }
+
+        this.tilesToLoadLimit = tilesToLoadLimit;
+        this.tilesToVisualizeLimit = tilesToVisualizeLimit;
+        if (this.mapModel.getValue()) {
+            this.mapModel.getValue()!.maxLoadTiles = this.tilesToLoadLimit;
+            this.mapModel.getValue()!.maxVisuTiles = this.tilesToVisualizeLimit;
+            this.mapModel.getValue()!.update();
+        }
+
+        console.log(`Max tiles to load set to ${this.tilesToLoadLimit}`);
+        console.log(`Max tiles to visualize set to ${this.tilesToVisualizeLimit}`);
+        return true;
     }
 }

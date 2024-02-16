@@ -49,28 +49,9 @@ export interface MapInfoItem extends Object {
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
             <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"
-                   (ngModelChange)="setSubjectValue(searchValue)"/>
+                   (ngModelChange)="setTargetValue(searchValue)"/>
         </span>
-        <div class="bttn-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
-            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help"
-                      tooltipPosition="right"></p-button>
-            <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
-                      pTooltip="Preferences" tooltipPosition="right"></p-button>
-        </div>
-        <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
-            <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
-            <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
-            <input type="number" pInputText [id]="tilesToLoadInput" placeholder="Enter max tiles to load" min="1"
-                   [(ngModel)]="tilesToLoadInput"/><br>
-            <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
-            <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
-            <input type="number" pInputText [id]="tilesToVisualizeInput" placeholder="Enter max tiles to load" min="1"
-                   [(ngModel)]="tilesToVisualizeInput"/><br>
-            <!-- Apply button -->
-            <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
-            <p-button (click)="pref.close($event)" label="Cancel" icon="pi pi-times"></p-button>
-        </p-dialog>
+        <pref-components></pref-components>
         <inspection-panel></inspection-panel>
         <div id="info">
             {{title}} {{version}}
@@ -90,12 +71,7 @@ export class AppComponent {
 
     title: string = 'erdblick';
     version: string = "v0.3.0";
-    tilesToLoadInput: number = 0;
-    tilesToVisualizeInput: number = 0;
-    layers: Array<[string, string, any]> = new Array<[string, string, any]>();
     searchValue: string = ""
-
-    leftTooltipItems: MenuItem[] | null = null;
     firstParamUpdate: boolean = true;
 
     constructor(private httpClient: HttpClient,
@@ -118,13 +94,8 @@ export class AppComponent {
             let erdblickModel = new ErdblickModel(coreLib, styleService);
             this.mapService.mapModel.next(erdblickModel);
             this.mapService.mapView = new ErdblickView(erdblickModel, 'mapViewContainer', parametersService);
-
             this.mapService.reloadStyle();
-
-            this.tilesToLoadInput = erdblickModel.maxLoadTiles;
-            this.tilesToVisualizeInput = erdblickModel.maxVisuTiles;
-
-            this.applyTileLimits();
+            this.mapService.applyTileLimits(erdblickModel.maxLoadTiles, erdblickModel.maxVisuTiles);
 
             // Add debug API that can be easily called from browser's debug console
             window.ebDebug = new ErdblickDebugApi(this.mapService.mapView);
@@ -271,40 +242,7 @@ export class AppComponent {
         });
     }
 
-    dialogVisible: boolean = false;
-    showPreferencesDialog() {
-        this.dialogVisible = true;
-    }
-
-    applyTileLimits() {
-        const tilesToLoad = this.tilesToLoadInput;
-        const tilesToVisualize = this.tilesToVisualizeInput;
-
-        if (isNaN(tilesToLoad) || isNaN(tilesToVisualize)) {
-            alert("Please enter valid tile limits!");
-            return;
-        }
-
-        if (this.mapService.mapModel.getValue()) {
-            this.mapService.mapModel.getValue()!.maxLoadTiles = tilesToLoad;
-            this.mapService.mapModel.getValue()!.maxVisuTiles = tilesToVisualize;
-            this.mapService.mapModel.getValue()!.update();
-        }
-
-        console.log(`Max tiles to load set to ${tilesToLoad}`);
-        console.log(`Max tiles to visualize set to ${tilesToVisualize}`);
-    }
-
-    tilesInputOnClick(event: Event) {
-        // Prevent event propagation for input fields
-        event.stopPropagation()
-    }
-
-    openHelp() {
-        window.open("https://developer.nds.live/tools/the-new-mapviewer/user-guide", "_blank");
-    }
-
-    setSubjectValue(value: string) {
+    setTargetValue(value: string) {
         this.jumpToTargetService.targetValueSubject.next(value);
     }
 

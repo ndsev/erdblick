@@ -31,13 +31,15 @@ import {MapPanelComponent} from "./map.panel.component";
 import {InspectionPanelComponent} from "./inspection.panel.component";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
+import {PreferencesComponent} from "./preferences.component";
 
 @NgModule({
     declarations: [
         AppComponent,
         MenuComponent,
         MapPanelComponent,
-        InspectionPanelComponent
+        InspectionPanelComponent,
+        PreferencesComponent
     ],
     imports: [
         BrowserModule,
