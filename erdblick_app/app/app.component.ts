@@ -96,6 +96,7 @@ export class AppComponent {
     searchValue: string = ""
 
     leftTooltipItems: MenuItem[] | null = null;
+    firstParamUpdate: boolean = true;
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
@@ -254,6 +255,11 @@ export class AppComponent {
                     currentParameters.styles = currentStyles;
                 }
                 this.parametersService.parameters.next(currentParameters);
+
+                if (Object.keys(params).length && this.firstParamUpdate) {
+                    this.mapService.mapModel.getValue()?.update();
+                    this.firstParamUpdate = false;
+                }
             });
 
             this.parametersService.parameters.subscribe(parameters => {
