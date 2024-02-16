@@ -30,18 +30,20 @@ export class StyleService {
             this.styleData = dataMap;
         });
         let styleUrls: Array<ErdblickStyle> = [];
-        httpClient.get("/config/config.json", {responseType: "json"}).subscribe({
+        httpClient.get("/config.json", {responseType: "json"}).subscribe({
             next: (data: any) => {
-                styleUrls = [...styleUrls, ...data["styles"]];
-                styleUrls.forEach((styleUrl: ErdblickStyle) => {
-                    if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
-                        styleUrl.url = `/bundle/styles/${styleUrl.url}`;
-                    }
-                    this.activatedStyles.set(styleUrl.id, true);
-                });
-                this.retrieveStyles(styleUrls).subscribe(dataMap => {
-                    this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
-                });
+                if (data && data["styles"]) {
+                    styleUrls = [...styleUrls, ...data["styles"]];
+                    styleUrls.forEach((styleUrl: ErdblickStyle) => {
+                        if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
+                            styleUrl.url = `/bundle/styles/${styleUrl.url}`;
+                        }
+                        this.activatedStyles.set(styleUrl.id, true);
+                    });
+                    this.retrieveStyles(styleUrls).subscribe(dataMap => {
+                        this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
+                    });
+                }
             },
             error: error => {
                 console.log(error);

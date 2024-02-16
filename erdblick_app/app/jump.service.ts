@@ -17,7 +17,7 @@ export class JumpTargetService {
     availableOptions = new Subject<Array<JumpTarget>>();
 
     constructor(private httpClient: HttpClient) {
-        httpClient.get("/config/config.json", {responseType: 'json'}).subscribe(
+        httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
                     try {
