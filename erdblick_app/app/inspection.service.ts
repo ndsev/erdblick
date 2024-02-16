@@ -34,7 +34,6 @@ export class InspectionService {
             }
         }
 
-
         let convertToTreeTableNodes = (json: any): TreeTableNode[] => {
             const treeTableNodes: TreeTableNode[] = [];
 

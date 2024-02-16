@@ -48,13 +48,14 @@ interface Column {
                                 </div>
                             </ng-template>
                             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                                <tr [ttRow]="rowNode">
+                                <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)">
                                     <td *ngFor="let col of cols; let i = index">
                                         <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                                              [pTooltip]="rowData[col.field].toString()" tooltipPosition="left"
                                              [tooltipOptions]="tooltipOptions">
-                                            <p-treeTableToggler [rowNode]="rowNode"
-                                                                *ngIf="i === 0"></p-treeTableToggler>
+                                            <p-treeTableToggler [rowNode]="rowNode" *ngIf="i === 0" 
+                                                                (click)="$event.stopPropagation()">
+                                            </p-treeTableToggler>
                                             <span>{{ rowData[col.field] }}</span>
                                         </div>
                                     </td>
@@ -173,5 +174,11 @@ export class InspectionPanelComponent implements OnInit  {
         };
 
         this.filteredTree = filterNodes(JSON.parse(this.jsonTree));
+    }
+
+    onRowClick(rowNode: any) {
+        const node: TreeNode = rowNode.node;
+        node.expanded = !node.expanded;
+        this.filteredTree = [...this.filteredTree];
     }
 }
