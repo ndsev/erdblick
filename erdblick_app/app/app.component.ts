@@ -1,11 +1,9 @@
-import {Component, OnInit, QueryList, ViewChildren} from '@angular/core';
+import {Component} from '@angular/core';
 import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
 import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
-import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
-import {InfoMessageService} from "./info.service";
 import {JumpTargetService} from "./jump.service";
 import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
@@ -13,6 +11,7 @@ import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
+import {OverlayPanel} from "primeng/overlaypanel";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -48,7 +47,7 @@ export interface MapInfoItem extends Object {
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" (click)="searchoverlay.toggle($event)"
+            <input type="text" pInputText [(ngModel)]="searchValue" (click)="toggleOverlay(searchValue, searchoverlay, $event)"
                    (ngModelChange)="setTargetValue(searchValue)"/>
         </span>
         <pref-components></pref-components>
@@ -240,6 +239,14 @@ export class AppComponent {
                 this.updateQueryParams(Object.fromEntries(entries));
             });
         });
+    }
+
+    toggleOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
+        if (value) {
+            searchOverlay.show(event);
+            return;
+        }
+        searchOverlay.toggle(event);
     }
 
     setTargetValue(value: string) {

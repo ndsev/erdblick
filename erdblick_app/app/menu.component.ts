@@ -62,14 +62,14 @@ export class MenuComponent {
                         validate: (value: string) => { return this.validateWGS84(value, true) }
                     },
                     {
-                        name: "Open Lat-Lon in Google Maps",
+                        name: "Open WGS84 Lat-Lon in Google Maps",
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInGM(value) },
                         validate: (value: string) => { return this.validateGM(value) }
                     },
                     {
-                        name: "Open Lat-Lon in Open Street Maps",
+                        name: "Open WGS84 Lat-Lon in Open Street Maps",
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInOSM(value) },
