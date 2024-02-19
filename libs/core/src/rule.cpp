@@ -10,6 +10,16 @@ FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
     parse(yaml);
 }
 
+FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonInheritableAttrs)
+{
+    *this = other;
+    if (resetNonInheritableAttrs) {
+        type_.reset();
+        filter_.clear();
+        firstOfRules_.clear();
+    }
+}
+
 void FeatureStyleRule::parse(const YAML::Node& yaml)
 {
     if (yaml["geometry"].IsDefined())
@@ -36,6 +46,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
     // Parse optional fields.
     if (yaml["aspect"].IsDefined()) {
+        // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
         if (aspectStr == "feature") {
             aspect_ = Feature;
@@ -91,6 +102,33 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+    if (yaml["relation-line-height-offset"].IsDefined()) {
+        // Parse vertical offset for relation line in meters.
+        relationLineHeightOffset_ = yaml["relation-line-height-offset"].as<float>();
+    }
+    if (yaml["relation-line-end-markers"].IsDefined()) {
+        // Parse style for the relation line end-markers.
+        relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationLineEndMarkerStyle_->parse(yaml["relation-line-end-markers"]);
+    }
+    if (yaml["relation-source-style"].IsDefined()) {
+        // Parse style for the relation source geometry.
+        relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationLineEndMarkerStyle_->parse(yaml["relation-source-style"]);
+    }
+    if (yaml["relation-target-style"].IsDefined()) {
+        // Parse style for the relation target geometry.
+        relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationLineEndMarkerStyle_->parse(yaml["relation-target-style"]);
+    }
+    if (yaml["relation-recursive"].IsDefined()) {
+        // Parse whether relations should be resolved recursively.
+        relationRecursive_ = yaml["relation-recursive"].as<bool>();
+    }
+    if (yaml["relation-merge-twoway"].IsDefined()) {
+        // Parse whether bidirectional relations should be followed and merged.
+        relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<std::string>();
+    }
     if (yaml["material-color"].IsDefined()) {
         materialColor_ = yaml["material-color"].as<std::string>();
     }
@@ -118,10 +156,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["first-of"].IsDefined()) {
         for (auto yamlSubRule : yaml["first-of"]) {
             // The sub-rule adopts all attributes except type and filter
-            auto& subRule = firstOfRules_.emplace_back(*this);
-            subRule.type_.reset();
-            subRule.filter_.clear();
-            subRule.firstOfRules_.clear();
+            auto& subRule = firstOfRules_.emplace_back(*this, true);
             subRule.parse(yamlSubRule);
         }
     }
@@ -232,14 +267,34 @@ float FeatureStyleRule::relationLineHeightOffset() const
     return relationLineHeightOffset_;
 }
 
-bool FeatureStyleRule::relationLineEndMarkers() const
-{
-    return relationLineEndMarkers_;
-}
-
 FeatureStyleRule::Aspect FeatureStyleRule::aspect() const
 {
     return aspect_;
+}
+
+std::shared_ptr<FeatureStyleRule> FeatureStyleRule::relationLineEndMarkerStyle() const
+{
+    return relationLineEndMarkerStyle_;
+}
+
+std::shared_ptr<FeatureStyleRule> FeatureStyleRule::relationSourceStyle() const
+{
+    return relationSourceStyle_;
+}
+
+std::shared_ptr<FeatureStyleRule> FeatureStyleRule::relationTargetStyle() const
+{
+    return relationTargetStyle_;
+}
+
+bool FeatureStyleRule::relationRecursive() const
+{
+    return relationRecursive_;
+}
+
+std::optional<std::string> const& FeatureStyleRule::relationMergeTwoWay() const
+{
+    return relationMergeTwoWay_;
 }
 
 }

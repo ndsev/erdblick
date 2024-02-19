@@ -15,7 +15,7 @@ class FeatureStyleRule
 {
 public:
     explicit FeatureStyleRule(YAML::Node const& yaml);
-    FeatureStyleRule(FeatureStyleRule const& other) = default;
+    FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     enum Aspect {
         Feature,
@@ -39,8 +39,13 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
+
     [[nodiscard]] float relationLineHeightOffset() const;
-    [[nodiscard]] bool relationLineEndMarkers() const;
+    [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
+    [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationSourceStyle() const;
+    [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationTargetStyle() const;
+    [[nodiscard]] bool relationRecursive() const;
+    [[nodiscard]] std::optional<std::string> const& relationMergeTwoWay() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -70,13 +75,11 @@ private:
     std::vector<FeatureStyleRule> firstOfRules_;
 
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
-    bool relationLineEndMarkers_ = false; // Show start/end marker lines?
-
-    // TODO:
-    //  - Relation recursion
-    //  - Relation bi-directionality detection
-    //  - Relation source rule
-    //  - Relation destination rule
+    std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
+    std::shared_ptr<FeatureStyleRule> relationSourceStyle_;
+    std::shared_ptr<FeatureStyleRule> relationTargetStyle_;
+    bool relationRecursive_ = false;
+    std::optional<std::string> relationMergeTwoWay_;
 };
 
 }
