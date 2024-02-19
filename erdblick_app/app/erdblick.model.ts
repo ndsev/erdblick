@@ -184,7 +184,7 @@ export class ErdblickModel {
         // Re-render all present batches with the new style.
         this.tileVisualizationQueue = [];
         this.visualizedTileLayers.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
-        for (let [tileLayerId, tileLayer] of this.loadedTileLayers.entries()) {
+        for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
             this.renderTileLayer(tileLayer, null);
         }
         console.log("Loaded styles.");
@@ -259,15 +259,21 @@ export class ErdblickModel {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
                     const mapItem = this.availableMapItems.getValue().get(mapName);
-                    if (mapItem !== undefined && mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible)) {
+                    if (mapItem !== undefined) {
                         let level = this.layerIdToLevel.get(mapName + '/' + layerName);
                         if (level !== undefined) {
                             let tileIds = tileIdPerLevel.get(level);
                             if (tileIds !== undefined) {
                                 for (let tileId of tileIds) {
                                     const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
-                                    if (!this.loadedTileLayers.has(tileMapLayerKey))
-                                        requestTilesForMapLayer.push(Number(tileId));
+                                    if (mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible)) {
+                                        if (!this.loadedTileLayers.has(tileMapLayerKey)) requestTilesForMapLayer.push(Number(tileId));
+                                    } else {
+                                        if (this.loadedTileLayers.has(tileMapLayerKey)) {
+                                            this.removeTileLayer(this.loadedTileLayers.get(tileMapLayerKey));
+                                            this.loadedTileLayers.delete(tileMapLayerKey);
+                                        }
+                                    }
                                 }
 
                                 // Only add a request if there are tiles to be loaded.
