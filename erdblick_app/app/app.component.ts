@@ -90,10 +90,9 @@ export class AppComponent {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
 
-            let erdblickModel = new ErdblickModel(coreLib, styleService);
+            let erdblickModel = new ErdblickModel(coreLib, styleService, parametersService);
             this.mapService.mapModel.next(erdblickModel);
             this.mapService.mapView = new ErdblickView(erdblickModel, 'mapViewContainer', parametersService);
-            this.mapService.reloadStyle();
             this.mapService.applyTileLimits(erdblickModel.maxLoadTiles, erdblickModel.maxVisuTiles);
 
             // Add debug API that can be easily called from browser's debug console
@@ -132,6 +131,7 @@ export class AppComponent {
                         this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapName + '/' + layerName, 13);
                     })
                     mapItems.set(mapName, {
+                        mapName: mapName,
                         coverage: firstCoverage,
                         level: 13,
                         mapLayers: mapLayers,
@@ -228,7 +228,7 @@ export class AppComponent {
 
                 if (Object.keys(params).length && this.firstParamUpdate) {
                     this.mapService.mapModel.getValue()?.update();
-                    this.mapService.mapModel.getValue()?.reloadStyle();
+                    this.mapService.mapModel.getValue()?.reapplyAllStyles();
                     this.firstParamUpdate = false;
                 }
             });
@@ -238,6 +238,9 @@ export class AppComponent {
                 entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
                 this.updateQueryParams(Object.fromEntries(entries));
             });
+
+            this.mapService.mapModel.getValue()?.update();
+            this.mapService.mapModel.getValue()?.reapplyAllStyles();
         });
     }
 

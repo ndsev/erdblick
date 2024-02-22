@@ -185,24 +185,24 @@ export class MapPanelComponent {
     }
 
     toggleStyle(styleId: string) {
-        const isAvailable = !this.styleService.activatedStyles.get(styleId);
-        this.styleService.activatedStyles.set(styleId, isAvailable);
+        const isActivated = !this.styleService.activatedStyles.get(styleId);
+        this.styleService.activatedStyles.set(styleId, isActivated);
         const parameters = this.parameterService.parameters.getValue();
-        console.log(styleId, isAvailable);
+        console.log(styleId, isActivated);
         if (parameters) {
-            if (isAvailable) {
+            if (isActivated) {
                 parameters.styles.push(styleId);
             } else {
                 parameters.styles = parameters.styles.filter(style => style != styleId);
-                console.log(parameters.styles);
             }
+            console.log(parameters.styles);
             this.parameterService.parameters.next(parameters);
         }
-        this.mapService.reloadStyle();
+        this.mapService.reapplyStyle(styleId);
     }
 
     reloadStyle(styleId: string) {
         this.styleService.activatedStyles.set(styleId, true);
-        this.mapService.reloadStyle();
+        this.mapService.reloadStyle(styleId);
     }
 }

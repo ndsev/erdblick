@@ -10,7 +10,9 @@ import { uint8ArrayToWasm } from "./wasm";
  */
 export class FeatureTile {
     // public:
-    id: number;
+    id: string;
+    mapName: string;
+    layerName: string;
     tileId: number;
     numFeatures: number;
     coreLib: any;
@@ -32,6 +34,8 @@ export class FeatureTile {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
+        this.mapName = mapTileMetadata.mapName;
+        this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
         this.numFeatures = mapTileMetadata.numFeatures;
         this.coreLib = coreLib;

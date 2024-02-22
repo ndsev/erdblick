@@ -5,8 +5,9 @@ import {FeatureTile} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
-import {StyleService} from "./style.service";
-import {ErdblickLayer, ErdblickMap} from "./map.service";
+import {ErdblickStyleData, StyleService} from "./style.service";
+import {ErdblickMap} from "./map.service";
+import {ParametersService} from "./parameters.service";
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
@@ -36,16 +37,16 @@ export class ErdblickModel {
     static MAX_NUM_TILES_TO_LOAD = 2048;
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
     private coreLib: any;
-    private styles: Map<string, any> | null;
-    private maps: Object | null;
+    private styles: Map<string, ErdblickStyleData> | null;
+    private maps: Map<string, ErdblickMap> | null;
     private loadedTileLayers: Map<any, any>;
-    private visualizedTileLayers: any[];
+    private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: any;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<number>;
     private currentHighDetailTileIds: Set<number>;
     private tileStreamParsingQueue: any[];
-    private tileVisualizationQueue: TileVisualization[];
+    private tileVisualizationQueue: [string, TileVisualization][];
     maxLoadTiles: number;
     maxVisuTiles: number;
     private tileParser: any;
@@ -59,12 +60,14 @@ export class ErdblickModel {
 
     private textEncoder: TextEncoder = new TextEncoder();
 
-    constructor(coreLibrary: any, private styleService: StyleService) {
+    constructor(coreLibrary: any,
+                private styleService: StyleService,
+                public parametersService: ParametersService) {
         this.coreLib = coreLibrary;
         this.styles = null;
         this.maps = null;
         this.loadedTileLayers = new Map();
-        this.visualizedTileLayers = [];
+        this.visualizedTileLayers = new Map();
         this.currentFetch = null;
         this.currentViewport = {
             south: .0,
@@ -106,12 +109,16 @@ export class ErdblickModel {
         //                                 BOOTSTRAP                             //
         ///////////////////////////////////////////////////////////////////////////
 
-        this.reloadStyle();
-        this.reloadDataSources();
+        this.styleService.stylesLoaded.subscribe(loaded => {
+            if (loaded) {
+                this.loadStyles();
+                this.reloadDataSources();
 
-        // Initial call to processTileStream, will keep calling itself
-        this.processTileStream();
-        this.processVisualizationTasks();
+                // Initial call to processTileStream, will keep calling itself
+                this.processTileStream();
+                this.processVisualizationTasks();
+            }
+        });
     }
 
     private processTileStream() {
@@ -151,8 +158,11 @@ export class ErdblickModel {
                 break;
             }
 
-            let tileVisu = this.tileVisualizationQueue.shift();
-            this.tileVisualizationTopic.next(tileVisu);
+            const entry = this.tileVisualizationQueue.shift();
+            if (entry !== undefined) {
+                const tileVisu = entry[1];
+                this.tileVisualizationTopic.next(tileVisu);
+            }
         }
 
         // Continue visualizing tiles with a delay.
@@ -160,34 +170,122 @@ export class ErdblickModel {
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
-    reloadStyle(styleId: string = "") {
-        // Delete the old style if present.
+    loadStyles() {
         if (this.styles) {
-            this.styles.forEach((style: any, id: string) => {
-                if (style) style.delete()
+            this.styles.forEach((style: ErdblickStyleData, _) => {
+                if (style) style.featureLayerStyle.delete();
             });
         }
-        this.styles = new Map<string, any>();
+        this.styles = new Map<string, ErdblickStyleData>();
 
-        this.styleService.styleData.forEach((styleString: string, id: string) => {
-            if (this.styleService.activatedStyles.has(id) && this.styleService.activatedStyles.get(id)) {
-                const styleUint8Array = this.textEncoder.encode(styleString);
-                // Parse the style description into a WASM style object.
-                uint8ArrayToWasm(this.coreLib,
-                    (wasmBuffer: any) => {
-                        this.styles?.set(id, new this.coreLib.FeatureLayerStyle(wasmBuffer));
-                    },
-                    styleUint8Array);
+        this.styleService.styleData.forEach((styleString: string, styleId: string) => {
+            const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString);
+            if (erdblickStyleData !== undefined && erdblickStyleData) {
+                this.styles!.set(styleId, erdblickStyleData);
             }
         });
 
         // Re-render all present batches with the new style.
         this.tileVisualizationQueue = [];
-        this.visualizedTileLayers.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
+        for (const styleId of this.visualizedTileLayers.keys()) {
+            const tileVisus = this.visualizedTileLayers.get(styleId);
+            if (tileVisus !== undefined) {
+                tileVisus.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
+                this.visualizedTileLayers.set(styleId, []);
+            }
+        }
         for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-            this.renderTileLayer(tileLayer, null);
+            this.styles.forEach((style, styleId) => {
+                this.renderTileLayer(tileLayer, style, styleId);
+            });
         }
         console.log("Loaded styles.");
+        console.log(this.styles);
+    }
+
+    private loadErdblickStyleData(styleId: string, styleString: string): ErdblickStyleData | undefined {
+        if (this.styleService.activatedStyles.has(styleId)) {
+            const styleUint8Array = this.textEncoder.encode(styleString);
+            // Parse the style description into a WASM style object.
+            return uint8ArrayToWasm(this.coreLib,
+                (wasmBuffer: any) => {
+                    return {
+                        enabled: this.styleService.activatedStyles.get(styleId)!,
+                        featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
+                    }
+                },
+                styleUint8Array);
+        }
+        return undefined;
+    }
+
+    reloadStyle(styleId: string) {
+        if (this.styles) {
+            if (this.styles.has(styleId) &&
+                this.styleService.styleData.has(styleId)) {
+
+                this.styleService.syncStyle(styleId).then(_ => {
+                    const styleString = this.styleService.styleData.get(styleId);
+                    if (styleString !== undefined) {
+                        this.styles!.get(styleId)?.featureLayerStyle?.delete();
+                        const erdblickStyleData= this.loadErdblickStyleData(styleId, styleString);
+                        if (erdblickStyleData !== undefined && erdblickStyleData) {
+                            this.styles!.set(styleId, erdblickStyleData);
+                        }
+                        this.tileVisualizationQueue = [];
+                        this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                            this.tileVisualizationDestructionTopic.next(tileVisu)
+                        );
+                        this.visualizedTileLayers.set(styleId, []);
+                        for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                            this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
+                        }
+                    }
+                });
+            }
+        }
+        console.log(`Reloaded style: ${styleId}.`);
+    }
+
+    private reapplyStyle(styleId: string) {
+        if (this.styles && this.styles.has(styleId)) {
+            const isActivated = this.styleService.activatedStyles.get(styleId);
+            if (isActivated === undefined) return;
+            const style = this.styles!.get(styleId);
+            if (style === undefined) return;
+            style.enabled = isActivated;
+
+            if (isActivated) {
+                this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                    this.tileVisualizationDestructionTopic.next(tileVisu)
+                );
+                this.visualizedTileLayers.set(styleId, []);
+                for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                    this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
+                }
+            } else {
+                this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                    this.tileVisualizationDestructionTopic.next(tileVisu)
+                );
+                this.visualizedTileLayers.set(styleId, []);
+            }
+            console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+        }
+    }
+
+    reapplyStyles(styleIds: Array<string>) {
+        this.tileVisualizationQueue = [];
+        styleIds.forEach(styleId => this.reapplyStyle(styleId));
+        console.log("visualizedTileLayers", this.visualizedTileLayers)
+        console.log("tileVisualizationQueue", this.tileVisualizationQueue)
+    }
+
+    reapplyAllStyles() {
+        if (this.styles) {
+            this.reapplyStyles([...this.styles.keys()]);
+        }
+        console.log("visualizedTileLayers", this.visualizedTileLayers)
+        console.log("tileVisualizationQueue", this.tileVisualizationQueue)
     }
 
     private reloadDataSources() {
@@ -199,7 +297,7 @@ export class ErdblickModel {
             console.log("Loaded data source info.");
         })
         .withJsonCallback((result: any) => {
-            this.maps = Object.fromEntries(result.map((mapInfo: any) => [mapInfo.mapId, mapInfo]));
+            this.maps = new Map<string, ErdblickMap>(result.map((mapInfo: ErdblickMap) => [mapInfo.mapName, mapInfo]));
             this.mapInfoTopic.next(this.maps);
         })
         .go();
@@ -208,6 +306,14 @@ export class ErdblickModel {
     ///////////////////////////////////////////////////////////////////////////
     //                          MAP UPDATE CONTROLS                          //
     ///////////////////////////////////////////////////////////////////////////
+
+    checkMapLayerVisibility(mapName: string, layerName: string) {
+        const mapItem = this.availableMapItems.getValue().get(mapName);
+        if (mapItem == undefined) {
+            return false;
+        }
+        return mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible);
+    }
 
     update() {
         // Get the tile IDs for the current viewport.
@@ -243,10 +349,12 @@ export class ErdblickModel {
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
-            if (!tileLayer.preventCulling && !this.currentVisibleTileIds.has(tileLayer.tileId))
+            if (!tileLayer.preventCulling && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
+                !this.checkMapLayerVisibility(tileLayer.mapName, tileLayer.layerName))) {
                 tileLayer.destroy();
-            else
+            } else {
                 newTileLayers.set(tileLayer.id, tileLayer);
+            }
         }
         this.loadedTileLayers = newTileLayers;
 
@@ -254,52 +362,70 @@ export class ErdblickModel {
         // TODO: Consider tile TTL.
         let requests = [];
         if (this.maps) {
-            for (let [mapName, map] of Object.entries(this.maps)) {
-                for (let [layerName, layer] of Object.entries(map.layers)) {
+            for (const [mapName, map] of this.maps) {
+                for (const layer of map.mapLayers) {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
-                    const mapItem = this.availableMapItems.getValue().get(mapName);
-                    if (mapItem !== undefined) {
-                        let level = this.layerIdToLevel.get(mapName + '/' + layerName);
-                        if (level !== undefined) {
-                            let tileIds = tileIdPerLevel.get(level);
-                            if (tileIds !== undefined) {
-                                for (let tileId of tileIds) {
-                                    const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
-                                    if (mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible)) {
-                                        if (!this.loadedTileLayers.has(tileMapLayerKey)) requestTilesForMapLayer.push(Number(tileId));
-                                    } else {
-                                        if (this.loadedTileLayers.has(tileMapLayerKey)) {
-                                            this.removeTileLayer(this.loadedTileLayers.get(tileMapLayerKey));
-                                            this.loadedTileLayers.delete(tileMapLayerKey);
-                                        }
-                                    }
-                                }
-
-                                // Only add a request if there are tiles to be loaded.
-                                if (requestTilesForMapLayer)
-                                    requests.push({
-                                        mapId: mapName,
-                                        layerId: layerName,
-                                        tileIds: requestTilesForMapLayer
-                                    });
+                    let level = this.layerIdToLevel.get(mapName + '/' + layer.name);
+                    if (level == undefined) {
+                        continue;
+                    }
+                    let tileIds = tileIdPerLevel.get(level!);
+                    if (tileIds == undefined) {
+                        continue;
+                    }
+                    for (let tileId of tileIds!) {
+                        const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layer.name, tileId);
+                        if (this.checkMapLayerVisibility(mapName, layer.name)) {
+                            if (!this.loadedTileLayers.has(tileMapLayerKey)) {
+                                requestTilesForMapLayer.push(Number(tileId));
+                            }
+                        } else {
+                            if (this.loadedTileLayers.has(tileMapLayerKey)) {
+                                this.removeTileLayer(this.loadedTileLayers.get(tileMapLayerKey));
+                                this.loadedTileLayers.delete(tileMapLayerKey);
                             }
                         }
+                    }
+                    // Only add a request if there are tiles to be loaded.
+                    if (requestTilesForMapLayer) {
+                        requests.push({
+                            mapId: mapName,
+                            layerId: layer.name,
+                            tileIds: requestTilesForMapLayer
+                        });
                     }
                 }
             }
         }
 
         // Update visualizations and visualization queue
-        this.visualizedTileLayers = this.visualizedTileLayers.filter(tileVisu => {
-            if (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) && !tileVisu.tile.preventCulling) {
-                this.tileVisualizationDestructionTopic.next(tileVisu);
-                return false;
+        for (const styleId of this.visualizedTileLayers.keys()) {
+            const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
+                if (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) && !tileVisu.tile.preventCulling) {
+                    this.tileVisualizationDestructionTopic.next(tileVisu);
+                    return false;
+                }
+                if (styleId != "_builtin" && !this.styles?.get(styleId)?.enabled) {
+                    this.tileVisualizationDestructionTopic.next(tileVisu);
+                    return false;
+                }
+                tileVisu.isHighDetail = this.currentHighDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
+                return true;
+            });
+            if (tileVisus !== undefined && tileVisus.length) {
+                this.visualizedTileLayers.set(styleId, tileVisus);
+            } else {
+                this.visualizedTileLayers.delete(styleId);
             }
-            tileVisu.isHighDetail = this.currentHighDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
-            return true;
-        });
-        this.tileVisualizationQueue = this.visualizedTileLayers.filter(tileVisu => tileVisu.isDirty());
+        }
+        for (const [styleId, tileVisus] of this.visualizedTileLayers) {
+            tileVisus.forEach(tileVisu => {
+                if (tileVisu.isDirty()) {
+                    this.tileVisualizationQueue.push([styleId, tileVisu]);
+                }
+            });
+        }
 
         // Launch the new fetch operation
         this.currentFetch = new Fetch(tileUrl)
@@ -343,37 +469,42 @@ export class ErdblickModel {
 
     private removeTileLayer(tileLayer: any) {
         tileLayer.destroy()
-        this.visualizedTileLayers = this.visualizedTileLayers.filter(tileVisu => {
-            if (tileVisu.tile.id === tileLayer.id) {
-                this.tileVisualizationDestructionTopic.next(tileVisu);
-                return false;
+        for (const styleId of this.visualizedTileLayers.keys()) {
+            const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
+                if (tileVisu.tile.id === tileLayer.id) {
+                    this.tileVisualizationDestructionTopic.next(tileVisu);
+                    return false;
+                }
+                return true;
+            });
+            if (tileVisus !== undefined && tileVisus.length) {
+                this.visualizedTileLayers.set(styleId, tileVisus);
+            } else {
+                this.visualizedTileLayers.delete(styleId);
             }
-            return true;
-        });
-        this.tileVisualizationQueue = this.tileVisualizationQueue.filter(tileVisu => {
+        }
+        this.tileVisualizationQueue = this.tileVisualizationQueue.filter(([_, tileVisu]) => {
             return tileVisu.tile.id !== tileLayer.id;
         });
         this.loadedTileLayers.delete(tileLayer.id);
     }
 
-    private renderTileLayer(tileLayer: any, style: any) {
+    private renderTileLayer(tileLayer: any, style: any, styleId: string = "_builtin") {
         if (style) {
+            if (styleId != "_builtin" && !style.enabled) {
+                return;
+            }
             let visu = new TileVisualization(
                 tileLayer,
-                style,
+                styleId == "_builtin" ? style : style.featureLayerStyle,
                 tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
-            this.tileVisualizationQueue.push(visu);
-            this.visualizedTileLayers.push(visu);
-            return;
+            this.tileVisualizationQueue.push([styleId, visu]);
+            if (this.visualizedTileLayers.has(styleId)) {
+                this.visualizedTileLayers.get(styleId)?.push(visu);
+            } else {
+                this.visualizedTileLayers.set(styleId, [visu]);
+            }
         }
-        this.styles?.forEach((style: any, id: string) => {
-            let visu = new TileVisualization(
-                tileLayer,
-                style,
-                tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
-            this.tileVisualizationQueue.push(visu);
-            this.visualizedTileLayers.push(visu);
-        })
     }
 
     // public:

@@ -4,6 +4,7 @@ import {ErdblickView} from "./erdblick.view";
 import {BehaviorSubject} from "rxjs";
 
 export interface ErdblickMap {
+    mapName: string;
     coverage: BigInt;
     level: number;
     mapLayers: Array<ErdblickLayer>;
@@ -52,9 +53,15 @@ export class MapService {
         return null;
     }
 
-    reloadStyle() {
+    reloadStyle(styleId: string) {
         if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.reloadStyle();
+            this.mapModel.getValue()!.reloadStyle(styleId);
+        }
+    }
+
+    reapplyStyle(styleId: string) {
+        if (this.mapModel.getValue()) {
+            this.mapModel.getValue()!.reapplyStyles([styleId]);
         }
     }
 

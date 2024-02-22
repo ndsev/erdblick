@@ -6,7 +6,7 @@ import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 export class TileVisualization {
     tile: FeatureTile;
     private style: any;
-    private isHighDetail: boolean;
+    isHighDetail: boolean;
     private entity: any;
     private primitiveCollection: any;
     private hasHighDetailVisualization: boolean;
@@ -111,7 +111,7 @@ export class TileVisualization {
      * Check if this visualization needs re-rendering, based on
      * whether the isHighDetail flag changed.
      */
-    private isDirty() {
+    isDirty() {
         return (
             (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
             (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization)

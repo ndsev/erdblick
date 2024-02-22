@@ -198,6 +198,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
+        .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
+        .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures);
 
