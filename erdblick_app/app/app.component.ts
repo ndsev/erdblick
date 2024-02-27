@@ -144,9 +144,9 @@ export class AppComponent {
             this.activatedRoute.queryParams.subscribe((params: Params) => {
                 let currentParameters = this.parametersService.parameters.getValue();
                 const newPosition = {
-                    x: params["x"] ? Number(params["x"]) : currentParameters.x,
-                    y: params["y"] ? Number(params["y"]) : currentParameters.y,
-                    z: params["z"] ? Number(params["z"]) : currentParameters.z
+                    lon: params["lon"] ? Number(params["lon"]) : currentParameters.lon,
+                    lat: params["lat"] ? Number(params["lat"]) : currentParameters.lat,
+                    alt: params["alt"] ? Number(params["alt"]) : currentParameters.alt
                 }
                 const newOrientation = {
                     heading: params["heading"] ? Number(params["heading"]) : currentParameters.heading,
@@ -155,13 +155,13 @@ export class AppComponent {
                 }
                 if (this.mapService.mapView !== undefined) {
                     this.mapService.mapView.viewer.camera.setView({
-                        destination: Cartesian3.fromElements(newPosition.x, newPosition.y, newPosition.z),
+                        destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
                         orientation: newOrientation
                     });
                 }
-                currentParameters.x = newPosition.x;
-                currentParameters.y = newPosition.y;
-                currentParameters.z = newPosition.z;
+                currentParameters.lon = newPosition.lon;
+                currentParameters.lat = newPosition.lat;
+                currentParameters.alt = newPosition.alt;
                 currentParameters.heading = newOrientation.heading;
                 currentParameters.roll = newOrientation.roll;
                 currentParameters.pitch = newOrientation.pitch;
@@ -214,11 +214,10 @@ export class AppComponent {
                     styles = JSON.parse(params["styles"]);
                 }
                 let currentStyles = new Array<string>();
-                [...this.styleService.activatedStyles.keys()].forEach(id => {
-                    const isActivated = styles.includes(id);
-                    this.styleService.activatedStyles.set(id, isActivated);
-                    if (isActivated) {
-                        currentStyles.push(id);
+                styles.forEach(styleId => {
+                    if (this.styleService.activatedStyles.has(styleId)) {
+                        this.styleService.activatedStyles.set(styleId, true);
+                        currentStyles.push(styleId);
                     }
                 })
                 if (currentStyles) {

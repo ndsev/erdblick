@@ -309,16 +309,17 @@ body {
     .maps-container {
         overflow: auto;
         max-height: calc(100vh - 30.5em);
+        margin-top: 0.25em;
 
         .map-container {
-            margin-top: 0.75em;
+            margin-top: 0.5em;
 
             .map-header {
                 font-size: 0.9em;
             }
 
             &:first-child {
-                margin-top: 0.25em;
+                margin-top: 0;
             }
         }
     }
@@ -326,6 +327,7 @@ body {
     .styles-container {
         overflow: auto;
         max-height: 10em;
+        margin-top: 0.25em;
     }
 
     .flex-container {
@@ -353,6 +355,12 @@ body {
                 width: 2em;
                 height: 2em;
                 box-shadow: none;
+            }
+
+            .p-fileupload {
+                span {
+                    box-shadow: none;
+                }
             }
 
             .p-inputnumber-buttons-horizontal .p-inputnumber-input {

@@ -1,10 +1,9 @@
-import {Component} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
 import {StyleService} from "./style.service";
-import {ErdblickModel} from "./erdblick.model";
 import {ParametersService} from "./parameters.service";
-import {map} from "rxjs";
+import {FileUpload} from "primeng/fileupload";
 
 
 @Component({
@@ -77,6 +76,49 @@ import {map} from "rxjs";
                                       label="" pTooltip="Reload style"
                                       tooltipPosition="bottom">
                             </p-button>
+                            <p-button (click)="exportStyle(style.key, false)"
+                                      icon="pi pi-file-export"
+                                      label="" pTooltip="Export style"
+                                      tooltipPosition="bottom">
+                            </p-button>
+                        </div>
+                    </div>
+                </div>
+                <div *ngIf="styleService.activatedImportedStyles.size" class="styles-container">
+                    <div *ngFor="let style of styleService.activatedImportedStyles | keyvalue" class="flex-container">
+                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
+                            {{ style.key }}
+                        </span>
+                        <div class="layer-controls style-controls">
+                            <p-button (click)="toggleImportedStyle(style.key)"
+                                      icon="{{style.value ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                      label="" pTooltip="Toggle style"
+                                      tooltipPosition="bottom">
+                            </p-button>
+                            <p-button (click)="removeStyle(style.key)"
+                                      icon="pi pi-trash"
+                                      label="" pTooltip="Remove style"
+                                      tooltipPosition="bottom">
+                            </p-button>
+                            <p-button (click)="exportStyle(style.key, true)"
+                                      icon="pi pi-file-export"
+                                      label="" pTooltip="Export style"
+                                      tooltipPosition="bottom">
+                            </p-button>
+                        </div>
+                    </div>
+                </div>
+                <div class="styles-container">
+                    <div class="flex-container">
+                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em"></span>
+                        <div class="layer-controls style-controls">
+                            <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import"
+                                          [customUpload]="true" [fileLimit]="1" [multiple]="false"
+                                          accept=".yaml" [maxFileSize]="1048576"
+                                          (uploadHandler)="importStyle($event)"
+                                          pTooltip="Import style" tooltipPosition="bottom" 
+                                          class="import-dialog" #styleUploader>
+                            </p-fileUpload>
                         </div>
                     </div>
                 </div>
@@ -93,6 +135,7 @@ export class MapPanelComponent {
 
     layerDialogVisible: boolean = false;
     mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
+    @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
@@ -195,14 +238,56 @@ export class MapPanelComponent {
             } else {
                 parameters.styles = parameters.styles.filter(style => style != styleId);
             }
-            console.log(parameters.styles);
             this.parameterService.parameters.next(parameters);
         }
         this.mapService.reapplyStyle(styleId);
     }
 
+    toggleImportedStyle(styleId: string) {
+        const isActivated = !this.styleService.activatedImportedStyles.get(styleId);
+        this.styleService.activatedImportedStyles.set(styleId, isActivated);
+        this.mapService.reapplyStyle(styleId, true);
+    }
+
     reloadStyle(styleId: string) {
         this.styleService.activatedStyles.set(styleId, true);
         this.mapService.reloadStyle(styleId);
+    }
+
+    exportStyle(styleId: string, imported: boolean) {
+        if(!this.styleService.exportStyle(styleId, imported)) {
+            this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
+        }
+    }
+
+    importStyle(event: any) {
+        if (event.files && event.files.length > 0) {
+            const file: File = event.files[0];
+            let styleId = file.name;
+            if (styleId.toLowerCase().endsWith(".yaml")) {
+                styleId = styleId.slice(0, -5);
+            } else if (styleId.toLowerCase().endsWith(".yml")) {
+                styleId = styleId.slice(0, -4);
+            }
+            styleId = `${styleId} (Imported)`
+            this.styleService.importStyle(event, file, styleId, this.styleUploader).subscribe(
+                (next) => {
+                    if (next) {
+                        this.mapService.loadImportedStyle(styleId);
+                    } else {
+                        this.messageService.showError(`Could not read empty data for: ${styleId}`);
+                    }
+                },
+                (error) => {
+                    this.messageService.showError(`Error occurred while trying to import style: ${styleId}`);
+                    console.log(error);
+                }
+            );
+        }
+    }
+
+    removeStyle(styleId: string) {
+        this.mapService.removeImportedStyle(styleId);
+        this.styleService.removeImportedStyle(styleId);
     }
 }

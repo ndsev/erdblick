@@ -22,7 +22,7 @@ import {MapService} from "./map.service";
         }
     `]
 })
-export class MenuComponent {
+export class SearchMenuComponent {
 
     searchItems: Array<JumpTarget> = [];
     value: string = "";
@@ -66,14 +66,14 @@ export class MenuComponent {
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInGM(value) },
-                        validate: (value: string) => { return this.validateGM(value) }
+                        validate: (value: string) => { return this.validateWGS84(value, false) }
                     },
                     {
                         name: "Open WGS84 Lat-Lon in Open Street Maps",
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInOSM(value) },
-                        validate: (value: string) => { return this.validateOSM(value) }
+                        validate: (value: string) => { return this.validateWGS84(value, false) }
                     }
                 ]
             ];
@@ -233,14 +233,7 @@ export class MenuComponent {
     }
 
     validateWGS84(value: string, isLonLat: boolean = false) {
-        return this.parseWgs84Coordinates(value, isLonLat) !== undefined;
-    }
-
-    validateGM(value: string) {
-        return this.parseWgs84Coordinates(value, false) !== undefined;
-    }
-
-    validateOSM(value: string) {
-        return this.parseWgs84Coordinates(value, false) !== undefined;
+        const coords = this.parseWgs84Coordinates(value, isLonLat);
+        return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
     }
 }

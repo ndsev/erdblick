@@ -38,6 +38,7 @@ export class ErdblickModel {
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
     private coreLib: any;
     private styles: Map<string, ErdblickStyleData> | null;
+    private importedStyles: Map<string, ErdblickStyleData> | null;
     private maps: Map<string, ErdblickMap> | null;
     private loadedTileLayers: Map<any, any>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
@@ -65,6 +66,7 @@ export class ErdblickModel {
                 public parametersService: ParametersService) {
         this.coreLib = coreLibrary;
         this.styles = null;
+        this.importedStyles = null;
         this.maps = null;
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
@@ -176,12 +178,24 @@ export class ErdblickModel {
                 if (style) style.featureLayerStyle.delete();
             });
         }
+        if (this.importedStyles) {
+            this.importedStyles.forEach((style: ErdblickStyleData, _) => {
+                if (style) style.featureLayerStyle.delete();
+            });
+        }
         this.styles = new Map<string, ErdblickStyleData>();
+        this.importedStyles = new Map<string, ErdblickStyleData>();
 
         this.styleService.styleData.forEach((styleString: string, styleId: string) => {
             const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString);
             if (erdblickStyleData !== undefined && erdblickStyleData) {
                 this.styles!.set(styleId, erdblickStyleData);
+            }
+        });
+        this.styleService.importedStyleData.forEach((styleString: string, styleId: string) => {
+            const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString, true);
+            if (erdblickStyleData !== undefined && erdblickStyleData) {
+                this.importedStyles!.set(styleId, erdblickStyleData);
             }
         });
 
@@ -198,23 +212,43 @@ export class ErdblickModel {
             this.styles.forEach((style, styleId) => {
                 this.renderTileLayer(tileLayer, style, styleId);
             });
+            this.importedStyles.forEach((style, styleId) => {
+                this.renderTileLayer(tileLayer, style, styleId);
+            });
         }
         console.log("Loaded styles.");
         console.log(this.styles);
     }
 
-    private loadErdblickStyleData(styleId: string, styleString: string): ErdblickStyleData | undefined {
-        if (this.styleService.activatedStyles.has(styleId)) {
-            const styleUint8Array = this.textEncoder.encode(styleString);
-            // Parse the style description into a WASM style object.
-            return uint8ArrayToWasm(this.coreLib,
-                (wasmBuffer: any) => {
-                    return {
-                        enabled: this.styleService.activatedStyles.get(styleId)!,
-                        featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
-                    }
-                },
-                styleUint8Array);
+    private loadErdblickStyleData(styleId: string, styleString: string, imported: boolean = false): ErdblickStyleData | undefined {
+        if (!imported) {
+            if (this.styleService.activatedStyles.has(styleId)) {
+                const styleUint8Array = this.textEncoder.encode(styleString);
+                // Parse the style description into a WASM style object.
+                return uint8ArrayToWasm(this.coreLib,
+                    (wasmBuffer: any) => {
+                        return {
+                            enabled: this.styleService.activatedStyles.get(styleId)!,
+                            featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
+                        }
+                    },
+                    styleUint8Array);
+            }
+        } else {
+            console.log("I AM OVER THERE")
+            if (this.styleService.activatedImportedStyles.has(styleId)) {
+                console.log("I AM OVER OVER THERE")
+                const styleUint8Array = this.textEncoder.encode(styleString);
+                // Parse the style description into a WASM style object.
+                return uint8ArrayToWasm(this.coreLib,
+                    (wasmBuffer: any) => {
+                        return {
+                            enabled: this.styleService.activatedImportedStyles.get(styleId)!,
+                            featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
+                        }
+                    },
+                    styleUint8Array);
+            }
         }
         return undefined;
     }
@@ -247,35 +281,99 @@ export class ErdblickModel {
         console.log(`Reloaded style: ${styleId}.`);
     }
 
-    private reapplyStyle(styleId: string) {
-        if (this.styles && this.styles.has(styleId)) {
-            const isActivated = this.styleService.activatedStyles.get(styleId);
-            if (isActivated === undefined) return;
-            const style = this.styles!.get(styleId);
-            if (style === undefined) return;
-            style.enabled = isActivated;
-
-            if (isActivated) {
+    cycleImportedStyle(styleId: string, remove= false) {
+        if (this.importedStyles) {
+            if (!this.styleService.importedStyleData.has(styleId)) {
+                console.log(`No style data for: ${styleId}.`);
+                return;
+            }
+            const styleString = this.styleService.importedStyleData.get(styleId);
+            if (styleString === undefined) {
+                console.log(`Could not retrieve style data for: ${styleId}.`);
+                return;
+            }
+            if (remove) {
+                this.importedStyles!.get(styleId)?.featureLayerStyle?.delete();
+                this.importedStyles!.delete(styleId);
+                this.tileVisualizationQueue = [];
                 this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
                     this.tileVisualizationDestructionTopic.next(tileVisu)
                 );
+                this.visualizedTileLayers.delete(styleId);
+            } else {
+                const erdblickStyleData= this.loadErdblickStyleData(styleId, styleString, true);
+                if (erdblickStyleData !== undefined && erdblickStyleData) {
+                    this.importedStyles!.set(styleId, erdblickStyleData);
+                }
                 this.visualizedTileLayers.set(styleId, []);
                 for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                    this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
+                    this.renderTileLayer(tileLayer, this.importedStyles!.get(styleId), styleId);
                 }
-            } else {
-                this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                    this.tileVisualizationDestructionTopic.next(tileVisu)
-                );
-                this.visualizedTileLayers.set(styleId, []);
             }
-            console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+        }
+        console.log(`Cycled imported style: ${styleId}.`);
+    }
+
+    private reapplyStyle(styleId: string, imported: boolean = false) {
+        console.log("I AM HERE")
+        if (!imported) {
+            if (this.styles && this.styles.has(styleId)) {
+                const isActivated = this.styleService.activatedStyles.get(styleId);
+                if (isActivated === undefined) return;
+                const style = this.styles!.get(styleId);
+                if (style === undefined) return;
+                style.enabled = isActivated;
+
+                if (isActivated) {
+                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                        this.tileVisualizationDestructionTopic.next(tileVisu)
+                    );
+                    this.visualizedTileLayers.set(styleId, []);
+                    for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                        this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
+                    }
+                } else {
+                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                        this.tileVisualizationDestructionTopic.next(tileVisu)
+                    );
+                    this.visualizedTileLayers.set(styleId, []);
+                }
+                console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+            }
+        } else {
+            console.log("I AM THERE")
+            if (this.importedStyles && this.importedStyles.has(styleId)) {
+                console.log("I AM DEEPER THERE")
+                const isActivated = this.styleService.activatedImportedStyles.get(styleId);
+                console.log(isActivated)
+                if (isActivated === undefined) return;
+                const style = this.importedStyles!.get(styleId);
+                console.log(style)
+                if (style === undefined) return;
+                style.enabled = isActivated;
+
+                if (isActivated) {
+                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                        this.tileVisualizationDestructionTopic.next(tileVisu)
+                    );
+                    this.visualizedTileLayers.set(styleId, []);
+                    for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                        this.renderTileLayer(tileLayer, this.importedStyles!.get(styleId), styleId);
+                    }
+                } else {
+                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                        this.tileVisualizationDestructionTopic.next(tileVisu)
+                    );
+                    this.visualizedTileLayers.set(styleId, []);
+                }
+                console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+            }
         }
     }
 
-    reapplyStyles(styleIds: Array<string>) {
+    reapplyStyles(styleIds: Array<string>, imported: boolean = false) {
         this.tileVisualizationQueue = [];
-        styleIds.forEach(styleId => this.reapplyStyle(styleId));
+        styleIds.forEach(styleId => this.reapplyStyle(styleId, imported));
         console.log("visualizedTileLayers", this.visualizedTileLayers)
         console.log("tileVisualizationQueue", this.tileVisualizationQueue)
     }

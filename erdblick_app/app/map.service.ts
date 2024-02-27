@@ -59,9 +59,21 @@ export class MapService {
         }
     }
 
-    reapplyStyle(styleId: string) {
+    reapplyStyle(styleId: string, imported: boolean = false) {
         if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.reapplyStyles([styleId]);
+            this.mapModel.getValue()!.reapplyStyles([styleId], imported);
+        }
+    }
+
+    loadImportedStyle(styleId: string) {
+        if (this.mapModel.getValue()) {
+            this.mapModel.getValue()!.cycleImportedStyle(styleId, false);
+        }
+    }
+
+    removeImportedStyle(styleId: string) {
+        if (this.mapModel.getValue()) {
+            this.mapModel.getValue()!.cycleImportedStyle(styleId, true);
         }
     }
 

@@ -90,9 +90,14 @@ export class ErdblickView {
         this.viewer.camera.changed.addEventListener(() => {
             const parameters = this.parameterService.parameters.getValue();
             if (parameters) {
-                parameters.x = this.viewer.camera.position.x;
-                parameters.y = this.viewer.camera.position.y;
-                parameters.z = this.viewer.camera.position.z;
+                const currentPositionCartographic = Cartographic.fromCartesian(
+                    Cartesian3.fromElements(
+                        this.viewer.camera.position.x, this.viewer.camera.position.y, this.viewer.camera.position.z
+                    )
+                );
+                parameters.lon = Math.toDegrees(currentPositionCartographic.longitude);
+                parameters.lat = Math.toDegrees(currentPositionCartographic.latitude);
+                parameters.alt = currentPositionCartographic.height;
                 parameters.heading = this.viewer.camera.heading;
                 parameters.pitch = this.viewer.camera.pitch;
                 parameters.roll = this.viewer.camera.roll;

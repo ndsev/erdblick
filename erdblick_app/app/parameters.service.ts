@@ -2,14 +2,15 @@ import {Injectable} from "@angular/core";
 import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
+import {Cartesian3, Cartographic, Math} from "cesium";
 
 export interface ErdblickParameters {
      heading: number,
      pitch: number,
      roll: number,
-     x: number,
-     y: number,
-     z: number,
+     lon: number,
+     lat: number,
+     alt: number,
      osmOpacity: number,
      osmEnabled: boolean,
      layers: Array<Array<string>>,
@@ -26,7 +27,18 @@ export class ParametersService {
           let parameters = this.loadSavedParameters();
           if (!parameters) {
                const currentOrientation = this.mapService.collectCameraOrientation();
-               const currentPosition = this.mapService.collectCameraPosition();
+               const currentCameraPosition = this.mapService.collectCameraPosition();
+               let currentPosition = null;
+               if (currentCameraPosition) {
+                   const currentPositionCartographic = Cartographic.fromCartesian(
+                       Cartesian3.fromElements(currentCameraPosition.x, currentCameraPosition.y, currentCameraPosition.z)
+                   );
+                   currentPosition = {
+                       lon: Math.toDegrees(currentPositionCartographic.longitude),
+                       lat: Math.toDegrees(currentPositionCartographic.latitude),
+                       alt: currentPositionCartographic.height
+                   }
+               }
                const currentStyles = [...this.styleService.activatedStyles.keys()].filter(key => this.styleService.activatedStyles.get(key));
                let currentLayers = new Array<Array<string>>;
                const mapModel = this.mapService.mapModel.getValue();
@@ -43,9 +55,9 @@ export class ParametersService {
                     heading: currentOrientation ? currentOrientation.heading : 6.0,
                     pitch: currentOrientation ? currentOrientation.pitch : -1.55,
                     roll: currentOrientation ? currentOrientation.roll : 0.25,
-                    x: currentPosition ? currentPosition.x : 19032026.0,
-                    y: currentPosition ? currentPosition.y : 8364456.0,
-                    z: currentPosition ? currentPosition.z : 16224903.0,
+                    lon: currentPosition ? currentPosition.lon : 22.837473,
+                    lat: currentPosition ? currentPosition.lat : 38.490817,
+                    alt: currentPosition ? currentPosition.alt : 16000000,
                     osmOpacity: 30,
                     osmEnabled: true,
                     layers: currentLayers,

@@ -56,7 +56,7 @@ interface Column {
                                             <p-treeTableToggler [rowNode]="rowNode" *ngIf="i === 0" 
                                                                 (click)="$event.stopPropagation()">
                                             </p-treeTableToggler>
-                                            <span>{{ rowData[col.field] }}</span>
+                                            <span (click)="$event.stopPropagation()">{{ rowData[col.field] }}</span>
                                         </div>
                                     </td>
                                 </tr>
