@@ -48,7 +48,10 @@ export class StyleService {
                         });
                         this.erdblickStyles = styleUrls;
                         this.retrieveStyles(styleUrls).then(dataMap => {
-                            this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
+                            if (dataMap.size > 0) {
+                                this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
+                                this.activatedStyles.set(defaultStyle.id, false);
+                            }
                             this.retrieveImportedStyles();
                             this.stylesLoaded.next(true);
                         });
