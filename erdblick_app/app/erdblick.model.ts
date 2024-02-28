@@ -186,6 +186,12 @@ export class ErdblickModel {
         this.styles = new Map<string, ErdblickStyleData>();
         this.importedStyles = new Map<string, ErdblickStyleData>();
 
+        const parameters = this.parametersService.parameters.getValue();
+        if (parameters) {
+            [...this.styleService.activatedStyles.keys()].forEach(styleId =>
+                this.styleService.activatedStyles.set(styleId, parameters.styles.includes(styleId)));
+        }
+
         this.styleService.styleData.forEach((styleString: string, styleId: string) => {
             const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString);
             if (erdblickStyleData !== undefined && erdblickStyleData) {
@@ -216,39 +222,24 @@ export class ErdblickModel {
                 this.renderTileLayer(tileLayer, style, styleId);
             });
         }
+
         console.log("Loaded styles.");
         console.log(this.styles);
     }
 
     private loadErdblickStyleData(styleId: string, styleString: string, imported: boolean = false): ErdblickStyleData | undefined {
-        if (!imported) {
-            if (this.styleService.activatedStyles.has(styleId)) {
-                const styleUint8Array = this.textEncoder.encode(styleString);
-                // Parse the style description into a WASM style object.
-                return uint8ArrayToWasm(this.coreLib,
-                    (wasmBuffer: any) => {
-                        return {
-                            enabled: this.styleService.activatedStyles.get(styleId)!,
-                            featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
-                        }
-                    },
-                    styleUint8Array);
-            }
-        } else {
-            console.log("I AM OVER THERE")
-            if (this.styleService.activatedImportedStyles.has(styleId)) {
-                console.log("I AM OVER OVER THERE")
-                const styleUint8Array = this.textEncoder.encode(styleString);
-                // Parse the style description into a WASM style object.
-                return uint8ArrayToWasm(this.coreLib,
-                    (wasmBuffer: any) => {
-                        return {
-                            enabled: this.styleService.activatedImportedStyles.get(styleId)!,
-                            featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
-                        }
-                    },
-                    styleUint8Array);
-            }
+        const isAvailable = imported ? this.styleService.activatedImportedStyles.has(styleId) : this.styleService.activatedStyles.has(styleId);
+        if (isAvailable) {
+            const styleUint8Array = this.textEncoder.encode(styleString);
+            // Parse the style description into a WASM style object.
+            return uint8ArrayToWasm(this.coreLib,
+                (wasmBuffer: any) => {
+                    return {
+                        enabled: imported ? this.styleService.activatedImportedStyles.get(styleId)! : this.styleService.activatedStyles.get(styleId)!,
+                        featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
+                    }
+                },
+                styleUint8Array);
         }
         return undefined;
     }
@@ -315,7 +306,6 @@ export class ErdblickModel {
     }
 
     private reapplyStyle(styleId: string, imported: boolean = false) {
-        console.log("I AM HERE")
         if (!imported) {
             if (this.styles && this.styles.has(styleId)) {
                 const isActivated = this.styleService.activatedStyles.get(styleId);
@@ -341,9 +331,7 @@ export class ErdblickModel {
                 console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
             }
         } else {
-            console.log("I AM THERE")
             if (this.importedStyles && this.importedStyles.has(styleId)) {
-                console.log("I AM DEEPER THERE")
                 const isActivated = this.styleService.activatedImportedStyles.get(styleId);
                 console.log(isActivated)
                 if (isActivated === undefined) return;

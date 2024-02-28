@@ -209,21 +209,23 @@ export class AppComponent {
                     currentParameters.layers = currentLayers;
                 }
 
-                let styles = currentParameters.styles;
-                if (params["styles"]) {
-                    styles = JSON.parse(params["styles"]);
-                }
-                let currentStyles = new Array<string>();
-                styles.forEach(styleId => {
-                    if (this.styleService.activatedStyles.has(styleId)) {
-                        this.styleService.activatedStyles.set(styleId, true);
-                        currentStyles.push(styleId);
+                if (!this.firstParamUpdate) {
+                    let styles = currentParameters.styles;
+                    if (params["styles"]) {
+                        styles = JSON.parse(params["styles"]);
                     }
-                })
-                if (currentStyles) {
-                    currentParameters.styles = currentStyles;
+                    let currentStyles = new Array<string>();
+                    styles.forEach(styleId => {
+                        if (this.styleService.activatedStyles.has(styleId)) {
+                            this.styleService.activatedStyles.set(styleId, true);
+                            currentStyles.push(styleId);
+                        }
+                    })
+                    if (currentStyles) {
+                        currentParameters.styles = currentStyles;
+                    }
+                    this.parametersService.parameters.next(currentParameters);
                 }
-                this.parametersService.parameters.next(currentParameters);
 
                 if (Object.keys(params).length && this.firstParamUpdate) {
                     this.mapService.mapModel.getValue()?.update();
