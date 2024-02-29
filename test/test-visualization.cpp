@@ -12,7 +12,7 @@ TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
 {
     TileLayerParser tlp;
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
-    FeatureLayerVisualization visualization(TestDataProvider::style(), testLayer);
+    FeatureLayerVisualization visualization(TestDataProvider::style(), {testLayer});
     auto result = visualization.primitiveCollection();
     std::cout << result << std::endl;
     REQUIRE(!result.empty());

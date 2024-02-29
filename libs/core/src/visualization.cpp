@@ -1,42 +1,43 @@
 #include "visualization.h"
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
-#include "simfil/overlay.h"
+#include "geometry.h"
 
 #include <iostream>
 
 using namespace mapget;
 
-namespace erdblick {
+namespace erdblick
+{
 
-namespace {
-mapget::Point geometryCenter(mapget::model_ptr<Geometry> const& g) {
-    // First, find average position of the geometry.
-    // Then, sort points by distance to center.
-
-    // If it is a line, and the number of points is even, return average of the two closest.
-    // Otherwise, return just the closest.
-
-    // There is an optimization we can do here for meshes:
-    // If the center is not inside the mesh:
-    // Take a line from the center through the closest point.
-    // Average the positions of all triangles which intersect this line.
-
-    return {};
-}
-}
-
-FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& style, const std::shared_ptr<mapget::TileFeatureLayer>& layer)
+FeatureLayerVisualization::FeatureLayerVisualization(
+    const FeatureLayerStyle& style,
+    const std::vector<std::shared_ptr<TileFeatureLayer>>& layers,
+    uint32_t highlightFeatureIndex)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
-      tile_(layer)
+      tile_(layers[0]),
+      allTiles_(layers),
+      highlightFeatureIndex_(highlightFeatureIndex)
 {
     uint32_t featureId = 0;
     for (auto&& feature : *tile_) {
+        if (highlightFeatureIndex_ != UnselectableId) {
+            if (featureId != highlightFeatureIndex) {
+                ++featureId;
+                continue;
+            }
+        }
+
         for (auto&& rule : style.rules()) {
+            if (highlightFeatureIndex_ != UnselectableId) {
+                if (rule.mode() != FeatureStyleRule::Highlight)
+                    continue;
+            }
+
             if (auto* matchingSubRule = rule.match(*feature)) {
                 addFeature(feature, featureId, *matchingSubRule);
                 featuresAdded_ = true;
@@ -46,7 +47,8 @@ FeatureLayerVisualization::FeatureLayerVisualization(const FeatureLayerStyle& st
     }
 }
 
-NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
+NativeJsValue FeatureLayerVisualization::primitiveCollection() const
+{
     if (!featuresAdded_)
         return {};
     auto collection = Cesium().PrimitiveCollection.New();
@@ -81,7 +83,20 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
     return *collection;
 }
 
-void FeatureLayerVisualization::addFeature(model_ptr<Feature>& feature, uint32_t id, FeatureStyleRule const& rule)
+NativeJsValue FeatureLayerVisualization::externalReferences()
+{
+    return *externalRelationReferences_;
+}
+
+void FeatureLayerVisualization::processResolvedExternalReferences(
+    const NativeJsValue& extRefsResolved)
+{
+}
+
+void FeatureLayerVisualization::addFeature(
+    model_ptr<Feature>& feature,
+    uint32_t id,
+    FeatureStyleRule const& rule)
 {
     if (rule.aspect() == FeatureStyleRule::Feature) {
         feature->geom()->forEachGeometry(
@@ -93,38 +108,16 @@ void FeatureLayerVisualization::addFeature(model_ptr<Feature>& feature, uint32_t
             });
     }
     else if (rule.aspect() == FeatureStyleRule::Relation) {
-        feature->forEachRelation([&](auto&& relation) {
-            // Resolve target feature.
-            // Future: Recursively collect relations, merge pairs.
-            auto targetRef = relation->target();
-            auto targetFeature = tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
-
-            if (!targetFeature) {
-                // TODO: Use locate for unresolvable features.
-                std::cerr << "Unresolved relation target." << std::endl;
-                return true;
-            }
-
-            // Create simfil evaluation context for the rule.
-            // Based on relation, annotate with $source and $target.
-            // Future: Annotate with $bidirectional
-
-            // Create line geometry which connects source and
-            // target feature. TODO: geom()->center()
-
-            // If sourceRule is set:
-            // Run source geometry visualization.
-
-            // If targetRule is set:
-            // Run target geometry visualization.
-            return true;
-        });
     }
 }
 
-void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule) {
+void FeatureLayerVisualization::addGeometry(
+    model_ptr<Geometry> const& geom,
+    uint32_t id,
+    FeatureStyleRule const& rule)
+{
     switch (geom->geomType()) {
-    case mapget::Geometry::GeomType::Polygon:
+    case Geometry::GeomType::Polygon:
         if (auto verts = encodeVerticesAsList(geom)) {
             if (rule.flat())
                 coloredGroundMeshes_.addPolygon(*verts, rule, id);
@@ -132,47 +125,19 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
                 coloredNontrivialMeshes_.addPolygon(*verts, rule, id);
         }
         break;
-    case mapget::Geometry::GeomType::Line:
-        if (rule.hasArrow() && rule.hasDoubleArrow()) {
-            if (auto vertsPair = encodeVerticesAsReversedSplitList(geom)) {
-                getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->first, rule, id);
-                getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->second, rule, id);
-            }
-        }
-        else {
-            if (auto verts = encodeVerticesAsList(geom)) {
-                if (rule.flat()) {
-                    if (rule.isDashed()) {
-                        getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
-                    }
-                    else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
-                        getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
-                    }
-                    else {
-                        coloredGroundLines_.addPolyLine(*verts, rule, id);
-                    }
-                }
-                else {
-                    if (rule.isDashed()) {
-                        getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
-                    } else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
-                        getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
-                    } else {
-                        coloredLines_.addPolyLine(*verts, rule, id);
-                    }
-                }
-            }
-        }
+    case Geometry::GeomType::Line:
+        addPolyLine(geom, rule, id);
         break;
-    case mapget::Geometry::GeomType::Mesh:
+    case Geometry::GeomType::Mesh:
         if (auto verts = encodeVerticesAsFloat64Array(geom)) {
             coloredTrivialMeshes_.addTriangles(*verts, rule, id);
         }
         break;
-    case mapget::Geometry::GeomType::Points:
+    case Geometry::GeomType::Points:
         geom->forEachPoint(
-            [this, &rule, &id](auto&& vertex) {
-                auto cartesian = JsValue(wgsToCartesian<mapget::Point>(vertex));
+            [this, &rule, &id](auto&& vertex)
+            {
+                auto cartesian = JsValue(wgsToCartesian<Point>(vertex));
                 coloredPoints_.addPoint(cartesian, rule, id);
                 return true;
             });
@@ -180,12 +145,15 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
     }
 }
 
-std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsList(model_ptr<Geometry> const& geom) {
+std::optional<JsValue>
+FeatureLayerVisualization::encodeVerticesAsList(model_ptr<Geometry> const& geom)
+{
     auto jsPoints = JsValue::List();
     uint32_t count = 0;
     geom->forEachPoint(
-        [&count, &jsPoints](auto&& vertex) {
-            jsPoints.push(JsValue(wgsToCartesian<mapget::Point>(vertex)));
+        [&count, &jsPoints](auto&& vertex)
+        {
+            jsPoints.push(JsValue(wgsToCartesian<Point>(vertex)));
             ++count;
             return true;
         });
@@ -228,12 +196,15 @@ std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVert
     return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
 }
 
-std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsFloat64Array(model_ptr<Geometry> const& geom) {
+std::optional<JsValue>
+FeatureLayerVisualization::encodeVerticesAsFloat64Array(model_ptr<Geometry> const& geom)
+{
     std::vector<double> cartesianCoords;
-    cartesianCoords.reserve(geom->numPoints()*3);
+    cartesianCoords.reserve(geom->numPoints() * 3);
     geom->forEachPoint(
-        [&cartesianCoords](auto&& vertex) {
-            auto cartesian = wgsToCartesian<mapget::Point>(vertex);
+        [&cartesianCoords](auto&& vertex)
+        {
+            auto cartesian = wgsToCartesian<Point>(vertex);
             cartesianCoords.push_back(cartesian.x);
             cartesianCoords.push_back(cartesian.y);
             cartesianCoords.push_back(cartesian.z);
@@ -262,6 +233,126 @@ CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForArrowMaterial(const F
         return &(iter->second);
     }
     return &(arrowMap.try_emplace(key, CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat())).first->second);
+}
+
+void erdblick::FeatureLayerVisualization::addLine(
+    const Point& a,
+    const Point& b,
+    uint32_t id,
+    const erdblick::FeatureStyleRule& rule)
+{
+    addPolyLine({a, b}, rule, id);
+}
+
+void FeatureLayerVisualization::addPolyLine(std::variant<std::vector<mapget::Point>, <mapget::geom_ptr<Geometry>> const& geom, const FeatureStyleRule& rule, uint32_t id)
+{
+    if (rule.hasArrow() && rule.hasDoubleArrow()) {
+        if (auto vertsPair = encodeVerticesAsReversedSplitList(geom)) {
+            getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->first, rule, id);
+            getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->second, rule, id);
+        }
+    }
+    else {
+        if (auto verts = encodeVerticesAsList(geom)) {
+            if (rule.flat()) {
+                if (rule.isDashed()) {
+                    getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
+                }
+                else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
+                    getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
+                }
+                else {
+                    coloredGroundLines_.addPolyLine(*verts, rule, id);
+                }
+            }
+            else {
+                if (rule.isDashed()) {
+                    getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
+                } else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
+                    getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
+                } else {
+                    coloredLines_.addPolyLine(*verts, rule, id);
+                }
+            }
+        }
+    }
+}
+
+RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
+    const FeatureStyleRule* rule,
+    mapget::model_ptr<mapget::Feature> f,
+    FeatureLayerVisualization& visu)
+    : rule_(rule), visu_(visu)
+{
+    unexploredRelations_.emplace_back(std::move(f));
+    populateRelationsToVisualize();
+}
+
+void RecursiveRelationVisualizationState::populateRelationsToVisualize()
+{
+    while (!unexploredRelations_.empty()) {
+        auto nextFeature = unexploredRelations_.front();
+        unexploredRelations_.pop_front();
+
+        nextFeature->forEachRelation(
+            [&](auto const& relation)
+            {
+                // Resolve target feature.
+                auto targetRef = relation->target();
+                auto targetFeature =
+                    visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+
+                if (!targetFeature) {
+                    // TODO: Use locate for unresolvable features.
+                    std::cerr << "Unresolved relation target." << std::endl;
+                    return true;
+                }
+                return true;
+            });
+    }
+}
+
+void RecursiveRelationVisualizationState::render(
+    const RecursiveRelationVisualizationState::RelationToVisualize& r)
+{
+    // Create simfil evaluation context for the rule.
+    // TODO: Annotate with $twoway
+    simfil::OverlayNode relationEvaluationContext(*relation);
+    relationEvaluationContext
+        .set(visu_.tile_->fieldNames()->emplace("$source"), simfil::Value::field(*f));
+    // TODO: There is flaw here: If the target feature comes
+    //  from a different node, it must be transcoded into the
+    //  same field namespace for simfil to work. The best way
+    //  to do that would be to add a feature copy ctor:
+    // if (targetFeature->model().nodeId() != feature->model().nodeId()) {
+    //     targetFeature = feature->model().newFeature(*targetFeature);
+    // }
+    relationEvaluationContext.set(
+        visu_.tile_->fieldNames()->emplace("$target"),
+        simfil::Value::field(*targetFeature));
+
+    // Create line geometry which connects source and target feature.
+    auto p1lo = geometryCenter(
+        relation->hasSourceValidity() ?
+            relation->sourceValidity() :
+            f->firstGeometry());
+    auto p2lo = geometryCenter(
+        relation->hasSourceValidity() ?
+            relation->sourceValidity() :
+            f->firstGeometry());
+    auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule->relationLineHeightOffset()};
+    auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule->relationLineHeightOffset()};
+    visu_.addLine(p1hi, p2hi, UnselectableId, *rule);
+    if (rule->relationLineEndMarkerStyle()) {
+        visu_.addLine(p1lo, p1hi, UnselectableId, *rule->relationLineEndMarkerStyle());
+        visu_.addLine(p2lo, p2hi, UnselectableId, *rule->relationLineEndMarkerStyle());
+    }
+
+    // TODO: If sourceRule is set:
+    //  Run source geometry visualization.
+
+    // TODO: If targetRule is set:
+    //  Run target geometry visualization.
 }
 
 }  // namespace erdblick
