@@ -109,11 +109,14 @@ export class ErdblickView {
         this.tileVisForPrimitive = new Map();
 
         model.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
-            tileVis.render(this.viewer);
-            tileVis.forEachPrimitive((primitive: any) => {
-                this.tileVisForPrimitive.set(primitive, tileVis);
-            })
-            this.viewer.scene.requestRender();
+            tileVis.render(this.viewer).then(wasRendered => {
+                if (wasRendered) {
+                    tileVis.forEachPrimitive((primitive: any) => {
+                        this.tileVisForPrimitive.set(primitive, tileVis);
+                    })
+                    this.viewer.scene.requestRender();
+                }
+            });
         });
 
         model.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
@@ -246,7 +249,7 @@ export class ErdblickView {
                 return null;
             }
         }
-        return new FeatureWrapper(index, tileVis.tile);
+        return new FeatureWrapper(index, tileVis.tiles);
     }
 
     /**

@@ -31,3 +31,18 @@ export function uint8ArrayToWasm(coreLib: any, fun: any, inputData: any) {
     sharedGlbArray.delete();
     return (result === false) ? null : result;
 }
+
+/**
+ * (Async version)
+ * Copy the contents of a given Uint8Array to a WASM function
+ * through a SharedUint8Array. If the operation fails or the WASM function
+ * returns false, null is returned.
+ */
+export async function uint8ArrayToWasmAsync(coreLib: any, fun: any, inputData: any) {
+    let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
+    let bufferPtr = Number(sharedGlbArray.getPointer());
+    coreLib.HEAPU8.set(inputData, bufferPtr);
+    let result = await fun(sharedGlbArray);
+    sharedGlbArray.delete();
+    return (result === false) ? null : result;
+}

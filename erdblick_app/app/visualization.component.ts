@@ -1,30 +1,48 @@
 import {Cartesian3, Color, Viewer} from "cesium";
 import {FeatureTile} from "./features.component";
-import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
+import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
-/** Bundle of a FeatureTile and a rendered */
+/** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
 export class TileVisualization {
-    tile: FeatureTile;
-    private style: any;
-    isHighDetail: boolean;
+    tiles: Array<FeatureTile>;
+    private readonly coreLib: ErdblickCore;
+    private readonly style: any;
+    readonly isHighDetail: boolean;
     private entity: any;
     private primitiveCollection: any;
     private hasHighDetailVisualization: boolean;
     private hasLowDetailVisualization: boolean;
+    private readonly numFeatures: number;
+    private readonly tileId: number;
+    private renderingInProgress: boolean;
+    private readonly highlight?: number;
+    private deleted: boolean;
 
     /**
      * Create a tile visualization.
-     * @param tile {FeatureTile} The tile to visualize.
+     * @param tiles {FeatureTile} The tile to visualize (first in the list), and additional ones
+     *  which might be used to visualize external references.
      * @param style The style to use for visualization.
      * @param highDetail The level of detail to use. Currently,
      *  a low-detail representation is indicated by `false`, and
      *  will result in a dot representation. A high-detail representation
      *  based on the style can be triggered using `true`.
+     * @param highlight Controls whether the visualization will run rules that
+     *  have `mode: highlight` set, otherwise, only rules with the default
+     *  `mode: normal` are executed.
      */
-    constructor(tile: FeatureTile, style: any, highDetail: any) {
-        this.tile = tile;
+    constructor(tiles: Array<FeatureTile>, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
+        console.assert(tiles.length > 0);
+
+        this.tiles = tiles;
+        this.coreLib = tiles.at(0)!.coreLib;
+        this.numFeatures = tiles.at(0)!.numFeatures;
+        this.tileId = tiles.at(0)!.tileId;
         this.style = style;
         this.isHighDetail = highDetail;
+        this.renderingInProgress = false;
+        this.highlight = highlight;
+        this.deleted = false;
 
         this.entity = null;  // Low-detail or empty -> Cesium point entity.
         this.primitiveCollection = null; // High-detail -> PrimitiveCollection.
@@ -37,19 +55,37 @@ export class TileVisualization {
      * Actually create the visualization.
      * @param viewer {Cesium.Viewer} The viewer to add the rendered entity to.
      */
-    render(viewer: Viewer) {
+    async render(viewer: Viewer) {
+        if (this.renderingInProgress || this.deleted)
+            return;
+
         // Remove any previous render-result, as a new one is generated.
         this.destroy(viewer);
 
         // Do not try to render if the underlying data is disposed.
-        if (this.tile.disposed || this.style.isDeleted()) {
-            return false;
+        if (this.tiles.some(t => t.disposed) || this.style.isDeleted()) {
+            return;
         }
 
         // Create potential high-detail visualization
+        this.renderingInProgress = true;
         if (this.isHighDetailAndNotEmpty()) {
-            this.tile.peek((tileFeatureLayer: TileFeatureLayer) => {
-                let visualization = new this.tile.coreLib.FeatureLayerVisualization(this.style, tileFeatureLayer);
+            await FeatureTile.peekMany(this.tiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
+                let visualization = new this.coreLib.FeatureLayerVisualization(
+                    this.style,
+                    tileFeatureLayers,
+                    this.highlight);
+
+                let extRefs = visualization.externalReferences();
+                if (extRefs.length > 0) {
+                    let extRefsResolved = await fetch("/locate", {body: extRefs});
+                    if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
+                        // Do not continue if any of the tiles or the style
+                        // were deleted while we were waiting.
+                        return;
+                    }
+                    visualization.processResolvedExternalReferences(extRefsResolved);
+                }
                 this.primitiveCollection = visualization.primitiveCollection();
             });
             if (this.primitiveCollection)
@@ -57,8 +93,8 @@ export class TileVisualization {
             this.hasHighDetailVisualization = true;
         } else {
             // Else: Low-detail dot representation
-            let position = this.tile.coreLib.getTilePosition(this.tile.tileId);
-            let color = (this.tile.numFeatures <= 0) ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
+            let position = this.coreLib.getTilePosition(BigInt(this.tileId));
+            let color = (this.numFeatures <= 0) ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
             this.entity = viewer.entities.add({
                 position: Cartesian3.fromDegrees(position.x, position.y),
                 point: {
@@ -68,7 +104,10 @@ export class TileVisualization {
             });
             this.hasLowDetailVisualization = true;
         }
-        return true;
+
+        this.renderingInProgress = false;
+        if (this.deleted)
+            this.destroy(viewer);
     }
 
     /**
@@ -76,6 +115,10 @@ export class TileVisualization {
      * @param viewer {Cesium.Viewer} The viewer to remove the rendered entity from.
      */
     destroy(viewer: Viewer) {
+        this.deleted = true;
+        if (this.renderingInProgress)
+            return;
+
         if (this.primitiveCollection) {
             viewer.scene.primitives.remove(this.primitiveCollection);
             if (!this.primitiveCollection.isDestroyed())
@@ -104,7 +147,7 @@ export class TileVisualization {
      * underlying data is not empty.
      */
     private isHighDetailAndNotEmpty() {
-        return this.isHighDetail && (this.tile.numFeatures > 0 || this.tile.preventCulling);
+        return this.isHighDetail && (this.numFeatures > 0 || this.tiles[0].preventCulling);
     }
 
     /**

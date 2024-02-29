@@ -1,6 +1,8 @@
 "use strict";
 
-import { uint8ArrayToWasm } from "./wasm";
+import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
+import { MainModule as ErdblickCore, TileLayerParser, TileFeatureLayer } from '../../build/libs/core/erdblick-core';
+import {Nullable} from "primeng/ts-helpers";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -15,11 +17,10 @@ export class FeatureTile {
     layerName: string;
     tileId: bigint;
     numFeatures: number;
-    coreLib: any;
-    private parser: any;
+    coreLib: ErdblickCore;
+    private parser: TileLayerParser;
     preventCulling: boolean;
-    private tileFeatureLayerBlob: any;
-    private primitiveCollection: any;
+    private readonly tileFeatureLayerBlob: any;
     disposed: boolean;
 
     /**
@@ -29,7 +30,7 @@ export class FeatureTile {
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib: any, parser: any, tileFeatureLayerBlob: any, preventCulling: any) {
+    constructor(coreLib: ErdblickCore, parser: TileLayerParser, tileFeatureLayerBlob: any, preventCulling: boolean) {
         let mapTileMetadata = uint8ArrayToWasm(coreLib, (wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
@@ -42,7 +43,6 @@ export class FeatureTile {
         this.parser = parser;
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
-        this.primitiveCollection = null;
         this.disposed = false;
     }
 
@@ -51,16 +51,36 @@ export class FeatureTile {
      * delete the deserialized WASM representation.
      * @returns The value returned by the callback.
      */
-    peek(callback: any) {
+    peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
         return uint8ArrayToWasm(this.coreLib, (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
+            let result = null;
             if (callback) {
-                return callback(deserializedLayer);
+                result = callback(deserializedLayer);
             }
             deserializedLayer.delete();
+            return result;
+        }, this.tileFeatureLayerBlob);
+    }
+
+    /**
+     * Async version of the above function.
+     */
+    async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
+        // Deserialize the WASM tileFeatureLayer from the blob.
+        return uint8ArrayToWasmAsync(this.coreLib, async (bufferToRead: any) => {
+            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            // Run the callback with the deserialized layer, and
+            // provide the result as the return value.
+            let result = null;
+            if (callback) {
+                result = await callback(deserializedLayer);
+            }
+            deserializedLayer.delete();
+            return result;
         }, this.tileFeatureLayerBlob);
     }
 
@@ -70,6 +90,38 @@ export class FeatureTile {
     destroy() {
         this.disposed = true;
     }
+
+    /**
+     * Peek into a list of multiple tiles simultaneously. Calls peek recursively,
+     * according to the given tiles array.
+     */
+    static async peekMany(tiles: Array<FeatureTile>, cb: any, result?: Array<TileFeatureLayer>) {
+        // Check if callback is provided
+        if (!cb) {
+            return;
+        }
+
+        // Termination condition for recursion.
+        if (tiles.length === 0) {
+            // All tiles parsed, run callback.
+            cb(result);
+            return;
+        }
+
+        // Get the next tile to process.
+        const nextTile = tiles[0];
+
+        // Remove the processed tile from the list.
+        tiles = tiles.slice(1);
+
+        // Check if nextTile is not undefined or null.
+        await nextTile.peekAsync(async parsedTile => {
+            // Add parsed tile to result.
+            result!.push(parsedTile!);
+            // Recurse with the remaining tiles.
+            await FeatureTile.peekMany(tiles, cb, result);
+        });
+    }
 }
 
 /**
@@ -78,7 +130,7 @@ export class FeatureTile {
  * possible to access the WASM feature view in a memory-safe way.
  */
 export class FeatureWrapper {
-    private index: number;
+    private readonly index: number;
     private featureTile: FeatureTile;
 
     /**
