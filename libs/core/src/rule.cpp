@@ -62,6 +62,20 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             return;
         }
     }
+    if (yaml["mode"].IsDefined()) {
+        // Parse the feature aspect that is covered by this rule.
+        auto modeStr = yaml["mode"].as<std::string>();
+        if (modeStr == "normal") {
+            mode_ = Normal;
+        }
+        else if (modeStr == "highlight") {
+            mode_ = Highlight;
+        }
+        else {
+            std::cout << "Unsupported mode: " << modeStr << std::endl;
+            return;
+        }
+    }
     if (yaml["type"].IsDefined()) {
         // Parse a feature type regular expression, e.g. `Lane|Boundary`
         type_ = yaml["type"].as<std::string>();
@@ -69,6 +83,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["filter"].IsDefined()) {
         // Parse a simfil filter expression, e.g. `properties.functionalRoadClass == 4`
         filter_ = yaml["filter"].as<std::string>();
+    }
+    if (yaml["selectable"].IsDefined()) {
+        // Parse the selectable flag.
+        selectable_ = yaml["selectable"].as<bool>();
     }
     if (yaml["color"].IsDefined()) {
         // Parse a CSS color
@@ -173,7 +191,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
     }
 
     // Filter by simfil expression.
-    if (!filter_.empty()) {
+    if (aspect_ == Feature && !filter_.empty()) {
         if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
@@ -295,6 +313,16 @@ bool FeatureStyleRule::relationRecursive() const
 std::optional<std::string> const& FeatureStyleRule::relationMergeTwoWay() const
 {
     return relationMergeTwoWay_;
+}
+
+bool FeatureStyleRule::selectable() const
+{
+    return selectable_;
+}
+
+FeatureStyleRule::Mode FeatureStyleRule::mode() const
+{
+    return mode_;
 }
 
 }

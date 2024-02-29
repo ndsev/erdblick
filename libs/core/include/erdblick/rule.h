@@ -23,8 +23,15 @@ public:
         Attribute
     };
 
+    enum Mode {
+        Normal,
+        Highlight
+    };
+
     FeatureStyleRule const* match(mapget::Feature& feature) const;
     [[nodiscard]] Aspect aspect() const;
+    [[nodiscard]] Mode mode() const;
+    [[nodiscard]] bool selectable() const;
     [[nodiscard]] bool supports(mapget::Geometry::GeomType const& g) const;
     [[nodiscard]] glm::fvec4 const& color() const;
     [[nodiscard]] float width() const;
@@ -55,6 +62,8 @@ private:
     }
 
     Aspect aspect_ = Feature;
+    Mode mode_ = Normal;
+    bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::regex> type_;
     std::string filter_;
