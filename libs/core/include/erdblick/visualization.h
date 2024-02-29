@@ -14,6 +14,12 @@ namespace erdblick
 class FeatureLayerVisualization;
 
 /**
+ * Feature ID which is used when the rendered representation is not
+ * supposed to be selectable.
+ */
+static constexpr uint32_t UnselectableId = 0xffffffff;
+
+/**
  * Covers the state for the visualization of a single Relation-Style+Feature
  * combination. For recursive relations, this state may contain references to
  * features in other tiles, which are resolved using the externalReferences()...
@@ -34,7 +40,7 @@ struct RecursiveRelationVisualizationState
         mapget::model_ptr<mapget::Relation> relation_;
         mapget::model_ptr<mapget::Feature> sourceFeature_;
         mapget::model_ptr<mapget::Feature> targetFeature_;
-        bool bidirectional_ = false;
+        bool twoway_ = false;
     };
 
     std::vector<RelationToVisualize*> externalRelationReferenceNodes_;
@@ -54,8 +60,6 @@ class FeatureLayerVisualization
     friend struct RecursiveRelationVisualizationState;
 
 public:
-    static constexpr uint32_t UnselectableId = 0xffffffff;
-
     /**
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
      * @param style The style to apply to the features in the layer.
@@ -66,22 +70,25 @@ public:
         const std::vector<std::shared_ptr<mapget::TileFeatureLayer>>& layers,
         uint32_t highlightFeatureIndex = UnselectableId);
 
-     /**
-      * Returns a list of external references, which must be resolved.
-      * The list contains tuples, where each tuple contains a pair of
-      * (1) A feature type.
-      * (2) A list of string-value pairs (Feature ID parts)
-      *
-      * This is called by visualization.ts, which then runs a /locate
-      * call. The result is fed into processResolvedExternalReferences().
-      */
-     [[nodiscard]] NativeJsValue externalReferences();
+    /**
+     * Returns a list of external references, which must be resolved.
+     * The list contains tuples, where each tuple contains a pair of
+     * (1) A feature type.
+     * (2) A list of string-value pairs (Feature ID parts)
+     *
+     * This is called by visualization.ts, which then runs a /locate
+     * call. The result is fed into processResolvedExternalReferences().
+     */
+    [[nodiscard]] NativeJsValue externalReferences();
 
-      /**
-       * Supply a list of resolved external references, corresponding to the
-       * externalReferences() list from the above function.
-       */
-     [[nodiscard]] void processResolvedExternalReferences(NativeJsValue const& extRefsResolved);
+    /**
+     * Supply a list of resolved external references, corresponding to the
+     * externalReferences() list from the above function.
+     *
+     * Each entry in the list consists of a list of Resolution objects.
+     * Each Resolution object has `tileId: <MapTileKey>` and `featureId: [<id-part-field, id-part-value, ...>]` fields.
+     */
+    void processResolvedExternalReferences(NativeJsValue const& extRefsResolvedNative);
 
     /**
      * Returns all non-empty Cesium primitives which resulted from

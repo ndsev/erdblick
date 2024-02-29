@@ -89,8 +89,10 @@ NativeJsValue FeatureLayerVisualization::externalReferences()
 }
 
 void FeatureLayerVisualization::processResolvedExternalReferences(
-    const NativeJsValue& extRefsResolved)
+    const NativeJsValue& extRefsResolvedNative)
 {
+    JsValue extRefsResolved(extRefsResolvedNative);
+
 }
 
 void FeatureLayerVisualization::addFeature(
@@ -316,10 +318,8 @@ void RecursiveRelationVisualizationState::render(
     const RecursiveRelationVisualizationState::RelationToVisualize& r)
 {
     // Create simfil evaluation context for the rule.
-    // TODO: Annotate with $twoway
-    simfil::OverlayNode relationEvaluationContext(*relation);
-    relationEvaluationContext
-        .set(visu_.tile_->fieldNames()->emplace("$source"), simfil::Value::field(*f));
+    simfil::OverlayNode relationEvaluationContext(*r.relation_);
+
     // TODO: There is flaw here: If the target feature comes
     //  from a different node, it must be transcoded into the
     //  same field namespace for simfil to work. The best way
@@ -328,24 +328,30 @@ void RecursiveRelationVisualizationState::render(
     //     targetFeature = feature->model().newFeature(*targetFeature);
     // }
     relationEvaluationContext.set(
+        visu_.tile_->fieldNames()->emplace("$source"),
+        simfil::Value::field(*r.sourceFeature_));
+    relationEvaluationContext.set(
         visu_.tile_->fieldNames()->emplace("$target"),
-        simfil::Value::field(*targetFeature));
+        simfil::Value::field(*r.targetFeature_));
+    relationEvaluationContext.set(
+        visu_.tile_->fieldNames()->emplace("$twoway"),
+        simfil::Value(r.twoway_));
 
     // Create line geometry which connects source and target feature.
     auto p1lo = geometryCenter(
-        relation->hasSourceValidity() ?
-            relation->sourceValidity() :
-            f->firstGeometry());
+        r.relation_->hasSourceValidity() ?
+            r.relation_->sourceValidity() :
+            r.sourceFeature_->firstGeometry());
     auto p2lo = geometryCenter(
-        relation->hasSourceValidity() ?
-            relation->sourceValidity() :
-            f->firstGeometry());
-    auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule->relationLineHeightOffset()};
-    auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule->relationLineHeightOffset()};
-    visu_.addLine(p1hi, p2hi, UnselectableId, *rule);
-    if (rule->relationLineEndMarkerStyle()) {
-        visu_.addLine(p1lo, p1hi, UnselectableId, *rule->relationLineEndMarkerStyle());
-        visu_.addLine(p2lo, p2hi, UnselectableId, *rule->relationLineEndMarkerStyle());
+        r.relation_->hasTargetValidity() ?
+            r.relation_->targetValidity() :
+            r.targetFeature_->firstGeometry());
+    auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule_->relationLineHeightOffset()};
+    auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_->relationLineHeightOffset()};
+    visu_.addLine(p1hi, p2hi, UnselectableId, *rule_);
+    if (rule_->relationLineEndMarkerStyle()) {
+        visu_.addLine(p1lo, p1hi, UnselectableId, *rule_->relationLineEndMarkerStyle());
+        visu_.addLine(p2lo, p2hi, UnselectableId, *rule_->relationLineEndMarkerStyle());
     }
 
     // TODO: If sourceRule is set:

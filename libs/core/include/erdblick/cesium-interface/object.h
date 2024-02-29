@@ -89,11 +89,37 @@ struct JsValue
     void set(std::string const& key, JsValue const& value);
 
     /**
-     * Push a value to a JS list.
+     * Append a value, assuming that this value is a JS list.
      * For EMSCRIPTEN, it will use value_.push(o.value_).
      * For the mock version, it will append the push action to `methodCalls`.
      */
     void push(const JsValue& o);
+
+    /**
+     * Get the value at the specified index, assuming that this
+     * is a list or an object. For both EMSCRIPTEN and the mock version,
+     * it will return value_[i].
+     */
+    template <typename T>
+    JsValue operator[] (T const& index) {
+        return JsValue(value_[index]);
+    }
+
+    /**
+     * Get the list length, assuming that this is a list.
+     * Returns ["length"] for EMSCRIPTEN, and .size() for
+     * the mock version.
+     */
+    [[nodiscard]] uint32_t size() const;
+
+    template <typename T>
+    T as() {
+    #ifdef EMSCRIPTEN
+        return value_.as<T>();
+    #else
+        return value_.get<T>();
+    #endif
+    }
 
     /**
      * Dereference operator to access the underlying value.

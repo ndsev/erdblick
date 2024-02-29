@@ -120,6 +120,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+    if (yaml["relation-type"].IsDefined()) {
+        // Parse a relation type regular expression, e.g. `connectedFrom|connectedTo`
+        relationType_ = yaml["relation-type"].as<std::string>();
+    }
     if (yaml["relation-line-height-offset"].IsDefined()) {
         // Parse vertical offset for relation line in meters.
         relationLineHeightOffset_ = yaml["relation-line-height-offset"].as<float>();
@@ -141,11 +145,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["relation-recursive"].IsDefined()) {
         // Parse whether relations should be resolved recursively.
+        // This is only done if mode==Highlight, and only works for
+        // relations within the same layer.
         relationRecursive_ = yaml["relation-recursive"].as<bool>();
     }
     if (yaml["relation-merge-twoway"].IsDefined()) {
         // Parse whether bidirectional relations should be followed and merged.
-        relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<std::string>();
+        relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<bool>();
     }
     if (yaml["material-color"].IsDefined()) {
         materialColor_ = yaml["material-color"].as<std::string>();
@@ -310,7 +316,7 @@ bool FeatureStyleRule::relationRecursive() const
     return relationRecursive_;
 }
 
-std::optional<std::string> const& FeatureStyleRule::relationMergeTwoWay() const
+bool FeatureStyleRule::relationMergeTwoWay() const
 {
     return relationMergeTwoWay_;
 }
@@ -323,6 +329,11 @@ bool FeatureStyleRule::selectable() const
 FeatureStyleRule::Mode FeatureStyleRule::mode() const
 {
     return mode_;
+}
+
+std::optional<std::regex> const& FeatureStyleRule::relationType()
+{
+    return relationType_;
 }
 
 }

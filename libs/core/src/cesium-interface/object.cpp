@@ -100,6 +100,14 @@ void JsValue::set(const std::string& key, const JsValue& value)
 #endif
 }
 
+uint32_t JsValue::size() const {
+#ifdef EMSCRIPTEN
+    return (*this)["length"];
+#else
+    return value_.size();
+#endif
+}
+
 CesiumClass::CesiumClass(const std::string& className)
     : className_(className)
 {

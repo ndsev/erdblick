@@ -47,12 +47,13 @@ public:
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
 
+    [[nodiscard]] std::optional<std::regex> const& relationType();
     [[nodiscard]] float relationLineHeightOffset() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationSourceStyle() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationTargetStyle() const;
     [[nodiscard]] bool relationRecursive() const;
-    [[nodiscard]] std::optional<std::string> const& relationMergeTwoWay() const;
+    [[nodiscard]] bool relationMergeTwoWay() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -83,12 +84,13 @@ private:
 
     std::vector<FeatureStyleRule> firstOfRules_;
 
+    std::optional<std::regex> relationType_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
     std::shared_ptr<FeatureStyleRule> relationSourceStyle_;
     std::shared_ptr<FeatureStyleRule> relationTargetStyle_;
     bool relationRecursive_ = false;
-    std::optional<std::string> relationMergeTwoWay_;
+    bool relationMergeTwoWay_ = false;
 };
 
 }
