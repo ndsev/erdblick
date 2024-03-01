@@ -1,15 +1,8 @@
-import {Component, OnInit, QueryList, ViewChildren} from '@angular/core';
-import {ErdblickView} from "./erdblick.view";
-import {ErdblickModel} from "./erdblick.model";
-import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
-import {HttpClient} from "@angular/common/http";
-import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
-import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
+import {Component} from '@angular/core';
+import {DebugWindow} from "./debugapi.component";
 import {InfoMessageService} from "./info.service";
 import {JumpTargetService} from "./jump.service";
-import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
-import {ActivatedRoute, Params, Router} from "@angular/router";
-import {Cartesian3} from "cesium";
+import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
@@ -101,9 +94,7 @@ export class PreferencesComponent {
     maxLoadTiles: number = 0;
     maxVisuTiles: number = 0;
 
-    constructor(private httpClient: HttpClient,
-                private router: Router,
-                private messageService: InfoMessageService,
+    constructor(private messageService: InfoMessageService,
                 public mapService: MapService,
                 public jumpToTargetService: JumpTargetService,
                 public styleService: StyleService,

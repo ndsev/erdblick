@@ -5,7 +5,7 @@ import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
 import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
 import {JumpTargetService} from "./jump.service";
-import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
+import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
 import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
@@ -15,26 +15,6 @@ import {OverlayPanel} from "primeng/overlaypanel";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
-
-export interface MapItemLayer extends Object {
-    canRead: boolean;
-    canWrite: boolean;
-    coverage: number[];
-    featureTypes: Object[];
-    layerId: string;
-    type: string;
-    version: Object;
-    zoomLevels: number[];
-}
-
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
-    layers: Map<string, MapItemLayer>;
-    mapId: string;
-    maxParallelJobs: number;
-    nodeId: string;
-    protocolVersion: Map<string, number>;
-}
 
 @Component({
     selector: 'app-root',
@@ -112,32 +92,52 @@ export class AppComponent {
                 })
             });
 
-            this.mapService.mapModel.getValue()!.mapInfoTopic.subscribe((mapInfo: Object) => {
-                let mapItems = new Map<string, ErdblickMap>();
-                Object.entries(mapInfo).forEach(([mapName, mapInfoItem]) => {
-                    let mapLayers: Array<ErdblickLayer> = new Array<ErdblickLayer>();
-                    let firstCoverage = 0n;
-                    Object.entries((mapInfoItem as MapInfoItem).layers).forEach(([layerName, layer]) => {
-                        let layerCoverage = (layer as MapItemLayer).coverage;
-                        if (layerCoverage.length > 0) {
-                            firstCoverage = BigInt(layerCoverage[0]);
+            this.mapService.mapModel.getValue()!.mapInfoTopic.subscribe((mapInfos: Array<MapInfoItem>) => {
+                let mapItems = new Map<string, MapInfoItem>();
+                mapInfos.forEach(mapInfo => {
+                    console.log("MapInfo ", mapInfo)
+                    const mapName: string = mapInfo["mapId"];
+                    let defCoverage = [0n];
+                    let layers = new Map<string, MapItemLayer>();
+                    for (const [layerName, layer] of mapInfo.layers) {
+                        if (layer.coverage.length == 0) {
+                            layer.coverage = defCoverage;
                         }
-                        mapLayers.push({
-                            name: layerName,
-                            coverage: firstCoverage,
+                        layers.set(layerName, {
+                            canRead: layer.canRead,
+                            canWrite: layer.canWrite,
+                            coverage: [...layer.coverage],
+                            featureTypes: [...layer.featureTypes],
+                            layerId: layer.layerId,
+                            type: layer.type,
+                            version: {
+                                major: layer.version.major,
+                                minor: layer.version.minor,
+                                patch: layer.version.patch
+                            },
+                            zoomLevels: [...layer.zoomLevels],
                             level: 13,
                             visible: true
                         });
                         this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapName + '/' + layerName, 13);
-                    })
+                    }
+                    console.log("layers", layers)
                     mapItems.set(mapName, {
-                        mapName: mapName,
-                        coverage: firstCoverage,
+                        extraJsonAttachment: mapInfo.extraJsonAttachment,
+                        layers: layers,
+                        mapId: mapName,
+                        maxParallelJobs: mapInfo.maxParallelJobs,
+                        nodeId: mapInfo.nodeId,
+                        protocolVersion: {
+                            major: mapInfo.protocolVersion.major,
+                            minor: mapInfo.protocolVersion.minor,
+                            patch: mapInfo.protocolVersion.patch
+                        },
                         level: 13,
-                        mapLayers: mapLayers,
                         visible: true
                     });
                 });
+                console.log("mapItems", mapItems)
                 this.mapService.mapModel.getValue()!.availableMapItems.next(mapItems);
             });
 
@@ -190,13 +190,13 @@ export class AppComponent {
                         if (this.mapService.mapModel.getValue()!.layerIdToLevel.has(name)) {
                             this.mapService.mapModel.getValue()!.layerIdToLevel.set(name, level);
                         }
-                        const [mapName, layerName] = name.split('/');
+                        const [encMapName, encLayerName] = name.split('/');
                         this.mapService.mapModel.getValue()!.availableMapItems.getValue().forEach(
-                            (mapItem: ErdblickMap, name: string) => {
-                            if (name == mapName) {
+                            (mapItem: MapInfoItem, mapName: string) => {
+                            if (mapName == encMapName) {
                                 mapItem.visible = true;
-                                mapItem.mapLayers.forEach((mapLayer: ErdblickLayer) => {
-                                    if (mapLayer.name == layerName) {
+                                mapItem.layers.forEach((mapLayer, layerName) => {
+                                    if (layerName == encLayerName) {
                                         mapLayer.visible = true;
                                         currentLayers.push([`${mapName}/${layerName}`, level.toString()])
                                     }

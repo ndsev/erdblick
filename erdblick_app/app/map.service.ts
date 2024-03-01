@@ -3,20 +3,44 @@ import {ErdblickModel} from "./erdblick.model";
 import {ErdblickView} from "./erdblick.view";
 import {BehaviorSubject} from "rxjs";
 
-export interface ErdblickMap {
-    mapName: string;
-    coverage: BigInt;
+export interface MapItemLayer extends Object {
+    canRead: boolean;
+    canWrite: boolean;
+    coverage: Array<bigint>;
+    featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
+    layerId: string;
+    type: string;
+    version: {major: number, minor: number, patch: number};
+    zoomLevels: Array<number>;
     level: number;
-    mapLayers: Array<ErdblickLayer>;
     visible: boolean;
 }
 
-export interface ErdblickLayer {
-    name: string;
-    coverage: BigInt;
+export interface MapInfoItem extends Object {
+    extraJsonAttachment: Object;
+    layers: Map<string, MapItemLayer>;
+    mapId: string;
+    maxParallelJobs: number;
+    nodeId: string;
+    protocolVersion: {major: number, minor: number, patch: number};
     level: number;
     visible: boolean;
 }
+
+// export interface ErdblickMap {
+//     mapName: string;
+//     coverage: BigInt;
+//     level: number;
+//     layers: Array<ErdblickLayer>;
+//     visible: boolean;
+// }
+//
+// export interface ErdblickLayer {
+//     name: string;
+//     coverage: BigInt;
+//     level: number;
+//     visible: boolean;
+// }
 
 @Injectable({providedIn: 'root'})
 export class MapService {

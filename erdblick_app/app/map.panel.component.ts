@@ -1,6 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {ErdblickLayer, ErdblickMap, MapService} from "./map.service";
+import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
@@ -18,10 +18,12 @@ import {FileUpload} from "primeng/fileupload";
                               icon="{{mapService.osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
                     </p-button>
-<!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
+                    <!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
                     <div *ngIf="mapService.osmEnabled" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue" class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()" class="w-full"></p-slider>
+                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue"
+                               class="w-full slider-input"/>
+                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                                  class="w-full"></p-slider>
                     </div>
                 </div>
                 <p-divider></p-divider>
@@ -31,21 +33,21 @@ import {FileUpload} from "primeng/fileupload";
                         <span class="font-bold white-space-nowrap map-header">
                             {{ mapItem.key }}
                         </span>
-                        <div *ngFor="let mapLayer of mapItem.value.mapLayers" class="flex-container">
+                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                                {{ mapLayer.name }}
+                                {{ mapLayer.key }}
                             </span>
                             <div class="layer-controls">
-                                <p-button (click)="toggleLayer(mapItem.key, mapLayer)"
-                                          icon="{{mapLayer.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                <p-button (click)="toggleLayer(mapItem.key, mapLayer.key, mapLayer.value)"
+                                          icon="{{mapLayer.value.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                           label="" pTooltip="Toggle layer" tooltipPosition="bottom">
                                 </p-button>
-                                <p-button *ngIf="mapLayer.coverage" (click)="focus(mapLayer.coverage, $event)"
+                                <p-button *ngIf="mapLayer.value.coverage[0]" (click)="focus(mapLayer.value.coverage[0], $event)"
                                           icon="pi pi-search"
                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom">
                                 </p-button>
-                                <p-inputNumber [(ngModel)]="mapLayer.level"
-                                               (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.name)"
+                                <p-inputNumber [(ngModel)]="mapLayer.value.level"
+                                               (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.key)"
                                                [showButtons]="true" [min]="0" [max]="15"
                                                buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
                                                decrementButtonClass="p-button-secondary"
@@ -116,7 +118,7 @@ import {FileUpload} from "primeng/fileupload";
                                           [customUpload]="true" [fileLimit]="1" [multiple]="false"
                                           accept=".yaml" [maxFileSize]="1048576"
                                           (uploadHandler)="importStyle($event)"
-                                          pTooltip="Import style" tooltipPosition="bottom" 
+                                          pTooltip="Import style" tooltipPosition="bottom"
                                           class="import-dialog" #styleUploader>
                             </p-fileUpload>
                         </div>
@@ -125,7 +127,7 @@ import {FileUpload} from "primeng/fileupload";
             </p-fieldset>
         </p-dialog>
         <p-button (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
-                  pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}" 
+                  pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
     `,
@@ -134,7 +136,7 @@ import {FileUpload} from "primeng/fileupload";
 export class MapPanelComponent {
 
     layerDialogVisible: boolean = false;
-    mapItems: Map<string, ErdblickMap> = new Map<string, ErdblickMap>();
+    mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
 
     constructor(public mapService: MapService,
@@ -163,24 +165,24 @@ export class MapPanelComponent {
 
     onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
         const mapLayerName = `${mapName}/${layerName}`;
-        const level = Number(event.toString());
+        const level = event.toString();
         if (this.mapService.mapModel.getValue()) {
-            this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapLayerName, level);
+            this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapLayerName, Number(level));
             const parameters = this.parameterService.parameters.getValue();
             if (parameters) {
                 const mapItem = this.mapItems.get(mapName);
                 if (mapItem !== undefined) {
-                    mapItem.mapLayers.forEach(mapLayer => {
-                        if (mapLayer.name == layerName && mapLayer.visible) {
+                    for (const [name, layer] of mapItem.layers) {
+                        if (name == layerName && layer.visible) {
                             let includes = false;
                             parameters.layers.forEach(layer => {
                                 includes = layer[0] == mapLayerName;
-                                if (includes) layer[1] = level.toString();
+                                if (includes) layer[1] = level;
                             })
-                            if (!includes) parameters.layers.push([mapLayerName, level.toString()]);
+                            if (!includes) parameters.layers.push([mapLayerName, level]);
                             this.parameterService.parameters.next(parameters);
                         }
-                    });
+                    }
                 }
             }
             this.mapService.mapModel.getValue()!.update();
@@ -208,14 +210,14 @@ export class MapPanelComponent {
         }
     }
 
-    toggleLayer(mapName: string, mapLayer: ErdblickLayer) {
-        const mapLayerName =`${mapName}/${mapLayer.name}`;
+    toggleLayer(mapName: string, layerName: string, mapLayer: MapItemLayer) {
+        const mapLayerName =`${mapName}/${layerName}`;
         mapLayer.visible = !mapLayer.visible;
         if (this.mapService.mapModel.getValue()) {
             const parameters = this.parameterService.parameters.getValue();
             if (parameters) {
                 if (mapLayer.visible) {
-                    parameters.layers.push([mapLayerName, mapLayer.level.toString()]);
+                    parameters.layers.push([mapLayerName, this.mapService.mapModel.getValue()!.layerIdToLevel.get(mapLayerName)!.toString()]);
                 } else {
                     parameters.layers = parameters.layers.filter(layer => layer[0] != mapLayerName);
                 }

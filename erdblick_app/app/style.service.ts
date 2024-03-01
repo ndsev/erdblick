@@ -58,6 +58,7 @@ export class StyleService {
                     }
                 },
                 error: error => {
+                    this.stylesLoaded.next(true);
                     console.log(error);
                 }
             });

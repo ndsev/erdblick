@@ -6,7 +6,7 @@ import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyleData, StyleService} from "./style.service";
-import {ErdblickMap} from "./map.service";
+import {MapInfoItem, MapItemLayer} from "./map.service";
 import {ParametersService} from "./parameters.service";
 
 const infoUrl = "/sources";
@@ -39,7 +39,7 @@ export class ErdblickModel {
     private coreLib: any;
     private styles: Map<string, ErdblickStyleData> | null;
     private importedStyles: Map<string, ErdblickStyleData> | null;
-    private maps: Map<string, ErdblickMap> | null;
+    private maps: Map<string, MapInfoItem> | null;
     private loadedTileLayers: Map<any, any>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: any;
@@ -57,7 +57,7 @@ export class ErdblickModel {
     mapInfoTopic: Subject<any>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
     layerIdToLevel: Map<string, number> = new Map<string, number>();
-    availableMapItems: BehaviorSubject<Map<string, ErdblickMap>> = new BehaviorSubject<Map<string, ErdblickMap>>(new Map<string, ErdblickMap>());
+    availableMapItems: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
 
     private textEncoder: TextEncoder = new TextEncoder();
 
@@ -382,8 +382,64 @@ export class ErdblickModel {
             }, infoBuffer)
             console.log("Loaded data source info.");
         })
-        .withJsonCallback((result: any) => {
-            this.maps = new Map<string, ErdblickMap>(result.map((mapInfo: ErdblickMap) => [mapInfo.mapName, mapInfo]));
+        .withJsonCallback((result: Array<MapInfoItem>) => {
+            const availableMapItems = this.availableMapItems.getValue();
+            this.maps = new Map<string, MapInfoItem>(result.map(mapInfo => {
+                let layers = new Map<string, MapItemLayer>();
+                let defCoverage = [0n];
+                console.log("withJsonCallback", "mapInfo", mapInfo, "layers", mapInfo.layers)
+                Object.entries(mapInfo.layers).forEach(([layerName, layer]) => {
+                    if (layer.coverage.length == 0) {
+                        layer.coverage = defCoverage;
+                    }
+                    layers.set(layerName, {
+                        canRead: layer.canRead,
+                        canWrite: layer.canWrite,
+                        coverage: [...layer.coverage],
+                        featureTypes: [...layer.featureTypes],
+                        layerId: layer.layerId,
+                        type: layer.type,
+                        version: {
+                            major: layer.version.major,
+                            minor: layer.version.minor,
+                            patch: layer.version.patch
+                        },
+                        zoomLevels: [...layer.zoomLevels],
+                        level: 13,
+                        visible: true
+                    });
+                    this.layerIdToLevel.set(mapInfo.mapId + '/' + layerName, 13);
+                });
+                if (availableMapItems.has(mapInfo.mapId)) {
+                    const availableMapItem = this.availableMapItems.getValue().get(mapInfo.mapId)!;
+                    mapInfo.visible = availableMapItem.visible;
+                    mapInfo.level = availableMapItem.level;
+                    for (const [layerName, mapLayer] of layers) {
+                        if (availableMapItem.layers.has(layerName)) {
+                            mapLayer.visible = availableMapItem.layers.get(layerName)!.visible;
+                            mapLayer.level = availableMapItem.layers.get(layerName)!.level;
+                        }
+                    }
+                } else {
+                    mapInfo.visible = true;
+                    mapInfo.level = 13;
+                }
+                console.log("[mapInfo.mapId, mapInfo]", layers);
+                return [mapInfo.mapId, {
+                    extraJsonAttachment: mapInfo.extraJsonAttachment,
+                    layers: layers,
+                    mapId: mapInfo.mapId,
+                    maxParallelJobs: mapInfo.maxParallelJobs,
+                    nodeId: mapInfo.nodeId,
+                    protocolVersion: {
+                        major: mapInfo.protocolVersion.major,
+                        minor: mapInfo.protocolVersion.minor,
+                        patch: mapInfo.protocolVersion.patch
+                    },
+                    level: mapInfo.level,
+                    visible: mapInfo.visible
+                }];
+            }));
             this.mapInfoTopic.next(this.maps);
         })
         .go();
@@ -398,7 +454,7 @@ export class ErdblickModel {
         if (mapItem == undefined) {
             return false;
         }
-        return mapItem.mapLayers.some(mapLayer => mapLayer.name == layerName && mapLayer.visible);
+        return mapItem.layers.has(layerName) && mapItem.layers.get(layerName)!.visible;
     }
 
     update() {
@@ -449,10 +505,10 @@ export class ErdblickModel {
         let requests = [];
         if (this.maps) {
             for (const [mapName, map] of this.maps) {
-                for (const layer of map.mapLayers) {
+                for (const [layerName, _] of map.layers) {
                     // Find tile IDs which are not yet loaded for this map layer combination.
                     let requestTilesForMapLayer = []
-                    let level = this.layerIdToLevel.get(mapName + '/' + layer.name);
+                    let level = this.layerIdToLevel.get(mapName + '/' + layerName);
                     if (level == undefined) {
                         continue;
                     }
@@ -461,8 +517,8 @@ export class ErdblickModel {
                         continue;
                     }
                     for (let tileId of tileIds!) {
-                        const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layer.name, tileId);
-                        if (this.checkMapLayerVisibility(mapName, layer.name)) {
+                        const tileMapLayerKey = this.coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
+                        if (this.checkMapLayerVisibility(mapName, layerName)) {
                             if (!this.loadedTileLayers.has(tileMapLayerKey)) {
                                 requestTilesForMapLayer.push(Number(tileId));
                             }
@@ -477,7 +533,7 @@ export class ErdblickModel {
                     if (requestTilesForMapLayer) {
                         requests.push({
                             mapId: mapName,
-                            layerId: layer.name,
+                            layerId: layerName,
                             tileIds: requestTilesForMapLayer
                         });
                     }

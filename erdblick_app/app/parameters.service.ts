@@ -43,12 +43,12 @@ export class ParametersService {
                let currentLayers = new Array<Array<string>>;
                const mapModel = this.mapService.mapModel.getValue();
                if (mapModel) {
-                    mapModel.availableMapItems.getValue().forEach((mapItem, mapName) => {
-                         mapItem.mapLayers.forEach(mapLayer => {
-                              if (mapLayer.visible) {
-                                   currentLayers.push([`${mapName}/${mapLayer.name}`, mapLayer.level.toString()]);
-                              }
-                         });
+                    mapModel.layerIdToLevel.forEach((level, mapLayerName) => {
+                        const [encMapName, encLayerName] = mapLayerName.split('/');
+                        const visible = mapService.mapModel.getValue()?.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
+                        if (visible !== undefined && visible) {
+                           currentLayers.push([mapLayerName, level.toString()]);
+                        }
                     });
                }
                this.parameters = new BehaviorSubject<ErdblickParameters>({

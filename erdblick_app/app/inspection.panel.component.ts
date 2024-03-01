@@ -1,7 +1,5 @@
 import {Component, OnInit} from "@angular/core";
-import {ErdblickLayer, MapService} from "./map.service";
 import {InfoMessageService} from "./info.service";
-import {StyleService} from "./style.service";
 import {TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService} from "./inspection.service";
 
