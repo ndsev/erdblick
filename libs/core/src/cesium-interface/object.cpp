@@ -82,6 +82,11 @@ JsValue JsValue::operator[](std::string const& propertyName)
 #endif
 }
 
+JsValue JsValue::operator[](uint32_t index) const
+{
+    return JsValue(value_[index]);
+}
+
 void JsValue::push(const JsValue& o)
 {
 #ifdef EMSCRIPTEN
@@ -102,9 +107,29 @@ void JsValue::set(const std::string& key, const JsValue& value)
 
 uint32_t JsValue::size() const {
 #ifdef EMSCRIPTEN
-    return (*this)["length"];
+    return value_["length"].as<uint32_t>();
 #else
     return value_.size();
+#endif
+}
+
+JsValue::Type JsValue::type() const
+{
+#ifdef EMSCRIPTEN
+    std::string typeStr = value_.typeOf().as<std::string>(); // Convert emscripten::val to std::string
+    if (typeStr == "undefined") return Type::Undefined;
+    else if (typeStr == "object") return Type::ObjectOrList;
+    else if (typeStr == "boolean") return Type::Bool;
+    else if (typeStr == "number" || typeStr == "bigint") return Type::Number;
+    else if (typeStr == "string") return Type::String;
+    else return Type::Undefined; // Default case
+#else
+    if (value_.is_null()) return Type::Null;
+    else if (value_.is_boolean()) return Type::Bool;
+    else if (value_.is_number()) return Type::Number;
+    else if (value_.is_string()) return Type::String;
+    else if (value_.is_array() || value_.is_object()) return Type::ObjectOrList;
+    else return Type::Undefined; // Catch-all for any types not covered
 #endif
 }
 

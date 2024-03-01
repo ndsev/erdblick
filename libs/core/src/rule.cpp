@@ -331,7 +331,7 @@ FeatureStyleRule::Mode FeatureStyleRule::mode() const
     return mode_;
 }
 
-std::optional<std::regex> const& FeatureStyleRule::relationType()
+std::optional<std::regex> const& FeatureStyleRule::relationType() const
 {
     return relationType_;
 }

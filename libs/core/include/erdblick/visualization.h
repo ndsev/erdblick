@@ -28,11 +28,11 @@ static constexpr uint32_t UnselectableId = 0xffffffff;
 struct RecursiveRelationVisualizationState
 {
     RecursiveRelationVisualizationState(
-        FeatureStyleRule const* rule,
+        FeatureStyleRule const& rule,
         mapget::model_ptr<mapget::Feature> f,
         FeatureLayerVisualization& visu);
 
-    FeatureStyleRule const* rule_;
+    FeatureStyleRule const& rule_;
     FeatureLayerVisualization& visu_;
 
     struct RelationToVisualize
@@ -41,15 +41,18 @@ struct RecursiveRelationVisualizationState
         mapget::model_ptr<mapget::Feature> sourceFeature_;
         mapget::model_ptr<mapget::Feature> targetFeature_;
         bool twoway_ = false;
+        bool rendered_ = false;
+
+        bool readyToRender() const;
     };
 
-    std::vector<RelationToVisualize*> externalRelationReferenceNodes_;
-    std::map<std::string, std::deque<RelationToVisualize>> relationNodesPerFeatureId_;
+    std::map<std::pair<mapget::TileFeatureLayer*, uint32_t>, std::deque<RelationToVisualize>>
+        relationsByFeatureAddr_;
     std::deque<mapget::model_ptr<mapget::Feature>> unexploredRelations_;
 
-    void populateRelationsToVisualize();
+    void populateAndRender(bool onlyUpdateTwowayFlags=false);
 
-    void render(RelationToVisualize const& r);
+    void render(RelationToVisualize& r);
 };
 
 /**
@@ -72,9 +75,9 @@ public:
 
     /**
      * Returns a list of external references, which must be resolved.
-     * The list contains tuples, where each tuple contains a pair of
-     * (1) A feature type.
-     * (2) A list of string-value pairs (Feature ID parts)
+     * The list contains Requests, where each Request object has these fields:
+     * - `typeId: <A feature type>`
+     * - `featureId: [<ext-id-part-field, ext-id-part-value, ...>]`
      *
      * This is called by visualization.ts, which then runs a /locate
      * call. The result is fed into processResolvedExternalReferences().
@@ -86,7 +89,11 @@ public:
      * externalReferences() list from the above function.
      *
      * Each entry in the list consists of a list of Resolution objects.
-     * Each Resolution object has `tileId: <MapTileKey>` and `featureId: [<id-part-field, id-part-value, ...>]` fields.
+     * Resolution list at index i corresponds to Request object at index i (above).
+     * Each Resolution object has these fields:
+     * - `tileId: <MapTileKey>`
+     * - `typeId: <A feature type>`
+     * - `featureId: [<id-part-field, id-part-value, ...>]`.
      */
     void processResolvedExternalReferences(NativeJsValue const& extRefsResolvedNative);
 
@@ -166,8 +173,11 @@ private:
     /// ===== Relation Processing Members =====
 
     JsValue externalRelationReferences_;
-    std::vector<std::pair<RecursiveRelationVisualizationState const*, uint32_t>> relationStyleStateForExtRef_;
-    std::deque<RecursiveRelationVisualizationState> relationStyleStateForRule_;
+    std::vector<std::pair<
+        RecursiveRelationVisualizationState*,
+        RecursiveRelationVisualizationState::RelationToVisualize*>>
+        externalRelationVisualizations_;
+    std::deque<RecursiveRelationVisualizationState> relationStyleState_;
 };
 
 }  // namespace erdblick

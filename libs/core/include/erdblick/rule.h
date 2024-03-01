@@ -47,7 +47,7 @@ public:
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
 
-    [[nodiscard]] std::optional<std::regex> const& relationType();
+    [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationSourceStyle() const;

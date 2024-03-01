@@ -189,11 +189,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     }
                     return self.at(i);
                 }));
+    em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
-        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
+        .constructor<FeatureLayerStyle const&, std::vector<std::shared_ptr<mapget::TileFeatureLayer>>, uint32_t>()
+        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
+        .function("externalReferences", &FeatureLayerVisualization::externalReferences)
+        .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")

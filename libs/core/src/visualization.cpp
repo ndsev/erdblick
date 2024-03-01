@@ -92,7 +92,59 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
     const NativeJsValue& extRefsResolvedNative)
 {
     JsValue extRefsResolved(extRefsResolvedNative);
+    auto numResolutionLists = extRefsResolved.size();
 
+    if (numResolutionLists != externalRelationVisualizations_.size()) {
+        throw std::runtime_error("Unexpected number of resolutions.");
+    }
+
+    std::set<RecursiveRelationVisualizationState*> updatedRelationVisuState;
+
+    for (auto i = 0; i < numResolutionLists; ++i) {
+        // Parse the first entry in the resolutionList
+        auto resolutionList = extRefsResolved[i];
+        if (resolutionList.size() == 0)
+            continue;
+
+        auto firstResolution = resolutionList[(uint32_t)0];
+        auto typeId = firstResolution["typeId"].as<std::string>();
+        auto featureIdParts = firstResolution["featureId"];
+        auto numFeatureIdParts = featureIdParts.size();
+        mapget::KeyValuePairs featureIdPartsVec;
+        for (auto kvIndex = 0; i < numFeatureIdParts; i += 2) {
+            auto key = featureIdParts[kvIndex].as<std::string>();
+            auto value = featureIdParts[kvIndex + 1];
+            if (value.type() == JsValue::Type::Number) {
+                featureIdPartsVec.emplace_back(key, value.as<int64_t>());
+            }
+            else if (value.type() == JsValue::Type::String) {
+                featureIdPartsVec.emplace_back(key, value.as<std::string>());
+            }
+        }
+
+        // Find the target feature in any of the available tiles.
+        mapget::model_ptr<mapget::Feature> targetFeature;
+        for (auto const& tile : allTiles_) {
+            targetFeature = tile->find(typeId, featureIdPartsVec);
+            if (targetFeature)
+                break;
+        }
+        if (!targetFeature)
+            continue;
+
+        // Annotate the relation visu with the resolved feature.
+        auto [relationVisuParent, relationVisu] = externalRelationVisualizations_[i];
+        relationVisu->targetFeature_ = targetFeature;
+        if (relationVisuParent->rule_.relationMergeTwoWay()) {
+            relationVisuParent->unexploredRelations_.emplace_back(targetFeature);
+        }
+        updatedRelationVisuState.insert(relationVisuParent);
+    }
+
+    // Re-process/render all changed relation visualization state.
+    for (auto visuState : updatedRelationVisuState) {
+        visuState->populateAndRender(true);
+    }
 }
 
 void FeatureLayerVisualization::addFeature(
@@ -110,6 +162,7 @@ void FeatureLayerVisualization::addFeature(
             });
     }
     else if (rule.aspect() == FeatureStyleRule::Relation) {
+        relationStyleState_.emplace_back(rule, feature, *this);
     }
 }
 
@@ -281,16 +334,16 @@ void FeatureLayerVisualization::addPolyLine(std::variant<std::vector<mapget::Poi
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
-    const FeatureStyleRule* rule,
+    const FeatureStyleRule& rule,
     mapget::model_ptr<mapget::Feature> f,
     FeatureLayerVisualization& visu)
     : rule_(rule), visu_(visu)
 {
     unexploredRelations_.emplace_back(std::move(f));
-    populateRelationsToVisualize();
+    populateAndRender();
 }
 
-void RecursiveRelationVisualizationState::populateRelationsToVisualize()
+void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowayFlags)
 {
     while (!unexploredRelations_.empty()) {
         auto nextFeature = unexploredRelations_.front();
@@ -299,31 +352,96 @@ void RecursiveRelationVisualizationState::populateRelationsToVisualize()
         nextFeature->forEachRelation(
             [&](auto const& relation)
             {
+                // Check if the relation type name is accepted for the rule.
+                if (auto const& relTypeRegex = rule_.relationType()) {
+                    auto relationTypeId = relation->name();
+                    if (!std::regex_match(relationTypeId.begin(), relationTypeId.end(), *relTypeRegex)) {
+                        return true;
+                    }
+                }
+
                 // Resolve target feature.
                 auto targetRef = relation->target();
                 auto targetFeature =
                     visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
 
-                if (!targetFeature) {
-                    // TODO: Use locate for unresolvable features.
-                    std::cerr << "Unresolved relation target." << std::endl;
-                    return true;
+                // Check if the target feature already has a reference to me.
+                auto relationsForTargetIt =
+                    relationsByFeatureAddr_.find({&targetFeature->model(), targetFeature->addr().value_});
+                if (rule_.relationMergeTwoWay()) {
+                    if (relationsForTargetIt != relationsByFeatureAddr_.end()) {
+                        for (auto& relVisu : relationsForTargetIt->second) {
+                            if (relVisu.targetFeature_->addr() == nextFeature->addr()) {
+                                relVisu.twoway_ = true;
+                                return true;
+                            }
+                        }
+                    }
                 }
+                if (onlyUpdateTwowayFlags)
+                    return true;
+
+                // Create new relation-to-visualize.
+                auto& relationsForThisFeature =
+                    relationsByFeatureAddr_[{&nextFeature->model(), nextFeature->addr().value_}];
+                auto& newRelationVisu = relationsForThisFeature.emplace_back();
+                newRelationVisu.relation_ = relation;
+                newRelationVisu.sourceFeature_ = nextFeature;
+
+                if (targetFeature) {
+                    // We got an additional feature to explore. But do it only
+                    // if we haven't explored it yet.
+                    if (rule_.relationRecursive() &&
+                        (relationsForTargetIt != relationsByFeatureAddr_.end()))
+                    {
+                        unexploredRelations_.emplace_back(targetFeature);
+                    }
+                }
+                else {
+                    // Add the relation to externals, if we could not resolve it.
+                    // It will be finalized later, via processResolvedExternalRelations().
+                    visu_.externalRelationVisualizations_.emplace_back(this, &newRelationVisu);
+
+                    JsValue featureIdParts = JsValue::List();
+                    for (auto const& [key, value] : relation->target()->keyValuePairs()) {
+                        featureIdParts.push(JsValue(key));
+                        std::visit([&featureIdParts](auto&& v){
+                            featureIdParts.push(JsValue(v));
+                        }, value);
+                    }
+
+                    JsValue newExtReferenceToResolve = JsValue::Dict();
+                    newExtReferenceToResolve.set("typeId", JsValue(relation->target()->typeId()));
+                    newExtReferenceToResolve.set("featureId", featureIdParts);
+                    visu_.externalRelationReferences_.push(newExtReferenceToResolve);
+                }
+
                 return true;
             });
+    }
+
+    // Render completed relation visualisations.
+    for (auto& [_, relationVisuList] : relationsByFeatureAddr_) {
+        for (auto& relVisu : relationVisuList) {
+            if (relVisu.readyToRender()) {
+                render(relVisu);
+            }
+        }
     }
 }
 
 void RecursiveRelationVisualizationState::render(
-    const RecursiveRelationVisualizationState::RelationToVisualize& r)
+    RecursiveRelationVisualizationState::RelationToVisualize& r)
 {
     // Create simfil evaluation context for the rule.
     simfil::OverlayNode relationEvaluationContext(*r.relation_);
 
-    // TODO: There is flaw here: If the target feature comes
-    //  from a different node, it must be transcoded into the
+    // Assemble simfil evaluation context.
+    // TODO: There is bug here: If the target feature comes
+    //  from a different node, it must be translated into the
     //  same field namespace for simfil to work. The best way
-    //  to do that would be to add a feature copy ctor:
+    //  to do that would be to add a feature copy ctor to simfil,
+    //  then we can do this:
     // if (targetFeature->model().nodeId() != feature->model().nodeId()) {
     //     targetFeature = feature->model().newFeature(*targetFeature);
     // }
@@ -337,28 +455,47 @@ void RecursiveRelationVisualizationState::render(
         visu_.tile_->fieldNames()->emplace("$twoway"),
         simfil::Value(r.twoway_));
 
+    // Obtain source/target geometries.
+    auto sourceGeom = r.relation_->hasSourceValidity() ?
+        r.relation_->sourceValidity() :
+        r.sourceFeature_->firstGeometry();
+    auto targetGeom = r.relation_->hasTargetValidity() ?
+        r.relation_->targetValidity() :
+        r.targetFeature_->firstGeometry();
+
     // Create line geometry which connects source and target feature.
-    auto p1lo = geometryCenter(
-        r.relation_->hasSourceValidity() ?
-            r.relation_->sourceValidity() :
-            r.sourceFeature_->firstGeometry());
-    auto p2lo = geometryCenter(
-        r.relation_->hasTargetValidity() ?
-            r.relation_->targetValidity() :
-            r.targetFeature_->firstGeometry());
-    auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule_->relationLineHeightOffset()};
-    auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_->relationLineHeightOffset()};
-    visu_.addLine(p1hi, p2hi, UnselectableId, *rule_);
-    if (rule_->relationLineEndMarkerStyle()) {
-        visu_.addLine(p1lo, p1hi, UnselectableId, *rule_->relationLineEndMarkerStyle());
-        visu_.addLine(p2lo, p2hi, UnselectableId, *rule_->relationLineEndMarkerStyle());
+    if (sourceGeom && targetGeom)
+    {
+        auto p1lo = geometryCenter(sourceGeom);
+        auto p2lo = geometryCenter(targetGeom);
+        auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule_.relationLineHeightOffset()};
+        auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_.relationLineHeightOffset()};
+
+        if (rule_.width() > 0) {
+            visu_.addLine(p1hi, p2hi, UnselectableId, rule_);
+        }
+        if (rule_.relationLineEndMarkerStyle()) {
+            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle());
+            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle());
+        }
     }
 
-    // TODO: If sourceRule is set:
-    //  Run source geometry visualization.
+    // Run source geometry visualization.
+    if (auto sourceRule = rule_.relationSourceStyle()) {
+        visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule);
+    }
 
-    // TODO: If targetRule is set:
-    //  Run target geometry visualization.
+    // Run target geometry visualization.
+    if (auto targetRule = rule_.relationSourceStyle()) {
+        visu_.addGeometry(targetGeom, UnselectableId, *targetRule);
+    }
+
+    r.rendered_ = true;
+}
+
+bool RecursiveRelationVisualizationState::RelationToVisualize::readyToRender() const
+{
+    return relation_ && sourceFeature_ && targetFeature_ && !rendered_;
 }
 
 }  // namespace erdblick

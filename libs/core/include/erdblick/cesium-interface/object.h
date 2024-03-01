@@ -84,6 +84,13 @@ struct JsValue
     JsValue operator[](std::string const& propertyName);
 
     /**
+     * Get the value at the specified index, assuming that this
+     * is a list. For both EMSCRIPTEN and the mock version,
+     * it will return value_[i].
+     */
+    JsValue operator[](uint32_t index) const;
+
+    /**
      * Set an object field or dictionary entry to a given value.
      */
     void set(std::string const& key, JsValue const& value);
@@ -96,21 +103,25 @@ struct JsValue
     void push(const JsValue& o);
 
     /**
-     * Get the value at the specified index, assuming that this
-     * is a list or an object. For both EMSCRIPTEN and the mock version,
-     * it will return value_[i].
-     */
-    template <typename T>
-    JsValue operator[] (T const& index) {
-        return JsValue(value_[index]);
-    }
-
-    /**
      * Get the list length, assuming that this is a list.
      * Returns ["length"] for EMSCRIPTEN, and .size() for
      * the mock version.
      */
     [[nodiscard]] uint32_t size() const;
+
+    enum class Type {
+        Undefined,
+        Null,
+        Bool,
+        Number,
+        String,
+        ObjectOrList
+    };
+
+    /**
+     * Get the type of this value.
+     */
+    [[nodiscard]] Type type() const;
 
     template <typename T>
     T as() {
