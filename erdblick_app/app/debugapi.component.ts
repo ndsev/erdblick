@@ -76,6 +76,6 @@ export class ErdblickDebugApi {
             this.coreLib.generateTestTile(sharedArr, this.model.tileParser);
         })
         let style = this.coreLib.generateTestStyle();
-        this.model.addTileFeatureLayer(tile, style, true);
+        this.model.addTileFeatureLayer(tile, style, "_builtin", true);
     }
 }

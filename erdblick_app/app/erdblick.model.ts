@@ -5,7 +5,7 @@ import {FeatureTile} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
-import {ErdblickStyleData, StyleService} from "./style.service";
+import {ErdblickStyle, ErdblickStyleData, StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
 import {ParametersService} from "./parameters.service";
 
@@ -62,7 +62,7 @@ export class ErdblickModel {
     private textEncoder: TextEncoder = new TextEncoder();
 
     constructor(coreLibrary: any,
-                private styleService: StyleService,
+                public styleService: StyleService,
                 public parametersService: ParametersService) {
         this.coreLib = coreLibrary;
         this.styles = null;
@@ -111,19 +111,16 @@ export class ErdblickModel {
         //                                 BOOTSTRAP                             //
         ///////////////////////////////////////////////////////////////////////////
 
-        this.styleService.stylesLoaded.subscribe(loaded => {
-            if (loaded) {
-                this.loadStyles();
-                this.reloadDataSources();
+        this.loadStyles();
+        this.reloadDataSources();
 
-                // Initial call to processTileStream, will keep calling itself
-                this.processTileStream();
-                this.processVisualizationTasks();
-            }
-        });
+        // Initial call to processTileStream, will keep calling itself
+        this.processTileStream();
+        this.processVisualizationTasks();
     }
 
     private processTileStream() {
+        console.log("CALLED PROCESS TILE STREAM")
         const startTime = Date.now();
         const timeBudget = 10; // milliseconds
 
@@ -134,12 +131,18 @@ export class ErdblickModel {
             }
 
             let [message, messageType] = this.tileStreamParsingQueue.shift();
+            console.log("PROCESS TILE STREAM: ", message, messageType)
             if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
                 uint8ArrayToWasm(this.coreLib, (wasmBuffer: any) => {
                     this.tileParser.readFieldDictUpdate(wasmBuffer);
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
-                this.addTileFeatureLayer(message.slice(Fetch.CHUNK_HEADER_SIZE), null, null);
+                this.styles?.forEach((style, styleId) => {
+                    this.addTileFeatureLayer(message.slice(Fetch.CHUNK_HEADER_SIZE), style, styleId, null);
+                });
+                this.importedStyles?.forEach((style, styleId) => {
+                    this.addTileFeatureLayer(message.slice(Fetch.CHUNK_HEADER_SIZE), style, styleId, null);
+                });
             } else {
                 console.error(`Encountered unknown message type ${messageType}!`);
             }
@@ -206,22 +209,22 @@ export class ErdblickModel {
         });
 
         // Re-render all present batches with the new style.
-        this.tileVisualizationQueue = [];
-        for (const styleId of this.visualizedTileLayers.keys()) {
-            const tileVisus = this.visualizedTileLayers.get(styleId);
-            if (tileVisus !== undefined) {
-                tileVisus.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
-                this.visualizedTileLayers.set(styleId, []);
-            }
-        }
-        for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-            this.styles.forEach((style, styleId) => {
-                this.renderTileLayer(tileLayer, style, styleId);
-            });
-            this.importedStyles.forEach((style, styleId) => {
-                this.renderTileLayer(tileLayer, style, styleId);
-            });
-        }
+        // this.tileVisualizationQueue = [];
+        // for (const styleId of this.visualizedTileLayers.keys()) {
+        //     const tileVisus = this.visualizedTileLayers.get(styleId);
+        //     if (tileVisus !== undefined) {
+        //         tileVisus.forEach(tileVisu => this.tileVisualizationDestructionTopic.next(tileVisu));
+        //         this.visualizedTileLayers.set(styleId, []);
+        //     }
+        // }
+        // for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+        //     this.styles.forEach((style, styleId) => {
+        //         this.renderTileLayer(tileLayer, style, styleId);
+        //     });
+        //     this.importedStyles.forEach((style, styleId) => {
+        //         this.renderTileLayer(tileLayer, style, styleId);
+        //     });
+        // }
 
         console.log("Loaded styles.");
     }
@@ -367,6 +370,7 @@ export class ErdblickModel {
         if (this.styles) {
             this.reapplyStyles([...this.styles.keys()]);
         }
+        console.log("REAPPLIED ALL STYLES")
     }
 
     private reloadDataSources() {
@@ -427,6 +431,7 @@ export class ErdblickModel {
     }
 
     update() {
+        console.log("START UPDATE")
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<number>();
         this.currentHighDetailTileIds = new Set<number>();
@@ -551,11 +556,13 @@ export class ErdblickModel {
             // but don't do it synchronously to avoid stalling the ongoing
             // fetch operation.
             this.tileStreamParsingQueue.push([message, messageType]);
+            console.log("tileStreamParsingQueue PUSHED: ", message, messageType)
         });
         this.currentFetch.go();
+        console.log("END UPDATE")
     }
 
-    private addTileFeatureLayer(tileLayerBlob: any, style: any, preventCulling: any) {
+    private addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyleData, styleId: string, preventCulling: any) {
         let tileLayer = new FeatureTile(this.coreLib, this.tileParser, tileLayerBlob, preventCulling);
 
         // Don't add a tile that is not supposed to be visible.
@@ -574,7 +581,7 @@ export class ErdblickModel {
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
         setTimeout(() => {
-            this.renderTileLayer(tileLayer, style);
+            this.renderTileLayer(tileLayer, style, styleId);
         })
     }
 
@@ -620,6 +627,7 @@ export class ErdblickModel {
 
     // public:
     setViewport(viewport: any) {
+        console.log("SET VIEWPORT")
         this.currentViewport = viewport;
         this.update();
     }
