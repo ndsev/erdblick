@@ -24,6 +24,18 @@ struct CesiumPrimitive
     static CesiumPrimitive withPolylineColorAppearance(bool clampToGround = false);
 
     /**
+     * Create a primitive which uses the PolylineDashMaterialAppearance.
+     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
+     */
+    static CesiumPrimitive withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
+
+    /**
+     * Create a primitive which uses the PolylineArrowMaterialAppearance.
+     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
+     */
+    static CesiumPrimitive withPolylineArrowMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
+
+    /**
      * Create a primitive which uses the PerInstanceColorAppearance.
      * See https://cesium.com/learn/cesiumjs/ref-doc/PerInstanceColorAppearance.html
      *
@@ -87,6 +99,7 @@ private:
 
     /** appearance option for the Primitive JS Object ctor. */
     JsValue appearance_;
+    JsValue material_;
 
     /** Flag which enables the direct triangle display required for addTriangles. */
     bool flatAndSynchronous_ = false;

@@ -47,15 +47,29 @@ private:
     static std::optional<JsValue> encodeVerticesAsList(mapget::model_ptr<mapget::Geometry> const& geom);
 
     /**
+     * Get some WGS84 points as two lists (first half reversed) of Cesium Cartesian points.
+     * Applicable for double arrows.
+     */
+    static std::optional<std::pair<JsValue, JsValue>> encodeVerticesAsReversedSplitList(mapget::model_ptr<mapget::Geometry> const& geom);
+
+    /**
      * Get some WGS84 points as a float64 buffer of Cesium Cartesian points.
      */
     static std::optional<JsValue> encodeVerticesAsFloat64Array(mapget::model_ptr<mapget::Geometry> const& geom);
 
+    CesiumPrimitive* getPrimitiveForDashMaterial(const FeatureStyleRule &rule);
+
+    CesiumPrimitive* getPrimitiveForArrowMaterial(const FeatureStyleRule &rule);
+
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
+    std::map<std::tuple<std::string, std::string, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
+    std::map<std::string, CesiumPrimitive> arrowLines_;
     CesiumPrimitive coloredNontrivialMeshes_;
     CesiumPrimitive coloredTrivialMeshes_;
     CesiumPrimitive coloredGroundLines_;
+    std::map<std::tuple<std::string, std::string, uint32_t, uint32_t>, CesiumPrimitive> dashGroundLines_;
+    std::map<std::string, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
 };

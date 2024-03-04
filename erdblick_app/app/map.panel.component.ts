@@ -148,6 +148,7 @@ export class MapPanelComponent {
                 mapModel.availableMapItems.subscribe(mapItems => this.mapItems = mapItems);
             }
         });
+
     }
 
     showLayerDialog() {

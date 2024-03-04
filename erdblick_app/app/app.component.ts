@@ -92,52 +92,7 @@ export class AppComponent {
                 })
             });
 
-            this.mapService.mapModel.getValue()!.mapInfoTopic.subscribe((mapInfos: Array<MapInfoItem>) => {
-                let mapItems = new Map<string, MapInfoItem>();
-                mapInfos.forEach(mapInfo => {
-                    console.log("MapInfo ", mapInfo)
-                    const mapName: string = mapInfo["mapId"];
-                    let defCoverage = [0n];
-                    let layers = new Map<string, MapItemLayer>();
-                    for (const [layerName, layer] of mapInfo.layers) {
-                        if (layer.coverage.length == 0) {
-                            layer.coverage = defCoverage;
-                        }
-                        layers.set(layerName, {
-                            canRead: layer.canRead,
-                            canWrite: layer.canWrite,
-                            coverage: [...layer.coverage],
-                            featureTypes: [...layer.featureTypes],
-                            layerId: layer.layerId,
-                            type: layer.type,
-                            version: {
-                                major: layer.version.major,
-                                minor: layer.version.minor,
-                                patch: layer.version.patch
-                            },
-                            zoomLevels: [...layer.zoomLevels],
-                            level: 13,
-                            visible: true
-                        });
-                        this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapName + '/' + layerName, 13);
-                    }
-                    console.log("layers", layers)
-                    mapItems.set(mapName, {
-                        extraJsonAttachment: mapInfo.extraJsonAttachment,
-                        layers: layers,
-                        mapId: mapName,
-                        maxParallelJobs: mapInfo.maxParallelJobs,
-                        nodeId: mapInfo.nodeId,
-                        protocolVersion: {
-                            major: mapInfo.protocolVersion.major,
-                            minor: mapInfo.protocolVersion.minor,
-                            patch: mapInfo.protocolVersion.patch
-                        },
-                        level: 13,
-                        visible: true
-                    });
-                });
-                console.log("mapItems", mapItems)
+            this.mapService.mapModel.getValue()!.mapInfoTopic.subscribe((mapItems: Map<string, MapInfoItem>) => {
                 this.mapService.mapModel.getValue()!.availableMapItems.next(mapItems);
             });
 

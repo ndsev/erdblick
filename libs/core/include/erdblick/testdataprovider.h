@@ -246,36 +246,49 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Bike'"
             color: "#3498db" # Blue color for Bike Way
-            width: 2.0
+            material-color: "#3498db" # Blue color for Bike Way
+            width: 10.0
+            arrow: "double"
 
           - geometry:
               - line
             type: "Way"
             filter: "properties.wayType == 'Pedestrian'"
             color: "#2ecc71" # Green color for Pedestrian Way
-            width: 1.5
+            material-color: "#2ecc71" # Green color for Pedestrian Way
+            width: 15.0
+            arrow: "double"
 
           - geometry:
               - line
             type: "Way"
             filter: "properties.wayType == 'Any'"
             color: "#f39c12" # Orange color for Any Way
-            width: 2.5
+            material-color: "#f39c12" # Orange color for Any Way
+            width: 30.0
+            arrow: "double"
 
           - geometry:
               - line
             type: "Way"
             filter: "properties.wayType == 'Vehicle'"
             color: "#e74c3c" # Red color for Vehicle Way
-            width: 3.0
+            material-color: "#e74c3c" # Red color for Vehicle Way
+            width: 30.0
+            arrow: "double"
 
           - geometry:
               - line
             type: "Way"
             filter: "properties.wayType == 'Vehicle'"
             color: "#17e38e"
-            width: 3.0
+            material-color: "#17e38e"
+            width: 30.0
             flat: true
+            dashed: true
+            gap-color: "#e74c3c"
+            gap-size: 100
+            dash-pattern: 40000
 
           - geometry:
               - polygon
@@ -318,6 +331,23 @@ public:
             type: "Diamond"
             color: gold
             opacity: 0.5
+
+          #- geometry:
+          #    - label
+          #  type: "SignLabel"
+          #  font: "24px Helvetica",
+          #  fillColor: "#BBBBBB",
+          #  outlineColor: "#000000",
+          #  outlineWidth: 2,
+          #  backgroundColor: "#00000000",
+          #  backgroundPadding: [7, 5],
+          #  horizontalOrigin: "CENTER",
+          #  verticalOrigin: "CENTER",
+          #  heightReference: "NONE"
+          #  scale: 1.0,
+          #  scaleByDistance: [1.5e2, 3, 8.0e6, 0.0],
+          #  translucencyByDistance: [1.5e2, 3, 8.0e6, 0.0],
+          #  style: "FILL_AND_OUTLINE",
 
           # Fallback-rule-list for POI/PONI
           - type: "PointOf.*"

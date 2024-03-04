@@ -23,7 +23,10 @@ CesiumLib::CesiumLib() :
     PolygonHierarchy("PolygonHierarchy"),
     PolylineColorAppearance("PolylineColorAppearance"),
     PolylineGeometry("PolylineGeometry"),
+    Polyline("Polyline"),
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
+    PolylineDashMaterialProperty("PolylineDashMaterialProperty"),
+    PolylineArrowMaterialProperty("PolylineArrowMaterialProperty"),
     Primitive("Primitive"),
     PrimitiveCollection("PrimitiveCollection"),
     PrimitiveType("PrimitiveType")

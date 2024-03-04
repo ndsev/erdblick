@@ -76,6 +76,28 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+    if (yaml["material-color"].IsDefined()) {
+        materialColor_ = yaml["material-color"].as<std::string>();
+    }
+    if (yaml["dashed"].IsDefined()) {
+        // Parse line dashes
+        dashed_ = yaml["dashed"].as<bool>();
+        if (yaml["dash-length"].IsDefined()) {
+            dashLength_ = yaml["dash-length"].as<int>();
+        }
+        if (yaml["gap-color"].IsDefined()) {
+            gapColor_ = yaml["gap-color"].as<std::string>();
+        }
+        if (yaml["dash-pattern"].IsDefined()) {
+            dashPattern_ = yaml["dash-pattern"].as<int>();
+        }
+    }
+    if (yaml["arrow"].IsDefined()) {
+        // Parse line arrowheads
+        auto arrow_ = yaml["arrow"].as<std::string>();
+        hasDoubleArrow_ = arrow_ == "double";
+        hasArrow_ = true;
+    }
 
     // Parse sub-rules
     if (yaml["first-of"].IsDefined()) {
@@ -138,6 +160,41 @@ float FeatureStyleRule::width() const
 bool FeatureStyleRule::flat() const
 {
     return flat_;
+}
+
+std::string FeatureStyleRule::materialColor() const
+{
+    return materialColor_;
+}
+
+bool FeatureStyleRule::isDashed() const
+{
+    return dashed_;
+}
+
+int FeatureStyleRule::dashLength() const
+{
+    return dashLength_;
+}
+
+std::string FeatureStyleRule::gapColor() const
+{
+    return gapColor_;
+}
+
+int FeatureStyleRule::dashPattern() const
+{
+    return dashPattern_;
+}
+
+bool FeatureStyleRule::hasArrow() const
+{
+    return hasArrow_;
+}
+
+bool FeatureStyleRule::hasDoubleArrow() const
+{
+    return hasDoubleArrow_;
 }
 
 glm::fvec4 const& FeatureStyleRule::outlineColor() const

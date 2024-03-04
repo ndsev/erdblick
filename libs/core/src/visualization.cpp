@@ -1,6 +1,7 @@
 #include "visualization.h"
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
+#include <iostream>
 
 using namespace mapget;
 
@@ -32,12 +33,28 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const {
     auto collection = Cesium().PrimitiveCollection.New();
     if (!coloredLines_.empty())
         collection.call<void>("add", coloredLines_.toJsObject());
+    if (!dashLines_.empty())
+        for (const auto &dashLinePair : dashLines_) {
+            collection.call<void>("add", dashLinePair.second.toJsObject());
+        }
+    if (!arrowLines_.empty())
+        for (const auto &darrowLinePair : arrowLines_) {
+            collection.call<void>("add", darrowLinePair.second.toJsObject());
+        }
     if (!coloredNontrivialMeshes_.empty())
         collection.call<void>("add", coloredNontrivialMeshes_.toJsObject());
     if (!coloredTrivialMeshes_.empty())
         collection.call<void>("add", coloredTrivialMeshes_.toJsObject());
     if (!coloredGroundLines_.empty())
         collection.call<void>("add", coloredGroundLines_.toJsObject());
+    if (!dashGroundLines_.empty())
+        for (const auto &dashGroundLinePair : dashGroundLines_) {
+            collection.call<void>("add", dashGroundLinePair.second.toJsObject());
+        }
+    if (!arrowGroundLines_.empty())
+        for (const auto &arrowGroundLinePair : arrowGroundLines_) {
+            collection.call<void>("add", arrowGroundLinePair.second.toJsObject());
+        }
     if (!coloredGroundMeshes_.empty())
         collection.call<void>("add", coloredGroundMeshes_.toJsObject());
     if (!coloredPoints_.empty())
@@ -65,11 +82,35 @@ void FeatureLayerVisualization::addGeometry(model_ptr<Geometry> const& geom, uin
         }
         break;
     case mapget::Geometry::GeomType::Line:
-        if (auto verts = encodeVerticesAsList(geom)) {
-            if (rule.flat())
-                coloredGroundLines_.addPolyLine(*verts, rule, id);
-            else
-                coloredLines_.addPolyLine(*verts, rule, id);
+        if (rule.hasArrow() && rule.hasDoubleArrow()) {
+            if (auto vertsPair = encodeVerticesAsReversedSplitList(geom)) {
+                getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->first, rule, id);
+                getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->second, rule, id);
+            }
+        }
+        else {
+            if (auto verts = encodeVerticesAsList(geom)) {
+                if (rule.flat()) {
+                    if (rule.isDashed()) {
+                        getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
+                    }
+                    else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
+                        getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
+                    }
+                    else {
+                        coloredGroundLines_.addPolyLine(*verts, rule, id);
+                    }
+                }
+                else {
+                    if (rule.isDashed()) {
+                        getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
+                    } else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
+                        getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
+                    } else {
+                        coloredLines_.addPolyLine(*verts, rule, id);
+                    }
+                }
+            }
         }
         break;
     case mapget::Geometry::GeomType::Mesh:
@@ -99,7 +140,44 @@ std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsList(model_ptr
         });
     if (!count)
         return {};
+    std::cout << "List size: " << count << std::endl;
     return jsPoints;
+}
+
+std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVerticesAsReversedSplitList(model_ptr<Geometry> const& geom) {
+    std::vector<mapget::Point> points;
+    uint32_t count = 0;
+    geom->forEachPoint(
+        [&count, &points](auto&& vertex) {
+            points.emplace_back(vertex);
+            ++count;
+            return true;
+        });
+    if (!count || count == 1)
+        return {};
+    std::cout << "Double arrow list size: " << count << std::endl;
+    auto jsPointsFirstHalf = JsValue::List();
+    auto jsPointsSecondfHalf = JsValue::List();
+    if (points.size() == 2) {
+        const auto x = (points.at(0).x + points.at(1).x) / 2;
+        const auto y = (points.at(0).y + points.at(1).y) / 2;
+        const auto z = (points.at(0).z + points.at(1).z) / 2;
+        mapget::Point midpoint{x, y, z};
+        jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(midpoint)));
+        jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(0))));
+        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(midpoint)));
+        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(1))));
+        return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
+    }
+    size_t midpointIndex = points.size() / 2;
+    bool isOddSize = points.size() % 2 == 1;
+    for (size_t i = isOddSize ? midpointIndex : midpointIndex - 1; i > 0; i--) {
+        jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
+    }
+    for (size_t i = isOddSize ? midpointIndex + 1 : midpointIndex; i < points.size(); i++) {
+        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
+    }
+    return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
 }
 
 std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsFloat64Array(model_ptr<Geometry> const& geom) {
@@ -115,6 +193,26 @@ std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsFloat64Array(m
     if (cartesianCoords.empty())
         return {};
     return JsValue::Float64Array(cartesianCoords);
+}
+
+CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForDashMaterial(const FeatureStyleRule &rule) {
+    const auto key = std::tuple<std::string, std::string, uint32_t, uint32_t>{rule.materialColor(), rule.gapColor(), rule.dashLength(), rule.dashPattern()};
+    auto& dashMap = rule.flat() ? dashGroundLines_ : dashLines_;
+    auto iter = dashMap.find(key);
+    if (iter != dashMap.end()) {
+        return &(iter->second);
+    }
+    return &(dashMap.try_emplace(key, CesiumPrimitive::withPolylineDashMaterialAppearance(rule, rule.flat())).first->second);
+}
+
+CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForArrowMaterial(const FeatureStyleRule &rule) {
+    const std::string key = rule.materialColor();
+    auto& arrowMap = rule.flat() ? arrowGroundLines_ : arrowLines_;
+    auto iter = arrowMap.find(key);
+    if (iter != arrowMap.end()) {
+        return &(iter->second);
+    }
+    return &(arrowMap.try_emplace(key, CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat())).first->second);
 }
 
 }  // namespace erdblick

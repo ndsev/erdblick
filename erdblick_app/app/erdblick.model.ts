@@ -224,7 +224,6 @@ export class ErdblickModel {
         }
 
         console.log("Loaded styles.");
-        console.log(this.styles);
     }
 
     private loadErdblickStyleData(styleId: string, styleString: string, imported: boolean = false): ErdblickStyleData | undefined {
@@ -362,16 +361,12 @@ export class ErdblickModel {
     reapplyStyles(styleIds: Array<string>, imported: boolean = false) {
         this.tileVisualizationQueue = [];
         styleIds.forEach(styleId => this.reapplyStyle(styleId, imported));
-        console.log("visualizedTileLayers", this.visualizedTileLayers)
-        console.log("tileVisualizationQueue", this.tileVisualizationQueue)
     }
 
     reapplyAllStyles() {
         if (this.styles) {
             this.reapplyStyles([...this.styles.keys()]);
         }
-        console.log("visualizedTileLayers", this.visualizedTileLayers)
-        console.log("tileVisualizationQueue", this.tileVisualizationQueue)
     }
 
     private reloadDataSources() {
@@ -387,29 +382,17 @@ export class ErdblickModel {
             this.maps = new Map<string, MapInfoItem>(result.map(mapInfo => {
                 let layers = new Map<string, MapItemLayer>();
                 let defCoverage = [0n];
-                console.log("withJsonCallback", "mapInfo", mapInfo, "layers", mapInfo.layers)
                 Object.entries(mapInfo.layers).forEach(([layerName, layer]) => {
-                    if (layer.coverage.length == 0) {
-                        layer.coverage = defCoverage;
+                    let erdblickLayer = layer as MapItemLayer;
+                    if (erdblickLayer.coverage.length == 0) {
+                        erdblickLayer.coverage = defCoverage;
                     }
-                    layers.set(layerName, {
-                        canRead: layer.canRead,
-                        canWrite: layer.canWrite,
-                        coverage: [...layer.coverage],
-                        featureTypes: [...layer.featureTypes],
-                        layerId: layer.layerId,
-                        type: layer.type,
-                        version: {
-                            major: layer.version.major,
-                            minor: layer.version.minor,
-                            patch: layer.version.patch
-                        },
-                        zoomLevels: [...layer.zoomLevels],
-                        level: 13,
-                        visible: true
-                    });
+                    erdblickLayer.level = 13;
+                    erdblickLayer.visible = true;
+                    layers.set(layerName, erdblickLayer);
                     this.layerIdToLevel.set(mapInfo.mapId + '/' + layerName, 13);
                 });
+                mapInfo.layers = layers;
                 if (availableMapItems.has(mapInfo.mapId)) {
                     const availableMapItem = this.availableMapItems.getValue().get(mapInfo.mapId)!;
                     mapInfo.visible = availableMapItem.visible;
@@ -424,21 +407,7 @@ export class ErdblickModel {
                     mapInfo.visible = true;
                     mapInfo.level = 13;
                 }
-                console.log("[mapInfo.mapId, mapInfo]", layers);
-                return [mapInfo.mapId, {
-                    extraJsonAttachment: mapInfo.extraJsonAttachment,
-                    layers: layers,
-                    mapId: mapInfo.mapId,
-                    maxParallelJobs: mapInfo.maxParallelJobs,
-                    nodeId: mapInfo.nodeId,
-                    protocolVersion: {
-                        major: mapInfo.protocolVersion.major,
-                        minor: mapInfo.protocolVersion.minor,
-                        patch: mapInfo.protocolVersion.patch
-                    },
-                    level: mapInfo.level,
-                    visible: mapInfo.visible
-                }];
+                return [mapInfo.mapId, mapInfo]
             }));
             this.mapInfoTopic.next(this.maps);
         })
