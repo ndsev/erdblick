@@ -308,57 +308,34 @@ export class ErdblickModel {
     }
 
     private reapplyStyle(styleId: string, imported: boolean = false) {
-        if (!imported) {
-            if (this.styles && this.styles.has(styleId)) {
-                const isActivated = this.styleService.activatedStyles.get(styleId);
-                if (isActivated === undefined) return;
-                const style = this.styles!.get(styleId);
-                if (style === undefined) return;
-                style.enabled = isActivated;
-
-                if (isActivated) {
-                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                        this.tileVisualizationDestructionTopic.next(tileVisu)
-                    );
-                    this.visualizedTileLayers.set(styleId, []);
-                    for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                        this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
-                    }
-                } else {
-                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                        this.tileVisualizationDestructionTopic.next(tileVisu)
-                    );
-                    this.visualizedTileLayers.set(styleId, []);
-                }
-                console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+        const styleMap = imported ? this.importedStyles : this.styles;
+        if (!styleMap || !styleMap.has(styleId)) {
+            return;
+        }
+        const isActivated = imported ? this.styleService.activatedImportedStyles.get(styleId) : this.styleService.activatedStyles.get(styleId);
+        if (isActivated === undefined) {
+            return;
+        }
+        const style = styleMap!.get(styleId);
+        if (style === undefined) {
+            return;
+        }
+        style.enabled = isActivated;
+        if (isActivated) {
+            this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                this.tileVisualizationDestructionTopic.next(tileVisu)
+            );
+            this.visualizedTileLayers.set(styleId, []);
+            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                this.renderTileLayer(tileLayer, style, styleId);
             }
         } else {
-            if (this.importedStyles && this.importedStyles.has(styleId)) {
-                const isActivated = this.styleService.activatedImportedStyles.get(styleId);
-                console.log(isActivated)
-                if (isActivated === undefined) return;
-                const style = this.importedStyles!.get(styleId);
-                console.log(style)
-                if (style === undefined) return;
-                style.enabled = isActivated;
-
-                if (isActivated) {
-                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                        this.tileVisualizationDestructionTopic.next(tileVisu)
-                    );
-                    this.visualizedTileLayers.set(styleId, []);
-                    for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                        this.renderTileLayer(tileLayer, this.importedStyles!.get(styleId), styleId);
-                    }
-                } else {
-                    this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                        this.tileVisualizationDestructionTopic.next(tileVisu)
-                    );
-                    this.visualizedTileLayers.set(styleId, []);
-                }
-                console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
-            }
+            this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                this.tileVisualizationDestructionTopic.next(tileVisu)
+            );
+            this.visualizedTileLayers.set(styleId, []);
         }
+        console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
     reapplyStyles(styleIds: Array<string>, imported: boolean = false) {
@@ -556,7 +533,6 @@ export class ErdblickModel {
             // but don't do it synchronously to avoid stalling the ongoing
             // fetch operation.
             this.tileStreamParsingQueue.push([message, messageType]);
-            console.log("tileStreamParsingQueue PUSHED: ", message, messageType)
         });
         this.currentFetch.go();
         console.log("END UPDATE")
