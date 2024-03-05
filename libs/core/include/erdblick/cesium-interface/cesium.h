@@ -27,10 +27,7 @@ struct CesiumLib
     CesiumClass PolygonHierarchy;
     CesiumClass PolylineColorAppearance;
     CesiumClass PolylineGeometry;
-    CesiumClass Polyline;
     CesiumClass PolylineMaterialAppearance;
-    CesiumClass PolylineDashMaterialProperty;
-    CesiumClass PolylineArrowMaterialProperty;
     CesiumClass Primitive;
     CesiumClass PrimitiveCollection;
     CesiumClass PrimitiveType;

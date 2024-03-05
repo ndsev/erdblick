@@ -206,6 +206,8 @@ export class AppComponent {
             this.mapService.mapModel.getValue()?.update();
             this.mapService.mapModel.getValue()?.reapplyAllStyles();
         }
+
+        setTimeout(() => { this.mapService.mapView?.updateViewport() }, 3000);
     }
 
     toggleOverlay(value: string, searchOverlay: OverlayPanel, event: any) {

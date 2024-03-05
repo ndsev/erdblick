@@ -131,7 +131,6 @@ export class ErdblickView {
         });
 
         model.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
-            this.viewer.camera.position
             this.viewer.camera.setView({
                 destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {
@@ -253,7 +252,7 @@ export class ErdblickView {
     /**
      * Update the visible viewport, and communicate it to the model.
      */
-    private updateViewport() {
+    updateViewport() {
         let canvas = this.viewer.scene.canvas;
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);

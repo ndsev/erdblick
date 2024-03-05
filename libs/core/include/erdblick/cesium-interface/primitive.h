@@ -24,14 +24,16 @@ struct CesiumPrimitive
     static CesiumPrimitive withPolylineColorAppearance(bool clampToGround = false);
 
     /**
-     * Create a primitive which uses the PolylineDashMaterialAppearance.
-     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
+     * Create a primitive which uses the PolylineMaterialAppearance for PolylineDash material.
+     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineMaterialAppearance.html
+     * See https://cesium.com/learn/cesiumjs/ref-doc/Material.html
      */
     static CesiumPrimitive withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
 
     /**
-     * Create a primitive which uses the PolylineArrowMaterialAppearance.
-     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
+     * Create a primitive which uses the PolylineMaterialAppearance for PolylineArrow material.
+     * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineMaterialAppearance.html
+     * See https://cesium.com/learn/cesiumjs/ref-doc/Material.html
      */
     static CesiumPrimitive withPolylineArrowMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
 

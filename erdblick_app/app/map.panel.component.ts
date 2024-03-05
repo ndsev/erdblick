@@ -234,7 +234,6 @@ export class MapPanelComponent {
         const isActivated = !this.styleService.activatedStyles.get(styleId);
         this.styleService.activatedStyles.set(styleId, isActivated);
         const parameters = this.parameterService.parameters.getValue();
-        console.log(styleId, isActivated);
         if (parameters) {
             if (isActivated) {
                 parameters.styles.push(styleId);

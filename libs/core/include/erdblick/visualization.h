@@ -57,8 +57,14 @@ private:
      */
     static std::optional<JsValue> encodeVerticesAsFloat64Array(mapget::model_ptr<mapget::Geometry> const& geom);
 
+    /**
+     * Get an initialised primitive for a particular PolylineDashMaterialAppearance.
+     */
     CesiumPrimitive* getPrimitiveForDashMaterial(const FeatureStyleRule &rule);
 
+    /**
+     * Get an initialised primitive for a particular PolylineArrowMaterialAppearance.
+     */
     CesiumPrimitive* getPrimitiveForArrowMaterial(const FeatureStyleRule &rule);
 
     bool featuresAdded_ = false;

@@ -27,21 +27,6 @@ export interface MapInfoItem extends Object {
     visible: boolean;
 }
 
-// export interface ErdblickMap {
-//     mapName: string;
-//     coverage: BigInt;
-//     level: number;
-//     layers: Array<ErdblickLayer>;
-//     visible: boolean;
-// }
-//
-// export interface ErdblickLayer {
-//     name: string;
-//     coverage: BigInt;
-//     level: number;
-//     visible: boolean;
-// }
-
 @Injectable({providedIn: 'root'})
 export class MapService {
 

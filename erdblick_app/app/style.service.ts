@@ -40,6 +40,7 @@ export class StyleService {
                 next: (data: any) => {
                     if (data && data["styles"]) {
                         styleUrls = [...styleUrls, ...data["styles"]];
+                        console.log(styleUrls)
                         styleUrls.forEach((styleUrl: ErdblickStyle) => {
                             if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
                                 styleUrl.url = `/bundle/styles/${styleUrl.url}`;
@@ -58,6 +59,8 @@ export class StyleService {
                     }
                 },
                 error: error => {
+                    this.activatedStyles.set(defaultStyle.id, true);
+                    this.retrieveImportedStyles();
                     this.stylesLoaded.next(true);
                     console.log(error);
                 }

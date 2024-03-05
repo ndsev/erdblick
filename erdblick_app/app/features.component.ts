@@ -13,7 +13,7 @@ export class FeatureTile {
     id: string;
     mapName: string;
     layerName: string;
-    tileId: number;
+    tileId: bigint;
     numFeatures: number;
     coreLib: any;
     private parser: any;
@@ -67,7 +67,7 @@ export class FeatureTile {
     /**
      * Mark this tile as "not available anymore".
      */
-    private destroy() {
+    destroy() {
         this.disposed = true;
     }
 }

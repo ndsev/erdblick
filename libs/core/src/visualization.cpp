@@ -140,7 +140,6 @@ std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsList(model_ptr
         });
     if (!count)
         return {};
-    std::cout << "List size: " << count << std::endl;
     return jsPoints;
 }
 
@@ -155,7 +154,6 @@ std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVert
         });
     if (!count || count == 1)
         return {};
-    std::cout << "Double arrow list size: " << count << std::endl;
     auto jsPointsFirstHalf = JsValue::List();
     auto jsPointsSecondfHalf = JsValue::List();
     if (points.size() == 2) {
@@ -169,12 +167,11 @@ std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVert
         jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(1))));
         return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
     }
-    size_t midpointIndex = points.size() / 2;
-    bool isOddSize = points.size() % 2 == 1;
-    for (size_t i = isOddSize ? midpointIndex : midpointIndex - 1; i > 0; i--) {
+    auto midpointIndex = points.size() / 2;
+    for (auto i = midpointIndex + 1; i-- > 0; ) {
         jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
     }
-    for (size_t i = isOddSize ? midpointIndex + 1 : midpointIndex; i < points.size(); i++) {
+    for (auto i = midpointIndex; i < points.size(); i++) {
         jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
     }
     return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
