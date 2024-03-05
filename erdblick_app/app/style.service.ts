@@ -56,6 +56,10 @@ export class StyleService {
                             this.retrieveImportedStyles();
                             this.stylesLoaded.next(true);
                         });
+                    } else {
+                        this.activatedStyles.set(defaultStyle.id, true);
+                        this.retrieveImportedStyles();
+                        this.stylesLoaded.next(true);
                     }
                 },
                 error: error => {
