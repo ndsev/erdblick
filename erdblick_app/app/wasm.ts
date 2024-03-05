@@ -24,10 +24,15 @@ export function uint8ArrayFromWasm(coreLib: any, fun: any) {
  * returns false, null is returned.
  */
 export function uint8ArrayToWasm(coreLib: any, fun: any, inputData: any) {
-    let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
-    let bufferPtr = Number(sharedGlbArray.getPointer());
-    coreLib.HEAPU8.set(inputData, bufferPtr);
-    let result = fun(sharedGlbArray);
-    sharedGlbArray.delete();
-    return (result === false) ? null : result;
+    try {
+        let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
+        let bufferPtr = Number(sharedGlbArray.getPointer());
+        coreLib.HEAPU8.set(inputData, bufferPtr);
+        let result = fun(sharedGlbArray);
+        sharedGlbArray.delete();
+        return (result === false) ? null : result;
+    } catch (e) {
+        console.error(`Error while parsing UINT8 encoded data: ${e}`)
+        return undefined;
+    }
 }

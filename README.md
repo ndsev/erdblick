@@ -43,15 +43,17 @@ rule that matches it.
 ### Custom Style Declarations
 
 It is possible to apply own custom styles easily. 
-On build, Erdblick automatically picks up .yaml style files from `styles` directory (where you can drop your custom files) 
-and bundles them in `static/bundle/styles`.
+On build, Erdblick automatically picks up `.yaml` style files from `styles` directory (where you can drop your custom files) 
+and bundles them in `static/bundle/styles` (in case you are using a pre-built Erdblick distribution, 
+you can directly put your styles in `static/bundle/styles`).
 
-For Erdblick to apply custom styles, it expects the following declarations for the styles in `config/config.json`:
+For Erdblick to apply custom styles, it expects the following declarations for the styles in `config/config.json` 
+(in case you are using a pre-built Erdblick distribution, you can directly create your configuration in `static/config.json`):
 ```json
 {
    "styles": [
-       { "id": "your_style_id", "url": "style_url" },
-       { "id": "your_style_id_2", "url": "style_url_2" }
+       { "id": "Your Style ID", "url": "style.yaml" },
+       { "id": "Your Style ID2", "url": "style_2.yaml" }
    ]
 }
 ```

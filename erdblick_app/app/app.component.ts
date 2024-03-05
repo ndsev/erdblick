@@ -61,7 +61,7 @@ export class AppComponent {
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
+        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
             });

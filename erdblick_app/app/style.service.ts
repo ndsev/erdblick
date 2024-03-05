@@ -38,6 +38,7 @@ export class StyleService {
     importedStyleData: Map<string, string> = new Map<string, string>();
     stylesLoaded: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
     private erdblickStyles: Array<ErdblickStyle> = [];
+    errorStyleIds: Map<string, string> = new Map<string, string>();
 
     constructor(private httpClient: HttpClient) {
         this.stylesLoaded.next(false);
@@ -65,7 +66,8 @@ export class StyleService {
                                             if (styleUrl.id == styleId) this.erdblickStyles.push(styleUrl);
                                         });
                                     } else {
-                                        console.log(`No data for style: ${styleId}`);
+                                        this.errorStyleIds.set(styleId, "Wrong URL / No data");
+                                        console.error(`Wrong URL or no data available for style: ${styleId}`);
                                     }
                                 });
                             }

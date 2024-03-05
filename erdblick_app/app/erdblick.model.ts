@@ -211,7 +211,7 @@ export class ErdblickModel {
         if (isAvailable) {
             const styleUint8Array = this.textEncoder.encode(styleString);
             // Parse the style description into a WASM style object.
-            return uint8ArrayToWasm(this.coreLib,
+            const result = uint8ArrayToWasm(this.coreLib,
                 (wasmBuffer: any) => {
                     return {
                         enabled: imported ? this.styleService.activatedImportedStyles.get(styleId)! : this.styleService.activatedStyles.get(styleId)!,
@@ -219,6 +219,11 @@ export class ErdblickModel {
                     }
                 },
                 styleUint8Array);
+            if (result === undefined) {
+                console.error(`Encountered parsing error in style "${styleId}" for the following YAML data:\n${styleString}`)
+                this.styleService.errorStyleIds.set(styleId, "YAML Parse Error");
+            }
+            return result;
         }
         return undefined;
     }

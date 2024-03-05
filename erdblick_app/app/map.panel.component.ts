@@ -110,6 +110,13 @@ import {FileUpload} from "primeng/fileupload";
                         </div>
                     </div>
                 </div>
+                <div *ngIf="styleService.errorStyleIds.size" class="styles-container">
+                    <div *ngFor="let message of styleService.errorStyleIds | keyvalue" class="flex-container">
+                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
+                            {{ message.key }}: {{message.value}} (see console)
+                        </span>
+                    </div>
+                </div>
                 <div class="styles-container">
                     <div class="flex-container">
                         <span class="font-bold white-space-nowrap" style="margin-left: 0.5em"></span>
