@@ -101,6 +101,11 @@ export class FeatureTile {
             return;
         }
 
+        // Create parsedTiles list.
+        if (parsedTiles === undefined) {
+            parsedTiles = [];
+        }
+
         // Termination condition for recursion.
         if (tiles.length === 0) {
             // All tiles parsed, run callback.

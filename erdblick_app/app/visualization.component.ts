@@ -15,7 +15,7 @@ export class TileVisualization {
     private hasHighDetailVisualization: boolean;
     private hasLowDetailVisualization: boolean;
     private readonly numFeatures: number;
-    private readonly tileId: number;
+    private readonly tileId: bigint;
     private renderingInProgress: boolean;
     private readonly highlight?: number;
     private deleted: boolean;
@@ -86,7 +86,7 @@ export class TileVisualization {
                 visualization.run()
 
                 let extRefs = visualization.externalReferences();
-                if (extRefs.length > 0) {
+                if (extRefs && extRefs.length > 0) {
                     let extRefsResolved = await fetch("/locate", {body: extRefs});
                     if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
                         // Do not continue if any of the tiles or the style
