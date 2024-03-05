@@ -21,9 +21,7 @@ export class JumpTargetService {
             {
                 next: (data: any) => {
                     try {
-                        if (data !== undefined &&
-                            data["extensionModules"] !== undefined &&
-                            data["extensionModules"]["jumpTargets"] !== undefined) {
+                        if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
                             let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
                             if (jumpTargetsConfig !== undefined) {
                                 // Using string interpolation so webpack can trace imports from the location
