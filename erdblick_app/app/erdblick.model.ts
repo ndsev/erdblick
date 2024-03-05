@@ -573,7 +573,7 @@ export class ErdblickModel {
                 return;
             }
             let visu = new TileVisualization(
-                tileLayer,
+                [tileLayer],
                 styleId == "_builtin" ? style : style.featureLayerStyle,
                 tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
             this.tileVisualizationQueue.push([styleId, visu]);

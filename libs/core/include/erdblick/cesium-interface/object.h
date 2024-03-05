@@ -81,14 +81,14 @@ struct JsValue
      * Property access using operator[].
      * Read-access to a non-existing mock property will add the property as an empty object.
      */
-    JsValue operator[](std::string const& propertyName);
+    JsValue operator[](std::string_view const& propertyName);
 
     /**
      * Get the value at the specified index, assuming that this
      * is a list. For both EMSCRIPTEN and the mock version,
      * it will return value_[i].
      */
-    JsValue operator[](uint32_t index) const;
+    JsValue at(uint32_t index) const;
 
     /**
      * Set an object field or dictionary entry to a given value.

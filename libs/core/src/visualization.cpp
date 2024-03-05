@@ -12,39 +12,15 @@ namespace erdblick
 
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
-    const std::vector<std::shared_ptr<TileFeatureLayer>>& layers,
     uint32_t highlightFeatureIndex)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
-      tile_(layers[0]),
-      allTiles_(layers),
+      style_(style),
       highlightFeatureIndex_(highlightFeatureIndex)
 {
-    uint32_t featureId = 0;
-    for (auto&& feature : *tile_) {
-        if (highlightFeatureIndex_ != UnselectableId) {
-            if (featureId != highlightFeatureIndex) {
-                ++featureId;
-                continue;
-            }
-        }
-
-        for (auto&& rule : style.rules()) {
-            if (highlightFeatureIndex_ != UnselectableId) {
-                if (rule.mode() != FeatureStyleRule::Highlight)
-                    continue;
-            }
-
-            if (auto* matchingSubRule = rule.match(*feature)) {
-                addFeature(feature, featureId, *matchingSubRule);
-                featuresAdded_ = true;
-            }
-        }
-        ++featureId;
-    }
 }
 
 NativeJsValue FeatureLayerVisualization::primitiveCollection() const
@@ -102,18 +78,18 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
 
     for (auto i = 0; i < numResolutionLists; ++i) {
         // Parse the first entry in the resolutionList
-        auto resolutionList = extRefsResolved[i];
+        auto resolutionList = extRefsResolved.at(i);
         if (resolutionList.size() == 0)
             continue;
 
-        auto firstResolution = resolutionList[(uint32_t)0];
+        auto firstResolution = resolutionList.at(0);
         auto typeId = firstResolution["typeId"].as<std::string>();
         auto featureIdParts = firstResolution["featureId"];
         auto numFeatureIdParts = featureIdParts.size();
         mapget::KeyValuePairs featureIdPartsVec;
         for (auto kvIndex = 0; i < numFeatureIdParts; i += 2) {
-            auto key = featureIdParts[kvIndex].as<std::string>();
-            auto value = featureIdParts[kvIndex + 1];
+            auto key = featureIdParts.at(kvIndex).as<std::string>();
+            auto value = featureIdParts.at(kvIndex + 1);
             if (value.type() == JsValue::Type::Number) {
                 featureIdPartsVec.emplace_back(key, value.as<int64_t>());
             }
@@ -330,6 +306,40 @@ void FeatureLayerVisualization::addPolyLine(std::variant<std::vector<mapget::Poi
                 }
             }
         }
+    }
+}
+
+void FeatureLayerVisualization::addTileFeatureLayer(
+    std::shared_ptr<mapget::TileFeatureLayer> tile)
+{
+    if (!tile_)
+        tile_ = std::move(tile);
+    allTiles_.emplace_back(tile_);
+}
+
+void FeatureLayerVisualization::run()
+{
+    uint32_t featureId = 0;
+    for (auto&& feature : *tile_) {
+        if (highlightFeatureIndex_ != UnselectableId) {
+            if (featureId != highlightFeatureIndex_) {
+                ++featureId;
+                continue;
+            }
+        }
+
+        for (auto&& rule : style_.rules()) {
+            if (highlightFeatureIndex_ != UnselectableId) {
+                if (rule.mode() != FeatureStyleRule::Highlight)
+                    continue;
+            }
+
+            if (auto* matchingSubRule = rule.match(*feature)) {
+                addFeature(feature, featureId, *matchingSubRule);
+                featuresAdded_ = true;
+            }
+        }
+        ++featureId;
     }
 }
 

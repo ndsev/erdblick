@@ -4,10 +4,12 @@ import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from ".
 
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
 export class TileVisualization {
+    tile: FeatureTile;
     tiles: Array<FeatureTile>;
+    isHighDetail: boolean;
+
     private readonly coreLib: ErdblickCore;
     private readonly style: any;
-    readonly isHighDetail: boolean;
     private entity: any;
     private primitiveCollection: any;
     private hasHighDetailVisualization: boolean;
@@ -34,6 +36,7 @@ export class TileVisualization {
     constructor(tiles: Array<FeatureTile>, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
         console.assert(tiles.length > 0);
 
+        this.tile = tiles[0];
         this.tiles = tiles;
         this.coreLib = tiles.at(0)!.coreLib;
         this.numFeatures = tiles.at(0)!.numFeatures;
@@ -54,27 +57,33 @@ export class TileVisualization {
     /**
      * Actually create the visualization.
      * @param viewer {Cesium.Viewer} The viewer to add the rendered entity to.
+     * @return True if anything was rendered, false otherwise.
      */
     async render(viewer: Viewer) {
         if (this.renderingInProgress || this.deleted)
-            return;
+            return false;
 
         // Remove any previous render-result, as a new one is generated.
         this.destroy(viewer);
 
         // Do not try to render if the underlying data is disposed.
         if (this.tiles.some(t => t.disposed) || this.style.isDeleted()) {
-            return;
+            return false;
         }
 
         // Create potential high-detail visualization
         this.renderingInProgress = true;
+        let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
-            await FeatureTile.peekMany(this.tiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
+            returnValue = await FeatureTile.peekMany(this.tiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
                 let visualization = new this.coreLib.FeatureLayerVisualization(
                     this.style,
-                    tileFeatureLayers,
-                    this.highlight);
+                    this.highlight!);
+
+                for (let tile of tileFeatureLayers)
+                    visualization.addTileFeatureLayer(tile);
+
+                visualization.run()
 
                 let extRefs = visualization.externalReferences();
                 if (extRefs.length > 0) {
@@ -82,11 +91,12 @@ export class TileVisualization {
                     if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
                         // Do not continue if any of the tiles or the style
                         // were deleted while we were waiting.
-                        return;
+                        return false;
                     }
                     visualization.processResolvedExternalReferences(extRefsResolved);
                 }
                 this.primitiveCollection = visualization.primitiveCollection();
+                return true;
             });
             if (this.primitiveCollection)
                 viewer.scene.primitives.add(this.primitiveCollection);
@@ -108,6 +118,7 @@ export class TileVisualization {
         this.renderingInProgress = false;
         if (this.deleted)
             this.destroy(viewer);
+        return returnValue;
     }
 
     /**

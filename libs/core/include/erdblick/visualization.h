@@ -43,7 +43,7 @@ struct RecursiveRelationVisualizationState
         bool twoway_ = false;
         bool rendered_ = false;
 
-        bool readyToRender() const;
+        [[nodiscard]] bool readyToRender() const;
     };
 
     std::map<std::pair<mapget::TileFeatureLayer*, uint32_t>, std::deque<RelationToVisualize>>
@@ -70,8 +70,18 @@ public:
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
-        const std::vector<std::shared_ptr<mapget::TileFeatureLayer>>& layers,
         uint32_t highlightFeatureIndex = UnselectableId);
+
+    /**
+     * Add a tile which is considered for visualization. All tiles added after
+     * the first one are only considered to resolve external relations.
+     */
+    void addTileFeatureLayer(std::shared_ptr<mapget::TileFeatureLayer> tile);
+
+    /**
+     * Run visualization for the added tile feature layers.
+     */
+    void run();
 
     /**
      * Returns a list of external references, which must be resolved.
@@ -166,6 +176,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
 
+    FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
     uint32_t highlightFeatureIndex_ = 0;

@@ -22,29 +22,28 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
 
 void FeatureStyleRule::parse(const YAML::Node& yaml)
 {
-    if (yaml["geometry"].IsDefined())
+    if (yaml["geometry"].IsDefined()) {
+        // Parse target geometry types.
         geometryTypes_ = 0;  // Reset inherited geometry types.
-
-    for (auto const& geometryStr : yaml["geometry"]) {
-        auto g = geometryStr.as<std::string>();
-        if (g == "point") {
-            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Points);
-        }
-        else if (g == "mesh") {
-            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Mesh);
-        }
-        else if (g == "line") {
-            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Line);
-        }
-        else if (g == "polygon") {
-            geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Polygon);
-        }
-        else {
-            std::cout << "Unsupported geometry type: " << g << std::endl;
+       for (auto const& geometryStr : yaml["geometry"]) {
+            auto g = geometryStr.as<std::string>();
+            if (g == "point") {
+                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Points);
+            }
+            else if (g == "mesh") {
+                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Mesh);
+            }
+            else if (g == "line") {
+                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Line);
+            }
+            else if (g == "polygon") {
+                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Polygon);
+            }
+            else {
+                std::cout << "Unsupported geometry type: " << g << std::endl;
+            }
         }
     }
-
-    // Parse optional fields.
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();

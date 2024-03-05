@@ -249,7 +249,7 @@ export class ErdblickView {
                 return null;
             }
         }
-        return new FeatureWrapper(index, tileVis.tiles);
+        return new FeatureWrapper(index, tileVis.tile);
     }
 
     /**

@@ -95,7 +95,7 @@ export class FeatureTile {
      * Peek into a list of multiple tiles simultaneously. Calls peek recursively,
      * according to the given tiles array.
      */
-    static async peekMany(tiles: Array<FeatureTile>, cb: any, result?: Array<TileFeatureLayer>) {
+    static async peekMany(tiles: Array<FeatureTile>, cb: any, parsedTiles?: Array<TileFeatureLayer>): Promise<any> {
         // Check if callback is provided
         if (!cb) {
             return;
@@ -104,8 +104,7 @@ export class FeatureTile {
         // Termination condition for recursion.
         if (tiles.length === 0) {
             // All tiles parsed, run callback.
-            cb(result);
-            return;
+            return await cb(parsedTiles);
         }
 
         // Get the next tile to process.
@@ -115,11 +114,11 @@ export class FeatureTile {
         tiles = tiles.slice(1);
 
         // Check if nextTile is not undefined or null.
-        await nextTile.peekAsync(async parsedTile => {
+        return await nextTile.peekAsync(async parsedTile => {
             // Add parsed tile to result.
-            result!.push(parsedTile!);
+            parsedTiles!.push(parsedTile!);
             // Recurse with the remaining tiles.
-            await FeatureTile.peekMany(tiles, cb, result);
+            return await FeatureTile.peekMany(tiles, cb, parsedTiles);
         });
     }
 }

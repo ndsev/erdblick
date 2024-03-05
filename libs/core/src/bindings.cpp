@@ -193,7 +193,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, std::vector<std::shared_ptr<mapget::TileFeatureLayer>>, uint32_t>()
+        .constructor<FeatureLayerStyle const&, uint32_t>()
+        .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
+        .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
