@@ -147,65 +147,59 @@ void FeatureLayerVisualization::addGeometry(
     uint32_t id,
     FeatureStyleRule const& rule)
 {
+    std::vector<mapget::Point> vertsCartesian;
+    vertsCartesian.reserve(geom->numPoints());
+    geom->forEachPoint(
+        [&vertsCartesian](auto&& vertex)
+        {
+            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex));
+            return true;
+        });
+
     switch (geom->geomType()) {
     case Geometry::GeomType::Polygon:
-        if (auto verts = encodeVerticesAsList(geom)) {
+        if (vertsCartesian.size() >= 3) {
+            auto verts = encodeVerticesAsList(vertsCartesian);
             if (rule.flat())
-                coloredGroundMeshes_.addPolygon(*verts, rule, id);
+                coloredGroundMeshes_.addPolygon(verts, rule, id);
             else
-                coloredNontrivialMeshes_.addPolygon(*verts, rule, id);
+                coloredNontrivialMeshes_.addPolygon(verts, rule, id);
         }
         break;
     case Geometry::GeomType::Line:
-        addPolyLine(geom, rule, id);
+        addPolyLine(vertsCartesian, rule, id);
         break;
     case Geometry::GeomType::Mesh:
-        if (auto verts = encodeVerticesAsFloat64Array(geom)) {
-            coloredTrivialMeshes_.addTriangles(*verts, rule, id);
+        if (vertsCartesian.size() >= 3) {
+            auto verts = encodeVerticesAsFloat64Array(vertsCartesian);
+            coloredTrivialMeshes_.addTriangles(verts, rule, id);
         }
         break;
     case Geometry::GeomType::Points:
-        geom->forEachPoint(
-            [this, &rule, &id](auto&& vertex)
-            {
-                auto cartesian = JsValue(wgsToCartesian<Point>(vertex));
-                coloredPoints_.addPoint(cartesian, rule, id);
-                return true;
-            });
+        for (auto const& pt : vertsCartesian) {
+            coloredPoints_.addPoint(JsValue(pt), rule, id);
+        }
         break;
     }
 }
 
-std::optional<JsValue>
-FeatureLayerVisualization::encodeVerticesAsList(model_ptr<Geometry> const& geom)
+JsValue
+FeatureLayerVisualization::encodeVerticesAsList(std::vector<mapget::Point> const& points)
 {
     auto jsPoints = JsValue::List();
-    uint32_t count = 0;
-    geom->forEachPoint(
-        [&count, &jsPoints](auto&& vertex)
-        {
-            jsPoints.push(JsValue(wgsToCartesian<Point>(vertex)));
-            ++count;
-            return true;
-        });
-    if (!count)
-        return {};
+    for (auto const& pt : points) {
+        jsPoints.push(JsValue(pt));
+    }
     return jsPoints;
 }
 
-std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVerticesAsReversedSplitList(model_ptr<Geometry> const& geom) {
-    std::vector<mapget::Point> points;
-    uint32_t count = 0;
-    geom->forEachPoint(
-        [&count, &points](auto&& vertex) {
-            points.emplace_back(vertex);
-            ++count;
-            return true;
-        });
-    if (!count || count == 1)
+std::pair<JsValue, JsValue>
+FeatureLayerVisualization::encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points)
+{
+    if (points.empty() || points.size() < 2)
         return {};
     auto jsPointsFirstHalf = JsValue::List();
-    auto jsPointsSecondfHalf = JsValue::List();
+    auto jsPointsSecondHalf = JsValue::List();
     if (points.size() == 2) {
         const auto x = (points.at(0).x + points.at(1).x) / 2;
         const auto y = (points.at(0).y + points.at(1).y) / 2;
@@ -213,57 +207,52 @@ std::optional<std::pair<JsValue, JsValue>> FeatureLayerVisualization::encodeVert
         mapget::Point midpoint{x, y, z};
         jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(midpoint)));
         jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(0))));
-        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(midpoint)));
-        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(1))));
-        return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
+        jsPointsSecondHalf.push(JsValue(wgsToCartesian<mapget::Point>(midpoint)));
+        jsPointsSecondHalf.push(JsValue(wgsToCartesian<mapget::Point>(points.at(1))));
+        return std::make_pair(jsPointsFirstHalf, jsPointsSecondHalf);
     }
+
     auto midpointIndex = points.size() / 2;
-    for (auto i = midpointIndex + 1; i-- > 0; ) {
+    for (auto i = midpointIndex; i >= 0; --i) {
         jsPointsFirstHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
     }
-    for (auto i = midpointIndex; i < points.size(); i++) {
-        jsPointsSecondfHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
+    for (auto i = midpointIndex; i < points.size(); ++i) {
+        jsPointsSecondHalf.push(JsValue(wgsToCartesian<mapget::Point>(points[i])));
     }
-    return std::make_pair(jsPointsFirstHalf, jsPointsSecondfHalf);
+    return std::make_pair(jsPointsFirstHalf, jsPointsSecondHalf);
 }
 
-std::optional<JsValue>
-FeatureLayerVisualization::encodeVerticesAsFloat64Array(model_ptr<Geometry> const& geom)
+JsValue
+FeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points)
 {
     std::vector<double> cartesianCoords;
-    cartesianCoords.reserve(geom->numPoints() * 3);
-    geom->forEachPoint(
-        [&cartesianCoords](auto&& vertex)
-        {
-            auto cartesian = wgsToCartesian<Point>(vertex);
-            cartesianCoords.push_back(cartesian.x);
-            cartesianCoords.push_back(cartesian.y);
-            cartesianCoords.push_back(cartesian.z);
-            return true;
-        });
-    if (cartesianCoords.empty())
-        return {};
+    cartesianCoords.reserve(points.size() * 3);
+    for (auto const& p : points) {
+        cartesianCoords.emplace_back(p.x);
+        cartesianCoords.emplace_back(p.y);
+        cartesianCoords.emplace_back(p.z);
+    }
     return JsValue::Float64Array(cartesianCoords);
 }
 
-CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForDashMaterial(const FeatureStyleRule &rule) {
+CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(const FeatureStyleRule &rule) {
     const auto key = std::tuple<std::string, std::string, uint32_t, uint32_t>{rule.materialColor(), rule.gapColor(), rule.dashLength(), rule.dashPattern()};
     auto& dashMap = rule.flat() ? dashGroundLines_ : dashLines_;
     auto iter = dashMap.find(key);
     if (iter != dashMap.end()) {
-        return &(iter->second);
+        return iter->second;
     }
-    return &(dashMap.try_emplace(key, CesiumPrimitive::withPolylineDashMaterialAppearance(rule, rule.flat())).first->second);
+    return dashMap.emplace(key, CesiumPrimitive::withPolylineDashMaterialAppearance(rule, rule.flat())).first->second;
 }
 
-CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForArrowMaterial(const FeatureStyleRule &rule) {
+CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(const FeatureStyleRule &rule) {
     const std::string key = rule.materialColor();
     auto& arrowMap = rule.flat() ? arrowGroundLines_ : arrowLines_;
     auto iter = arrowMap.find(key);
     if (iter != arrowMap.end()) {
-        return &(iter->second);
+        return iter->second;
     }
-    return &(arrowMap.try_emplace(key, CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat())).first->second);
+    return arrowMap.emplace(key, CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat())).first->second;
 }
 
 void erdblick::FeatureLayerVisualization::addLine(
@@ -275,37 +264,27 @@ void erdblick::FeatureLayerVisualization::addLine(
     addPolyLine({a, b}, rule, id);
 }
 
-void FeatureLayerVisualization::addPolyLine(std::variant<std::vector<mapget::Point>, <mapget::geom_ptr<Geometry>> const& geom, const FeatureStyleRule& rule, uint32_t id)
+void FeatureLayerVisualization::addPolyLine(std::vector<mapget::Point> const& geom, const FeatureStyleRule& rule, uint32_t id)
 {
     if (rule.hasArrow() && rule.hasDoubleArrow()) {
-        if (auto vertsPair = encodeVerticesAsReversedSplitList(geom)) {
-            getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->first, rule, id);
-            getPrimitiveForArrowMaterial(rule)->addPolyLine(vertsPair->second, rule, id);
-        }
+        auto vertsPair = encodeVerticesAsReversedSplitList(geom);
+        getPrimitiveForArrowMaterial(rule).addPolyLine(vertsPair.first, rule, id);
+        getPrimitiveForArrowMaterial(rule).addPolyLine(vertsPair.second, rule, id);
+        return;
+    }
+
+    auto verts = encodeVerticesAsList(geom);
+    if (rule.hasArrow()) {
+        getPrimitiveForArrowMaterial(rule).addPolyLine(verts, rule, id);
+    }
+    else if (rule.isDashed()) {
+        getPrimitiveForDashMaterial(rule).addPolyLine(verts, rule, id);
+    }
+    else if (rule.flat()) {
+        coloredGroundLines_.addPolyLine(verts, rule, id);
     }
     else {
-        if (auto verts = encodeVerticesAsList(geom)) {
-            if (rule.flat()) {
-                if (rule.isDashed()) {
-                    getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
-                }
-                else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
-                    getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
-                }
-                else {
-                    coloredGroundLines_.addPolyLine(*verts, rule, id);
-                }
-            }
-            else {
-                if (rule.isDashed()) {
-                    getPrimitiveForDashMaterial(rule)->addPolyLine(*verts, rule, id);
-                } else if (rule.hasArrow() && !rule.hasDoubleArrow()) {
-                    getPrimitiveForArrowMaterial(rule)->addPolyLine(*verts, rule, id);
-                } else {
-                    coloredLines_.addPolyLine(*verts, rule, id);
-                }
-            }
-        }
+        coloredLines_.addPolyLine(verts, rule, id);
     }
 }
 

@@ -126,41 +126,47 @@ private:
     void addGeometry(mapget::model_ptr<mapget::Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule);
 
     /**
-     * Get the line primitive which supports this style based on the
-     * arrow/dash/flat options which are set in the style.
-     */
-    CesiumPrimitive& getLinePrimitive(FeatureStyleRule const& rule);
-
-    /**
      * Add a line which connects two points to the visualization.
      */
-    void addLine(mapget::Point const& a, mapget::Point const& b, uint32_t id, FeatureStyleRule const& rule);
+    void addLine(
+        mapget::Point const& a,
+        mapget::Point const& b,
+        uint32_t id,
+        FeatureStyleRule const& rule);
 
     /**
-     * Get some WGS84 points as a list of Cesium Cartesian points.
+     * Add a polyline which has at least two shape-points.
      */
-    static std::optional<JsValue> encodeVerticesAsList(mapget::model_ptr<mapget::Geometry> const& geom);
+    void addPolyLine(
+        std::vector<mapget::Point> const& geom,
+        const FeatureStyleRule& rule,
+        uint32_t id);
+
+        /**
+     * Get some cartesian points as a list of Cesium Cartesian points.
+     */
+    static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
 
     /**
-     * Get some WGS84 points as two lists (first half reversed) of Cesium Cartesian points.
+     * Get some cartesian points as two lists (first half reversed) of Cesium Cartesian points.
      * Applicable for double arrows.
      */
-    static std::optional<std::pair<JsValue, JsValue>> encodeVerticesAsReversedSplitList(mapget::model_ptr<mapget::Geometry> const& geom);
+    static std::pair<JsValue, JsValue> encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points);
 
     /**
-     * Get some WGS84 points as a float64 buffer of Cesium Cartesian points.
+     * Get some cartesian points as a float64 buffer of Cesium Cartesian points.
      */
-    static std::optional<JsValue> encodeVerticesAsFloat64Array(mapget::model_ptr<mapget::Geometry> const& geom);
+    static JsValue encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points);
 
     /**
      * Get an initialised primitive for a particular PolylineDashMaterialAppearance.
      */
-    CesiumPrimitive* getPrimitiveForDashMaterial(const FeatureStyleRule &rule);
+    CesiumPrimitive& getPrimitiveForDashMaterial(const FeatureStyleRule &rule);
 
     /**
      * Get an initialised primitive for a particular PolylineArrowMaterialAppearance.
      */
-    CesiumPrimitive* getPrimitiveForArrowMaterial(const FeatureStyleRule &rule);
+    CesiumPrimitive& getPrimitiveForArrowMaterial(const FeatureStyleRule &rule);
 
     /// =========== Generic Members ===========
 
