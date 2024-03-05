@@ -155,11 +155,11 @@ export class MapPanelComponent {
         this.layerDialogVisible = !this.layerDialogVisible;
     }
 
-    focus(tileId: BigInt, event: any) {
+    focus(tileId: bigint, event: any) {
         event.stopPropagation();
         if (this.mapService.mapModel.getValue() && this.mapService.coreLib !== undefined) {
             this.mapService.mapModel.getValue()!.zoomToWgs84PositionTopic.next(
-                this.mapService.coreLib.getTilePosition(tileId)
+                this.mapService.coreLib.getTilePosition(BigInt(tileId))
             );
         }
     }
