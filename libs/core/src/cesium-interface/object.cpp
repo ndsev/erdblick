@@ -69,7 +69,7 @@ JsValue JsValue::Float64Array(const std::vector<double>& coordinates)
 #endif
 }
 
-JsValue JsValue::operator[](std::string_view const& propertyName)
+JsValue JsValue::operator[](std::string const& propertyName)
 {
 #ifdef EMSCRIPTEN
     return JsValue(value_[propertyName]);

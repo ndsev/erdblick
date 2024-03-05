@@ -23,6 +23,41 @@ FeatureLayerVisualization::FeatureLayerVisualization(
 {
 }
 
+
+void FeatureLayerVisualization::addTileFeatureLayer(
+    std::shared_ptr<mapget::TileFeatureLayer> tile)
+{
+    if (!tile_)
+        tile_ = std::move(tile);
+    allTiles_.emplace_back(tile_);
+}
+
+void FeatureLayerVisualization::run()
+{
+    uint32_t featureId = 0;
+    for (auto&& feature : *tile_) {
+        if (highlightFeatureIndex_ != UnselectableId) {
+            if (featureId != highlightFeatureIndex_) {
+                ++featureId;
+                continue;
+            }
+        }
+
+        for (auto&& rule : style_.rules()) {
+            if (highlightFeatureIndex_ != UnselectableId) {
+                if (rule.mode() != FeatureStyleRule::Highlight)
+                    continue;
+            }
+
+            if (auto* matchingSubRule = rule.match(*feature)) {
+                addFeature(feature, featureId, *matchingSubRule);
+                featuresAdded_ = true;
+            }
+        }
+        ++featureId;
+    }
+}
+
 NativeJsValue FeatureLayerVisualization::primitiveCollection() const
 {
     if (!featuresAdded_)
@@ -285,40 +320,6 @@ void FeatureLayerVisualization::addPolyLine(std::vector<mapget::Point> const& ge
     }
     else {
         coloredLines_.addPolyLine(verts, rule, id);
-    }
-}
-
-void FeatureLayerVisualization::addTileFeatureLayer(
-    std::shared_ptr<mapget::TileFeatureLayer> tile)
-{
-    if (!tile_)
-        tile_ = std::move(tile);
-    allTiles_.emplace_back(tile_);
-}
-
-void FeatureLayerVisualization::run()
-{
-    uint32_t featureId = 0;
-    for (auto&& feature : *tile_) {
-        if (highlightFeatureIndex_ != UnselectableId) {
-            if (featureId != highlightFeatureIndex_) {
-                ++featureId;
-                continue;
-            }
-        }
-
-        for (auto&& rule : style_.rules()) {
-            if (highlightFeatureIndex_ != UnselectableId) {
-                if (rule.mode() != FeatureStyleRule::Highlight)
-                    continue;
-            }
-
-            if (auto* matchingSubRule = rule.match(*feature)) {
-                addFeature(feature, featureId, *matchingSubRule);
-                featuresAdded_ = true;
-            }
-        }
-        ++featureId;
     }
 }
 

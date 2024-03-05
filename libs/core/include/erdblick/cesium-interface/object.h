@@ -81,7 +81,7 @@ struct JsValue
      * Property access using operator[].
      * Read-access to a non-existing mock property will add the property as an empty object.
      */
-    JsValue operator[](std::string_view const& propertyName);
+    JsValue operator[](std::string const& propertyName);
 
     /**
      * Get the value at the specified index, assuming that this

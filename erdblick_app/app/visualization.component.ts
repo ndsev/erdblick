@@ -44,7 +44,7 @@ export class TileVisualization {
         this.style = style;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
-        this.highlight = highlight;
+        this.highlight = highlight === undefined ? 0xffffffff : highlight;
         this.deleted = false;
 
         this.entity = null;  // Low-detail or empty -> Cesium point entity.
