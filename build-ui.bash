@@ -20,6 +20,9 @@ else
 fi
 
 echo "Building Angular distribution files."
-npm run build -- -c production
-
+if [[ -z "$NG_DEVELOP" ]]; then
+  npm run build -- -c production
+else
+  npm run build
+fi
 exit 0
