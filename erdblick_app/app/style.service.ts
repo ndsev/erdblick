@@ -1,8 +1,17 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
-import {from, mergeMap, map, reduce, firstValueFrom, Subject, BehaviorSubject, Observable, Subscriber} from "rxjs";
+import {
+    from,
+    mergeMap,
+    map,
+    reduce,
+    firstValueFrom,
+    BehaviorSubject,
+    Observable,
+    Subscriber,
+    catchError, of
+} from "rxjs";
 import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
 
 export interface ErdblickStyle {
@@ -32,38 +41,43 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient) {
         this.stylesLoaded.next(false);
-        this.activatedStyles.set(defaultStyle.id, true);
         this.retrieveStyles([defaultStyle]).then(dataMap => {
             this.styleData = dataMap;
+            this.activatedStyles.set(defaultStyle.id, true);
+            this.erdblickStyles = [defaultStyle];
             let styleUrls: Array<ErdblickStyle> = [];
             httpClient.get("/config.json", {responseType: "json"}).subscribe({
                 next: (data: any) => {
                     if (data && data["styles"]) {
-                        styleUrls = [...styleUrls, ...data["styles"]];
-                        console.log(styleUrls)
+                        styleUrls = [...data["styles"]];
                         styleUrls.forEach((styleUrl: ErdblickStyle) => {
                             if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
                                 styleUrl.url = `/bundle/styles/${styleUrl.url}`;
                             }
-                            this.activatedStyles.set(styleUrl.id, true);
                         });
-                        this.erdblickStyles = styleUrls;
                         this.retrieveStyles(styleUrls).then(dataMap => {
                             if (dataMap.size > 0) {
-                                this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
-                                this.activatedStyles.set(defaultStyle.id, false);
+                                dataMap.forEach((styleString, styleId) => {
+                                    if (styleString) {
+                                        this.styleData.set(styleId, styleString);
+                                        this.activatedStyles.set(styleId, true);
+                                        styleUrls.forEach(styleUrl => {
+                                            if (styleUrl.id == styleId) this.erdblickStyles.push(styleUrl);
+                                        });
+                                    } else {
+                                        console.log(`No data for style: ${styleId}`);
+                                    }
+                                });
                             }
                             this.retrieveImportedStyles();
                             this.stylesLoaded.next(true);
                         });
                     } else {
-                        this.activatedStyles.set(defaultStyle.id, true);
                         this.retrieveImportedStyles();
                         this.stylesLoaded.next(true);
                     }
                 },
                 error: error => {
-                    this.activatedStyles.set(defaultStyle.id, true);
                     this.retrieveImportedStyles();
                     this.stylesLoaded.next(true);
                     console.log(error);
@@ -76,7 +90,13 @@ export class StyleService {
         return firstValueFrom(from(styles).pipe(
             mergeMap(style =>
                 this.httpClient.get(style.url, {responseType: 'text'})
-                    .pipe(map(data => ({style, data})))
+                    .pipe(
+                        map(data => ({style, data})),
+                        catchError(error => {
+                            console.error('Error fetching style', style.id, error);
+                            return of({style, data: ""});
+                        })
+                    )
             ),
             reduce((acc, {style, data}) => {
                 acc.set(style.id, data);
