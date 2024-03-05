@@ -29,6 +29,10 @@ const defaultStyle: ErdblickStyle = {
     url: "/bundle/styles/default-style.yaml"
 };
 
+/**
+ * Retrieves and stores YAML style plain data
+ * Keeps track of activated styles and error messages
+ */
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
