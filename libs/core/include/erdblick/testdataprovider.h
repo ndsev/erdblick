@@ -246,7 +246,6 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Bike'"
             color: "#3498db" # Blue color for Bike Way
-            material-color: "#3498db" # Blue color for Bike Way
             width: 10.0
             arrow: "double"
 
@@ -255,7 +254,6 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Pedestrian'"
             color: "#2ecc71" # Green color for Pedestrian Way
-            material-color: "#2ecc71" # Green color for Pedestrian Way
             width: 15.0
             arrow: "double"
 
@@ -264,7 +262,6 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Any'"
             color: "#f39c12" # Orange color for Any Way
-            material-color: "#f39c12" # Orange color for Any Way
             width: 30.0
             arrow: "double"
 
@@ -273,7 +270,6 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Vehicle'"
             color: "#e74c3c" # Red color for Vehicle Way
-            material-color: "#e74c3c" # Red color for Vehicle Way
             width: 30.0
             arrow: "double"
 
@@ -282,7 +278,6 @@ public:
             type: "Way"
             filter: "properties.wayType == 'Vehicle'"
             color: "#17e38e"
-            material-color: "#17e38e"
             width: 30.0
             flat: true
             dashed: true

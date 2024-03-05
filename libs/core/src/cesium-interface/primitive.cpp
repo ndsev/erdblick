@@ -16,12 +16,12 @@ namespace erdblick {
 
     CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround) {
         CesiumPrimitive result;
-        auto const color = Color(style.materialColor());
-        auto const gapcolor = Color(style.gapColor());
+        auto const &color = style.color();
+        auto const &gapColor = style.gapColor();
         result.appearance_ = Cesium().PolylineMaterialAppearance.New({
             {"material", Cesium().MaterialFromType("PolylineDash", JsValue::Dict({
-                {"color", color.toCesiumColor(1.0)},
-                {"gapColor", gapcolor.toCesiumColor(1.0)},
+                {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
+                {"gapColor", Cesium().Color.New(gapColor.r, gapColor.g, gapColor.b, gapColor.a)},
                 {"dashLength", JsValue(style.dashLength())},
                 {"dashPattern", JsValue(style.dashPattern())}
             }))}
@@ -33,10 +33,10 @@ namespace erdblick {
 
     CesiumPrimitive CesiumPrimitive::withPolylineArrowMaterialAppearance(const FeatureStyleRule &style, bool clampToGround) {
         CesiumPrimitive result;
-        auto const color = Color(style.materialColor());
+        auto const &color = style.color();
         result.appearance_ = Cesium().PolylineMaterialAppearance.New({
             {"material", Cesium().MaterialFromType("PolylineArrow", JsValue::Dict({
-                {"color", color.toCesiumColor(1.0)},
+                {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
             }))}
         });
         result.clampToGround_ = clampToGround;

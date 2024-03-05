@@ -5,9 +5,10 @@ import {FeatureTile} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
-import {ErdblickStyle, ErdblickStyleData, StyleService} from "./style.service";
+import {StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
 import {ParametersService} from "./parameters.service";
+import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
@@ -21,6 +22,11 @@ type ViewportProperties = {
     height: number;
     camPosLat: number
 };
+
+type ErdblickStyleData = {
+    enabled: boolean,
+    featureLayerStyle: FeatureLayerStyle
+}
 
 /**
  * Erdblick view-model class. This class is responsible for keeping track
@@ -231,7 +237,7 @@ export class ErdblickModel {
     reloadStyle(styleId: string) {
         if (this.styles) {
             if (this.styles.has(styleId) && this.styleService.styleData.has(styleId)) {
-                this.styleService.syncStyle(styleId).then(_ => {
+                this.styleService.syncStyleYamlData(styleId).then(_ => {
                     const styleString = this.styleService.styleData.get(styleId);
                     if (styleString !== undefined) {
                         this.styles!.get(styleId)?.featureLayerStyle?.delete();
@@ -547,7 +553,7 @@ export class ErdblickModel {
                     this.renderTileLayer(tileLayer, style, styleId);
                 });
             }
-        })
+        });
     }
 
     private removeTileLayer(tileLayer: any) {

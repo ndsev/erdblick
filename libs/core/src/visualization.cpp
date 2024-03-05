@@ -193,7 +193,7 @@ std::optional<JsValue> FeatureLayerVisualization::encodeVerticesAsFloat64Array(m
 }
 
 CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForDashMaterial(const FeatureStyleRule &rule) {
-    const auto key = std::tuple<std::string, std::string, uint32_t, uint32_t>{rule.materialColor(), rule.gapColor(), rule.dashLength(), rule.dashPattern()};
+    const auto key = std::tuple<std::string, std::string, uint32_t, uint32_t>{rule.colorString(), rule.gapColorString(), rule.dashLength(), rule.dashPattern()};
     auto& dashMap = rule.flat() ? dashGroundLines_ : dashLines_;
     auto iter = dashMap.find(key);
     if (iter != dashMap.end()) {
@@ -203,7 +203,7 @@ CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForDashMaterial(const Fe
 }
 
 CesiumPrimitive* FeatureLayerVisualization::getPrimitiveForArrowMaterial(const FeatureStyleRule &rule) {
-    const std::string key = rule.materialColor();
+    const std::string key = rule.colorString();
     auto& arrowMap = rule.flat() ? arrowGroundLines_ : arrowLines_;
     auto iter = arrowMap.find(key);
     if (iter != arrowMap.end()) {
