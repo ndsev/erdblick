@@ -575,7 +575,6 @@ export class ErdblickModel {
             let visu = new TileVisualization(
                 tileLayer,
                 styleId == "_builtin" ? style : style.featureLayerStyle,
-                styleId,
                 tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
             this.tileVisualizationQueue.push([styleId, visu]);
             if (this.visualizedTileLayers.has(styleId)) {
