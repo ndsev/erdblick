@@ -110,6 +110,13 @@ import {FileUpload} from "primeng/fileupload";
                         </div>
                     </div>
                 </div>
+                <div *ngIf="styleService.errorStyleIds.size" class="styles-container">
+                    <div *ngFor="let message of styleService.errorStyleIds | keyvalue" class="flex-container">
+                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
+                            {{ message.key }}: {{message.value}} (see console)
+                        </span>
+                    </div>
+                </div>
                 <div class="styles-container">
                     <div class="flex-container">
                         <span class="font-bold white-space-nowrap" style="margin-left: 0.5em"></span>
@@ -257,7 +264,7 @@ export class MapPanelComponent {
     }
 
     exportStyle(styleId: string, imported: boolean) {
-        if(!this.styleService.exportStyle(styleId, imported)) {
+        if(!this.styleService.exportStyleYamlFile(styleId, imported)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
@@ -272,7 +279,7 @@ export class MapPanelComponent {
                 styleId = styleId.slice(0, -4);
             }
             styleId = `${styleId} (Imported)`
-            this.styleService.importStyle(event, file, styleId, this.styleUploader).subscribe(
+            this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader).subscribe(
                 (next) => {
                     if (next) {
                         this.mapService.loadImportedStyle(styleId);

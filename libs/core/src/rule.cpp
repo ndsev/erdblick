@@ -89,7 +89,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["color"].IsDefined()) {
         // Parse a CSS color
-        color_ = Color(yaml["color"].as<std::string>()).toFVec4();
+        colorString_ = yaml["color"].as<std::string>();
+        color_ = Color(colorString_).toFVec4();
     }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
@@ -152,9 +153,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse whether bidirectional relations should be followed and merged.
         relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<bool>();
     }
-    if (yaml["material-color"].IsDefined()) {
-        materialColor_ = yaml["material-color"].as<std::string>();
-    }
     if (yaml["dashed"].IsDefined()) {
         // Parse line dashes
         dashed_ = yaml["dashed"].as<bool>();
@@ -162,7 +160,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             dashLength_ = yaml["dash-length"].as<int>();
         }
         if (yaml["gap-color"].IsDefined()) {
-            gapColor_ = yaml["gap-color"].as<std::string>();
+            gapColorString_ = yaml["gap-color"].as<std::string>();
+            gapColor_ = Color(yaml["gap-color"].as<std::string>()).toFVec4();
         }
         if (yaml["dash-pattern"].IsDefined()) {
             dashPattern_ = yaml["dash-pattern"].as<int>();
@@ -225,6 +224,13 @@ glm::fvec4 const& FeatureStyleRule::color() const
     return color_;
 }
 
+std::string FeatureStyleRule::colorString() const
+{
+    // Return string representation of the color
+    // to simplify usage for mapped Material primitives
+    return colorString_;
+}
+
 float FeatureStyleRule::width() const
 {
     return width_;
@@ -233,11 +239,6 @@ float FeatureStyleRule::width() const
 bool FeatureStyleRule::flat() const
 {
     return flat_;
-}
-
-std::string FeatureStyleRule::materialColor() const
-{
-    return materialColor_;
 }
 
 bool FeatureStyleRule::isDashed() const
@@ -250,9 +251,16 @@ int FeatureStyleRule::dashLength() const
     return dashLength_;
 }
 
-std::string FeatureStyleRule::gapColor() const
+glm::fvec4 const& FeatureStyleRule::gapColor() const
 {
     return gapColor_;
+}
+
+std::string FeatureStyleRule::gapColorString() const
+{
+    // Return string representation of the color
+    // to simplify usage for mapped Material primitives
+    return gapColorString_;
 }
 
 int FeatureStyleRule::dashPattern() const

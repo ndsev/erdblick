@@ -1,18 +1,21 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
-import {from, mergeMap, map, reduce, firstValueFrom, Subject, BehaviorSubject, Observable, Subscriber} from "rxjs";
-import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {ParametersService} from "./parameters.service";
+import {
+    from,
+    mergeMap,
+    map,
+    reduce,
+    firstValueFrom,
+    BehaviorSubject,
+    Observable,
+    Subscriber,
+    catchError, of
+} from "rxjs";
 import {FileUpload} from "primeng/fileupload";
 
-export interface ErdblickStyle {
+interface ErdblickStyle {
     id: string,
     url: string
-}
-
-export type ErdblickStyleData = {
-    enabled: boolean,
-    featureLayerStyle: FeatureLayerStyle
 }
 
 const defaultStyle: ErdblickStyle = {
@@ -20,6 +23,10 @@ const defaultStyle: ErdblickStyle = {
     url: "/bundle/styles/default-style.yaml"
 };
 
+/**
+ * Retrieves and stores YAML style plain data
+ * Keeps track of activated styles and error messages
+ */
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
@@ -29,41 +36,48 @@ export class StyleService {
     importedStyleData: Map<string, string> = new Map<string, string>();
     stylesLoaded: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
     private erdblickStyles: Array<ErdblickStyle> = [];
+    errorStyleIds: Map<string, string> = new Map<string, string>();
 
     constructor(private httpClient: HttpClient) {
         this.stylesLoaded.next(false);
-        this.activatedStyles.set(defaultStyle.id, true);
-        this.retrieveStyles([defaultStyle]).then(dataMap => {
+        this.fetchStylesYamlSources([defaultStyle]).then(dataMap => {
             this.styleData = dataMap;
+            this.activatedStyles.set(defaultStyle.id, true);
+            this.erdblickStyles = [defaultStyle];
             let styleUrls: Array<ErdblickStyle> = [];
             httpClient.get("/config.json", {responseType: "json"}).subscribe({
                 next: (data: any) => {
                     if (data && data["styles"]) {
-                        styleUrls = [...styleUrls, ...data["styles"]];
-                        console.log(styleUrls)
+                        styleUrls = [...data["styles"]];
                         styleUrls.forEach((styleUrl: ErdblickStyle) => {
                             if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
                                 styleUrl.url = `/bundle/styles/${styleUrl.url}`;
                             }
-                            this.activatedStyles.set(styleUrl.id, true);
                         });
-                        this.erdblickStyles = styleUrls;
-                        this.retrieveStyles(styleUrls).then(dataMap => {
+                        this.fetchStylesYamlSources(styleUrls).then(dataMap => {
                             if (dataMap.size > 0) {
-                                this.styleData = new Map([...dataMap.entries(), ...this.styleData.entries()]);
-                                this.activatedStyles.set(defaultStyle.id, false);
+                                dataMap.forEach((styleString, styleId) => {
+                                    if (styleString) {
+                                        this.styleData.set(styleId, styleString);
+                                        this.activatedStyles.set(styleId, true);
+                                        styleUrls.forEach(styleUrl => {
+                                            if (styleUrl.id == styleId) this.erdblickStyles.push(styleUrl);
+                                        });
+                                    } else {
+                                        this.errorStyleIds.set(styleId, "Wrong URL / No data");
+                                        console.error(`Wrong URL or no data available for style: ${styleId}`);
+                                    }
+                                });
                             }
                             this.retrieveImportedStyles();
                             this.stylesLoaded.next(true);
                         });
                     } else {
-                        this.activatedStyles.set(defaultStyle.id, true);
                         this.retrieveImportedStyles();
                         this.stylesLoaded.next(true);
                     }
                 },
                 error: error => {
-                    this.activatedStyles.set(defaultStyle.id, true);
                     this.retrieveImportedStyles();
                     this.stylesLoaded.next(true);
                     console.log(error);
@@ -72,11 +86,17 @@ export class StyleService {
         });
     }
 
-    retrieveStyles(styles: Array<ErdblickStyle>) {
+    fetchStylesYamlSources(styles: Array<ErdblickStyle>) {
         return firstValueFrom(from(styles).pipe(
             mergeMap(style =>
                 this.httpClient.get(style.url, {responseType: 'text'})
-                    .pipe(map(data => ({style, data})))
+                    .pipe(
+                        map(data => ({style, data})),
+                        catchError(error => {
+                            console.error('Error fetching style', style.id, error);
+                            return of({style, data: ""});
+                        })
+                    )
             ),
             reduce((acc, {style, data}) => {
                 acc.set(style.id, data);
@@ -85,11 +105,11 @@ export class StyleService {
         ));
     }
 
-    async syncStyle(styleId: string) {
+    async syncStyleYamlData(styleId: string) {
         for (const erdblickStyle of this.erdblickStyles) {
             if (erdblickStyle.id == styleId) {
                 try {
-                    const result= await this.retrieveStyles([erdblickStyle]);
+                    const result= await this.fetchStylesYamlSources([erdblickStyle]);
                     if (result !== undefined && result.get(styleId) !== undefined) {
                         const styleData = result.get(styleId)!;
                         this.styleData.set(styleId, styleData);
@@ -101,7 +121,7 @@ export class StyleService {
         }
     }
 
-    exportStyle(styleId: string, imported: boolean = false) {
+    exportStyleYamlFile(styleId: string, imported: boolean = false) {
         const content = imported ? this.importedStyleData.get(styleId) : this.styleData.get(styleId);
         if (content === undefined) {
             return false;
@@ -132,7 +152,7 @@ export class StyleService {
         return true;
     }
 
-    importStyle(event: any, file: File, styleId: string, fileUploader: FileUpload | undefined) {
+    importStyleYamlFile(event: any, file: File, styleId: string, fileUploader: FileUpload | undefined) {
         const fileReader = new FileReader();
         fileReader.readAsText(file);
         // Prevent the default upload behavior
