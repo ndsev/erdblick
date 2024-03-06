@@ -476,7 +476,8 @@ export class ErdblickModel {
         // Update visualizations and visualization queue
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
-                if (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) && !tileVisu.tile.preventCulling) {
+                if (!tileVisu.tile.preventCulling && (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) ||
+                    !this.checkMapLayerVisibility(tileVisu.tile.mapName, tileVisu.tile.layerName))) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
