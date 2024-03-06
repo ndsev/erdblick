@@ -3,8 +3,7 @@ project(erdblick)
 
 include(FetchContent)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_OSX_ARCHITECTURES "x86_64")
+set(CMAKE_CXX_STANDARD 20)
 
 # Treat warnings as errors, with some exceptions for Cesium.
 set (ERDBLICK_CXX_FLAGS
@@ -25,6 +24,12 @@ FetchContent_Declare(glm
     GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(glm)
 
+FetchContent_Declare(mapget
+  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+  GIT_TAG        "relations"
+  GIT_SHALLOW    ON)
+FetchContent_MakeAvailable(mapget)
+
 # Fetch cesium-native
 set(CESIUM_TESTS_ENABLED OFF)
 set(CESIUM_GLM_STRICT_ENABLED OFF)
@@ -33,15 +38,9 @@ set(DRACO_JS_GLUE OFF CACHE BOOL "Disable JS glue for Draco" FORCE)
 FetchContent_Declare(
   cesiumnative
   GIT_REPOSITORY https://github.com/Klebert-Engineering/cesium-native.git
-  GIT_TAG "main"
+  GIT_TAG "spdlog-upgrade"
   GIT_SHALLOW ON)
 FetchContent_MakeAvailable(cesiumnative)
-
-FetchContent_Declare(mapget
-  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "main"
-  GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(mapget)
 
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"

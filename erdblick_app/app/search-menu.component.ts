@@ -8,9 +8,11 @@ import {MapService} from "./map.service";
 @Component({
     selector: 'search-menu-items',
     template: `
-        <div class="search-menu" *ngFor="let item of searchItems">
-            <p-divider></p-divider>
-            <p (click)="jumpToWGS84(item.jump(value))" class="search-option" [ngClass]="{'item-disabled': !item.enabled }"><span>{{item.name}}</span><br>{{item.label}}</p>
+        <div class="search-menu-wrapper">
+            <div class="search-menu" *ngFor="let item of searchItems">
+                <p-divider></p-divider>
+                <p (click)="jumpToWGS84(item.jump(value))" class="search-option" [ngClass]="{'item-disabled': !item.enabled }"><span>{{item.name}}</span><br>{{item.label}}</p>
+            </div>
         </div>
     `,
     styles: [`
@@ -20,7 +22,7 @@ import {MapService} from "./map.service";
         }
     `]
 })
-export class MenuComponent {
+export class SearchMenuComponent {
 
     searchItems: Array<JumpTarget> = [];
     value: string = "";
@@ -31,7 +33,6 @@ export class MenuComponent {
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.value = event;
-            console.log("VALUE: ", this.value);
             this.validateMenuItems();
         });
 
@@ -61,18 +62,18 @@ export class MenuComponent {
                         validate: (value: string) => { return this.validateWGS84(value, true) }
                     },
                     {
-                        name: "Open Lat-Lon in Google Maps",
+                        name: "Open WGS84 Lat-Lon in Google Maps",
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInGM(value) },
-                        validate: (value: string) => { return this.validateGM(value) }
+                        validate: (value: string) => { return this.validateWGS84(value, false) }
                     },
                     {
-                        name: "Open Lat-Lon in Open Street Maps",
+                        name: "Open WGS84 Lat-Lon in Open Street Maps",
                         label: "Open Location in External Map Service",
                         enabled: false,
                         jump: (value: string) => { return this.openInOSM(value) },
-                        validate: (value: string) => { return this.validateOSM(value) }
+                        validate: (value: string) => { return this.validateWGS84(value, false) }
                     }
                 ]
             ];
@@ -84,10 +85,9 @@ export class MenuComponent {
             this.messageService.showError("No value provided!");
             return;
         }
-        if (this.mapService.mapModel !== undefined) {
+        if (this.mapService.coreLib) {
             try {
                 let wgs84TileId = BigInt(value);
-                // this.mapService.mapModel.zoomToWgs84PositionTopic.next(this.mapService.coreLib.getTilePosition(wgs84TileId));
                 let position = this.mapService.coreLib.getTilePosition(wgs84TileId);
                 return [position.x, position.y, position.z]
             } catch (e) {
@@ -130,9 +130,9 @@ export class MenuComponent {
 
         // WGS (degree)
         if (isLonLat) {
-            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g;
+            exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
         } else {
-            exp = /([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*([1-9][0-9]{0,2}|0)°([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+            exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
         }
         matches = [...coordinateString.matchAll(exp)];
         if (!isMatched && matches.length > 0) {
@@ -174,21 +174,20 @@ export class MenuComponent {
         if (coordinates === undefined) {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
-        } else {
-            let lat = coordinates[0];
-            let lon = coordinates[1];
-            let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
-            let position = Cartesian3.fromDegrees(lon, lat, alt);
-            let orientation = this.mapService.collectCameraInfo();
-            if (orientation) {
-                if (this.mapService.mapView !== undefined) {
-                    this.mapService.mapView.viewer.camera.setView({
-                        destination: position,
-                        orientation: orientation
-                    });
-                } else {
-                    this.messageService.showError("Cannot set camera information. The view is not available.");
-                }
+        }
+        let lat = coordinates[0];
+        let lon = coordinates[1];
+        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
+        let position = Cartesian3.fromDegrees(lon, lat, alt);
+        let orientation = this.mapService.collectCameraOrientation();
+        if (orientation) {
+            if (this.mapService.mapView !== undefined) {
+                this.mapService.mapView.viewer.camera.setView({
+                    destination: position,
+                    orientation: orientation
+                });
+            } else {
+                this.messageService.showError("Cannot set camera information. The view is not available.");
             }
         }
     }
@@ -234,14 +233,7 @@ export class MenuComponent {
     }
 
     validateWGS84(value: string, isLonLat: boolean = false) {
-        return this.parseWgs84Coordinates(value, isLonLat) !== undefined;
-    }
-
-    validateGM(value: string) {
-        return this.parseWgs84Coordinates(value, false) !== undefined;
-    }
-
-    validateOSM(value: string) {
-        return this.parseWgs84Coordinates(value, false) !== undefined;
+        const coords = this.parseWgs84Coordinates(value, isLonLat);
+        return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
     }
 }

@@ -31,6 +31,8 @@ public:
      */
     struct TileLayerMetadata {
         std::string id;
+        std::string mapName;
+        std::string layerName;
         uint64_t tileId;
         int32_t numFeatures;
     };

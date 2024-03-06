@@ -5,18 +5,19 @@ import {FeatureWrapper} from "./features.component";
 import {TileVisualization} from "./visualization.component"
 import {BehaviorSubject} from "rxjs"
 import {
-    Viewer,
-    UrlTemplateImageryProvider,
-    ScreenSpaceEventHandler,
-    ScreenSpaceEventType,
-    Color,
-    ColorGeometryInstanceAttribute,
-    Math,
     Cartesian2,
     Cartesian3,
     Cartographic,
-    defined
+    Color,
+    ColorGeometryInstanceAttribute,
+    ImageryLayer,
+    Math,
+    ScreenSpaceEventHandler,
+    ScreenSpaceEventType,
+    UrlTemplateImageryProvider,
+    Viewer
 } from "cesium";
+import {ParametersService} from "./parameters.service";
 
 export class ErdblickView {
     viewer: Viewer;
@@ -28,13 +29,16 @@ export class ErdblickView {
     private mouseHandler: ScreenSpaceEventHandler;
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
+    private openStreetMapLayer: ImageryLayer;
 
     /**
      * Construct a Cesium View with a Model.
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
      */
-    constructor(model: ErdblickModel, containerDomElementId: string) {
+    constructor(model: ErdblickModel,
+                containerDomElementId: string,
+                public parameterService: ParametersService) {
         this.model = model;
         this.viewer = new Viewer(containerDomElementId,
             {
@@ -53,13 +57,8 @@ export class ErdblickView {
                 baseLayer: false
             }
         );
-
-        let openStreetMap = new UrlTemplateImageryProvider({
-            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            maximumLevel: 19,
-        });
-        let openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(openStreetMap);
-        openStreetMapLayer.alpha = 0.3;
+        this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
+        this.openStreetMapLayer.alpha = 0.3;
 
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
@@ -89,6 +88,21 @@ export class ErdblickView {
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
+            const parameters = this.parameterService.parameters.getValue();
+            if (parameters) {
+                const currentPositionCartographic = Cartographic.fromCartesian(
+                    Cartesian3.fromElements(
+                        this.viewer.camera.position.x, this.viewer.camera.position.y, this.viewer.camera.position.z
+                    )
+                );
+                parameters.lon = Math.toDegrees(currentPositionCartographic.longitude);
+                parameters.lat = Math.toDegrees(currentPositionCartographic.latitude);
+                parameters.alt = currentPositionCartographic.height;
+                parameters.heading = this.viewer.camera.heading;
+                parameters.pitch = this.viewer.camera.pitch;
+                parameters.roll = this.viewer.camera.roll;
+                this.parameterService.parameters.next(parameters);
+            }
             this.updateViewport();
         });
 
@@ -128,6 +142,9 @@ export class ErdblickView {
         });
 
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+        // Remove fullscreen button as unnecessary
+        this.viewer.fullscreenButton.destroy();
     }
 
     /**
@@ -235,7 +252,7 @@ export class ErdblickView {
     /**
      * Update the visible viewport, and communicate it to the model.
      */
-    private updateViewport() {
+    updateViewport() {
         let canvas = this.viewer.scene.canvas;
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
@@ -282,5 +299,17 @@ export class ErdblickView {
             camPosLat: centerLat,
             orientation: -this.viewer.camera.heading + Math.PI * .5,
         });
+    }
+
+    private getOpenStreetMapLayerProvider() {
+        return new UrlTemplateImageryProvider({
+            url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            maximumLevel: 19,
+        });
+    }
+
+    updateOpenStreetMapLayer(opacity: number) {
+        this.openStreetMapLayer.alpha = opacity;
+        this.viewer.scene.requestRender();
     }
 }

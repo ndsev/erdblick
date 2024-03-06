@@ -10,8 +10,10 @@ import { uint8ArrayToWasm } from "./wasm";
  */
 export class FeatureTile {
     // public:
-    id: number;
-    tileId: number;
+    id: string;
+    mapName: string;
+    layerName: string;
+    tileId: bigint;
     numFeatures: number;
     coreLib: any;
     private parser: any;
@@ -32,6 +34,8 @@ export class FeatureTile {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
+        this.mapName = mapTileMetadata.mapName;
+        this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
         this.numFeatures = mapTileMetadata.numFeatures;
         this.coreLib = coreLib;
@@ -63,7 +67,7 @@ export class FeatureTile {
     /**
      * Mark this tile as "not available anymore".
      */
-    private destroy() {
+    destroy() {
         this.disposed = true;
     }
 }

@@ -196,11 +196,13 @@ export class Fetch
     handleJsonResponse(response: Response) {
         response.json()
             .then(jsonData => {
+                // Serialize the JSON before it is passed to the callback, so that
+                // any manipulations to it will not side-effect a later buffer callback.
+                let jsonString = JSON.stringify(jsonData);
                 if (this.jsonCallback) {
                     this.jsonCallback(jsonData);
                 }
 
-                let jsonString = JSON.stringify(jsonData);
                 let uint8Array = new TextEncoder().encode(jsonString);
                 this.runBufferCallback(uint8Array)
             });

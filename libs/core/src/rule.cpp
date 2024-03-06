@@ -46,7 +46,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["color"].IsDefined()) {
         // Parse a CSS color
-        color_ = Color(yaml["color"].as<std::string>()).toFVec4();
+        colorString_ = yaml["color"].as<std::string>();
+        color_ = Color(colorString_).toFVec4();
     }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
@@ -75,6 +76,26 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             nearFarScale_ = {.0};
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
+    }
+    if (yaml["dashed"].IsDefined()) {
+        // Parse line dashes
+        dashed_ = yaml["dashed"].as<bool>();
+        if (yaml["dash-length"].IsDefined()) {
+            dashLength_ = yaml["dash-length"].as<int>();
+        }
+        if (yaml["gap-color"].IsDefined()) {
+            gapColorString_ = yaml["gap-color"].as<std::string>();
+            gapColor_ = Color(yaml["gap-color"].as<std::string>()).toFVec4();
+        }
+        if (yaml["dash-pattern"].IsDefined()) {
+            dashPattern_ = yaml["dash-pattern"].as<int>();
+        }
+    }
+    if (yaml["arrow"].IsDefined()) {
+        // Parse line arrowheads
+        auto arrow_ = yaml["arrow"].as<std::string>();
+        hasDoubleArrow_ = arrow_ == "double";
+        hasArrow_ = true;
     }
 
     // Parse sub-rules
@@ -130,6 +151,13 @@ glm::fvec4 const& FeatureStyleRule::color() const
     return color_;
 }
 
+std::string FeatureStyleRule::colorString() const
+{
+    // Return string representation of the color
+    // to simplify usage for mapped Material primitives
+    return colorString_;
+}
+
 float FeatureStyleRule::width() const
 {
     return width_;
@@ -138,6 +166,43 @@ float FeatureStyleRule::width() const
 bool FeatureStyleRule::flat() const
 {
     return flat_;
+}
+
+bool FeatureStyleRule::isDashed() const
+{
+    return dashed_;
+}
+
+int FeatureStyleRule::dashLength() const
+{
+    return dashLength_;
+}
+
+glm::fvec4 const& FeatureStyleRule::gapColor() const
+{
+    return gapColor_;
+}
+
+std::string FeatureStyleRule::gapColorString() const
+{
+    // Return string representation of the color
+    // to simplify usage for mapped Material primitives
+    return gapColorString_;
+}
+
+int FeatureStyleRule::dashPattern() const
+{
+    return dashPattern_;
+}
+
+bool FeatureStyleRule::hasArrow() const
+{
+    return hasArrow_;
+}
+
+bool FeatureStyleRule::hasDoubleArrow() const
+{
+    return hasDoubleArrow_;
 }
 
 glm::fvec4 const& FeatureStyleRule::outlineColor() const

@@ -7,3 +7,4 @@ clion-build-*
 static
 .angular
 node_modules
+config

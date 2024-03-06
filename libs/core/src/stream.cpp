@@ -93,6 +93,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     }
     return {
         tileLayer.id().toString(),
+        tileLayer.id().mapId_,
+        tileLayer.id().layerId_,
         tileLayer.tileId().value_,
         numFeatures
     };

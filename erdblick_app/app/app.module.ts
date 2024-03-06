@@ -21,14 +21,26 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./info.service";
-import {MenuComponent} from "./menu.component";
+import {SearchMenuComponent} from "./search-menu.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
+import {InputSwitchModule} from "primeng/inputswitch";
+import {SliderModule} from "primeng/slider";
+import {StyleService} from "./style.service";
+import {MapPanelComponent} from "./map.panel.component";
+import {InspectionPanelComponent} from "./inspection.panel.component";
+import {InspectionService} from "./inspection.service";
+import {ParametersService} from "./parameters.service";
+import {PreferencesComponent} from "./preferences.component";
+import {FileUploadModule} from "primeng/fileupload";
 
 @NgModule({
     declarations: [
         AppComponent,
-        MenuComponent
+        SearchMenuComponent,
+        MapPanelComponent,
+        InspectionPanelComponent,
+        PreferencesComponent
     ],
     imports: [
         BrowserModule,
@@ -48,13 +60,19 @@ import {MapService} from "./map.service";
         TreeTableModule,
         ToastModule,
         InputNumberModule,
-        FieldsetModule
+        FieldsetModule,
+        InputSwitchModule,
+        SliderModule,
+        FileUploadModule
     ],
     providers: [
         MapService,
         MessageService,
         InfoMessageService,
-        JumpTargetService
+        JumpTargetService,
+        StyleService,
+        InspectionService,
+        ParametersService
     ],
     bootstrap: [AppComponent]
 })
