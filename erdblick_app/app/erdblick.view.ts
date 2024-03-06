@@ -35,6 +35,7 @@ export class ErdblickView {
      * Construct a Cesium View with a Model.
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
+     * @param parameterService The parameter service, used to update
      */
     constructor(model: ErdblickModel,
                 containerDomElementId: string,

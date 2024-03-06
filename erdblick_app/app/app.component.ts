@@ -163,6 +163,8 @@ export class AppComponent {
                 if (this.mapService.mapModel.getValue()!.layerIdToLevel.has(name)) {
                     this.mapService.mapModel.getValue()!.layerIdToLevel.set(name, level);
                 }
+                // TODO: This is enforcing a constraint, that map name and layer name
+                //  may not contain dashes. @VA
                 const [encMapName, encLayerName] = name.split('/');
                 this.mapService.mapModel.getValue()!.availableMapItems.getValue().forEach(
                     (mapItem: MapInfoItem, mapName: string) => {

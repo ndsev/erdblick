@@ -19,7 +19,8 @@ FeatureLayerVisualization::FeatureLayerVisualization(
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
       style_(style),
-      highlightFeatureIndex_(highlightFeatureIndex)
+      highlightFeatureIndex_(highlightFeatureIndex),
+      externalRelationReferences_(JsValue::List())
 {
 }
 
@@ -249,7 +250,7 @@ FeatureLayerVisualization::encodeVerticesAsReversedSplitList(std::vector<mapget:
         return std::make_pair(jsPointsFirstHalf, jsPointsSecondHalf);
     }
 
-    auto midpointIndex = pointsCartesian.size() / 2;
+    auto midpointIndex = static_cast<int32_t>(pointsCartesian.size() / 2);
     for (auto i = midpointIndex; i >= 0; --i) {
         jsPointsFirstHalf.push(JsValue(pointsCartesian[i]));
     }
@@ -344,70 +345,7 @@ void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowa
         nextFeature->forEachRelation(
             [&](auto const& relation)
             {
-                // Check if the relation type name is accepted for the rule.
-                if (auto const& relTypeRegex = rule_.relationType()) {
-                    auto relationTypeId = relation->name();
-                    if (!std::regex_match(relationTypeId.begin(), relationTypeId.end(), *relTypeRegex)) {
-                        return true;
-                    }
-                }
-
-                // Resolve target feature.
-                auto targetRef = relation->target();
-                auto targetFeature =
-                    visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
-
-                // Check if the target feature already has a reference to me.
-                auto relationsForTargetIt =
-                    relationsByFeatureAddr_.find({&targetFeature->model(), targetFeature->addr().value_});
-                if (rule_.relationMergeTwoWay()) {
-                    if (relationsForTargetIt != relationsByFeatureAddr_.end()) {
-                        for (auto& relVisu : relationsForTargetIt->second) {
-                            if (relVisu.targetFeature_->addr() == nextFeature->addr()) {
-                                relVisu.twoway_ = true;
-                                return true;
-                            }
-                        }
-                    }
-                }
-                if (onlyUpdateTwowayFlags)
-                    return true;
-
-                // Create new relation-to-visualize.
-                auto& relationsForThisFeature =
-                    relationsByFeatureAddr_[{&nextFeature->model(), nextFeature->addr().value_}];
-                auto& newRelationVisu = relationsForThisFeature.emplace_back();
-                newRelationVisu.relation_ = relation;
-                newRelationVisu.sourceFeature_ = nextFeature;
-
-                if (targetFeature) {
-                    // We got an additional feature to explore. But do it only
-                    // if we haven't explored it yet.
-                    if (rule_.relationRecursive() &&
-                        (relationsForTargetIt != relationsByFeatureAddr_.end()))
-                    {
-                        unexploredRelations_.emplace_back(targetFeature);
-                    }
-                }
-                else {
-                    // Add the relation to externals, if we could not resolve it.
-                    // It will be finalized later, via processResolvedExternalRelations().
-                    visu_.externalRelationVisualizations_.emplace_back(this, &newRelationVisu);
-
-                    JsValue featureIdParts = JsValue::List();
-                    for (auto const& [key, value] : relation->target()->keyValuePairs()) {
-                        featureIdParts.push(JsValue(key));
-                        std::visit([&featureIdParts](auto&& v){
-                            featureIdParts.push(JsValue(v));
-                        }, value);
-                    }
-
-                    JsValue newExtReferenceToResolve = JsValue::Dict();
-                    newExtReferenceToResolve.set("typeId", JsValue(relation->target()->typeId()));
-                    newExtReferenceToResolve.set("featureId", featureIdParts);
-                    visu_.externalRelationReferences_.push(newExtReferenceToResolve);
-                }
-
+                addRelation(nextFeature, relation, onlyUpdateTwowayFlags);
                 return true;
             });
     }
@@ -422,11 +360,88 @@ void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowa
     }
 }
 
+template<typename T>
+struct always_false : std::false_type {};
+
+void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& sourceFeature, const model_ptr<Relation>& relation, bool onlyUpdateTwowayFlags)
+{
+    // Check if the relation type name is accepted for the rule.
+    if (auto const& relTypeRegex = rule_.relationType()) {
+        auto relationTypeId = relation->name();
+        if (!std::regex_match(relationTypeId.begin(), relationTypeId.end(), *relTypeRegex)) {
+            return;
+        }
+    }
+
+    // Resolve target feature.
+    auto targetRef = relation->target();
+    auto targetFeature =
+        visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+
+    // Check if the target feature already has a reference to me.
+    auto relationsForTargetIt =
+        relationsByFeatureAddr_.find({&targetFeature->model(), targetFeature->addr().value_});
+    if (rule_.relationMergeTwoWay()) {
+        if (relationsForTargetIt != relationsByFeatureAddr_.end()) {
+            for (auto& relVisu : relationsForTargetIt->second) {
+                if (relVisu.targetFeature_->addr() == sourceFeature->addr()) {
+                    relVisu.twoway_ = true;
+                    return;
+                }
+            }
+        }
+    }
+    if (onlyUpdateTwowayFlags)
+        return;
+
+    // Create new relation-to-visualize.
+    auto& relationsForThisFeature =
+        relationsByFeatureAddr_[{&sourceFeature->model(), sourceFeature->addr().value_}];
+    auto& newRelationVisu = relationsForThisFeature.emplace_back();
+    newRelationVisu.relation_ = relation;
+    newRelationVisu.sourceFeature_ = sourceFeature;
+
+    if (targetFeature) {
+        newRelationVisu.targetFeature_ = targetFeature;
+        // We got an additional feature to explore. But do it only
+        // if we haven't explored it yet.
+        if (rule_.relationRecursive() &&
+            (relationsForTargetIt != relationsByFeatureAddr_.end()))
+        {
+            unexploredRelations_.emplace_back(targetFeature);
+        }
+    }
+    else {
+        // Add the relation to externals, if we could not resolve it.
+        // It will be finalized later, via processResolvedExternalRelations().
+        visu_.externalRelationVisualizations_.emplace_back(this, &newRelationVisu);
+
+        JsValue featureIdParts = JsValue::List();
+        for (auto const& [key, value] : relation->target()->keyValuePairs()) {
+            featureIdParts.push(JsValue(std::string(key)));
+            std::visit([&featureIdParts](auto&& v){
+                if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string_view>) {
+                    featureIdParts.push(JsValue(std::string(v)));
+                } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
+                    featureIdParts.push(JsValue(v));
+                } else {
+                    static_assert(always_false<decltype(v)>::value, "Type of 'v' is neither std::string_view nor int64_t");
+                }
+            }, value);
+        }
+
+        JsValue newExtReferenceToResolve = JsValue::Dict();
+        newExtReferenceToResolve.set("typeId", JsValue(std::string(relation->target()->typeId())));
+        newExtReferenceToResolve.set("featureId", featureIdParts);
+        visu_.externalRelationReferences_.push(newExtReferenceToResolve);
+    }
+}
+
 void RecursiveRelationVisualizationState::render(
     RecursiveRelationVisualizationState::RelationToVisualize& r)
 {
     // Create simfil evaluation context for the rule.
-    simfil::OverlayNode relationEvaluationContext(*r.relation_);
+    simfil::OverlayNode relationEvaluationContext(simfil::Value::field(*r.relation_));
 
     // Assemble simfil evaluation context.
     // TODO: There is bug here: If the target feature comes

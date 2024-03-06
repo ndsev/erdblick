@@ -52,6 +52,11 @@ struct RecursiveRelationVisualizationState
 
     void populateAndRender(bool onlyUpdateTwowayFlags=false);
 
+    void addRelation(
+        const mapget::model_ptr<mapget::Feature>& sourceFeature,
+        mapget::model_ptr<mapget::Relation> const& relation,
+        bool onlyUpdateTwowayFlags);
+
     void render(RelationToVisualize& r);
 };
 
