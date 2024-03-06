@@ -27,7 +27,8 @@ declare let window: DebugWindow;
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" (click)="toggleOverlay(searchValue, searchoverlay, $event)"
+            <input type="text" pInputText [(ngModel)]="searchValue" 
+                   (click)="toggleOverlay(searchValue, searchoverlay, $event)" 
                    (ngModelChange)="setTargetValue(searchValue)"/>
         </span>
         <pref-components></pref-components>
