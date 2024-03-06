@@ -247,7 +247,7 @@ public:
             filter: "properties.wayType == 'Bike'"
             color: "#3498db" # Blue color for Bike Way
             width: 10.0
-            arrow: "double"
+            arrow: "single"
 
           - geometry:
               - line
@@ -255,7 +255,7 @@ public:
             filter: "properties.wayType == 'Pedestrian'"
             color: "#2ecc71" # Green color for Pedestrian Way
             width: 15.0
-            arrow: "double"
+            arrow: "single"
 
           - geometry:
               - line
@@ -282,7 +282,7 @@ public:
             flat: true
             dashed: true
             gap-color: "#e74c3c"
-            gap-size: 100
+            dash-length: 20
             dash-pattern: 40000
 
           - geometry:

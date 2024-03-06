@@ -50,8 +50,8 @@ private:
     bool flat_ = false;
     bool dashed_ = false;
     int dashLength_ = 16;
-    std::string gapColorString_ = "#ffffff";
-    glm::fvec4 gapColor_{1.0, 1.0, 1.0, 1.};
+    std::string gapColorString_ = "#000000";
+    glm::fvec4 gapColor_{.0, .0, .0, 0.};
     int dashPattern_ = 255;
     bool hasArrow_ = false;
     bool hasDoubleArrow_ = false;

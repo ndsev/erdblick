@@ -59,6 +59,8 @@ For Erdblick to apply custom styles, it expects the following declarations for t
 ```
 where `url` field must be a path relative to `static/bundle/styles` and `id` is used to identify the particular style in GUI.
 
+Currently, it's also possible to export and import styles in GUI. Styles imported this way will persist in the `local storage` of the browser.
+
 ### Style Definitions
 
 Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is optional:
@@ -75,7 +77,13 @@ Each rule within the YAML `rules` array can have the following fields. Any field
 | `outline-color`__*__  | Point outline color.                                                                                 | String                                                     | `green`, `#fff`      |
 | `outline-width`__*__  | Point outline width in px.                                                                           | Float                                                      | `3.6`                |
 | `near-far-scale`__*__ | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).               | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]` |
+| `arrow`__*__          | For arrows at the end of the line or on both beginning and end.                                      | String.                                                    | `double`, `single`   |
+| `dashed`__*__         | Indicate that a line has dashes.                                                                     | Boolean.                                                   | `true`               |
+| `gap-color`__*__      | If a gap between dashes has a color.                                                                 | String                                                     | `blue`, `#aaa`       |
+| `dash-length`__*__    | Size of a dash in pixels.                                                                            | Integer.                                                   | '16'                 |
+| `dash-pattern`__*__   | A 16 bit pattern for the dash.                                                                       | Integer.                                                   | '255'                |
 | `first-of`__*__       | Mark a rule as a parent of a fallback rule list. See description below.                              | Array of Rule objects.                                     | See example below.   |
+
 
 **About `first-of`:**
 
