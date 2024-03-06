@@ -129,8 +129,8 @@ private:
      * Add a line which connects two points to the visualization.
      */
     void addLine(
-        mapget::Point const& a,
-        mapget::Point const& b,
+        mapget::Point const& wgsA,
+        mapget::Point const& wgsB,
         uint32_t id,
         FeatureStyleRule const& rule);
 
@@ -138,7 +138,7 @@ private:
      * Add a polyline which has at least two shape-points.
      */
     void addPolyLine(
-        std::vector<mapget::Point> const& geom,
+        std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
         uint32_t id);
 

@@ -65,6 +65,7 @@ export class TileVisualization {
 
         // Remove any previous render-result, as a new one is generated.
         this.destroy(viewer);
+        this.deleted = false;
 
         // Do not try to render if the underlying data is disposed.
         if (this.tiles.some(t => t.disposed) || this.style.isDeleted()) {
