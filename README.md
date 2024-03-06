@@ -36,10 +36,6 @@ rule that matches it.
 <details>
 <summary>Show details</summary>
 
-> **Note ⚠️:** While the mature product envisions a rich UI with the ability
-> to edit and toggle multiple style sheets, the current alpha version loads
-> its style sheet from the hard-coded path [styles/default-style.yaml](styles/default-style.yaml) bundled in `static/bundle/styles`.
-
 ### Custom Style Declarations
 
 It is possible to apply own custom styles easily. 
