@@ -195,6 +195,42 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             arrow_ = *arrowMode;
     }
 
+
+
+    // Parse labels' rules
+    if (yaml["label-font"].IsDefined()) {
+        // Parse label font
+        labelFont_ = yaml["label-font"].as<std::string>();
+    }
+    if (yaml["label-background-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-background-padding"].IsDefined()) {
+        // Parse option to have a label padding.
+        labelBackgroundPadding_ = yaml["label-background-padding"].as<std::pair<int, int>>();
+    }
+    if (yaml["label-horizontal-origin"].IsDefined()) {
+        // Parse label horizontal origin
+        labelHorizontalOrigin_ = yaml["label-horizontal-origin"].as<std::string>();
+    }
+    if (yaml["label-vertical-origin"].IsDefined()) {
+        // Parse label vertical origin
+        labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
+    }
+    if (yaml["label-text-expression"].IsDefined()) {
+        // Parse label SIMFIL expression
+        labelTextExpression_ = yaml["label-text-expression"].as<std::string>();
+    }
+    if (yaml["label-text"].IsDefined()) {
+        // Parse label placeholder exprestextsion
+        labelText_ = yaml["label-text"].as<std::string>();
+    }
+    if (yaml["label-style"].IsDefined()) {
+        // Parse label style string
+        labelStyle_ = yaml["label-style"].as<std::string>();
+    }
+
     // Parse sub-rules
     if (yaml["first-of"].IsDefined()) {
         for (auto yamlSubRule : yaml["first-of"]) {
@@ -375,6 +411,43 @@ FeatureStyleRule::Mode FeatureStyleRule::mode() const
 std::optional<std::regex> const& FeatureStyleRule::relationType() const
 {
     return relationType_;
+}
+
+std::string FeatureStyleRule::labelFont() const
+{
+    return labelFont_;
+}
+glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
+{
+    return labelBackgroundColor_;
+}
+std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
+{
+    return labelBackgroundPadding_;
+}
+std::string FeatureStyleRule::labelHorizontalOrigin() const
+{
+    return labelHorizontalOrigin_;
+}
+std::string FeatureStyleRule::labelVerticalOrigin() const
+{
+    return labelVerticalOrigin_;
+}
+std::string FeatureStyleRule::labelHeightReference() const
+{
+    return labelHeightReference_;
+}
+std::string FeatureStyleRule::labelTextExpression() const
+{
+    return labelTextExpression_;
+}
+std::string FeatureStyleRule::labelText() const
+{
+    return labelText_;
+}
+std::string FeatureStyleRule::labelStyle() const
+{
+    return labelStyle_;
 }
 
 }

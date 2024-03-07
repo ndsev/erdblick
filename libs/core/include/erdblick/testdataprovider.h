@@ -327,22 +327,22 @@ public:
             color: gold
             opacity: 0.5
 
-          #- geometry:
-          #    - label
-          #  type: "SignLabel"
-          #  font: "24px Helvetica",
-          #  fillColor: "#BBBBBB",
-          #  outlineColor: "#000000",
-          #  outlineWidth: 2,
-          #  backgroundColor: "#00000000",
-          #  backgroundPadding: [7, 5],
-          #  horizontalOrigin: "CENTER",
-          #  verticalOrigin: "CENTER",
-          #  heightReference: "NONE"
-          #  scale: 1.0,
-          #  scaleByDistance: [1.5e2, 3, 8.0e6, 0.0],
-          #  translucencyByDistance: [1.5e2, 3, 8.0e6, 0.0],
-          #  style: "FILL_AND_OUTLINE",
+          - geometry:
+              - label
+            type: "SignLabel"
+            color: "#00ccdd"
+            outline-color: "#000000"
+            outline-width: 2
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "CENTER"
+            label-vertical-origin: "CENTER"
+            label-height-reference: "NONE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL_AND_OUTLINE"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           # Fallback-rule-list for POI/PONI
           - type: "PointOf.*"

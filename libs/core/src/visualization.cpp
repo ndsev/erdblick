@@ -243,8 +243,6 @@ void FeatureLayerVisualization::addGeometry(
         }
         break;
     }
-
-
 }
 
 JsValue
