@@ -195,7 +195,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
     }
 
     // Filter by simfil expression.
-    if (aspect_ == Feature && !filter_.empty()) {
+    if (!filter_.empty()) {
         if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
         }

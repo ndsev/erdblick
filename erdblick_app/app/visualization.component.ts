@@ -86,16 +86,16 @@ export class TileVisualization {
 
                 visualization.run()
 
-                let extRefs = visualization.externalReferences();
-                if (extRefs && extRefs.length > 0) {
-                    let extRefsResolved = await fetch("/locate", {body: extRefs});
-                    if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
-                        // Do not continue if any of the tiles or the style
-                        // were deleted while we were waiting.
-                        return false;
-                    }
-                    visualization.processResolvedExternalReferences(extRefsResolved);
-                }
+                // let extRefs = visualization.externalReferences();
+                // if (extRefs && extRefs.length > 0) {
+                //     let extRefsResolved = await fetch("/locate", {body: extRefs});
+                //     if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
+                //         // Do not continue if any of the tiles or the style
+                //         // were deleted while we were waiting.
+                //         return false;
+                //     }
+                //     visualization.processResolvedExternalReferences(extRefsResolved);
+                // }
                 this.primitiveCollection = visualization.primitiveCollection();
                 return true;
             });

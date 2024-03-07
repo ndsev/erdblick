@@ -462,6 +462,8 @@ void RecursiveRelationVisualizationState::render(
         visu_.tile_->fieldNames()->emplace("$twoway"),
         simfil::Value(r.twoway_));
 
+    // TODO: Make use of this simfil context.
+
     // Obtain source/target geometries.
     auto sourceGeom = r.relation_->hasSourceValidity() ?
         r.relation_->sourceValidity() :
