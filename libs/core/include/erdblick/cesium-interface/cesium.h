@@ -31,6 +31,8 @@ struct CesiumLib
     CesiumClass Primitive;
     CesiumClass PrimitiveCollection;
     CesiumClass PrimitiveType;
+    CesiumClass Label;
+    CesiumClass LabelCollection;
 
     [[nodiscard]] JsValue MaterialFromType(std::string const& type, JsValue const& options);
 

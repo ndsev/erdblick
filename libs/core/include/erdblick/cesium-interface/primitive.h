@@ -18,6 +18,10 @@ namespace erdblick
 struct CesiumPrimitive
 {
     /**
+     */
+    static CesiumPrimitive withLabelCollection();
+
+    /**
      * Create a primitive which uses the PolylineColorAppearance.
      * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineColorAppearance.html
      */
@@ -124,6 +128,7 @@ private:
     /** appearance option for the Primitive JS Object ctor. */
     JsValue appearance_;
     JsValue material_;
+    JsValue labelCollection_;
 
     /** Flag which enables the direct triangle display required for addTriangles. */
     bool flatAndSynchronous_ = false;

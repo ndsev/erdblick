@@ -6,12 +6,36 @@
 
 namespace erdblick {
 
+
+CesiumPrimitive CesiumPrimitive::withLabelCollection() {
+    CesiumPrimitive result;
+    result.labelCollection_ = Cesium().LabelCollection.New();
+    return result;
+}
+
 CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround) {
     CesiumPrimitive result;
     result.appearance_ = Cesium().PolylineColorAppearance.New();
     result.clampToGround_ = clampToGround;
     result.polyLinePrimitive_ = true;
     result.perInstanceColor_ = true;
+    return result;
+}
+
+CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround) {
+    CesiumPrimitive result;
+    auto const &color = style.color();
+    auto const &gapColor = style.gapColor();
+    result.appearance_ = Cesium().PolylineMaterialAppearance.New({
+        {"material", Cesium().MaterialFromType("PolylineDash", JsValue::Dict({
+            {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
+            {"gapColor", Cesium().Color.New(gapColor.r, gapColor.g, gapColor.b, gapColor.a)},
+            {"dashLength", JsValue(style.dashLength())},
+            {"dashPattern", JsValue(style.dashPattern())}
+        }))}
+    });
+    result.clampToGround_ = clampToGround;
+    result.polyLinePrimitive_ = true;
     return result;
 }
 
@@ -139,6 +163,23 @@ void CesiumPrimitive::addGeometryInstance(
     });
     ++numGeometryInstances_;
     geometryInstances_.push(geometryInstance);
+}
+
+
+void CesiumPrimitive::addLabel(
+        JsValue const &position,
+        std::string labelText,
+        FeatureStyleRule const &style,
+        uint32_t id) {
+    JsValue label;
+    label = Cesium().PolylineGeometry.New({
+         {"position", position},
+         {"show", JsValue(true)},
+         {"text", JsValue(labelText)},
+         {"font", JsValue(style())},
+         {"arcType", Cesium().ArcType["NONE"]}
+    });
+    this->labelCollection_.push(label);
 }
 
 NativeJsValue CesiumPrimitive::toJsObject() const {

@@ -114,6 +114,8 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
         collection.call<void>("add", coloredGroundMeshes_.toJsObject());
     if (!coloredPoints_.empty())
         collection.call<void>("add", coloredPoints_.toJsObject());
+    if (!labelCollection_.empty())
+        collection.call<void>("add", labelCollection_.toJsObject());
     return *collection;
 }
 
@@ -241,6 +243,8 @@ void FeatureLayerVisualization::addGeometry(
         }
         break;
     }
+
+
 }
 
 JsValue

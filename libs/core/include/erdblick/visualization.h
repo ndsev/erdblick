@@ -215,6 +215,8 @@ private:
         RecursiveRelationVisualizationState::RelationToVisualize*>>
         externalRelationVisualizations_;
     std::deque<RecursiveRelationVisualizationState> relationStyleState_;
+
+    CesiumPrimitive labelCollection_;
 };
 
 }  // namespace erdblick
