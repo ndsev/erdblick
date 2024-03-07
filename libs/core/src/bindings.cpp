@@ -87,6 +87,12 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
+/** Get the neighbor for a mapget tile id. */
+uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
+    mapget::TileId tid(tileIdValue);
+    return mapget::TileId(tid.x() + offsetX, tid.y() + offsetY, tid.z()).value_;
+}
+
 /** Get the full string key of a map tile feature layer. */
 std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
     auto tileKey = mapget::MapTileKey();
@@ -127,7 +133,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("x", &mapget::Point::x)
         .field("y", &mapget::Point::y)
         .field("z", &mapget::Point::z);
-    em::register_vector<mapget::Point>("Points");
 
     ////////// Viewport
     em::value_object<Viewport>("Viewport")
@@ -224,6 +229,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
+
+    ////////// Get tile id with vertical/horizontal offset
+    em::function("getTileNeighbor", &getTileNeighbor);
 
     ////////// Get a test tile/style
     em::function("generateTestTile", &generateTestTile);

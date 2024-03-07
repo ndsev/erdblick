@@ -72,7 +72,7 @@ export class TileVisualization {
             return false;
         }
 
-        // Create potential high-detail visualization
+        // Create potential high-detail visualization.
         this.renderingInProgress = true;
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {

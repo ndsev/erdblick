@@ -1,14 +1,14 @@
 "use strict";
 
 import {Fetch} from "./fetch.component";
-import {FeatureTile} from "./features.component";
+import {FeatureTile, FeatureWrapper} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
 import {StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
 import {ParametersService} from "./parameters.service";
-import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, MainModule as ErdblickCore} from "../../build/libs/core/erdblick-core";
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
@@ -42,7 +42,7 @@ type ErdblickStyleData = {
 export class ErdblickModel {
     static MAX_NUM_TILES_TO_LOAD = 2048;
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
-    private coreLib: any;
+    private coreLib: ErdblickCore;
     private styles: Map<string, ErdblickStyleData> | null;
     private importedStyles: Map<string, ErdblickStyleData> | null;
     private maps: Map<string, MapInfoItem> | null;
@@ -389,6 +389,13 @@ export class ErdblickModel {
         return mapItem.layers.has(layerName) && mapItem.layers.get(layerName)!.visible;
     }
 
+    *allStyles(): Generator<[string, ErdblickStyleData], void, unknown> {
+        for (let styleIdAndData of this.styles!)
+            yield styleIdAndData;
+        for (let styleIdAndData of this.importedStyles!)
+            yield styleIdAndData;
+    }
+
     update() {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
@@ -547,12 +554,8 @@ export class ErdblickModel {
             if (style && styleId) {
                 this.renderTileLayer(tileLayer, style, styleId);
             } else {
-                this.styles?.forEach((style, styleId) => {
+                for (let [styleId, style] of this.allStyles())
                     this.renderTileLayer(tileLayer, style, styleId);
-                });
-                this.importedStyles?.forEach((style, styleId) => {
-                    this.renderTileLayer(tileLayer, style, styleId);
-                });
             }
         });
     }
@@ -597,9 +600,23 @@ export class ErdblickModel {
         }
     }
 
-    // public:
     setViewport(viewport: any) {
         this.currentViewport = viewport;
         this.update();
+    }
+
+    getAvailableNinePatchFeatureTiles(tileId: bigint, mapName: string, layerName: string): Array<FeatureTile> {
+        let result: Array<FeatureTile> = [];
+        // Iterate over 3x3 tile grid and return available tiles.
+        for (let xOff of [0, -1, 1]) {
+            for (let yOff of [0, -1, 1]) {
+                let mapTileKey = this.coreLib.getTileFeatureLayerKey(
+                    mapName, layerName, this.coreLib.getTileNeighbor(tileId, xOff, yOff));
+                if (this.loadedTileLayers.has(mapTileKey)) {
+                    result.push(this.loadedTileLayers.get(mapTileKey)!);
+                }
+            }
+        }
+        return result;
     }
 }

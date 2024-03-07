@@ -135,7 +135,7 @@ export class FeatureTile {
  */
 export class FeatureWrapper {
     private readonly index: number;
-    private featureTile: FeatureTile;
+    public featureTile: FeatureTile;
 
     /**
      * Construct a feature wrapper from a featureTile and a feature index

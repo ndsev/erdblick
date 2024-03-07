@@ -49,6 +49,8 @@ void FeatureLayerVisualization::run()
                 if (rule.mode() != FeatureStyleRule::Highlight)
                     continue;
             }
+            else if (rule.mode() != FeatureStyleRule::Normal)
+                continue;
 
             if (auto* matchingSubRule = rule.match(*feature)) {
                 addFeature(feature, featureId, *matchingSubRule);
@@ -405,9 +407,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         newRelationVisu.targetFeature_ = targetFeature;
         // We got an additional feature to explore. But do it only
         // if we haven't explored it yet.
-        if (rule_.relationRecursive() &&
-            (relationsForTargetIt != relationsByFeatureAddr_.end()))
-        {
+        if (rule_.relationRecursive() && relationsForTargetIt == relationsByFeatureAddr_.end()) {
             unexploredRelations_.emplace_back(targetFeature);
         }
     }

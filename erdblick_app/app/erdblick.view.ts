@@ -30,6 +30,7 @@ export class ErdblickView {
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer;
+    private selectionVisualizations: TileVisualization[]
 
     /**
      * Construct a Cesium View with a Model.
@@ -65,6 +66,9 @@ export class ErdblickView {
 
         // Holds the currently selected feature.
         this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
+
+        // Holds visualizations for the current selection for all present styles.
+        this.selectionVisualizations = [];
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
@@ -196,7 +200,10 @@ export class ErdblickView {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        if (feature) {
+        this.selectionVisualizations.forEach(this.model.tileVisualizationDestructionTopic.next);
+        this.selectionVisualizations = [];
+        let resolvedFeature = this.resolveFeature(feature.primitive, feature.id);
+        if (feature && resolvedFeature) {
             // Highlight the new picked feature and remember its original color.
             // Make sure that if the hovered feature is picked, we don't
             // remember the hover color as the original color.
@@ -206,7 +213,19 @@ export class ErdblickView {
             this.pickedFeatureOrigColor = this.getFeatureColor(feature);
             this.setFeatureColor(feature, Color.YELLOW);
             this.pickedFeature = feature;
-            this.selectionTopic.next(this.resolveFeature(feature.primitive, feature.id));
+            this.selectionTopic.next(resolvedFeature);
+            for (let [styleId, styleData] of this.model.allStyles()) {
+                let visu = new TileVisualization(
+                    this.model.getAvailableNinePatchFeatureTiles(
+                        resolvedFeature!.featureTile.tileId,
+                        resolvedFeature!.featureTile.mapName,
+                        resolvedFeature!.featureTile.layerName),
+                    styleData.featureLayerStyle,
+                    true,
+                    feature.id);
+                this.model.tileVisualizationTopic.next(visu);
+                this.selectionVisualizations.push(visu);
+            }
         } else {
             this.selectionTopic.next(null);
         }
