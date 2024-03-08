@@ -122,13 +122,18 @@ private:
     /**
      * Add all geometry of some feature which is compatible with the given rule.
      */
-    void addFeature(mapget::model_ptr<mapget::Feature>& feature, uint32_t id, FeatureStyleRule const& rule);
+    void addFeature(
+        mapget::model_ptr<mapget::Feature>& feature,
+        uint32_t id,
+        FeatureStyleRule const& rule);
 
     /**
      * Add some geometry. The Cesium conversion will be dispatched,
      * based on the geometry type and the style rule instructions.
      */
-    void addGeometry(mapget::model_ptr<mapget::Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule);
+    void addGeometry(
+        mapget::model_ptr<mapget::Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun);
 
     /**
      * Add a line which connects two points to the visualization.
@@ -137,7 +142,8 @@ private:
         mapget::Point const& wgsA,
         mapget::Point const& wgsB,
         uint32_t id,
-        FeatureStyleRule const& rule);
+        FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun);
 
     /**
      * Add a polyline which has at least two shape-points.
@@ -145,7 +151,8 @@ private:
     void addPolyLine(
         std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
-        uint32_t id);
+        uint32_t id,
+        BoundEvalFun const& evalFun);
 
         /**
      * Get some cartesian points as a list of Cesium Cartesian points.
@@ -166,24 +173,31 @@ private:
     /**
      * Get an initialised primitive for a particular PolylineDashMaterialAppearance.
      */
-    CesiumPrimitive& getPrimitiveForDashMaterial(const FeatureStyleRule &rule);
+    CesiumPrimitive&
+    getPrimitiveForDashMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
 
     /**
      * Get an initialised primitive for a particular PolylineArrowMaterialAppearance.
      */
-    CesiumPrimitive& getPrimitiveForArrowMaterial(const FeatureStyleRule &rule);
+    CesiumPrimitive&
+    getPrimitiveForArrowMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
+
+    /**
+     * Simfil expression evaluation function for the tile which this visualization belongs to.
+     */
+    simfil::Value evaluateExpression(std::string const& expression, simfil::ModelNode const& ctx) const;
 
     /// =========== Generic Members ===========
 
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
-    std::map<std::tuple<std::string, std::string, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
-    std::map<std::string, CesiumPrimitive> arrowLines_;
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
+    std::map<uint32_t, CesiumPrimitive> arrowLines_;
     CesiumPrimitive coloredNontrivialMeshes_;
     CesiumPrimitive coloredTrivialMeshes_;
     CesiumPrimitive coloredGroundLines_;
-    std::map<std::tuple<std::string, std::string, uint32_t, uint32_t>, CesiumPrimitive> dashGroundLines_;
-    std::map<std::string, CesiumPrimitive> arrowGroundLines_;
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, CesiumPrimitive> dashGroundLines_;
+    std::map<uint32_t, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
 

@@ -5,6 +5,27 @@
 namespace erdblick
 {
 
+namespace
+{
+std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowStr) {
+    if (arrowStr == "none") {
+        return FeatureStyleRule::NoArrow;
+    }
+    else if (arrowStr == "forward") {
+        return FeatureStyleRule::ForwardArrow;
+    }
+    else if (arrowStr == "backward") {
+        return FeatureStyleRule::BackwardArrow;
+    }
+    else if (arrowStr == "double") {
+        return FeatureStyleRule::DoubleArrow;
+    }
+
+    std::cout << "Unsupported arrow mode: " << arrowStr << std::endl;
+    return {};
+}
+}
+
 FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
 {
     parse(yaml);
@@ -89,8 +110,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["color"].IsDefined()) {
         // Parse a CSS color
-        colorString_ = yaml["color"].as<std::string>();
-        color_ = Color(colorString_).toFVec4();
+        auto colorStr = yaml["color"].as<std::string>();
+        color_ = Color(colorStr).toFVec4();
     }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
@@ -160,8 +181,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             dashLength_ = yaml["dash-length"].as<int>();
         }
         if (yaml["gap-color"].IsDefined()) {
-            gapColorString_ = yaml["gap-color"].as<std::string>();
-            gapColor_ = Color(yaml["gap-color"].as<std::string>()).toFVec4();
+            auto colorStr = yaml["gap-color"].as<std::string>();
+            gapColor_ = Color(colorStr).toFVec4();
         }
         if (yaml["dash-pattern"].IsDefined()) {
             dashPattern_ = yaml["dash-pattern"].as<int>();
@@ -169,9 +190,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["arrow"].IsDefined()) {
         // Parse line arrowheads
-        auto arrow_ = yaml["arrow"].as<std::string>();
-        hasDoubleArrow_ = arrow_ == "double";
-        hasArrow_ = true;
+        auto arrowStr = yaml["arrow"].as<std::string>();
+        if (auto arrowMode = parseArrowMode(arrowStr))
+            arrow_ = *arrowMode;
     }
 
     // Parse sub-rules
@@ -219,16 +240,30 @@ bool FeatureStyleRule::supports(const mapget::GeomType& g) const
     return geometryTypes_ & geomTypeBit(g);
 }
 
-glm::fvec4 const& FeatureStyleRule::color() const
+glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 {
+    if (!colorExpression_.empty()) {
+        auto colorVal = evalFun(colorExpression_);
+        if (colorVal.isa(simfil::ValueType::Int)) {
+            auto colorInt = colorVal.as<simfil::ValueType::Int>();
+            auto a = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto b = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto g = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto r = static_cast<float>(colorInt & 0xff) / 255.;
+            return {r, g, b, a};
+        }
+        else if (colorVal.isa(simfil::ValueType::String)) {
+            auto colorStr = colorVal.as<simfil::ValueType::String>();
+            return Color(colorStr.c_str()).toFVec4(color_.a);
+        }
+        else
+            std::cout << "Invalid result for color expression: " << colorExpression_
+                      << ": " << colorVal.toString() << std::endl;
+    }
     return color_;
-}
-
-std::string FeatureStyleRule::colorString() const
-{
-    // Return string representation of the color
-    // to simplify usage for mapped Material primitives
-    return colorString_;
 }
 
 float FeatureStyleRule::width() const
@@ -256,26 +291,25 @@ glm::fvec4 const& FeatureStyleRule::gapColor() const
     return gapColor_;
 }
 
-std::string FeatureStyleRule::gapColorString() const
-{
-    // Return string representation of the color
-    // to simplify usage for mapped Material primitives
-    return gapColorString_;
-}
-
 int FeatureStyleRule::dashPattern() const
 {
     return dashPattern_;
 }
 
-bool FeatureStyleRule::hasArrow() const
+FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) const
 {
-    return hasArrow_;
-}
+    if (!arrowExpression_.empty()) {
+        auto arrowVal = evalFun(arrowExpression_);
+        if (arrowVal.isa(simfil::ValueType::String)) {
+            auto arrowStr = arrowVal.as<simfil::ValueType::String>();
+            if (auto arrowMode = parseArrowMode(arrowStr))
+                return *arrowMode;
+        }
 
-bool FeatureStyleRule::hasDoubleArrow() const
-{
-    return hasDoubleArrow_;
+        std::cout << "Invalid result for arrow expression: " << arrowExpression_
+                  << ": " << arrowVal.toString() << std::endl;
+    }
+    return arrow_;
 }
 
 glm::fvec4 const& FeatureStyleRule::outlineColor() const

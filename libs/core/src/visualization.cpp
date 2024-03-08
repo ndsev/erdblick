@@ -10,6 +10,14 @@ using namespace mapget;
 namespace erdblick
 {
 
+namespace {
+uint32_t fvec4ToInt(glm::fvec4 const& v) {
+    return (
+        (static_cast<uint32_t>(v.r * 255) << 24) | (static_cast<uint32_t>(v.g * 255) << 16) |
+        (static_cast<uint32_t>(v.b * 255) << 8) | static_cast<uint32_t>(v.a * 255));
+}
+}
+
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
     uint32_t highlightFeatureIndex)
@@ -24,7 +32,6 @@ FeatureLayerVisualization::FeatureLayerVisualization(
 {
 }
 
-
 void FeatureLayerVisualization::addTileFeatureLayer(
     std::shared_ptr<mapget::TileFeatureLayer> tile)
 {
@@ -36,6 +43,7 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 void FeatureLayerVisualization::run()
 {
     uint32_t featureId = 0;
+
     for (auto&& feature : *tile_) {
         if (highlightFeatureIndex_ != UnselectableId) {
             if (featureId != highlightFeatureIndex_) {
@@ -167,11 +175,12 @@ void FeatureLayerVisualization::addFeature(
     FeatureStyleRule const& rule)
 {
     if (rule.aspect() == FeatureStyleRule::Feature) {
+        auto boundEvalFun = [this, &feature](auto&& str){return evaluateExpression(str, *feature);};
         feature->geom()->forEachGeometry(
-            [this, id, &rule](auto&& geom)
+            [this, id, &rule, &boundEvalFun](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, id, rule);
+                    addGeometry(geom, id, rule, boundEvalFun);
                 return true;
             });
     }
@@ -183,7 +192,8 @@ void FeatureLayerVisualization::addFeature(
 void FeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
     uint32_t id,
-    FeatureStyleRule const& rule)
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun)
 {
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
@@ -199,23 +209,23 @@ void FeatureLayerVisualization::addGeometry(
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsList(vertsCartesian);
             if (rule.flat())
-                coloredGroundMeshes_.addPolygon(jsVerts, rule, id);
+                coloredGroundMeshes_.addPolygon(jsVerts, rule, id, evalFun);
             else
-                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, id);
+                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, id, evalFun);
         }
         break;
     case Geometry::GeomType::Line:
-        addPolyLine(vertsCartesian, rule, id);
+        addPolyLine(vertsCartesian, rule, id, evalFun);
         break;
     case Geometry::GeomType::Mesh:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsFloat64Array(vertsCartesian);
-            coloredTrivialMeshes_.addTriangles(jsVerts, rule, id);
+            coloredTrivialMeshes_.addTriangles(jsVerts, rule, id, evalFun);
         }
         break;
     case Geometry::GeomType::Points:
         for (auto const& pt : vertsCartesian) {
-            coloredPoints_.addPoint(JsValue(pt), rule, id);
+            coloredPoints_.addPoint(JsValue(pt), rule, id, evalFun);
         }
         break;
     }
@@ -275,57 +285,104 @@ FeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Poin
     return JsValue::Float64Array(cartesianCoords);
 }
 
-CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(const FeatureStyleRule &rule) {
-    const auto key = std::tuple<std::string, std::string, uint32_t, uint32_t>{rule.colorString(), rule.gapColorString(), rule.dashLength(), rule.dashPattern()};
+CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(
+    const FeatureStyleRule& rule,
+    BoundEvalFun const& evalFun)
+{
+    const auto resolvedColor = rule.color(evalFun);
+    const auto colorKey = fvec4ToInt(resolvedColor);
+    const auto gapColorKey = fvec4ToInt(rule.gapColor());
+    const auto key = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>{colorKey, gapColorKey, rule.dashLength(), rule.dashPattern()};
     auto& dashMap = rule.flat() ? dashGroundLines_ : dashLines_;
     auto iter = dashMap.find(key);
     if (iter != dashMap.end()) {
         return iter->second;
     }
-    return dashMap.emplace(key, CesiumPrimitive::withPolylineDashMaterialAppearance(rule, rule.flat())).first->second;
+    return dashMap
+        .emplace(
+            key,
+            CesiumPrimitive::withPolylineDashMaterialAppearance(rule, rule.flat(), resolvedColor))
+        .first->second;
 }
 
-CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(const FeatureStyleRule &rule) {
-    const std::string key = rule.colorString();
+CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
+    const FeatureStyleRule& rule,
+    BoundEvalFun const& evalFun)
+{
+    const auto resolvedColor = rule.color(evalFun);
+    const auto colorKey = fvec4ToInt(resolvedColor);
     auto& arrowMap = rule.flat() ? arrowGroundLines_ : arrowLines_;
-    auto iter = arrowMap.find(key);
+    auto iter = arrowMap.find(colorKey);
     if (iter != arrowMap.end()) {
         return iter->second;
     }
-    return arrowMap.emplace(key, CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat())).first->second;
+    return arrowMap
+        .emplace(
+            colorKey,
+            CesiumPrimitive::withPolylineArrowMaterialAppearance(rule, rule.flat(), resolvedColor))
+        .first->second;
 }
 
 void erdblick::FeatureLayerVisualization::addLine(
     const Point& wgsA,
     const Point& wgsB,
     uint32_t id,
-    const erdblick::FeatureStyleRule& rule)
+    const erdblick::FeatureStyleRule& rule,
+    BoundEvalFun const& evalFun)
 {
-    addPolyLine({wgsToCartesian<mapget::Point>(wgsA), wgsToCartesian<mapget::Point>(wgsB)}, rule, id);
+    addPolyLine(
+        {wgsToCartesian<mapget::Point>(wgsA), wgsToCartesian<mapget::Point>(wgsB)},
+        rule,
+        id,
+        evalFun);
 }
 
-void FeatureLayerVisualization::addPolyLine(std::vector<mapget::Point> const& vertsCartesian, const FeatureStyleRule& rule, uint32_t id)
+void FeatureLayerVisualization::addPolyLine(
+    std::vector<mapget::Point> const& vertsCartesian,
+    const FeatureStyleRule& rule,
+    uint32_t id,
+    BoundEvalFun const& evalFun)
 {
-    if (rule.hasArrow() && rule.hasDoubleArrow()) {
+    auto arrowType = rule.arrow(evalFun);
+
+    if (arrowType == FeatureStyleRule::DoubleArrow) {
         auto jsVertsPair = encodeVerticesAsReversedSplitList(vertsCartesian);
-        getPrimitiveForArrowMaterial(rule).addPolyLine(jsVertsPair.first, rule, id);
-        getPrimitiveForArrowMaterial(rule).addPolyLine(jsVertsPair.second, rule, id);
+        auto& primitive = getPrimitiveForArrowMaterial(rule, evalFun);
+        primitive.addPolyLine(jsVertsPair.first, rule, id, evalFun);
+        primitive.addPolyLine(jsVertsPair.second, rule, id, evalFun);
         return;
     }
 
     auto jsVerts = encodeVerticesAsList(vertsCartesian);
-    if (rule.hasArrow()) {
-        getPrimitiveForArrowMaterial(rule).addPolyLine(jsVerts, rule, id);
+    if (arrowType == FeatureStyleRule::ForwardArrow) {
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+    }
+    else if (arrowType == FeatureStyleRule::BackwardArrow) {
+        jsVerts.call<void>("reverse");
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
     }
     else if (rule.isDashed()) {
-        getPrimitiveForDashMaterial(rule).addPolyLine(jsVerts, rule, id);
+        getPrimitiveForDashMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
     }
     else if (rule.flat()) {
-        coloredGroundLines_.addPolyLine(jsVerts, rule, id);
+        coloredGroundLines_.addPolyLine(jsVerts, rule, id, evalFun);
     }
     else {
-        coloredLines_.addPolyLine(jsVerts, rule, id);
+        coloredLines_.addPolyLine(jsVerts, rule, id, evalFun);
     }
+}
+
+simfil::Value FeatureLayerVisualization::evaluateExpression(
+    const std::string& expression,
+    const simfil::ModelNode& ctx) const
+{
+    auto results = simfil::eval(
+        tile_->evaluationEnvironment(),
+        *tile_->compiledExpression(expression),
+        ctx);
+    if (results.empty())
+        return simfil::Value::null();
+    return std::move(results[0]);
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
@@ -462,7 +519,11 @@ void RecursiveRelationVisualizationState::render(
         visu_.tile_->fieldNames()->emplace("$twoway"),
         simfil::Value(r.twoway_));
 
-    // TODO: Make use of this simfil context.
+    // Function which can evaluate a simfil expression in the relation context.
+    auto boundEvalFun = [this, &relationEvaluationContext](auto&& str)
+    {
+        return visu_.evaluateExpression(str, relationEvaluationContext);
+    };
 
     // Obtain source/target geometries.
     auto sourceGeom = r.relation_->hasSourceValidity() ?
@@ -481,22 +542,22 @@ void RecursiveRelationVisualizationState::render(
         auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_.relationLineHeightOffset()};
 
         if (rule_.width() > 0) {
-            visu_.addLine(p1hi, p2hi, UnselectableId, rule_);
+            visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun);
         }
         if (rule_.relationLineEndMarkerStyle()) {
-            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle());
-            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle());
+            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun);
+            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun);
         }
     }
 
     // Run source geometry visualization.
     if (auto sourceRule = rule_.relationSourceStyle()) {
-        visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule);
+        visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun);
     }
 
     // Run target geometry visualization.
     if (auto targetRule = rule_.relationSourceStyle()) {
-        visu_.addGeometry(targetGeom, UnselectableId, *targetRule);
+        visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
     }
 
     r.rendered_ = true;
