@@ -195,39 +195,45 @@ export class ErdblickView {
     private setPickedCesiumFeature(feature: any) {
         if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
             return;
+
         // Restore the previously picked feature to its original color.
         if (this.pickedFeature && this.pickedFeatureOrigColor) {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        this.selectionVisualizations.forEach(this.model.tileVisualizationDestructionTopic.next);
+        this.selectionVisualizations.forEach(visu => this.model.tileVisualizationDestructionTopic.next(visu));
         this.selectionVisualizations = [];
-        let resolvedFeature = this.resolveFeature(feature.primitive, feature.id);
-        if (feature && resolvedFeature) {
-            // Highlight the new picked feature and remember its original color.
-            // Make sure that if the hovered feature is picked, we don't
-            // remember the hover color as the original color.
-            if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
-                this.setHoveredCesiumFeature(null);
-            }
-            this.pickedFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Color.YELLOW);
-            this.pickedFeature = feature;
-            this.selectionTopic.next(resolvedFeature);
-            for (let [styleId, styleData] of this.model.allStyles()) {
-                let visu = new TileVisualization(
-                    this.model.getAvailableNinePatchFeatureTiles(
-                        resolvedFeature!.featureTile.tileId,
-                        resolvedFeature!.featureTile.mapName,
-                        resolvedFeature!.featureTile.layerName),
-                    styleData.featureLayerStyle,
-                    true,
-                    feature.id);
-                this.model.tileVisualizationTopic.next(visu);
-                this.selectionVisualizations.push(visu);
-            }
-        } else {
+
+        // Get the actual mapget feature for the picked Cesium feature.
+        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
+        if (!resolvedFeature) {
             this.selectionTopic.next(null);
+            return;
+        }
+
+        // Highlight the new picked feature and remember its original color.
+        // Make sure that if the hovered feature is picked, we don't
+        // remember the hover color as the original color.
+        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
+            this.setHoveredCesiumFeature(null);
+        }
+        this.pickedFeatureOrigColor = this.getFeatureColor(feature);
+        this.setFeatureColor(feature, Color.YELLOW);
+        this.pickedFeature = feature;
+        this.selectionTopic.next(resolvedFeature);
+
+        // Apply additional highlight styles.
+        for (let [styleId, styleData] of this.model.allStyles()) {
+            let visu = new TileVisualization(
+                this.model.getAvailableNinePatchFeatureTiles(
+                    resolvedFeature!.featureTile.tileId,
+                    resolvedFeature!.featureTile.mapName,
+                    resolvedFeature!.featureTile.layerName),
+                styleData.featureLayerStyle,
+                true,
+                feature.id);
+            this.model.tileVisualizationTopic.next(visu);
+            this.selectionVisualizations.push(visu);
         }
     }
 
