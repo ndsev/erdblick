@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 set -eu
-
-cmake --build build -- -j
+cmake --build --preset conan-release -- -j

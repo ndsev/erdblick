@@ -1,6 +1,12 @@
 [requires]
+mapget/dev
 glm/cci.20230113
 yaml-cpp/0.8.0
+
+[options]
+mapget/*:with_service=False
+mapget/*:with_httplib=False
+mapget/*:with_wheel=False
 
 [generators]
 CMakeDeps

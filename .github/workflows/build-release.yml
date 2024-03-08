@@ -17,10 +17,18 @@ jobs:
       - name: Install Ninja
         run: |
           sudo apt update && sudo apt install ninja-build
+
       - name: Install Conan
         run: |
           pip install conan
           conan profile detect
+
+      - name: Install mapget (git+conan)
+        run: |
+          cd $(mktemp -d)
+          git clone "https://github.com/ndsev/mapget.git" -b conan-pkg
+          cd mapget
+          conan create . -o with_service=False -s compiler.cppstd=20 -b missing
 
       - name: Build demo with Emscripten
         run: |
