@@ -22,23 +22,6 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
     return result;
 }
 
-CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround) {
-    CesiumPrimitive result;
-    auto const &color = style.color();
-    auto const &gapColor = style.gapColor();
-    result.appearance_ = Cesium().PolylineMaterialAppearance.New({
-        {"material", Cesium().MaterialFromType("PolylineDash", JsValue::Dict({
-            {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
-            {"gapColor", Cesium().Color.New(gapColor.r, gapColor.g, gapColor.b, gapColor.a)},
-            {"dashLength", JsValue(style.dashLength())},
-            {"dashPattern", JsValue(style.dashPattern())}
-        }))}
-    });
-    result.clampToGround_ = clampToGround;
-    result.polyLinePrimitive_ = true;
-    return result;
-}
-
 CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(
     const FeatureStyleRule& style,
     bool clampToGround,
