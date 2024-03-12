@@ -17,6 +17,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/cesium-interface/cesium.h
   include/erdblick/cesium-interface/point-conversion.h
   include/erdblick/cesium-interface/points.h
+  include/erdblick/cesium-interface/labels.h
 
   src/visualization.cpp
   src/style.cpp
@@ -31,7 +32,8 @@ set(ERDBLICK_SOURCE_FILES
   src/cesium-interface/primitive.cpp
   src/cesium-interface/cesium.cpp
   src/cesium-interface/points.cpp
-  )
+  src/cesium-interface/labels.cpp
+)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)

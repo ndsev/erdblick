@@ -195,12 +195,18 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             arrow_ = *arrowMode;
     }
 
-
-
     // Parse labels' rules
     if (yaml["label-font"].IsDefined()) {
         // Parse label font
         labelFont_ = yaml["label-font"].as<std::string>();
+    }
+    if (yaml["label-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelColor_ = Color(yaml["label-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-outline-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
     }
     if (yaml["label-background-color"].IsDefined()) {
         // Parse option to have a label background color.
@@ -219,16 +225,22 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
     }
     if (yaml["label-text-expression"].IsDefined()) {
+        hasLabel_ = true;
         // Parse label SIMFIL expression
         labelTextExpression_ = yaml["label-text-expression"].as<std::string>();
     }
     if (yaml["label-text"].IsDefined()) {
+        hasLabel_ = true;
         // Parse label placeholder exprestextsion
         labelText_ = yaml["label-text"].as<std::string>();
     }
     if (yaml["label-style"].IsDefined()) {
         // Parse label style string
         labelStyle_ = yaml["label-style"].as<std::string>();
+    }
+    if (yaml["label-scale"].IsDefined()) {
+        // Parse label style string
+        labelStyle_ = yaml["label-scale"].as<std::string>();
     }
 
     // Parse sub-rules
@@ -413,41 +425,83 @@ std::optional<std::regex> const& FeatureStyleRule::relationType() const
     return relationType_;
 }
 
+bool FeatureStyleRule::hasLabel() const
+{
+    return hasLabel_;
+}
+
 std::string FeatureStyleRule::labelFont() const
 {
     return labelFont_;
 }
+
+glm::fvec4 const& FeatureStyleRule::labelColor() const
+{
+    return labelBackgroundColor_;
+}
+
+glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
+{
+    return labelBackgroundColor_;
+}
+
 glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
 {
     return labelBackgroundColor_;
 }
+
 std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
 {
     return labelBackgroundPadding_;
 }
+
 std::string FeatureStyleRule::labelHorizontalOrigin() const
 {
     return labelHorizontalOrigin_;
 }
+
 std::string FeatureStyleRule::labelVerticalOrigin() const
 {
     return labelVerticalOrigin_;
 }
+
 std::string FeatureStyleRule::labelHeightReference() const
 {
     return labelHeightReference_;
 }
+
 std::string FeatureStyleRule::labelTextExpression() const
 {
     return labelTextExpression_;
 }
-std::string FeatureStyleRule::labelText() const
+
+std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
+    if (!labelTextExpression_.empty()) {
+        auto resultVal = evalFun(labelTextExpression_);
+        if (resultVal.isa(simfil::ValueType::String)) {
+            auto resultText = resultVal.as<simfil::ValueType::String>();
+            if (!resultText.empty()) {
+                return resultText;
+            }
+            std::cout << "Empty return value for the label text expression: " << labelTextExpression_
+                      << ": " << resultVal.toString() << std::endl;
+            return labelText_;
+        }
+        std::cout << "Invalid return value type for the label text expression: " << labelTextExpression_
+                  << ": " << resultVal.toString() << std::endl;
+        return labelText_;
+    }
     return labelText_;
 }
+
 std::string FeatureStyleRule::labelStyle() const
 {
     return labelStyle_;
+}
+
+float FeatureStyleRule::labelScale() const {
+    return labelScale_;
 }
 
 }

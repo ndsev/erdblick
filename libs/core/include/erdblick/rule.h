@@ -66,15 +66,19 @@ public:
     [[nodiscard]] bool relationRecursive() const;
     [[nodiscard]] bool relationMergeTwoWay() const;
 
+    [[nodiscard]] bool hasLabel() const;
     [[nodiscard]] std::string labelFont() const;
+    [[nodiscard]] glm::fvec4 const& labelColor() const;
+    [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     [[nodiscard]] glm::fvec4 const& labelBackgroundColor() const;
     [[nodiscard]] std::pair<int, int> const& labelBackgroundPadding() const;
     [[nodiscard]] std::string labelHorizontalOrigin() const;
     [[nodiscard]] std::string labelVerticalOrigin() const;
     [[nodiscard]] std::string labelHeightReference() const;
     [[nodiscard]] std::string labelTextExpression() const;
-    [[nodiscard]] std::string labelText() const;
+    [[nodiscard]] std::string labelText(BoundEvalFun const& evalFun) const;
     [[nodiscard]] std::string labelStyle() const;
+    [[nodiscard]] float labelScale() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -104,15 +108,19 @@ private:
     std::optional<std::array<float, 4>> nearFarScale_;
 
     // Labels' rules
+    bool hasLabel_ = false;
     std::string labelFont_ = "24px Helvetica";
+    glm::fvec4 labelColor_{1., 1., 1., 1.};
+    glm::fvec4 labelOutlineColor_{.0, .0, .0, .0};
     glm::fvec4 labelBackgroundColor_{.0, .0, .0, .0};
     std::pair<int, int> labelBackgroundPadding_{0, 0};
     std::string labelHorizontalOrigin_ = "CENTER";
     std::string labelVerticalOrigin_ = "CENTER";
     std::string labelHeightReference_ = "NONE";
-    std::string labelTextExpression_ = "**.speedLimitKmh";
-    std::string labelText_ = "abc";
+    std::string labelTextExpression_ = "";
+    std::string labelText_ = "";
     std::string labelStyle_ = "FILL_AND_OUTLINE";
+    float labelScale_ = 1.;
 
     std::vector<FeatureStyleRule> firstOfRules_;
 

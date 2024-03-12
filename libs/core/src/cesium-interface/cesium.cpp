@@ -28,7 +28,11 @@ CesiumLib::CesiumLib() :
     PrimitiveCollection("PrimitiveCollection"),
     PrimitiveType("PrimitiveType"),
     Label("Label"),
-    LabelCollection("LabelCollection")
+    LabelCollection("LabelCollection"),
+    HorizontalOrigin("HorizontalOrigin"),
+    VerticalOrigin("VerticalOrigin"),
+    LabelStyle("LabelStyle"),
+    Cartesian2("Cartesian2")
 {
 }
 

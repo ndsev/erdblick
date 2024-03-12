@@ -243,6 +243,13 @@ void FeatureLayerVisualization::addGeometry(
         }
         break;
     }
+
+    if (rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            labelCollection_.addLabel(JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))), text, rule, id, evalFun);
+        }
+    }
 }
 
 JsValue

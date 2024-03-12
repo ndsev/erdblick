@@ -5,6 +5,7 @@
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
+#include "cesium-interface/labels.h"
 #include "style.h"
 #include "simfil/overlay.h"
 
@@ -200,6 +201,7 @@ private:
     std::map<uint32_t, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
+    CesiumPrimitiveLabelsCollection labelCollection_;
 
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
@@ -216,7 +218,7 @@ private:
         externalRelationVisualizations_;
     std::deque<RecursiveRelationVisualizationState> relationStyleState_;
 
-    CesiumPrimitive labelCollection_;
+    std::vector<FeatureStyleRule> labelStyles{};
 };
 
 }  // namespace erdblick
