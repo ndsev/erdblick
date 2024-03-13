@@ -242,6 +242,25 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse label style string
         labelStyle_ = yaml["label-scale"].as<std::string>();
     }
+    if (yaml["label-pixel-offset"].IsDefined()) {
+        // Parse option to have a label padding.
+        labelPixelOffset_ = yaml["label-pixel-offset"].as<std::pair<float, float>>();
+    }
+    if (yaml["label-eye-offset"].IsDefined()) {
+        // Parse option to have a label padding.
+        auto coordinates = yaml["label-eye-offset"].as<std::vector<float>>();
+        if (coordinates.size() == 3) {
+            labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
+        }
+    }
+    if (yaml["translucency-by-distance"].IsDefined()) {
+        // Parse option for near and far translucency properties of a Label based on the Label's distance from the camera.
+        auto components = yaml["translucency-by-distance"].as<std::vector<float>>();
+        if (components.size() >= 4) {
+            translucencyByDistance_ = {.0};
+            std::copy(components.begin(), components.begin()+4, translucencyByDistance_->begin());
+        }
+    }
 
     // Parse sub-rules
     if (yaml["first-of"].IsDefined()) {
@@ -502,6 +521,21 @@ std::string FeatureStyleRule::labelStyle() const
 
 float FeatureStyleRule::labelScale() const {
     return labelScale_;
+}
+
+std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset() const
+{
+    return labelPixelOffset_;
+}
+
+std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
+{
+    return labelEyeOffset_;
+}
+
+std::optional<std::array<float, 4>> const& FeatureStyleRule::translucencyByDistance() const
+{
+    return translucencyByDistance_;
 }
 
 }

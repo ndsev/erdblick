@@ -19,29 +19,42 @@ void CesiumPrimitiveLabelsCollection::addLabel(
     auto const &color = style.labelColor();
     auto const &outlineColor = style.labelOutlineColor();
     auto const &bgColor = style.labelBackgroundColor();
-    auto const &nfs = style.nearFarScale();
     auto const &padding = style.labelBackgroundPadding();
-    labelCollection_.call<void>("add", *JsValue::Dict({
-        {"id", JsValue(id)},
-        {"position", position},
-        {"show", JsValue(true)},
-        {"text", JsValue(labelText)},
-        {"font", JsValue(style.labelFont())},
-        {"fillColor", Cesium().Color.New(color.r, color.g, color.b, color.a)},
-        {"outlineColor", Cesium().Color.New(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a)},
-        {"outlineWidth", JsValue(style.outlineWidth())},
-        {"showBackground", JsValue(false)},
-        {"backgroundColor", Cesium().Color.New(bgColor.r, bgColor.g, bgColor.b, bgColor.a)},
-        {"backgroundPadding", Cesium().Cartesian2.New(padding.first, padding.second)},
-        {"style", Cesium().LabelStyle[style.labelStyle()]},
-        {"horizontalOrigin", Cesium().HorizontalOrigin[style.labelHorizontalOrigin()]},
-        {"verticalOrigin", Cesium().VerticalOrigin[style.labelVerticalOrigin()]},
-        {"scale", JsValue(style.labelScale())},
-        {"pixelOffsetScaleByDistance", Cesium().NearFarScalar.New((*nfs)[0], (*nfs)[1], (*nfs)[2], (*nfs)[3])}
-        // {"pixelOffset", Cesium.Cartesian2.ZERO},
-        // {"eyeOffset", Cesium.Cartesian3.ZERO},
-        // {"translucencyByDistance", undefined}
-    }));
+
+    auto labelProperties = JsValue::Dict({
+         {"id", JsValue(id)},
+         {"position", position},
+         {"show", JsValue(true)},
+         {"text", JsValue(labelText)},
+         {"font", JsValue(style.labelFont())},
+         {"fillColor", Cesium().Color.New(color.r, color.g, color.b, color.a)},
+         {"outlineColor", Cesium().Color.New(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a)},
+         {"outlineWidth", JsValue(style.outlineWidth())},
+         {"backgroundColor", Cesium().Color.New(bgColor.r, bgColor.g, bgColor.b, bgColor.a)},
+         {"backgroundPadding", Cesium().Cartesian2.New(padding.first, padding.second)},
+         {"style", Cesium().LabelStyle[style.labelStyle()]},
+         {"horizontalOrigin", Cesium().HorizontalOrigin[style.labelHorizontalOrigin()]},
+         {"verticalOrigin", Cesium().VerticalOrigin[style.labelVerticalOrigin()]},
+         {"scale", JsValue(style.labelScale())}
+    });
+    if (auto const &nfs = style.nearFarScale()) {
+        labelProperties.set("pixelOffsetScaleByDistance",
+            Cesium().NearFarScalar.New((*nfs)[0], (*nfs)[1], (*nfs)[2], (*nfs)[3]));
+    }
+    if (auto const &pixelOffset = style.labelPixelOffset()) {
+        labelProperties.set("pixelOffset",
+            Cesium().Cartesian2.New(pixelOffset->first, pixelOffset->second));
+    }
+    if (auto const &eyeOffset = style.labelEyeOffset()) {
+        labelProperties.set("eyeOffset",
+            Cesium().Cartesian3.New(std::get<0>(*eyeOffset),std::get<1>(*eyeOffset),std::get<2>(*eyeOffset)));
+    }
+    if (auto const &tbd = style.translucencyByDistance()) {
+        labelProperties.set("translucencyByDistance",
+            Cesium().NearFarScalar.New((*tbd)[0], (*tbd)[1], (*tbd)[2], (*tbd)[3]));
+    }
+
+    labelCollection_.call<void>("add", *labelProperties);
     numLabelInstances_++;
 }
 

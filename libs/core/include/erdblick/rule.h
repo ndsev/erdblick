@@ -79,6 +79,9 @@ public:
     [[nodiscard]] std::string labelText(BoundEvalFun const& evalFun) const;
     [[nodiscard]] std::string labelStyle() const;
     [[nodiscard]] float labelScale() const;
+    [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
+    [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
+    [[nodiscard]] std::optional<std::array<float, 4>> const& translucencyByDistance() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -121,6 +124,9 @@ private:
     std::string labelText_ = "";
     std::string labelStyle_ = "FILL_AND_OUTLINE";
     float labelScale_ = 1.;
+    std::optional<std::pair<float, float>> labelPixelOffset_;
+    std::optional<std::tuple<float, float, float>> labelEyeOffset_;
+    std::optional<std::array<float, 4>> translucencyByDistance_;
 
     std::vector<FeatureStyleRule> firstOfRules_;
 

@@ -121,9 +121,7 @@ void CesiumPrimitive::addGeometryInstance(
     auto attributes = JsValue::Dict();
     if (perInstanceColor_) {
         auto const color = style.color(evalFun);
-        attributes.set(
-                "color",
-                Cesium().ColorGeometryInstanceAttribute.New(color.r, color.g, color.b, color.a));
+        attributes.set("color", Cesium().ColorGeometryInstanceAttribute.New(color.r, color.g, color.b, color.a));
     }
     auto geometryInstance = Cesium().GeometryInstance.New({
         {"geometry",   geom},

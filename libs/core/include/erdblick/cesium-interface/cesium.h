@@ -37,6 +37,7 @@ struct CesiumLib
     CesiumClass VerticalOrigin;
     CesiumClass LabelStyle;
     CesiumClass Cartesian2;
+    CesiumClass Cartesian3;
 
     [[nodiscard]] JsValue MaterialFromType(std::string const& type, JsValue const& options);
 

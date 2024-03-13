@@ -32,7 +32,8 @@ CesiumLib::CesiumLib() :
     HorizontalOrigin("HorizontalOrigin"),
     VerticalOrigin("VerticalOrigin"),
     LabelStyle("LabelStyle"),
-    Cartesian2("Cartesian2")
+    Cartesian2("Cartesian2"),
+    Cartesian3("Cartesian3")
 {
 }
 

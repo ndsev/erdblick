@@ -135,7 +135,6 @@ export class TileVisualization {
                 return true;
             });
             if (this.primitiveCollection)
-                console.log(this.primitiveCollection);
                 viewer.scene.primitives.add(this.primitiveCollection);
             this.hasHighDetailVisualization = true;
         } else {
