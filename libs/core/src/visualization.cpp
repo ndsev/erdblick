@@ -35,8 +35,19 @@ FeatureLayerVisualization::FeatureLayerVisualization(
 void FeatureLayerVisualization::addTileFeatureLayer(
     std::shared_ptr<mapget::TileFeatureLayer> tile)
 {
-    if (!tile_)
+    if (!tile_) {
         tile_ = std::move(tile);
+    }
+    else if (tile->nodeId() != tile_->nodeId()) {
+        // Ensure that the added aux tile and the primary tile use the same
+        // field name encoding. So we transcode the aux tile into the same dict.
+        // However, the transcoding process changes the dictionary, as it might
+        // add unknown field names. This would fork the dict state from the remote
+        // node dict, which leads to undefined behavior. So we work on a copy of it.
+        if (!internalFieldsDictCopy_)
+            internalFieldsDictCopy_ = tile->takeFieldsDictOwnership();
+        tile->transcode(internalFieldsDictCopy_);
+    }
     allTiles_.emplace_back(tile_);
 }
 

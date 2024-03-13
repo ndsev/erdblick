@@ -205,6 +205,7 @@ private:
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
     uint32_t highlightFeatureIndex_ = 0;
+    std::shared_ptr<simfil::Fields> internalFieldsDictCopy_;
 
     /// ===== Relation Processing Members =====
 
