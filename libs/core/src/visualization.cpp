@@ -144,7 +144,7 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
         auto featureIdParts = firstResolution["featureId"];
         auto numFeatureIdParts = featureIdParts.size();
         mapget::KeyValuePairs featureIdPartsVec;
-        for (auto kvIndex = 0; i < numFeatureIdParts; i += 2) {
+        for (auto kvIndex = 0; kvIndex < numFeatureIdParts; kvIndex += 2) {
             auto key = featureIdParts.at(kvIndex).as<std::string>();
             auto value = featureIdParts.at(kvIndex + 1);
             if (value.type() == JsValue::Type::Number) {
@@ -512,14 +512,6 @@ void RecursiveRelationVisualizationState::render(
     simfil::OverlayNode relationEvaluationContext(simfil::Value::field(*r.relation_));
 
     // Assemble simfil evaluation context.
-    // TODO: There is bug here: If the target feature comes
-    //  from a different node, it must be translated into the
-    //  same field namespace for simfil to work. The best way
-    //  to do that would be to add a feature copy ctor to simfil,
-    //  then we can do this:
-    // if (targetFeature->model().nodeId() != feature->model().nodeId()) {
-    //     targetFeature = feature->model().newFeature(*targetFeature);
-    // }
     relationEvaluationContext.set(
         visu_.tile_->fieldNames()->emplace("$source"),
         simfil::Value::field(*r.sourceFeature_));
