@@ -4,6 +4,8 @@ import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
+import {Subscription} from "rxjs";
+import {Dialog} from "primeng/dialog";
 
 
 @Component({
@@ -75,7 +77,7 @@ import {FileUpload} from "primeng/fileupload";
                             </p-button>
                             <p-button (click)="reloadStyle(style.key)"
                                       icon="pi pi-refresh"
-                                      label="" pTooltip="Reload style"
+                                      label="" pTooltip="Reload style from disk"
                                       tooltipPosition="bottom">
                             </p-button>
                             <p-button (click)="exportStyle(style.key, false)"
@@ -92,6 +94,11 @@ import {FileUpload} from "primeng/fileupload";
                             {{ style.key }}
                         </span>
                         <div class="layer-controls style-controls">
+                            <p-button (click)="showStyleEditor(style.key)"
+                                      icon="pi pi-file-edit"
+                                      label="" pTooltip="Edit style"
+                                      tooltipPosition="bottom">
+                            </p-button>
                             <p-button (click)="toggleImportedStyle(style.key)"
                                       icon="{{style.value ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                       label="" pTooltip="Toggle style"
@@ -137,14 +144,33 @@ import {FileUpload} from "primeng/fileupload";
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
+        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="true" #editorDialog>
+            <editor></editor>
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check" [disabled]="!dataWasModified"></p-button>
+                <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"' icon="pi pi-times"></p-button>
+            </div>
+        </p-dialog>
+        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
+            <p>You have already edited the style data. Do you really want to discard the changes?</p>
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                <p-button (click)="discardStyleEdits()" label="Yes"></p-button>
+                <p-button (click)="warningDialog.close($event)" label="No"></p-button>
+            </div>
+        </p-dialog>
     `,
     styles: [``]
 })
 export class MapPanelComponent {
 
+    editorDialogVisible: boolean = false;
     layerDialogVisible: boolean = false;
+    warningDialogVisible: boolean = false;
     mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
+    editedStyleDataSubscription: Subscription = new Subscription();
+    dataWasModified: boolean = false;
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
+    @ViewChild('editorDialog') editorDialog: Dialog | undefined;
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
@@ -298,5 +324,43 @@ export class MapPanelComponent {
     removeStyle(styleId: string) {
         this.mapService.removeImportedStyle(styleId);
         this.styleService.removeImportedStyle(styleId);
+    }
+
+    showStyleEditor(styleId: string) {
+        this.styleService.selectedStyleIdForEditing.next(styleId);
+        this.editorDialogVisible = true;
+        this.editedStyleDataSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleData => {
+            const originalStyleData = this.styleService.importedStyleData.get(styleId);
+            this.dataWasModified = !(editedStyleData == originalStyleData);
+        });
+    }
+
+    applyEditedStyle() {
+        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
+        const styleData = this.styleService.styleEditedStateData.getValue();
+        if (styleId) {
+            this.styleService.updateImportedStyle(styleId, styleData);
+        }
+        this.mapService.reapplyStyle(styleId, true);
+        this.dataWasModified = false;
+    }
+
+    closeEditorDialog(event: any) {
+        if (this.editorDialog !== undefined) {
+            if (this.dataWasModified) {
+                event.stopPropagation();
+                this.warningDialogVisible = true;
+            } else {
+                this.warningDialogVisible = false;
+                this.editorDialog.close(event);
+            }
+        }
+        this.editedStyleDataSubscription.unsubscribe();
+    }
+
+    discardStyleEdits() {
+        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
+        this.styleService.selectedStyleIdForEditing.next(styleId);
+        this.warningDialogVisible = false;
     }
 }

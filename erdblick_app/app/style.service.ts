@@ -38,6 +38,10 @@ export class StyleService {
     private erdblickStyles: Array<ErdblickStyle> = [];
     errorStyleIds: Map<string, string> = new Map<string, string>();
 
+    selectedStyleIdForEditing: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    styleBeingEdited: boolean = false;
+    styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
+
     constructor(private httpClient: HttpClient) {
         this.stylesLoaded.next(false);
         this.fetchStylesYamlSources([defaultStyle]).then(dataMap => {
@@ -192,6 +196,13 @@ export class StyleService {
     removeImportedStyle(styleId: string) {
         this.activatedImportedStyles.delete(styleId);
         this.importedStyleData.delete(styleId);
+        this.saveImportedStyles();
+    }
+
+    updateImportedStyle(styleId: string, styleData: string) {
+        if (this.importedStyleData.has(styleId)) {
+            this.importedStyleData.set(styleId, styleData);
+        }
         this.saveImportedStyles();
     }
 
