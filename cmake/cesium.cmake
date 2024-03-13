@@ -24,18 +24,21 @@ ExternalProject_Add(cesiumnative
     -DCESIUM_GLM_STRICT_ENABLED=OFF
     -DCESIUM_TRACING_ENABLED=OFF
     -DDRACO_JS_GLUE=OFF
-    #-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} # FIXME: Is this needed?
-  INSTALL_COMMAND "")
+    -DBUILD_SHARED_LIBS=OFF
+    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+  INSTALL_COMMAND ""
+  STEP_TARGETS build)
 
 function (add_cesium_lib TARGET)
-  message(STATUS "Adding Cesium library: ${TARGET}")
+  message(STATUS "Adding Cesium library: ${TARGET} (${BINARY_DIR}/${TARGET}/${CMAKE_STATIC_LIBRARY_PREFIX}${TARGET}${CMAKE_STATIC_LIBRARY_SUFFIX})")
   ExternalProject_Get_Property(cesiumnative
     SOURCE_DIR BINARY_DIR)
 
-  add_library(${TARGET} SHARED IMPORTED)
+  add_library(${TARGET} STATIC IMPORTED)
   set_target_properties(${TARGET} PROPERTIES
     IMPORTED_LOCATION "${BINARY_DIR}/${TARGET}/${CMAKE_STATIC_LIBRARY_PREFIX}${TARGET}${CMAKE_STATIC_LIBRARY_SUFFIX}"
     INTERFACE_INCLUDE_DIRECTORIES "${SOURCE_DIR}/${TARGET}/include")
+  add_dependencies(${TARGET} cesiumnative-build)
 endfunction()
 
 add_cesium_lib(CesiumUtility)

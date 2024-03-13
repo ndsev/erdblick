@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
-project(erdblick)
+
+project(erdblick CXX)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Treat warnings as errors, with some exceptions for Cesium.
 set (ERDBLICK_CXX_FLAGS
@@ -13,9 +15,9 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 # External dependencies.
-find_package(mapget   REQUIRED COMPONENTS model)
-find_package(glm      REQUIRED)
-find_package(yaml-cpp REQUIRED)
+find_package(mapget   CONFIG REQUIRED COMPONENTS model)
+find_package(glm      CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 
 # Cesium
 include(cmake/cesium.cmake)
