@@ -2,10 +2,17 @@ import {Cartesian3, Color, Viewer} from "cesium";
 import {FeatureTile} from "./features.component";
 import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
+interface LocateResolution {
+    tileId: string,
+}
+
+interface LocateResponse {
+    responses: Array<Array<LocateResolution>>
+}
+
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
 export class TileVisualization {
     tile: FeatureTile;
-    tiles: Array<FeatureTile>;
     isHighDetail: boolean;
 
     private readonly coreLib: ErdblickCore;
@@ -19,11 +26,13 @@ export class TileVisualization {
     private renderingInProgress: boolean;
     private readonly highlight?: number;
     private deleted: boolean;
+    private readonly auxTileFun: (key: string)=>FeatureTile|null;
 
     /**
      * Create a tile visualization.
-     * @param tiles {FeatureTile} The tile to visualize (first in the list), and additional ones
-     *  which might be used to visualize external references.
+     * @param tile {FeatureTile} The tile to visualize.
+     * @param auxTileFun Callback which may be called to resolve external references
+     *  for relation visualization.
      * @param style The style to use for visualization.
      * @param highDetail The level of detail to use. Currently,
      *  a low-detail representation is indicated by `false`, and
@@ -33,19 +42,17 @@ export class TileVisualization {
      *  have `mode: highlight` set, otherwise, only rules with the default
      *  `mode: normal` are executed.
      */
-    constructor(tiles: Array<FeatureTile>, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
-        console.assert(tiles.length > 0);
-
-        this.tile = tiles[0];
-        this.tiles = tiles;
-        this.coreLib = tiles.at(0)!.coreLib;
-        this.numFeatures = tiles.at(0)!.numFeatures;
-        this.tileId = tiles.at(0)!.tileId;
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
+        this.tile = tile;
+        this.coreLib = tile.coreLib;
+        this.numFeatures = tile.numFeatures;
+        this.tileId = tile.tileId;
         this.style = style;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlight = highlight === undefined ? 0xffffffff : highlight;
         this.deleted = false;
+        this.auxTileFun = auxTileFun;
 
         this.entity = null;  // Low-detail or empty -> Cesium point entity.
         this.primitiveCollection = null; // High-detail -> PrimitiveCollection.
@@ -68,7 +75,7 @@ export class TileVisualization {
         this.deleted = false;
 
         // Do not try to render if the underlying data is disposed.
-        if (this.tiles.some(t => t.disposed) || this.style.isDeleted()) {
+        if (this.tile.disposed || this.style.isDeleted()) {
             return false;
         }
 
@@ -76,26 +83,54 @@ export class TileVisualization {
         this.renderingInProgress = true;
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
-            returnValue = await FeatureTile.peekMany(this.tiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
+            returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let visualization = new this.coreLib.FeatureLayerVisualization(
                     this.style,
                     this.highlight!);
+                visualization.addTileFeatureLayer(tileFeatureLayer);
+                visualization.run();
 
-                for (let tile of tileFeatureLayers)
-                    visualization.addTileFeatureLayer(tile);
+                // Try to resolve externally referenced auxiliary tiles.
+                let extRefs = {requests: visualization.externalReferences()};
+                if (extRefs.requests && extRefs.requests.length > 0) {
+                    let response = await fetch("/locate", {
+                        body: JSON.stringify(extRefs),
+                        method: "POST"
+                    }).catch((err)=>console.error(`Error during /locate call: ${err}`));
+                    if (!response) {
+                        return false;
+                    }
 
-                visualization.run()
+                    let extRefsResolved = await response.json() as LocateResponse;
+                    if (this.tile.disposed || this.style.isDeleted()) {
+                        // Do not continue if any of the tiles or the style
+                        // were deleted while we were waiting.
+                        return false;
+                    }
 
-                // let extRefs = visualization.externalReferences();
-                // if (extRefs && extRefs.length > 0) {
-                //     let extRefsResolved = await fetch("/locate", {body: extRefs});
-                //     if (this.tiles.some(tile => tile.disposed) || this.style.isDeleted()) {
-                //         // Do not continue if any of the tiles or the style
-                //         // were deleted while we were waiting.
-                //         return false;
-                //     }
-                //     visualization.processResolvedExternalReferences(extRefsResolved);
-                // }
+                    // Resolve located external tile IDs to actual tiles.
+                    let seenTileIds = new Set<string>();
+                    let auxTiles = new Array<FeatureTile>();
+                    for (let resolutions of extRefsResolved.responses) {
+                        for (let resolution of resolutions) {
+                            if (!seenTileIds.has(resolution.tileId)) {
+                                let tile = this.auxTileFun(resolution.tileId);
+                                if (tile) {
+                                    auxTiles.push(tile);
+                                }
+                                seenTileIds.add(resolution.tileId);
+                            }
+                        }
+                    }
+
+                    // Now we can actually parse the auxiliary layers,
+                    // add them to the visualization, and let it process them.
+                    await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
+                        for (let auxTile of tileFeatureLayers)
+                            visualization.addTileFeatureLayer(auxTile);
+                        visualization.processResolvedExternalReferences(extRefsResolved);
+                    });
+                }
                 this.primitiveCollection = visualization.primitiveCollection();
                 return true;
             });
@@ -159,7 +194,7 @@ export class TileVisualization {
      * underlying data is not empty.
      */
     private isHighDetailAndNotEmpty() {
-        return this.isHighDetail && (this.numFeatures > 0 || this.tiles[0].preventCulling);
+        return this.isHighDetail && (this.numFeatures > 0 || this.tile.preventCulling);
     }
 
     /**

@@ -499,6 +499,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         }
 
         JsValue newExtReferenceToResolve = JsValue::Dict();
+        newExtReferenceToResolve.set("mapId", JsValue(visu_.tile_->mapId()));
         newExtReferenceToResolve.set("typeId", JsValue(std::string(relation->target()->typeId())));
         newExtReferenceToResolve.set("featureId", featureIdParts);
         visu_.externalRelationReferences_.push(newExtReferenceToResolve);

@@ -588,7 +588,8 @@ export class ErdblickModel {
                 return;
             }
             let visu = new TileVisualization(
-                [tileLayer],
+                tileLayer,
+                (tileKey: string)=>this.getFeatureTile(tileKey),
                 styleId == "_builtin" ? style : style.featureLayerStyle,
                 tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
             this.tileVisualizationQueue.push([styleId, visu]);
@@ -605,18 +606,7 @@ export class ErdblickModel {
         this.update();
     }
 
-    getAvailableNinePatchFeatureTiles(tileId: bigint, mapName: string, layerName: string): Array<FeatureTile> {
-        let result: Array<FeatureTile> = [];
-        // Iterate over 3x3 tile grid and return available tiles.
-        for (let xOff of [0, -1, 1]) {
-            for (let yOff of [0, -1, 1]) {
-                let mapTileKey = this.coreLib.getTileFeatureLayerKey(
-                    mapName, layerName, this.coreLib.getTileNeighbor(tileId, xOff, yOff));
-                if (this.loadedTileLayers.has(mapTileKey)) {
-                    result.push(this.loadedTileLayers.get(mapTileKey)!);
-                }
-            }
-        }
-        return result;
+    getFeatureTile(tileKey: string): FeatureTile|null {
+        return this.loadedTileLayers.get(tileKey) || null;
     }
 }

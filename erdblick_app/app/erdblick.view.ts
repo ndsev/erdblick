@@ -225,10 +225,8 @@ export class ErdblickView {
         // Apply additional highlight styles.
         for (let [styleId, styleData] of this.model.allStyles()) {
             let visu = new TileVisualization(
-                this.model.getAvailableNinePatchFeatureTiles(
-                    resolvedFeature!.featureTile.tileId,
-                    resolvedFeature!.featureTile.mapName,
-                    resolvedFeature!.featureTile.layerName),
+                resolvedFeature!.featureTile,
+                (tileKey: string)=>this.model.getFeatureTile(tileKey),
                 styleData.featureLayerStyle,
                 true,
                 feature.id);
