@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -eu
-
-rm -rf build && mkdir build
+rm -rf build
 mkdir -p build/deps
 mkdir -p build/assets
 

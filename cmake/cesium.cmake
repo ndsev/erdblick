@@ -30,9 +30,9 @@ ExternalProject_Add(cesiumnative
   STEP_TARGETS build)
 
 function (add_cesium_lib TARGET)
-  message(STATUS "Adding Cesium library: ${TARGET} (${BINARY_DIR}/${TARGET}/${CMAKE_STATIC_LIBRARY_PREFIX}${TARGET}${CMAKE_STATIC_LIBRARY_SUFFIX})")
   ExternalProject_Get_Property(cesiumnative
     SOURCE_DIR BINARY_DIR)
+  message(STATUS "Adding Cesium library: ${TARGET} (${BINARY_DIR}/${TARGET}/${CMAKE_STATIC_LIBRARY_PREFIX}${TARGET}${CMAKE_STATIC_LIBRARY_SUFFIX})")
 
   add_library(${TARGET} STATIC IMPORTED)
   set_target_properties(${TARGET} PROPERTIES

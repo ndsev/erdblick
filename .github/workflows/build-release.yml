@@ -18,17 +18,32 @@ jobs:
         run: |
           sudo apt update && sudo apt install ninja-build
 
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '21.x'
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install npm dependencies
+        run: npm -g install --force --include=dev
+
       - name: Install Conan
         run: |
           pip install conan
           conan profile detect
+          conan --version
 
       - name: Install mapget (git+conan)
         run: |
           cd $(mktemp -d)
-          git clone "https://github.com/ndsev/mapget.git" -b conan-pkg
+          git clone "https://github.com/ndsev/mapget.git" -b use-conan
           cd mapget
-          conan create . -o with_service=False -s compiler.cppstd=20 -b missing
+          conan create . -s compiler.cppstd=20 -b missing \
+            -pr:b default -pr:h "$GITHUB_WORKSPACE/conan-profiles/emscripten.profile" \
+            -o with_httplib=False \
+            -o with_service=False \
+            -o with_wheel=False
 
       - name: Build demo with Emscripten
         run: |

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-SOURCE_LOC=$1
-if [ -z $SOURCE_LOC ]; then
+SOURCE_LOC="$1"
+BUILD_DIR="${SOURCE_LOC}/build"
+
+if [ -z "$SOURCE_LOC" ]; then
   echo "No source location supplied."
   exit 1
 fi
