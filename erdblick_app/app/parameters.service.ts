@@ -39,7 +39,7 @@ export class ParametersService {
                        alt: currentPositionCartographic.height
                    }
                }
-               const currentStyles = [...this.styleService.activatedStyles.keys()].filter(key => this.styleService.activatedStyles.get(key));
+               const currentStyles = [...this.styleService.availableStyles.keys()].filter(key => this.styleService.availableStyles.get(key));
                let currentLayers = new Array<Array<string>>;
                const mapModel = this.mapService.mapModel.getValue();
                if (mapModel) {

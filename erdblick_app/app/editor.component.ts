@@ -48,7 +48,6 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     ngAfterViewInit(): void {
         this.styleService.selectedStyleIdForEditing.subscribe(styleId => {
-            console.log(styleId);
             if (styleId) {
                 const childElements = this.editorRef.nativeElement.childNodes;
                 for (let child of childElements) {
@@ -63,7 +62,12 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     }
 
     createEditorState() {
-        this.styleData = this.styleService.importedStyleData.get(this.styleService.selectedStyleIdForEditing.getValue())!
+        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
+        if (this.styleService.styleData.has(styleId)) {
+            this.styleData = `${this.styleService.styleData.get(styleId)!.data}\n\n\n\n\n`;
+        } else {
+            this.styleData = "";
+        }
         return EditorState.create({
             doc: this.styleData,
             extensions: [

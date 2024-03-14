@@ -3,9 +3,9 @@ import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
-import MainModuleFactory, {Feature} from '../../build/libs/core/erdblick-core';
+import MainModuleFactory, {Feature, MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
 import {JumpTargetService} from "./jump.service";
-import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
+import {MapInfoItem, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
 import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
@@ -67,7 +67,7 @@ export class AppComponent {
                 this.version = data.toString();
             });
 
-        MainModuleFactory().then((coreLib: any) => {
+        MainModuleFactory().then((coreLib: ErdblickCore) => {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
 
@@ -192,8 +192,8 @@ export class AppComponent {
             }
             let currentStyles = new Array<string>();
             styles.forEach(styleId => {
-                if (this.styleService.activatedStyles.has(styleId)) {
-                    this.styleService.activatedStyles.set(styleId, true);
+                if (this.styleService.availableStyles.has(styleId)) {
+                    this.styleService.availableStyles.set(styleId, true);
                     currentStyles.push(styleId);
                 }
             })

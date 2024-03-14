@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {ErdblickModel} from "./erdblick.model";
 import {ErdblickView} from "./erdblick.view";
 import {BehaviorSubject} from "rxjs";
+import {MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
 
 export interface MapItemLayer extends Object {
     canRead: boolean;
@@ -32,7 +33,7 @@ export class MapService {
 
     mapModel: BehaviorSubject<ErdblickModel | null> = new BehaviorSubject<ErdblickModel | null>(null);
     mapView: ErdblickView | undefined;
-    coreLib: any;
+    coreLib: ErdblickCore | undefined;
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
     tilesToLoadLimit: number = 0;
@@ -62,15 +63,15 @@ export class MapService {
         return null;
     }
 
-    reloadStyle(styleId: string) {
+    reloadBuiltinStyle(styleId: string) {
         if (this.mapModel.getValue()) {
             this.mapModel.getValue()!.reloadStyle(styleId);
         }
     }
 
-    reapplyStyle(styleId: string, imported: boolean = false) {
+    reapplyStyle(styleId: string) {
         if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.reapplyStyles([styleId], imported);
+            this.mapModel.getValue()!.reapplyStyles([styleId]);
         }
     }
 

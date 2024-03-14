@@ -44,7 +44,8 @@ import {Dialog} from "primeng/dialog";
                                           icon="{{mapLayer.value.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                           label="" pTooltip="Toggle layer" tooltipPosition="bottom">
                                 </p-button>
-                                <p-button *ngIf="mapLayer.value.coverage[0]" (click)="focus(mapLayer.value.coverage[0], $event)"
+                                <p-button *ngIf="mapLayer.value.coverage[0]"
+                                          (click)="focus(mapLayer.value.coverage[0], $event)"
                                           icon="pi pi-search"
                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom">
                                 </p-button>
@@ -63,64 +64,74 @@ import {Dialog} from "primeng/dialog";
                 </div>
             </p-fieldset>
             <p-fieldset class="map-tab" legend="Styles">
-                <div *ngIf="!styleService.activatedStyles.size">No styles loaded.</div>
-                <div *ngIf="styleService.activatedStyles.size" class="styles-container">
-                    <div *ngFor="let style of styleService.activatedStyles | keyvalue" class="flex-container">
-                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                            {{ style.key }}
-                        </span>
-                        <div class="layer-controls style-controls">
-                            <p-button (click)="toggleStyle(style.key)"
-                                      icon="{{style.value ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                      label="" pTooltip="Toggle style"
-                                      tooltipPosition="bottom">
-                            </p-button>
-                            <p-button (click)="reloadStyle(style.key)"
-                                      icon="pi pi-refresh"
-                                      label="" pTooltip="Reload style from disk"
-                                      tooltipPosition="bottom">
-                            </p-button>
-                            <p-button (click)="exportStyle(style.key, false)"
-                                      icon="pi pi-file-export"
-                                      label="" pTooltip="Export style"
-                                      tooltipPosition="bottom">
-                            </p-button>
+                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">No styles loaded.
+                </div>
+                <div *ngIf="styleService.builtinStylesCount" class="styles-container">
+                    <div *ngFor="let style of styleService.styleData | keyvalue">
+                        <div *ngIf="!style.value.imported" class="flex-container">
+                            <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
+                                {{ style.key }}
+                            </span>
+                            <div class="layer-controls style-controls">
+                                <p-button (click)="showStyleEditor(style.key)"
+                                          icon="pi pi-file-edit"
+                                          label="" pTooltip="Edit style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="toggleStyle(style.key)"
+                                          icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                          label="" pTooltip="Toggle style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="resetStyle(style.key)"
+                                          icon="pi pi-refresh"
+                                          label="" pTooltip="Reload style from disk"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="exportStyle(style.key)"
+                                          icon="pi pi-file-export"
+                                          label="" pTooltip="Export style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div *ngIf="styleService.activatedImportedStyles.size" class="styles-container">
-                    <div *ngFor="let style of styleService.activatedImportedStyles | keyvalue" class="flex-container">
-                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                            {{ style.key }}
-                        </span>
-                        <div class="layer-controls style-controls">
-                            <p-button (click)="showStyleEditor(style.key)"
-                                      icon="pi pi-file-edit"
-                                      label="" pTooltip="Edit style"
-                                      tooltipPosition="bottom">
-                            </p-button>
-                            <p-button (click)="toggleImportedStyle(style.key)"
-                                      icon="{{style.value ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                      label="" pTooltip="Toggle style"
-                                      tooltipPosition="bottom">
-                            </p-button>
-                            <p-button (click)="removeStyle(style.key)"
-                                      icon="pi pi-trash"
-                                      label="" pTooltip="Remove style"
-                                      tooltipPosition="bottom">
-                            </p-button>
-                            <p-button (click)="exportStyle(style.key, true)"
-                                      icon="pi pi-file-export"
-                                      label="" pTooltip="Export style"
-                                      tooltipPosition="bottom">
-                            </p-button>
+                <div *ngIf="styleService.importedStylesCount" class="styles-container">
+                    <div *ngFor="let style of styleService.styleData | keyvalue">
+                        <div *ngIf="style.value.imported" class="flex-container">
+                            <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
+                                {{ style.key }}
+                            </span>
+                            <div class="layer-controls style-controls">
+                                <p-button (click)="showStyleEditor(style.key)"
+                                          icon="pi pi-file-edit"
+                                          label="" pTooltip="Edit style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="toggleStyle(style.key)"
+                                          icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                          label="" pTooltip="Toggle style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="removeStyle(style.key)"
+                                          icon="pi pi-trash"
+                                          label="" pTooltip="Remove style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="exportStyle(style.key)"
+                                          icon="pi pi-file-export"
+                                          label="" pTooltip="Export style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div *ngIf="styleService.errorStyleIds.size" class="styles-container">
-                    <div *ngFor="let message of styleService.errorStyleIds | keyvalue" class="flex-container">
+                <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
+                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue" class="flex-container">
                         <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                            {{ message.key }}: {{message.value}} (see console)
+                            {{ message.key }}: {{ message.value }} (see console)
                         </span>
                     </div>
                 </div>
@@ -147,8 +158,10 @@ import {Dialog} from "primeng/dialog";
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="true" #editorDialog>
             <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check" [disabled]="!dataWasModified"></p-button>
-                <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"' icon="pi pi-times"></p-button>
+                <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
+                          [disabled]="!dataWasModified"></p-button>
+                <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"'
+                          icon="pi pi-times"></p-button>
             </div>
         </p-dialog>
         <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
@@ -264,8 +277,8 @@ export class MapPanelComponent {
     }
 
     toggleStyle(styleId: string) {
-        const isActivated = !this.styleService.activatedStyles.get(styleId);
-        this.styleService.activatedStyles.set(styleId, isActivated);
+        const isActivated = !this.styleService.availableStyles.get(styleId);
+        this.styleService.availableStyles.set(styleId, isActivated);
         const parameters = this.parameterService.parameters.getValue();
         if (parameters) {
             if (isActivated) {
@@ -278,19 +291,15 @@ export class MapPanelComponent {
         this.mapService.reapplyStyle(styleId);
     }
 
-    toggleImportedStyle(styleId: string) {
-        const isActivated = !this.styleService.activatedImportedStyles.get(styleId);
-        this.styleService.activatedImportedStyles.set(styleId, isActivated);
-        this.mapService.reapplyStyle(styleId, true);
+    resetStyle(styleId: string) {
+        if (this.styleService.styleData.has(styleId) && !this.styleService.styleData.get(styleId)!.imported) {
+            this.styleService.availableStyles.set(styleId, true);
+            this.mapService.reloadBuiltinStyle(styleId);
+        }
     }
 
-    reloadStyle(styleId: string) {
-        this.styleService.activatedStyles.set(styleId, true);
-        this.mapService.reloadStyle(styleId);
-    }
-
-    exportStyle(styleId: string, imported: boolean) {
-        if(!this.styleService.exportStyleYamlFile(styleId, imported)) {
+    exportStyle(styleId: string) {
+        if(!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
@@ -330,18 +339,28 @@ export class MapPanelComponent {
         this.styleService.selectedStyleIdForEditing.next(styleId);
         this.editorDialogVisible = true;
         this.editedStyleDataSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleData => {
-            const originalStyleData = this.styleService.importedStyleData.get(styleId);
-            this.dataWasModified = !(editedStyleData == originalStyleData);
+            const originalStyleData = this.styleService.styleData.get(styleId)?.data!;
+            this.dataWasModified = !(editedStyleData.replace(/\n+$/, '') == originalStyleData.replace(/\n+$/, ''));
         });
     }
 
     applyEditedStyle() {
         const styleId = this.styleService.selectedStyleIdForEditing.getValue();
-        const styleData = this.styleService.styleEditedStateData.getValue();
-        if (styleId) {
-            this.styleService.updateImportedStyle(styleId, styleData);
+        const styleData = this.styleService.styleEditedStateData.getValue().replace(/\n+$/, '');
+        if (!styleId) {
+            this.messageService.showError(`No cached style ID found!`);
+            return;
         }
-        this.mapService.reapplyStyle(styleId, true);
+        if (!styleData) {
+            this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
+            return;
+        }
+        if (!this.styleService.styleData.has(styleId)) {
+            this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
+            return;
+        }
+        this.styleService.updateStyle(styleId, styleData);
+        this.mapService.reapplyStyle(styleId);
         this.dataWasModified = false;
     }
 

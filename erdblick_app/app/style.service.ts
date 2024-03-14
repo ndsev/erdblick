@@ -1,24 +1,35 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
+    of,
     from,
-    mergeMap,
     map,
+    mergeMap,
     reduce,
     firstValueFrom,
     BehaviorSubject,
     Observable,
     Subscriber,
-    catchError, of
+    catchError
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
+import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
-interface ErdblickStyle {
+interface ErdblickStyleEntry {
     id: string,
     url: string
 }
 
-const defaultStyle: ErdblickStyle = {
+export interface ErdblickStyle {
+    id: string,
+    modified: boolean,
+    imported: boolean,
+    enabled: boolean,
+    data: string,
+    featureLayerStyle: FeatureLayerStyle | null
+}
+
+const defaultStyle: ErdblickStyleEntry = {
     id: "Default Style",
     url: "/bundle/styles/default-style.yaml"
 };
@@ -30,30 +41,38 @@ const defaultStyle: ErdblickStyle = {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    activatedStyles: Map<string, boolean> = new Map<string, boolean>();
-    activatedImportedStyles: Map<string, boolean> = new Map<string, boolean>();
-    styleData: Map<string, string> = new Map<string, string>();
-    importedStyleData: Map<string, string> = new Map<string, string>();
+    availableStyles: Map<string, boolean> = new Map<string, boolean>();
+    styleData: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     stylesLoaded: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
-    private erdblickStyles: Array<ErdblickStyle> = [];
-    errorStyleIds: Map<string, string> = new Map<string, string>();
+    private erdblickBuiltinStyles: Array<ErdblickStyleEntry> = [];
+    erroredStyleIds: Map<string, string> = new Map<string, string>();
 
     selectedStyleIdForEditing: BehaviorSubject<string> = new BehaviorSubject<string>("");
     styleBeingEdited: boolean = false;
     styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
 
+    builtinStylesCount = 0;
+    importedStylesCount = 0;
+
     constructor(private httpClient: HttpClient) {
         this.stylesLoaded.next(false);
         this.fetchStylesYamlSources([defaultStyle]).then(dataMap => {
-            this.styleData = dataMap;
-            this.activatedStyles.set(defaultStyle.id, true);
-            this.erdblickStyles = [defaultStyle];
-            let styleUrls: Array<ErdblickStyle> = [];
+            this.styleData.set(defaultStyle.id, {
+                id: defaultStyle.id,
+                modified: false,
+                imported: false,
+                enabled: true,
+                data: dataMap.get(defaultStyle.id)!,
+                featureLayerStyle: null
+            });
+            this.availableStyles.set(defaultStyle.id, true);
+            this.erdblickBuiltinStyles = [defaultStyle];
+            let styleUrls: Array<ErdblickStyleEntry> = [];
             httpClient.get("/config.json", {responseType: "json"}).subscribe({
                 next: (data: any) => {
                     if (data && data["styles"]) {
                         styleUrls = [...data["styles"]];
-                        styleUrls.forEach((styleUrl: ErdblickStyle) => {
+                        styleUrls.forEach((styleUrl: ErdblickStyleEntry) => {
                             if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
                                 styleUrl.url = `/bundle/styles/${styleUrl.url}`;
                             }
@@ -62,16 +81,25 @@ export class StyleService {
                             if (dataMap.size > 0) {
                                 dataMap.forEach((styleString, styleId) => {
                                     if (styleString) {
-                                        this.styleData.set(styleId, styleString);
-                                        this.activatedStyles.set(styleId, true);
+                                        this.styleData.set(styleId, {
+                                            id: styleId,
+                                            modified: false,
+                                            imported: false,
+                                            enabled: true,
+                                            data: styleString,
+                                            featureLayerStyle: null
+                                        });
+                                        this.availableStyles.set(styleId, true);
+                                        this.builtinStylesCount++;
                                         styleUrls.forEach(styleUrl => {
-                                            if (styleUrl.id == styleId) this.erdblickStyles.push(styleUrl);
+                                            if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
                                         });
                                     } else {
-                                        this.errorStyleIds.set(styleId, "Wrong URL / No data");
+                                        this.erroredStyleIds.set(styleId, "Wrong URL / No data");
                                         console.error(`Wrong URL or no data available for style: ${styleId}`);
                                     }
                                 });
+                                this.retrieveModifiedBuiltinStyles();
                             }
                             this.retrieveImportedStyles();
                             this.stylesLoaded.next(true);
@@ -90,7 +118,7 @@ export class StyleService {
         });
     }
 
-    fetchStylesYamlSources(styles: Array<ErdblickStyle>) {
+    fetchStylesYamlSources(styles: Array<ErdblickStyleEntry>) {
         return firstValueFrom(from(styles).pipe(
             mergeMap(style =>
                 this.httpClient.get(style.url, {responseType: 'text'})
@@ -110,13 +138,21 @@ export class StyleService {
     }
 
     async syncStyleYamlData(styleId: string) {
-        for (const erdblickStyle of this.erdblickStyles) {
+        for (const erdblickStyle of this.erdblickBuiltinStyles) {
             if (erdblickStyle.id == styleId) {
                 try {
                     const result= await this.fetchStylesYamlSources([erdblickStyle]);
                     if (result !== undefined && result.get(styleId) !== undefined) {
-                        const styleData = result.get(styleId)!;
-                        this.styleData.set(styleId, styleData);
+                        const styleString = result.get(styleId)!;
+                        this.styleData.set(styleId, {
+                            id: styleId,
+                            modified: false,
+                            imported: false,
+                            enabled: true,
+                            data: styleString,
+                            featureLayerStyle: null
+                        });
+                        this.saveModifiedBuiltinStyles();
                     }
                 } catch (error) {
                     console.error('Style retrieval failed:', error);
@@ -125,14 +161,14 @@ export class StyleService {
         }
     }
 
-    exportStyleYamlFile(styleId: string, imported: boolean = false) {
-        const content = imported ? this.importedStyleData.get(styleId) : this.styleData.get(styleId);
+    exportStyleYamlFile(styleId: string) {
+        const content = this.styleData.get(styleId)!;
         if (content === undefined) {
             return false;
         }
         try {
             // Create a blob from the content
-            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const blob = new Blob([content.data], { type: 'text/plain;charset=utf-8' });
             // Create a URL for the blob
             const url = window.URL.createObjectURL(blob);
 
@@ -177,8 +213,15 @@ export class StyleService {
                     } else {
                         styleData = uploadedContent;
                     }
-                    this.activatedImportedStyles.set(styleId, true);
-                    this.importedStyleData.set(styleId, styleData);
+                    this.availableStyles.set(styleId, true);
+                    this.styleData.set(styleId, {
+                        id: styleId,
+                        modified: false,
+                        imported: true,
+                        enabled: true,
+                        data: styleData,
+                        featureLayerStyle: null
+                    });
                     this.saveImportedStyles();
                     observer.next(true);
                 } else {
@@ -194,33 +237,70 @@ export class StyleService {
     }
 
     removeImportedStyle(styleId: string) {
-        this.activatedImportedStyles.delete(styleId);
-        this.importedStyleData.delete(styleId);
+        // TODO: check if the style was modified and offer to export it
+        this.availableStyles.delete(styleId);
+        this.styleData.delete(styleId);
         this.saveImportedStyles();
     }
 
-    updateImportedStyle(styleId: string, styleData: string) {
-        if (this.importedStyleData.has(styleId)) {
-            this.importedStyleData.set(styleId, styleData);
+    updateStyle(styleId: string, styleData: string) {
+        if (this.styleData.has(styleId)) {
+            const style = this.styleData.get(styleId)!;
+            style.data = styleData;
+            style.modified = true;
+            this.styleData.set(styleId, style);
+            if (style.imported) {
+                this.saveImportedStyles();
+            } else {
+                this.saveModifiedBuiltinStyles();
+            }
         }
-        this.saveImportedStyles();
+    }
+
+    saveModifiedBuiltinStyles() {
+        localStorage.setItem('builtinStyleData', JSON.stringify(
+            [...this.styleData].filter(([key, value]) => !value.imported && value.modified)
+        ));
     }
 
     saveImportedStyles() {
         localStorage.setItem('activatedImportedStyles', JSON.stringify(
-            Array.from(this.activatedImportedStyles.entries()))
-        );
+            [...this.availableStyles].filter(([key, value]) => {
+                const imported = this.styleData.get(key)?.imported;
+                return imported !== undefined && imported;
+            })
+        ));
         localStorage.setItem('importedStyleData', JSON.stringify(
-            Array.from(this.importedStyleData.entries()))
-        );
+            [...this.styleData].filter(([key, value]) => value.imported)
+        ));
     }
 
     retrieveImportedStyles() {
         const activatedImportedStyles = localStorage.getItem('activatedImportedStyles');
         const importedStyleData = localStorage.getItem('importedStyleData');
         if (activatedImportedStyles && importedStyleData) {
-            this.activatedImportedStyles = new Map(JSON.parse(activatedImportedStyles));
-            this.importedStyleData = new Map(JSON.parse(importedStyleData));
+            new Map<string, boolean>(JSON.parse(activatedImportedStyles)).forEach((isActivated, styleId) => {
+                this.availableStyles.set(styleId, isActivated);
+            });
+            new Map<string, Object>(JSON.parse(importedStyleData)).forEach((style, styleId) => {
+                const erdblickStyle = style as ErdblickStyle;
+                erdblickStyle.featureLayerStyle = null;
+                this.styleData.set(styleId, erdblickStyle);
+                this.importedStylesCount++;
+            });
+        }
+    }
+
+    retrieveModifiedBuiltinStyles() {
+        const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
+        if (modifiedBuiltinStyleData) {
+            new Map<string, Object>(JSON.parse(modifiedBuiltinStyleData)).forEach((style, styleId) => {
+                if (this.styleData.has(styleId)) {
+                    const erdblickStyle = style as ErdblickStyle;
+                    erdblickStyle.featureLayerStyle = null;
+                    this.styleData.set(styleId, erdblickStyle);
+                }
+            });
         }
     }
 }
