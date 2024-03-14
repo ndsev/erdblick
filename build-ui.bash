@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -eu
 
 SOURCE_LOC="$1"
 BUILD_DIR="${SOURCE_LOC}/build"
@@ -9,7 +10,7 @@ if [ -z "$SOURCE_LOC" ]; then
 fi
 
 echo "Using source dir @ $SOURCE_LOC."
-cd "$SOURCE_LOC" || exit 1
+cd "$SOURCE_LOC"
 
 echo "Collecting npm modules."
 npm install
@@ -20,4 +21,3 @@ if [[ -z "$NG_DEVELOP" ]]; then
 else
   npm run build
 fi
-exit 0
