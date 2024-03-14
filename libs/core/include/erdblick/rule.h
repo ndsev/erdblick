@@ -67,7 +67,7 @@ public:
     [[nodiscard]] bool relationMergeTwoWay() const;
 
     [[nodiscard]] bool hasLabel() const;
-    [[nodiscard]] std::string labelFont() const;
+    [[nodiscard]] std::string const& labelFont() const;
     [[nodiscard]] glm::fvec4 const& labelColor() const;
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     [[nodiscard]] float labelOutlineWidth() const;

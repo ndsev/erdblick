@@ -453,7 +453,7 @@ bool FeatureStyleRule::hasLabel() const
     return hasLabel_;
 }
 
-std::string FeatureStyleRule::labelFont() const
+std::string const& FeatureStyleRule::labelFont() const
 {
     return labelFont_;
 }
