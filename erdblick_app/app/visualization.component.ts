@@ -132,6 +132,7 @@ export class TileVisualization {
                     });
                 }
                 this.primitiveCollection = visualization.primitiveCollection();
+                visualization.delete();
                 return true;
             });
             if (this.primitiveCollection)

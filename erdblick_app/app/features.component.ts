@@ -71,7 +71,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasmAsync(this.coreLib, async (bufferToRead: any) => {
+        return await uint8ArrayToWasmAsync(this.coreLib, async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
