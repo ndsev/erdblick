@@ -3,7 +3,7 @@ import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
-import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
+import MainModuleFactory, {Feature} from '../../build/libs/core/erdblick-core';
 import {JumpTargetService} from "./jump.service";
 import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
@@ -66,7 +66,7 @@ export class AppComponent {
                 this.version = data.toString();
             });
 
-        libErdblickCore().then((coreLib: any) => {
+        MainModuleFactory().then((coreLib: any) => {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
 
