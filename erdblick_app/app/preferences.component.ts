@@ -6,6 +6,8 @@ import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
+import {ActivatedRoute, Router} from "@angular/router";
+import {of} from "rxjs";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -59,6 +61,20 @@ export interface MapInfoItem extends Object {
             </div>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
+            <p-divider></p-divider>
+            <div class="button-container">
+                <label>Storage for Viewer properties (URL):</label>
+                <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
+            </div>
+            <div class="button-container">
+                <label>Storage for imported styles:</label>
+                <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
+            </div>
+            <div class="button-container">
+                <label>Storage for modified built-in styles:</label>
+                <p-button (click)="clearModifiedStyles()" label="Clear" icon="pi pi-trash"></p-button>
+            </div>
+            <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
 
@@ -69,14 +85,14 @@ export interface MapInfoItem extends Object {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            width: 24em;
+            width: 30em;
             margin: 1em 0;
         }
         
         .tiles-input {
             font-size: medium;
             text-align: center;
-            width: 12em;
+            width: 17em;
         }
         
         @media only screen and (max-width: 56em) {
@@ -95,8 +111,9 @@ export class PreferencesComponent {
     maxVisuTiles: number = 0;
 
     constructor(private messageService: InfoMessageService,
+                private router: Router,
+                private route: ActivatedRoute,
                 public mapService: MapService,
-                public jumpToTargetService: JumpTargetService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
@@ -128,5 +145,28 @@ export class PreferencesComponent {
 
     openHelp() {
         window.open("https://developer.nds.live/tools/the-new-mapviewer/user-guide", "_blank");
+    }
+
+    clearURLProperties() {
+        this.parametersService.clearStorage();
+    }
+
+    clearImportedStyles() {
+        for (let styleId of this.styleService.styleData.keys()) {
+            if (this.styleService.styleData.get(styleId)!.imported) {
+                this.mapService.removeImportedStyle(styleId);
+                this.styleService.availableStyles.delete(styleId);
+            }
+        }
+        this.styleService.clearStorageForImportedStyles();
+    }
+
+    clearModifiedStyles() {
+        for (let styleId of this.styleService.styleData.keys()) {
+            if (!this.styleService.styleData.get(styleId)!.imported) {
+                this.mapService.reloadBuiltinStyle(styleId);
+            }
+        }
+        this.styleService.clearStorageForBuiltinStyles();
     }
 }

@@ -82,6 +82,22 @@ export class ParametersService {
           return null;
      }
 
+     clearStorage() {
+         localStorage.removeItem('erdblickParameters');
+         this.parameters.next({
+             heading: 6.0,
+             pitch: -1.55,
+             roll: 0.25,
+             lon: 22.837473,
+             lat: 38.490817,
+             alt: 16000000,
+             osmOpacity: 30,
+             osmEnabled: true,
+             layers: [],
+             styles: []
+         });
+     }
+
      private saveParameters() {
           localStorage.setItem('erdblickParameters', JSON.stringify(this.parameters.getValue()));
      }

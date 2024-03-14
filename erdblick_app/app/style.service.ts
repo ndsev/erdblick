@@ -303,4 +303,13 @@ export class StyleService {
             });
         }
     }
+
+    clearStorageForImportedStyles() {
+        localStorage.removeItem('activatedImportedStyles');
+        localStorage.removeItem('importedStyleData');
+    }
+
+    clearStorageForBuiltinStyles() {
+        localStorage.removeItem('builtinStyleData');
+    }
 }
