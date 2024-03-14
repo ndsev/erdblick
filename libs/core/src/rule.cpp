@@ -208,6 +208,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse option to have a label background color.
         labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
     }
+    if (yaml["label-outline-width"].IsDefined()) {
+        // Parse option for the width of the label outline color.
+        outlineWidth_ = yaml["label-outline-width"].as<float>();
+    }
     if (yaml["label-background-color"].IsDefined()) {
         // Parse option to have a label background color.
         labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
@@ -464,6 +468,11 @@ glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
     return labelBackgroundColor_;
 }
 
+float FeatureStyleRule::labelOutlineWidth() const
+{
+    return labelOutlineWidth_;
+}
+
 glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
 {
     return labelBackgroundColor_;
@@ -474,22 +483,22 @@ std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
     return labelBackgroundPadding_;
 }
 
-std::string FeatureStyleRule::labelHorizontalOrigin() const
+std::string const& FeatureStyleRule::labelHorizontalOrigin() const
 {
     return labelHorizontalOrigin_;
 }
 
-std::string FeatureStyleRule::labelVerticalOrigin() const
+std::string const& FeatureStyleRule::labelVerticalOrigin() const
 {
     return labelVerticalOrigin_;
 }
 
-std::string FeatureStyleRule::labelHeightReference() const
+std::string const& FeatureStyleRule::labelHeightReference() const
 {
     return labelHeightReference_;
 }
 
-std::string FeatureStyleRule::labelTextExpression() const
+std::string const& FeatureStyleRule::labelTextExpression() const
 {
     return labelTextExpression_;
 }
@@ -514,7 +523,7 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
     return labelText_;
 }
 
-std::string FeatureStyleRule::labelStyle() const
+std::string const& FeatureStyleRule::labelStyle() const
 {
     return labelStyle_;
 }

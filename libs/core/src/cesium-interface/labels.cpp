@@ -29,7 +29,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
          {"font", JsValue(style.labelFont())},
          {"fillColor", Cesium().Color.New(color.r, color.g, color.b, color.a)},
          {"outlineColor", Cesium().Color.New(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a)},
-         {"outlineWidth", JsValue(style.outlineWidth())},
+         {"outlineWidth", JsValue(style.labelOutlineWidth())},
          {"backgroundColor", Cesium().Color.New(bgColor.r, bgColor.g, bgColor.b, bgColor.a)},
          {"backgroundPadding", Cesium().Cartesian2.New(padding.first, padding.second)},
          {"style", Cesium().LabelStyle[style.labelStyle()]},

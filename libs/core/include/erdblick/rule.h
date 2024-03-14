@@ -70,14 +70,15 @@ public:
     [[nodiscard]] std::string labelFont() const;
     [[nodiscard]] glm::fvec4 const& labelColor() const;
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
+    [[nodiscard]] float labelOutlineWidth() const;
     [[nodiscard]] glm::fvec4 const& labelBackgroundColor() const;
     [[nodiscard]] std::pair<int, int> const& labelBackgroundPadding() const;
-    [[nodiscard]] std::string labelHorizontalOrigin() const;
-    [[nodiscard]] std::string labelVerticalOrigin() const;
-    [[nodiscard]] std::string labelHeightReference() const;
-    [[nodiscard]] std::string labelTextExpression() const;
+    [[nodiscard]] std::string const& labelHorizontalOrigin() const;
+    [[nodiscard]] std::string const& labelVerticalOrigin() const;
+    [[nodiscard]] std::string const& labelHeightReference() const;
+    [[nodiscard]] std::string const& labelTextExpression() const;
     [[nodiscard]] std::string labelText(BoundEvalFun const& evalFun) const;
-    [[nodiscard]] std::string labelStyle() const;
+    [[nodiscard]] std::string const& labelStyle() const;
     [[nodiscard]] float labelScale() const;
     [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
     [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
@@ -115,6 +116,7 @@ private:
     std::string labelFont_ = "24px Helvetica";
     glm::fvec4 labelColor_{1., 1., 1., 1.};
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .0};
+    float labelOutlineWidth_ = .0;
     glm::fvec4 labelBackgroundColor_{.0, .0, .0, .0};
     std::pair<int, int> labelBackgroundPadding_{0, 0};
     std::string labelHorizontalOrigin_ = "CENTER";
