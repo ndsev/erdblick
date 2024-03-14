@@ -44,9 +44,10 @@ void FeatureLayerVisualization::addTileFeatureLayer(
         // However, the transcoding process changes the dictionary, as it might
         // add unknown field names. This would fork the dict state from the remote
         // node dict, which leads to undefined behavior. So we work on a copy of it.
-        if (!internalFieldsDictCopy_)
-            internalFieldsDictCopy_ = tile->takeFieldsDictOwnership();
-        tile->transcode(internalFieldsDictCopy_);
+        if (!internalFieldsDictCopy_) {
+            internalFieldsDictCopy_ = std::make_shared<simfil::Fields>(*tile->fieldNames());
+        }
+        tile->setFieldNames(internalFieldsDictCopy_);
     }
     allTiles_.emplace_back(tile_);
 }
