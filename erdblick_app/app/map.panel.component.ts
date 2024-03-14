@@ -155,7 +155,7 @@ import {Dialog} from "primeng/dialog";
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
-        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="true" #editorDialog>
+        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog class="editor-dialog">
             <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"

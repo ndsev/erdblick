@@ -9,20 +9,66 @@ import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { StyleService } from "./style.service";
 import * as jsyaml from 'js-yaml';
 
+const completionsList = [
+    {label: "version", type: "property"},
+    {label: "name", type: "property"},
+    {label: "rules", type: "property"},
+    {label: "opacity", type: "property"},
+    {label: "label-color", type: "property"},
+    {label: "label-outline-color", type: "property"},
+    {label: "label-font", type: "property"},
+    {label: "label-background-color", type: "property"},
+    {label: "label-background-padding", type: "property"},
+    {label: "label-horizontal-origin", type: "property"},
+    {label: "label-vertical-origin", type: "property"},
+    {label: "label-text-expression", type: "property"},
+    {label: "label-text", type: "property"},
+    {label: "label-style", type: "property"},
+    {label: "label-scale", type: "property"},
+    {label: "label-pixel-offset", type: "property"},
+    {label: "label-eye-offset", type: "property"},
+    {label: "translucency-by-distance", type: "property"},
+    {label: "geometry", type: "property"},
+    {label: "type", type: "property"},
+    {label: "filter", type: "property"},
+    {label: "color", type: "property"},
+    {label: "opacity", type: "property"},
+    {label: "width", type: "property"},
+    {label: "flat", type: "property"},
+    {label: "false", type: "property"},
+    {label: "outline-color", type: "property"},
+    {label: "outline-width", type: "property"},
+    {label: "near-far-scale", type: "property"},
+    {label: "arrow", type: "property"},
+    {label: "dashed", type: "property"},
+    {label: "gap-color", type: "property"},
+    {label: "dash-length", type: "property"},
+    {label: "dash-pattern", type: "property"},
+    {label: "first-of", type: "property"},
+    {label: "FILL", type: "keyword"},
+    {label: "OUTLINE", type: "keyword"},
+    {label: "FILL_AND_OUTLINE", type: "keyword"},
+    {label: "point", type: "keyword"},
+    {label: "mesh", type: "keyword"},
+    {label: "line", type: "keyword"},
+    {label: "polygon", type: "keyword"},
+    {label: "double", type: "keyword"},
+    {label: "forward", type: "keyword"},
+    {label: "backward", type: "keyword"},
+    {label: "LEFT", type: "keyword"},
+    {label: "CENTER", type: "keyword"},
+    {label: "RIGHT", type: "keyword"},
+    {label: "ABOVE", type: "keyword"},
+    {label: "BELOW", type: "keyword"},
+    {label: "BASELINE", type: "keyword"}
+]
+
 @Component({
     selector: 'editor',
     template: `
         <div #editor class="editor-container"></div>
     `,
-    styles: [`
-        .editor-container {
-            max-height: 70vh;
-            width: 70vw;
-            margin: 0;
-            overflow: auto;
-            border: 1px solid silver;
-        }
-    `]
+    styles: []
 })
 export class EditorComponent implements AfterViewInit, OnDestroy {
 
@@ -30,18 +76,6 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     private editorView?: EditorView;
     private styleData: string = "";
-    private completionsList = [
-        {label: "version", type: "property"},
-        {label: "name", type: "property"},
-        {label: "rules", type: "property"},
-        {label: "geometry", type: "property"},
-        {label: "color", type: "property"},
-        {label: "opacity", type: "property"},
-        {label: "width", type: "property"},
-        {label: "FILL", type: "keyword"},
-        {label: "OUTLINE", type: "keyword"},
-        {label: "FILL_AND_OUTLINE", type: "keyword"},
-    ]
 
     constructor(public styleService: StyleService,
                 public renderer: Renderer2) {}
@@ -120,7 +154,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         }
         return {
             from: word.from,
-            options: this.completionsList
+            options: completionsList
         }
     };
 }
