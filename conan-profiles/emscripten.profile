@@ -10,8 +10,5 @@ build_type=Release
 [tool_requires]
 emsdk/3.1.50
 
-[replace_requires]
-nodejs/*: nodejs/16.20.2
-
 [replace_tool_requires]
 nodejs/*: nodejs/16.20.2
