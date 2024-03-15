@@ -29,7 +29,7 @@ jobs:
           cd $(mktemp -d)
           git clone "https://github.com/ndsev/mapget.git" -b use-conan
           cd mapget
-          conan create . -s compiler.cppstd=20 -b missing \
+          conan create . -s compiler.cppstd=20 -s build_type=Release -b missing \
             -pr:b default -pr:h "$GITHUB_WORKSPACE/conan-profiles/emscripten.profile" \
             -o with_httplib=False \
             -o with_service=False \

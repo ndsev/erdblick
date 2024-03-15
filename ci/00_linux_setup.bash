@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -eu
-rm -rf build
-mkdir -p build/deps
-mkdir -p build/assets
 
-conan install . -pr:b default -pr:h conan-profiles/emscripten.profile \
+BUILD_DIR="./build"
+PROFILE_DIR="./conan-profiles"
+
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR/deps"
+mkdir -p "$BUILD_DIR/assets"
+
+conan install . \
+    -pr:b "$PROFILE_DIR/build.profile" \
+    -pr:h "$PROFILE_DIR/emscripten.profile" \
     -s build_type=Release -s compiler.cppstd=20 -b missing -b editable \
-    -of build
+    -of "$BUILD_DIR"
