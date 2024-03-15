@@ -59,11 +59,11 @@ Currently, it's also possible to export and import styles in GUI. Styles importe
 
 ### Style Definitions
 
-Each rule within the YAML `rules` array can have the following fields. Any field marked with __`*`__ is mandatory:
+Each rule within the YAML `rules` array can have the following fields.
 
 | Field                      | Description                                                                                                               | Type                                                       | Example Value            |
 |----------------------------|---------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|--------------------------|
-| `geometry` __*__           | List of feature geometry type(s) the rule applies to.                                                                     | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]`      |
+| `geometry`                 | List of geometry type(s) the rule applies to.                                                                             | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]`      |
 | `type`                     | A regular expression to match against a feature type.                                                                     | String                                                     | `"Lane\|Boundary"`       |
 | `filter`                   | A [simfil](https://github.com/klebert-engineering/simfil) filter expression.                                              | String                                                     | `*roadClass == 4`        |
 | `color`                    | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords).                      | String                                                     | `"#FF5733"`, `red`       |
@@ -90,9 +90,9 @@ Each rule within the YAML `rules` array can have the following fields. Any field
 | `label-text`               | A placeholder in case the simfil expression either isn't necessary or won't produce a result.                             | String                                                     | `No speed limit`         |
 | `label-style`              | Describes how to draw a label using "FILL", "OUTLINE" or "FILL_AND_OUTLINE".                                              | String                                                     | `FILL`                   |
 | `label-scale`              | The uniform scale that is multiplied with the label's size in pixels.                                                     | Float                                                      | `1.0`                    |
-| `label-pixel-offset`       | The offset in screen space from the origin of this label (the screen space origin is the top, left corner of the canvas). | Pair of Floats (optional).                                 | `[5.0, 30.0]`            |
-| `label-eye-offset`         | Gets and sets the 3D Cartesian offset applied to this label in eye coordinates.                                           | Tuple of three Floats (optional).                          | `[5.0, 10.0, 15.0]`      |
-| `translucency-by-distance` | Near and far translucency properties of a Label based on the Label's distance from the camera.                            | Array of four Floats (optional).                           | `[1.5e2, 3, 8.0e6, 0.0]` |
+| `label-pixel-offset`       | The offset in screen space from the origin of this label (the screen space origin is the top, left corner of the canvas). | Pair of Floats.                                            | `[5.0, 30.0]`            |
+| `label-eye-offset`         | Gets and sets the 3D Cartesian offset applied to this label in eye coordinates.                                           | Tuple of three Floats.                                     | `[5.0, 10.0, 15.0]`      |
+| `translucency-by-distance` | Near and far translucency properties of a Label based on the Label's distance from the camera.                            | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]` |
 | `first-of`                 | Mark a rule as a parent of a fallback rule list. See description below.                                                   | Array of Rule objects.                                     | See example below.       |
 
 **About `first-of`:**
