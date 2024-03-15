@@ -175,8 +175,8 @@ export class ErdblickModel {
 
         const parameters = this.parametersService.parameters.getValue();
         if (parameters) {
-            [...this.styleService.availableStyles.keys()].forEach(styleId =>
-                this.styleService.availableStyles.set(styleId, parameters.styles.includes(styleId)));
+            [...this.styleService.availableStylesActivations.keys()].forEach(styleId =>
+                this.styleService.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
         }
 
         this.styleService.styleData.forEach((style: ErdblickStyle, styleId: string) => {
@@ -238,7 +238,7 @@ export class ErdblickModel {
         }
         if (remove) {
             style.featureLayerStyle?.delete();
-            this.styleService.availableStyles.delete(styleId);
+            this.styleService.availableStylesActivations.delete(styleId);
             this.styleService.styleData.delete(styleId);
             this.tileVisualizationQueue = [];
             this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
@@ -261,7 +261,7 @@ export class ErdblickModel {
         if (!this.styleService.styleData.has(styleId)) {
             return;
         }
-        const isActivated = this.styleService.availableStyles.get(styleId);
+        const isActivated = this.styleService.availableStylesActivations.get(styleId);
         if (isActivated === undefined) {
             return;
         }
@@ -292,7 +292,7 @@ export class ErdblickModel {
     }
 
     reapplyAllStyles() {
-        this.reapplyStyles([...this.styleService.availableStyles.keys()]);
+        this.reapplyStyles([...this.styleService.availableStylesActivations.keys()]);
     }
 
     private reloadDataSources() {

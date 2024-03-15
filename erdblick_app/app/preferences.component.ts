@@ -155,7 +155,7 @@ export class PreferencesComponent {
         for (let styleId of this.styleService.styleData.keys()) {
             if (this.styleService.styleData.get(styleId)!.imported) {
                 this.mapService.removeImportedStyle(styleId);
-                this.styleService.availableStyles.delete(styleId);
+                this.styleService.availableStylesActivations.delete(styleId);
             }
         }
         this.styleService.clearStorageForImportedStyles();

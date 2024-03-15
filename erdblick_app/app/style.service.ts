@@ -29,7 +29,7 @@ export interface ErdblickStyle {
     featureLayerStyle: FeatureLayerStyle | null
 }
 
-const defaultStyle: ErdblickStyleEntry = {
+export const defaultStyle: ErdblickStyleEntry = {
     id: "Default Style",
     url: "/bundle/styles/default-style.yaml"
 };
@@ -41,7 +41,7 @@ const defaultStyle: ErdblickStyleEntry = {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    availableStyles: Map<string, boolean> = new Map<string, boolean>();
+    availableStylesActivations: Map<string, boolean> = new Map<string, boolean>();
     styleData: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     stylesLoaded: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
     private erdblickBuiltinStyles: Array<ErdblickStyleEntry> = [];
@@ -65,7 +65,7 @@ export class StyleService {
                 data: dataMap.get(defaultStyle.id)!,
                 featureLayerStyle: null
             });
-            this.availableStyles.set(defaultStyle.id, true);
+            this.availableStylesActivations.set(defaultStyle.id, true);
             this.erdblickBuiltinStyles = [defaultStyle];
             let styleUrls: Array<ErdblickStyleEntry> = [];
             httpClient.get("/config.json", {responseType: "json"}).subscribe({
@@ -89,7 +89,7 @@ export class StyleService {
                                             data: styleString,
                                             featureLayerStyle: null
                                         });
-                                        this.availableStyles.set(styleId, true);
+                                        this.availableStylesActivations.set(styleId, true);
                                         this.builtinStylesCount++;
                                         styleUrls.forEach(styleUrl => {
                                             if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
@@ -213,7 +213,7 @@ export class StyleService {
                     } else {
                         styleData = uploadedContent;
                     }
-                    this.availableStyles.set(styleId, true);
+                    this.availableStylesActivations.set(styleId, true);
                     this.styleData.set(styleId, {
                         id: styleId,
                         modified: false,
@@ -238,7 +238,7 @@ export class StyleService {
 
     removeImportedStyle(styleId: string) {
         // TODO: check if the style was modified and offer to export it
-        this.availableStyles.delete(styleId);
+        this.availableStylesActivations.delete(styleId);
         this.styleData.delete(styleId);
         this.saveImportedStyles();
     }
@@ -265,7 +265,7 @@ export class StyleService {
 
     saveImportedStyles() {
         localStorage.setItem('activatedImportedStyles', JSON.stringify(
-            [...this.availableStyles].filter(([key, value]) => {
+            [...this.availableStylesActivations].filter(([key, value]) => {
                 const imported = this.styleData.get(key)?.imported;
                 return imported !== undefined && imported;
             })
@@ -280,7 +280,7 @@ export class StyleService {
         const importedStyleData = localStorage.getItem('importedStyleData');
         if (activatedImportedStyles && importedStyleData) {
             new Map<string, boolean>(JSON.parse(activatedImportedStyles)).forEach((isActivated, styleId) => {
-                this.availableStyles.set(styleId, isActivated);
+                this.availableStylesActivations.set(styleId, isActivated);
             });
             new Map<string, Object>(JSON.parse(importedStyleData)).forEach((style, styleId) => {
                 const erdblickStyle = style as ErdblickStyle;

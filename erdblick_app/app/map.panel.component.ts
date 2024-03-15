@@ -277,8 +277,8 @@ export class MapPanelComponent {
     }
 
     toggleStyle(styleId: string) {
-        const isActivated = !this.styleService.availableStyles.get(styleId);
-        this.styleService.availableStyles.set(styleId, isActivated);
+        const isActivated = !this.styleService.availableStylesActivations.get(styleId);
+        this.styleService.availableStylesActivations.set(styleId, isActivated);
         const parameters = this.parameterService.parameters.getValue();
         if (parameters) {
             if (isActivated) {
@@ -293,7 +293,7 @@ export class MapPanelComponent {
 
     resetStyle(styleId: string) {
         if (this.styleService.styleData.has(styleId) && !this.styleService.styleData.get(styleId)!.imported) {
-            this.styleService.availableStyles.set(styleId, true);
+            this.styleService.availableStylesActivations.set(styleId, true);
             this.mapService.reloadBuiltinStyle(styleId);
         }
     }

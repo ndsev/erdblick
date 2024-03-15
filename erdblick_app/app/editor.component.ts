@@ -146,10 +146,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     styleCompletions: CompletionSource = (context: CompletionContext) => {
         let word = context.matchBefore(/\w*/);
-        if (!word) {
-            return null;
-        }
-        if (word.from == word.to && !context.explicit) {
+        if (!word || (word.from == word.to && !context.explicit)) {
             return null;
         }
         return {
