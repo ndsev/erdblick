@@ -16,10 +16,9 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
 }
 
 CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(
-    const FeatureStyleRule& style,
-    bool clampToGround,
-    glm::fvec4 const& resolvedColor)
-{
+        const FeatureStyleRule &style,
+        bool clampToGround,
+        glm::fvec4 const &resolvedColor) {
     CesiumPrimitive result;
     auto const &gapColor = style.gapColor();
     result.appearance_ = Cesium().PolylineMaterialAppearance.New({
@@ -36,14 +35,13 @@ CesiumPrimitive CesiumPrimitive::withPolylineDashMaterialAppearance(
 }
 
 CesiumPrimitive CesiumPrimitive::withPolylineArrowMaterialAppearance(
-    const FeatureStyleRule& style,
-    bool clampToGround,
-    glm::fvec4 const& resolvedColor)
-{
+        const FeatureStyleRule &style,
+        bool clampToGround,
+        glm::fvec4 const &resolvedColor) {
     CesiumPrimitive result;
     result.appearance_ = Cesium().PolylineMaterialAppearance.New({
         {"material", Cesium().MaterialFromType("PolylineArrow", JsValue::Dict({
-            {"color", Cesium().Color.New(resolvedColor.r, resolvedColor.g, resolvedColor.b, resolvedColor.a)},
+            {"color", Cesium().Color.New(resolvedColor.r, resolvedColor.g, resolvedColor.b, resolvedColor.a)}
         }))}
     });
     result.clampToGround_ = clampToGround;
@@ -51,12 +49,11 @@ CesiumPrimitive CesiumPrimitive::withPolylineArrowMaterialAppearance(
     return result;
 }
 
-CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(
-        bool flatAndSynchronous, bool clampToGround) {
+CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous, bool clampToGround) {
     CesiumPrimitive result;
     result.flatAndSynchronous_ = flatAndSynchronous;
     result.appearance_ = Cesium().PerInstanceColorAppearance.New({
-        {"flat", JsValue(flatAndSynchronous)}
+         {"flat", JsValue(flatAndSynchronous)}
     });
     result.clampToGround_ = clampToGround;
     result.polyLinePrimitive_ = false;
@@ -65,53 +62,50 @@ CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(
 }
 
 void CesiumPrimitive::addPolyLine(
-    JsValue const& vertices,
-    FeatureStyleRule const& style,
-    uint32_t id,
-    BoundEvalFun const& evalFun)
-{
+        JsValue const &vertices,
+        FeatureStyleRule const &style,
+        uint32_t id,
+        BoundEvalFun const &evalFun) {
     JsValue polyline;
     if (clampToGround_) {
         polyline = Cesium().GroundPolylineGeometry.New({
             {"positions", vertices},
-            {"width", JsValue(style.width())}
-        });
+            {"width",     JsValue(style.width())}
+       });
     } else {
         polyline = Cesium().PolylineGeometry.New({
             {"positions", vertices},
-            {"width", JsValue(style.width())},
-            {"arcType", Cesium().ArcType["NONE"]}
-        });
+            {"width",     JsValue(style.width())},
+            {"arcType",   Cesium().ArcType["NONE"]}
+     });
     }
     addGeometryInstance(style, id, polyline, evalFun);
 }
 
 void CesiumPrimitive::addPolygon(
-    const JsValue& vertices,
-    const FeatureStyleRule& style,
-    uint32_t id,
-    BoundEvalFun const& evalFun)
-{
+        const JsValue &vertices,
+        const FeatureStyleRule &style,
+        uint32_t id,
+        BoundEvalFun const &evalFun) {
     auto polygon = Cesium().PolygonGeometry.New({
-        {"polygonHierarchy", Cesium().PolygonHierarchy.New(*vertices)},
-        {"arcType", Cesium().ArcType["GEODESIC"]},
+        {"polygonHierarchy",  Cesium().PolygonHierarchy.New(*vertices)},
+        {"arcType",           Cesium().ArcType["GEODESIC"]},
         {"perPositionHeight", JsValue(true)}
     });
     addGeometryInstance(style, id, polygon, evalFun);
 }
 
 void CesiumPrimitive::addTriangles(
-    const JsValue& float64Array,
-    const FeatureStyleRule& style,
-    uint32_t id,
-    BoundEvalFun const& evalFun)
-{
+        const JsValue &float64Array,
+        const FeatureStyleRule &style,
+        uint32_t id,
+        BoundEvalFun const &evalFun) {
     auto geometry = Cesium().Geometry.New({
         {"attributes", JsValue::Dict({
             {"position", Cesium().GeometryAttribute.New({
-                {"componentDatatype", Cesium().ComponentDatatype["DOUBLE"]},
+                {"componentDatatype",      Cesium().ComponentDatatype["DOUBLE"]},
                 {"componentsPerAttribute", JsValue(3)},
-                {"values", float64Array}
+                {"values",                 float64Array}
             })}
         })},
         {"boundingSphere", JsValue(Cesium().BoundingSphere.call<NativeJsValue>("fromVertices", *float64Array))}
@@ -120,21 +114,18 @@ void CesiumPrimitive::addTriangles(
 }
 
 void CesiumPrimitive::addGeometryInstance(
-    const FeatureStyleRule& style,
-    uint32_t id,
-    const JsValue& geom,
-    BoundEvalFun const& evalFun)
-{
+        const FeatureStyleRule &style,
+        uint32_t id,
+        const JsValue &geom,
+        BoundEvalFun const &evalFun) {
     auto attributes = JsValue::Dict();
     if (perInstanceColor_) {
         auto const color = style.color(evalFun);
-        attributes.set(
-            "color",
-            Cesium().ColorGeometryInstanceAttribute.New(color.r, color.g, color.b, color.a));
+        attributes.set("color", Cesium().ColorGeometryInstanceAttribute.New(color.r, color.g, color.b, color.a));
     }
     auto geometryInstance = Cesium().GeometryInstance.New({
-        {"geometry", geom},
-        {"id", JsValue(id)},
+        {"geometry",   geom},
+        {"id",         JsValue(id)},
         {"attributes", attributes}
     });
     ++numGeometryInstances_;
@@ -143,11 +134,12 @@ void CesiumPrimitive::addGeometryInstance(
 
 NativeJsValue CesiumPrimitive::toJsObject() const {
     JsValue result;
+
     auto primitiveOptions = JsValue::Dict({
-        {"geometryInstances", geometryInstances_},
-        {"appearance", appearance_},
+        {"geometryInstances",        geometryInstances_},
+        {"appearance",               appearance_},
         {"releaseGeometryInstances", JsValue(true)},
-        {"asynchronous", JsValue(!flatAndSynchronous_)}
+        {"asynchronous",             JsValue(!flatAndSynchronous_)}
     });
 
     if (clampToGround_ && polyLinePrimitive_)

@@ -195,6 +195,77 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             arrow_ = *arrowMode;
     }
 
+    // Parse labels' rules
+    if (yaml["label-font"].IsDefined()) {
+        // Parse label font
+        labelFont_ = yaml["label-font"].as<std::string>();
+    }
+    if (yaml["label-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelColor_ = Color(yaml["label-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-outline-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-outline-width"].IsDefined()) {
+        // Parse option for the width of the label outline color.
+        outlineWidth_ = yaml["label-outline-width"].as<float>();
+    }
+    if (yaml["label-background-color"].IsDefined()) {
+        // Parse option to have a label background color.
+        labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-background-padding"].IsDefined()) {
+        // Parse option to have a label padding.
+        labelBackgroundPadding_ = yaml["label-background-padding"].as<std::pair<int, int>>();
+    }
+    if (yaml["label-horizontal-origin"].IsDefined()) {
+        // Parse label horizontal origin
+        labelHorizontalOrigin_ = yaml["label-horizontal-origin"].as<std::string>();
+    }
+    if (yaml["label-vertical-origin"].IsDefined()) {
+        // Parse label vertical origin
+        labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
+    }
+    if (yaml["label-text-expression"].IsDefined()) {
+        hasLabel_ = true;
+        // Parse label SIMFIL expression
+        labelTextExpression_ = yaml["label-text-expression"].as<std::string>();
+    }
+    if (yaml["label-text"].IsDefined()) {
+        hasLabel_ = true;
+        // Parse label placeholder exprestextsion
+        labelText_ = yaml["label-text"].as<std::string>();
+    }
+    if (yaml["label-style"].IsDefined()) {
+        // Parse label style string
+        labelStyle_ = yaml["label-style"].as<std::string>();
+    }
+    if (yaml["label-scale"].IsDefined()) {
+        // Parse label style string
+        labelStyle_ = yaml["label-scale"].as<std::string>();
+    }
+    if (yaml["label-pixel-offset"].IsDefined()) {
+        // Parse option to have a label padding.
+        labelPixelOffset_ = yaml["label-pixel-offset"].as<std::pair<float, float>>();
+    }
+    if (yaml["label-eye-offset"].IsDefined()) {
+        // Parse option to have a label padding.
+        auto coordinates = yaml["label-eye-offset"].as<std::vector<float>>();
+        if (coordinates.size() == 3) {
+            labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
+        }
+    }
+    if (yaml["translucency-by-distance"].IsDefined()) {
+        // Parse option for near and far translucency properties of a Label based on the Label's distance from the camera.
+        auto components = yaml["translucency-by-distance"].as<std::vector<float>>();
+        if (components.size() >= 4) {
+            translucencyByDistance_ = {.0};
+            std::copy(components.begin(), components.begin()+4, translucencyByDistance_->begin());
+        }
+    }
+
     // Parse sub-rules
     if (yaml["first-of"].IsDefined()) {
         for (auto yamlSubRule : yaml["first-of"]) {
@@ -375,6 +446,105 @@ FeatureStyleRule::Mode FeatureStyleRule::mode() const
 std::optional<std::regex> const& FeatureStyleRule::relationType() const
 {
     return relationType_;
+}
+
+bool FeatureStyleRule::hasLabel() const
+{
+    return hasLabel_;
+}
+
+std::string const& FeatureStyleRule::labelFont() const
+{
+    return labelFont_;
+}
+
+glm::fvec4 const& FeatureStyleRule::labelColor() const
+{
+    return labelBackgroundColor_;
+}
+
+glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
+{
+    return labelBackgroundColor_;
+}
+
+float FeatureStyleRule::labelOutlineWidth() const
+{
+    return labelOutlineWidth_;
+}
+
+glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
+{
+    return labelBackgroundColor_;
+}
+
+std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
+{
+    return labelBackgroundPadding_;
+}
+
+std::string const& FeatureStyleRule::labelHorizontalOrigin() const
+{
+    return labelHorizontalOrigin_;
+}
+
+std::string const& FeatureStyleRule::labelVerticalOrigin() const
+{
+    return labelVerticalOrigin_;
+}
+
+std::string const& FeatureStyleRule::labelHeightReference() const
+{
+    return labelHeightReference_;
+}
+
+std::string const& FeatureStyleRule::labelTextExpression() const
+{
+    return labelTextExpression_;
+}
+
+std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
+{
+    if (!labelTextExpression_.empty()) {
+        auto resultVal = evalFun(labelTextExpression_);
+        if (resultVal.isa(simfil::ValueType::String)) {
+            auto resultText = resultVal.as<simfil::ValueType::String>();
+            if (!resultText.empty()) {
+                return resultText;
+            }
+            std::cout << "Empty return value for the label text expression: " << labelTextExpression_
+                      << ": " << resultVal.toString() << std::endl;
+            return labelText_;
+        }
+        std::cout << "Invalid return value type for the label text expression: " << labelTextExpression_
+                  << ": " << resultVal.toString() << std::endl;
+        return labelText_;
+    }
+    return labelText_;
+}
+
+std::string const& FeatureStyleRule::labelStyle() const
+{
+    return labelStyle_;
+}
+
+float FeatureStyleRule::labelScale() const {
+    return labelScale_;
+}
+
+std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset() const
+{
+    return labelPixelOffset_;
+}
+
+std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
+{
+    return labelEyeOffset_;
+}
+
+std::optional<std::array<float, 4>> const& FeatureStyleRule::translucencyByDistance() const
+{
+    return translucencyByDistance_;
 }
 
 }

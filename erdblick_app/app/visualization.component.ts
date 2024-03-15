@@ -1,4 +1,4 @@
-import {Cartesian3, Color, Viewer} from "cesium";
+import {Cartesian3, Color, Viewer, LabelCollection} from "cesium";
 import {FeatureTile} from "./features.component";
 import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 

@@ -114,6 +114,8 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
         collection.call<void>("add", coloredGroundMeshes_.toJsObject());
     if (!coloredPoints_.empty())
         collection.call<void>("add", coloredPoints_.toJsObject());
+    if (!labelCollection_.empty())
+        collection.call<void>("add", labelCollection_.toJsObject());
     return *collection;
 }
 
@@ -240,6 +242,13 @@ void FeatureLayerVisualization::addGeometry(
             coloredPoints_.addPoint(JsValue(pt), rule, id, evalFun);
         }
         break;
+    }
+
+    if (rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            labelCollection_.addLabel(JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))), text, rule, id, evalFun);
+        }
     }
 }
 

@@ -218,9 +218,11 @@ export class ErdblickView {
             this.setHoveredCesiumFeature(null);
         }
         this.pickedFeatureOrigColor = this.getFeatureColor(feature);
-        this.setFeatureColor(feature, Color.YELLOW);
-        this.pickedFeature = feature;
-        this.selectionTopic.next(resolvedFeature);
+        if (this.pickedFeatureOrigColor) {
+            this.setFeatureColor(feature, Color.YELLOW);
+            this.pickedFeature = feature;
+            this.selectionTopic.next(resolvedFeature);
+        }
 
         // Apply additional highlight styles.
         for (let [styleId, styleData] of this.model.allStyles()) {
@@ -251,7 +253,7 @@ export class ErdblickView {
     }
 
     /** Read the color of a cesium feature through its associated primitive. */
-    private getFeatureColor(feature: any) {
+    private getFeatureColor(feature: any): Color | null {
         if (feature.primitive.color !== undefined) {
             // Special treatment for point primitives.
             return feature.primitive.color.clone();
@@ -260,6 +262,9 @@ export class ErdblickView {
             return null;
         }
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
+        if (attributes.color === undefined) {
+            return null;
+        }
         return Color.fromBytes(...attributes.color);
     }
 
