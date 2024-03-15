@@ -36,20 +36,17 @@ void FeatureLayerVisualization::addTileFeatureLayer(
     std::shared_ptr<mapget::TileFeatureLayer> tile)
 {
     if (!tile_) {
-        tile_ = std::move(tile);
+        tile_ = tile;
+        internalFieldsDictCopy_ = std::make_shared<simfil::Fields>(*tile->fieldNames());
     }
-    else if (tile->nodeId() != tile_->nodeId()) {
-        // Ensure that the added aux tile and the primary tile use the same
-        // field name encoding. So we transcode the aux tile into the same dict.
-        // However, the transcoding process changes the dictionary, as it might
-        // add unknown field names. This would fork the dict state from the remote
-        // node dict, which leads to undefined behavior. So we work on a copy of it.
-        if (!internalFieldsDictCopy_) {
-            internalFieldsDictCopy_ = std::make_shared<simfil::Fields>(*tile->fieldNames());
-        }
-        tile->setFieldNames(internalFieldsDictCopy_);
-    }
-    allTiles_.emplace_back(tile_);
+
+    // Ensure that the added aux tile and the primary tile use the same
+    // field name encoding. So we transcode the aux tile into the same dict.
+    // However, the transcoding process changes the dictionary, as it might
+    // add unknown field names. This would fork the dict state from the remote
+    // node dict, which leads to undefined behavior. So we work on a copy of it.
+    tile->setFieldNames(internalFieldsDictCopy_);
+    allTiles_.emplace_back(tile);
 }
 
 void FeatureLayerVisualization::run()
@@ -131,7 +128,8 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
     auto numResolutionLists = extRefsResolved.size();
 
     if (numResolutionLists != externalRelationVisualizations_.size()) {
-        throw std::runtime_error("Unexpected number of resolutions.");
+        std::cout << "Unexpected number of resolutions.!" << std::endl;
+        return;
     }
 
     std::set<RecursiveRelationVisualizationState*> updatedRelationVisuState;
@@ -165,8 +163,10 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
             if (targetFeature)
                 break;
         }
-        if (!targetFeature)
+        if (!targetFeature) {
+            std::cout << "Resolved target feature was not found in aux tiles!" << std::endl;
             continue;
+        }
 
         // Annotate the relation visu with the resolved feature.
         auto [relationVisuParent, relationVisu] = externalRelationVisualizations_[i];

@@ -94,7 +94,10 @@ export class TileVisualization {
                 let extRefs = {requests: visualization.externalReferences()};
                 if (extRefs.requests && extRefs.requests.length > 0) {
                     let response = await fetch("/locate", {
-                        body: JSON.stringify(extRefs),
+                        body: JSON.stringify(extRefs, (_, value) =>
+                            typeof value === 'bigint'
+                                ? Number(value)
+                                : value),
                         method: "POST"
                     }).catch((err)=>console.error(`Error during /locate call: ${err}`));
                     if (!response) {
@@ -128,7 +131,7 @@ export class TileVisualization {
                     await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
                         for (let auxTile of tileFeatureLayers)
                             visualization.addTileFeatureLayer(auxTile);
-                        visualization.processResolvedExternalReferences(extRefsResolved);
+                        visualization.processResolvedExternalReferences(extRefsResolved.responses);
                     });
                 }
                 this.primitiveCollection = visualization.primitiveCollection();
