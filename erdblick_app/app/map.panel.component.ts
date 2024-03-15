@@ -157,11 +157,14 @@ import {Dialog} from "primeng/dialog";
         </p-button>
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog class="editor-dialog">
             <editor></editor>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                          [disabled]="!dataWasModified"></p-button>
-                <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"'
-                          icon="pi pi-times"></p-button>
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
+                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                    <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
+                              [disabled]="!dataWasModified"></p-button>
+                    <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"'
+                              icon="pi pi-times"></p-button>
+                </div>
+                <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
             </div>
         </p-dialog>
         <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
@@ -381,5 +384,9 @@ export class MapPanelComponent {
         const styleId = this.styleService.selectedStyleIdForEditing.getValue();
         this.styleService.selectedStyleIdForEditing.next(styleId);
         this.warningDialogVisible = false;
+    }
+
+    openStyleHelp() {
+        window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 }

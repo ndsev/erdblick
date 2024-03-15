@@ -33,9 +33,6 @@ Erdblick styles are defined as *YAML*-files, which must have a `rules` key that 
 feature visualisation rule objects. During runtime, a feature will be visualised according to each
 rule that matches it.
 
-<details>
-<summary>Show details</summary>
-
 ### Custom Style Declarations
 
 It is possible to apply own custom styles easily. 
@@ -61,7 +58,10 @@ Currently, it's also possible to export and import styles in GUI. Styles importe
 
 Both bundled and imported styles can be modified directly via a GUI editor included in Erdblick.
 If a style was modified this way, it will persist in the `local storage` of the browser 
-(if the `local storage` is cleared or reset, all of the modifications will be reset as well).
+(if the `local storage` is cleared or reset, all of the modifications will be reset as well; 
+in case you would like to clear the styles yourself, you can do that via the preferences panel.
+
+The style editor automatically verifies YAML for syntax parsing errors and provides basic autocomplete. 
 
 ### Style Definitions
 
@@ -140,8 +140,6 @@ rules:
     type: "Boundary"
     color: "#33FF57"
 ```
-
-</details>
 
 ## Build instructions (Linux-only)
 

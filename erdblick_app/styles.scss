@@ -401,10 +401,21 @@ body {
 
 .editor-container {
   max-height: 70vh;
-  width: 70vw;
+  min-width: 65vw;
+  width: 100%;
   margin: 0;
   overflow: auto;
   border: 1px solid silver;
+}
+
+.editor-dialog {
+  .p-dialog {
+    min-width: 70vw;
+
+    .p-dialog-content {
+      padding: 0 1.5rem 1rem 1.5rem;
+    }
+  }
 }
 
 @media only screen and (max-width: 56em) {
