@@ -38,11 +38,18 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
         type_.reset();
         filter_.clear();
         firstOfRules_.clear();
+        relationLineEndMarkerStyle_.reset();
+        relationSourceStyle_.reset();
+        relationTargetStyle_.reset();
     }
 }
 
 void FeatureStyleRule::parse(const YAML::Node& yaml)
 {
+    /////////////////////////////////////
+    /// Generic Rule Fields
+    /////////////////////////////////////
+
     if (yaml["geometry"].IsDefined()) {
         // Parse target geometry types.
         geometryTypes_ = 0;  // Reset inherited geometry types.
@@ -113,6 +120,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         auto colorStr = yaml["color"].as<std::string>();
         color_ = Color(colorStr).toFVec4();
     }
+    if (yaml["color-expression"].IsDefined()) {
+        // Set a simfil expression which returns an RGBA integer, or a parsable color.
+        colorExpression_ = yaml["color-expression"].as<std::string>();
+    }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
         color_.a = yaml["opacity"].as<float>();
@@ -141,6 +152,40 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+
+    /////////////////////////////////////
+    /// Line Style Fields
+    /////////////////////////////////////
+
+    if (yaml["dashed"].IsDefined()) {
+        // Parse line dashes
+        dashed_ = yaml["dashed"].as<bool>();
+        if (yaml["dash-length"].IsDefined()) {
+            dashLength_ = yaml["dash-length"].as<int>();
+        }
+        if (yaml["gap-color"].IsDefined()) {
+            auto colorStr = yaml["gap-color"].as<std::string>();
+            gapColor_ = Color(colorStr).toFVec4();
+        }
+        if (yaml["dash-pattern"].IsDefined()) {
+            dashPattern_ = yaml["dash-pattern"].as<int>();
+        }
+    }
+    if (yaml["arrow"].IsDefined()) {
+        // Parse line arrowheads
+        auto arrowStr = yaml["arrow"].as<std::string>();
+        if (auto arrowMode = parseArrowMode(arrowStr))
+            arrow_ = *arrowMode;
+    }
+    if (yaml["arrow-expression"].IsDefined()) {
+        // Set a simfil expression which returns 'forward', 'backward' or 'double'.
+        arrowExpression_ = yaml["arrow-expression"].as<std::string>();
+    }
+
+    /////////////////////////////////////
+    /// Relation Rule Fields
+    /////////////////////////////////////
+
     if (yaml["relation-type"].IsDefined()) {
         // Parse a relation type regular expression, e.g. `connectedFrom|connectedTo`
         relationType_ = yaml["relation-type"].as<std::string>();
@@ -174,26 +219,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse whether bidirectional relations should be followed and merged.
         relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<bool>();
     }
-    if (yaml["dashed"].IsDefined()) {
-        // Parse line dashes
-        dashed_ = yaml["dashed"].as<bool>();
-        if (yaml["dash-length"].IsDefined()) {
-            dashLength_ = yaml["dash-length"].as<int>();
-        }
-        if (yaml["gap-color"].IsDefined()) {
-            auto colorStr = yaml["gap-color"].as<std::string>();
-            gapColor_ = Color(colorStr).toFVec4();
-        }
-        if (yaml["dash-pattern"].IsDefined()) {
-            dashPattern_ = yaml["dash-pattern"].as<int>();
-        }
-    }
-    if (yaml["arrow"].IsDefined()) {
-        // Parse line arrowheads
-        auto arrowStr = yaml["arrow"].as<std::string>();
-        if (auto arrowMode = parseArrowMode(arrowStr))
-            arrow_ = *arrowMode;
-    }
+
+    /////////////////////////////////////
+    /// Label Rule Fields
+    /////////////////////////////////////
 
     // Parse labels' rules
     if (yaml["label-font"].IsDefined()) {
@@ -229,13 +258,11 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
     }
     if (yaml["label-text-expression"].IsDefined()) {
-        hasLabel_ = true;
         // Parse label SIMFIL expression
         labelTextExpression_ = yaml["label-text-expression"].as<std::string>();
     }
     if (yaml["label-text"].IsDefined()) {
-        hasLabel_ = true;
-        // Parse label placeholder exprestextsion
+        // Parse label placeholder text
         labelText_ = yaml["label-text"].as<std::string>();
     }
     if (yaml["label-style"].IsDefined()) {
@@ -266,7 +293,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
     }
 
-    // Parse sub-rules
+    /////////////////////////////////////
+    /// Sub-Rule Fields
+    /////////////////////////////////////
+
     if (yaml["first-of"].IsDefined()) {
         for (auto yamlSubRule : yaml["first-of"]) {
             // The sub-rule adopts all attributes except type and filter
@@ -450,7 +480,7 @@ std::optional<std::regex> const& FeatureStyleRule::relationType() const
 
 bool FeatureStyleRule::hasLabel() const
 {
-    return hasLabel_;
+    return !labelTextExpression_.empty() || !labelText_.empty();
 }
 
 std::string const& FeatureStyleRule::labelFont() const

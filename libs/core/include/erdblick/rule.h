@@ -105,14 +105,13 @@ private:
     int dashLength_ = 16;
     glm::fvec4 gapColor_{.0, .0, .0, 0.};
     int dashPattern_ = 255;
-    Arrow arrow_;
+    Arrow arrow_ = NoArrow;
     std::string arrowExpression_;
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
 
     // Labels' rules
-    bool hasLabel_ = false;
     std::string labelFont_ = "24px Helvetica";
     glm::fvec4 labelColor_{1., 1., 1., 1.};
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .0};
@@ -122,8 +121,8 @@ private:
     std::string labelHorizontalOrigin_ = "CENTER";
     std::string labelVerticalOrigin_ = "CENTER";
     std::string labelHeightReference_ = "NONE";
-    std::string labelTextExpression_ = "";
-    std::string labelText_ = "";
+    std::string labelTextExpression_;
+    std::string labelText_;
     std::string labelStyle_ = "FILL_AND_OUTLINE";
     float labelScale_ = 1.;
     std::optional<std::pair<float, float>> labelPixelOffset_;

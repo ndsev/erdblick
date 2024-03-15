@@ -349,13 +349,29 @@ void erdblick::FeatureLayerVisualization::addLine(
     const Point& wgsB,
     uint32_t id,
     const erdblick::FeatureStyleRule& rule,
-    BoundEvalFun const& evalFun)
+    BoundEvalFun const& evalFun,
+    double labelPositionHint)
 {
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA);
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB);
+
     addPolyLine(
-        {wgsToCartesian<mapget::Point>(wgsA), wgsToCartesian<mapget::Point>(wgsB)},
+        {cartA, cartB},
         rule,
         id,
         evalFun);
+
+    if (rule.hasLabel()) {
+        auto text = rule.labelText(evalFun);
+        if (!text.empty()) {
+            labelCollection_.addLabel(
+                JsValue(mapget::Point(cartA + (cartB - cartA) * labelPositionHint)),
+                text,
+                rule,
+                id,
+                evalFun);
+        }
+    }
 }
 
 void FeatureLayerVisualization::addPolyLine(
@@ -364,6 +380,9 @@ void FeatureLayerVisualization::addPolyLine(
     uint32_t id,
     BoundEvalFun const& evalFun)
 {
+    if (vertsCartesian.size() < 2)
+        return;
+
     auto arrowType = rule.arrow(evalFun);
 
     if (arrowType == FeatureStyleRule::DoubleArrow) {
@@ -520,17 +539,21 @@ void RecursiveRelationVisualizationState::render(
     RecursiveRelationVisualizationState::RelationToVisualize& r)
 {
     // Create simfil evaluation context for the rule.
-    simfil::OverlayNode relationEvaluationContext(simfil::Value::field(*r.relation_));
+    auto const& constRelation = static_cast<mapget::Relation const&>(*r.relation_);
+    auto const& constSource = static_cast<mapget::Feature const&>(*r.sourceFeature_);
+    auto const& constTarget = static_cast<mapget::Feature const&>(*r.targetFeature_);
+
+    simfil::OverlayNode relationEvaluationContext(simfil::Value::field(constRelation));
 
     // Assemble simfil evaluation context.
     relationEvaluationContext.set(
-        visu_.tile_->fieldNames()->emplace("$source"),
-        simfil::Value::field(*r.sourceFeature_));
+        visu_.internalFieldsDictCopy_->emplace("$source"),
+        simfil::Value::field(constSource));
     relationEvaluationContext.set(
-        visu_.tile_->fieldNames()->emplace("$target"),
-        simfil::Value::field(*r.targetFeature_));
+        visu_.internalFieldsDictCopy_->emplace("$target"),
+        simfil::Value::field(constTarget));
     relationEvaluationContext.set(
-        visu_.tile_->fieldNames()->emplace("$twoway"),
+        visu_.internalFieldsDictCopy_->emplace("$twoway"),
         simfil::Value(r.twoway_));
 
     // Function which can evaluate a simfil expression in the relation context.
@@ -559,8 +582,8 @@ void RecursiveRelationVisualizationState::render(
             visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun);
         }
         if (rule_.relationLineEndMarkerStyle()) {
-            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun);
-            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun);
+            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
         }
     }
 

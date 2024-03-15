@@ -138,13 +138,16 @@ private:
 
     /**
      * Add a line which connects two points to the visualization.
+     * Note: labelPositionHint can be used to move a potential label
+     *  to the front (0) or center (0.5, default) or back (1) of the line.
      */
     void addLine(
         mapget::Point const& wgsA,
         mapget::Point const& wgsB,
         uint32_t id,
         FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun);
+        BoundEvalFun const& evalFun,
+        double labelPositionHint=0.5);
 
     /**
      * Add a polyline which has at least two shape-points.

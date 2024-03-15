@@ -232,6 +232,7 @@ public:
             diamondVertices[5], diamondVertices[0], diamondVertices[3]  // Bottom front-bottom triangle
         };
         diamondMeshFeature->addMesh(diamondTriangles);
+        diamondMeshFeature->addRelation("hasPoi", "PointOfInterest", {{"areaId", "TheBestArea"}, {"pointId", 200}});
 
         return result;
     }
@@ -297,7 +298,7 @@ public:
             label-background-padding: [7, 5]
             label-horizontal-origin: "LEFT"
             label-vertical-origin: "BASELINE"
-            label-text-expression: "**.speedLimitKmh"
+            label-text-expression: "**.wayType as string"
             label-text: "abc"
             label-style: "OUTLINE"
             near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
@@ -411,6 +412,12 @@ public:
             label-text: "abc"
             label-style: "FILL"
             near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
+
+          - type: "Diamond"
+            aspect: relation
+            color: red
+            width: 10
+            color-expression: "select(arr('red', 'green'), not $twoway as int)"
 
           # Fallback-rule-list for POI/PONI
           - type: "PointOf.*"
