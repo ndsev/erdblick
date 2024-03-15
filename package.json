@@ -20,7 +20,7 @@
         "@angular/router": "^16.0.4",
         "assert": "^2.1.0",
         "browserify-zlib": "^0.2.0",
-        "cesium": "^1.111.0",
+        "cesium": "^1.115.0",
         "https-browserify": "^1.0.0",
         "primeicons": "^6.0.1",
         "primeng": "^16.9.1",

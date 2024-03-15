@@ -33,6 +33,7 @@ import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
 import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
+import {HighlightService} from "./highlight.service";
 
 @NgModule({
     declarations: [
@@ -72,7 +73,8 @@ import {FileUploadModule} from "primeng/fileupload";
         JumpTargetService,
         StyleService,
         InspectionService,
-        ParametersService
+        ParametersService,
+        HighlightService
     ],
     bootstrap: [AppComponent]
 })
