@@ -128,7 +128,7 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
     auto numResolutionLists = extRefsResolved.size();
 
     if (numResolutionLists != externalRelationVisualizations_.size()) {
-        std::cout << "Unexpected number of resolutions.!" << std::endl;
+        std::cout << "Unexpected number of resolutions!" << std::endl;
         return;
     }
 
@@ -247,7 +247,12 @@ void FeatureLayerVisualization::addGeometry(
     if (rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
-            labelCollection_.addLabel(JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))), text, rule, id, evalFun);
+            labelCollection_.addLabel(
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))),
+                text,
+                rule,
+                id,
+                evalFun);
         }
     }
 }
@@ -416,13 +421,24 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
     const std::string& expression,
     const simfil::ModelNode& ctx) const
 {
-    auto results = simfil::eval(
-        tile_->evaluationEnvironment(),
-        *tile_->compiledExpression(expression),
-        ctx);
-    if (results.empty())
+    try
+    {
+        auto const& compiledExpr = tile_->compiledExpression(expression);
+        auto results = simfil::eval(
+            tile_->evaluationEnvironment(),
+            *compiledExpr,
+            ctx);
+        if (!results.empty()) {
+            return std::move(results[0]);
+        }
+    }
+    catch (std::exception const& e) {
+        std::cout << "Error evaluating " << expression << ": " << e.what() << std::endl;
         return simfil::Value::null();
-    return std::move(results[0]);
+    }
+
+    std::cout << "Expression " << expression << " returned nothing." << std::endl;
+    return simfil::Value::null();
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
@@ -450,7 +466,7 @@ void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowa
     }
 
     // Render completed relation visualisations.
-    for (auto& [_, relationVisuList] : relationsByFeatureAddr_) {
+    for (auto& [_, relationVisuList] : relationsByFeatureId_) {
         for (auto& relVisu : relationVisuList) {
             if (relVisu.readyToRender()) {
                 render(relVisu);
@@ -478,12 +494,12 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
 
     // Check if the target feature already has a reference to me.
-    auto relationsForTargetIt =
-        relationsByFeatureAddr_.find({&targetFeature->model(), targetFeature->addr().value_});
-    if (rule_.relationMergeTwoWay()) {
-        if (relationsForTargetIt != relationsByFeatureAddr_.end()) {
+    auto relationsForTargetIt = relationsByFeatureId_.end();
+    if (targetFeature) {
+        relationsForTargetIt = relationsByFeatureId_.find(targetFeature->id()->toString());
+        if (rule_.relationMergeTwoWay() && relationsForTargetIt != relationsByFeatureId_.end()) {
             for (auto& relVisu : relationsForTargetIt->second) {
-                if (relVisu.targetFeature_->addr() == sourceFeature->addr()) {
+                if (relVisu.targetFeature_ && relVisu.targetFeature_->id()->toString() == sourceFeature->id()->toString()) {
                     relVisu.twoway_ = true;
                     return;
                 }
@@ -494,8 +510,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         return;
 
     // Create new relation-to-visualize.
-    auto& relationsForThisFeature =
-        relationsByFeatureAddr_[{&sourceFeature->model(), sourceFeature->addr().value_}];
+    auto& relationsForThisFeature = relationsByFeatureId_[sourceFeature->id()->toString()];
     auto& newRelationVisu = relationsForThisFeature.emplace_back();
     newRelationVisu.relation_ = relation;
     newRelationVisu.sourceFeature_ = sourceFeature;
@@ -504,7 +519,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         newRelationVisu.targetFeature_ = targetFeature;
         // We got an additional feature to explore. But do it only
         // if we haven't explored it yet.
-        if (rule_.relationRecursive() && relationsForTargetIt == relationsByFeatureAddr_.end()) {
+        if (rule_.relationRecursive() && relationsForTargetIt == relationsByFeatureId_.end()) {
             unexploredRelations_.emplace_back(targetFeature);
         }
     }

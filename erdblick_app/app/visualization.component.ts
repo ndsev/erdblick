@@ -138,8 +138,9 @@ export class TileVisualization {
                 visualization.delete();
                 return true;
             });
-            if (this.primitiveCollection)
+            if (this.primitiveCollection) {
                 viewer.scene.primitives.add(this.primitiveCollection);
+            }
             this.hasHighDetailVisualization = true;
         } else {
             // Else: Low-detail dot representation

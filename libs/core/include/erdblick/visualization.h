@@ -47,8 +47,8 @@ struct RecursiveRelationVisualizationState
         [[nodiscard]] bool readyToRender() const;
     };
 
-    std::map<std::pair<mapget::TileFeatureLayer*, uint32_t>, std::deque<RelationToVisualize>>
-        relationsByFeatureAddr_;
+    std::map<std::string, std::deque<RelationToVisualize>>
+        relationsByFeatureId_;
     std::deque<mapget::model_ptr<mapget::Feature>> unexploredRelations_;
 
     void populateAndRender(bool onlyUpdateTwowayFlags=false);

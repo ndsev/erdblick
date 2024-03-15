@@ -490,12 +490,12 @@ std::string const& FeatureStyleRule::labelFont() const
 
 glm::fvec4 const& FeatureStyleRule::labelColor() const
 {
-    return labelBackgroundColor_;
+    return labelColor_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
 {
-    return labelBackgroundColor_;
+    return labelOutlineColor_;
 }
 
 float FeatureStyleRule::labelOutlineWidth() const
