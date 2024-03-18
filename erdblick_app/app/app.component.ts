@@ -71,6 +71,10 @@ export class AppComponent {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
 
+            coreLib.setExceptionHandler((excType: string, message: string) => {
+                throw new Error(`${excType}: ${message}`);
+            });
+
             this.styleService.stylesLoaded.subscribe(loaded => {
                 if (loaded) this.init();
             });

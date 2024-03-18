@@ -9,6 +9,7 @@
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
+#include "simfil/exception-handler.h"
 
 #include "mapget/log.h"
 
@@ -114,6 +115,13 @@ void generateTestTile(SharedUint8Array& output, TileLayerParser& parser) {
 /** Create a test style. */
 FeatureLayerStyle generateTestStyle() {
     return TestDataProvider::style();
+}
+
+/** Create a test style. */
+void setExceptionHandler(em::val handler) {
+    simfil::ThrowHandler::instance().set([handler](auto&& type, auto&& message){
+        handler(type, message);
+    });
 }
 
 EMSCRIPTEN_BINDINGS(erdblick)
@@ -236,4 +244,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Get a test tile/style
     em::function("generateTestTile", &generateTestTile);
     em::function("generateTestStyle", &generateTestStyle);
+
+    ////////// Set an exception handler
+    em::function("setExceptionHandler", &setExceptionHandler);
 }

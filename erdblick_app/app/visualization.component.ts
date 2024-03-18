@@ -88,7 +88,13 @@ export class TileVisualization {
                     this.style,
                     this.highlight!);
                 visualization.addTileFeatureLayer(tileFeatureLayer);
-                visualization.run();
+                try {
+                    visualization.run();
+                }
+                catch (e) {
+                    console.log(`Exception while rendering: ${e}`);
+                    return false;
+                }
 
                 // Try to resolve externally referenced auxiliary tiles.
                 let extRefs = {requests: visualization.externalReferences()};
@@ -131,7 +137,13 @@ export class TileVisualization {
                     await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
                         for (let auxTile of tileFeatureLayers)
                             visualization.addTileFeatureLayer(auxTile);
-                        visualization.processResolvedExternalReferences(extRefsResolved.responses);
+
+                        try {
+                            visualization.processResolvedExternalReferences(extRefsResolved.responses);
+                        }
+                        catch (e) {
+                            console.log(`Exception while rendering: ${e}`);
+                        }
                     });
                 }
                 this.primitiveCollection = visualization.primitiveCollection();
