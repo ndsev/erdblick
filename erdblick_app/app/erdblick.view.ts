@@ -18,11 +18,12 @@ import {
     Viewer
 } from "cesium";
 import {ParametersService} from "./parameters.service";
+import {HighlightService} from "./highlight.service";
 
 export class ErdblickView {
     viewer: Viewer;
     private model: ErdblickModel;
-    private pickedFeature: any = null;
+    pickedFeature: any = null;
     private pickedFeatureOrigColor: Color | null = null;
     private hoveredFeature: any = null;
     private hoveredFeatureOrigColor: Color | null = null;
@@ -36,10 +37,12 @@ export class ErdblickView {
      * Construct a Cesium View with a Model.
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
+     * @param highlightService The highlight service, used to pick the color of the highlight
      * @param parameterService The parameter service, used to update
      */
     constructor(model: ErdblickModel,
                 containerDomElementId: string,
+                public highlightService: HighlightService,
                 public parameterService: ParametersService) {
         this.model = model;
         this.viewer = new Viewer(containerDomElementId,
@@ -184,7 +187,7 @@ export class ErdblickView {
         if (feature && !this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
             // Highlight the new hovered feature and remember its original color.
             this.hoveredFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Color.YELLOW);
+            this.setFeatureColor(feature, this.highlightService.pickedColor);
             this.hoveredFeature = feature;
         }
     }
@@ -219,7 +222,7 @@ export class ErdblickView {
         }
         this.pickedFeatureOrigColor = this.getFeatureColor(feature);
         if (this.pickedFeatureOrigColor) {
-            this.setFeatureColor(feature, Color.YELLOW);
+            this.setFeatureColor(feature, this.highlightService.pickedColor);
             this.pickedFeature = feature;
             this.selectionTopic.next(resolvedFeature);
         }
@@ -238,7 +241,7 @@ export class ErdblickView {
     }
 
     /** Set the color of a cesium feature through its associated primitive. */
-    private setFeatureColor(feature: any, color: Color) {
+    setFeatureColor(feature: any, color: Color) {
         if (feature.primitive.color !== undefined) {
             // Special treatment for point primitives.
             feature.primitive.color = color;

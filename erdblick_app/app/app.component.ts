@@ -12,6 +12,7 @@ import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
 import {OverlayPanel} from "primeng/overlaypanel";
+import {HighlightService} from "./highlight.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -61,6 +62,7 @@ export class AppComponent {
                 public jumpToTargetService: JumpTargetService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
+                public highlightService: HighlightService,
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
@@ -80,7 +82,11 @@ export class AppComponent {
     init() {
         let erdblickModel = new ErdblickModel(this.mapService.coreLib, this.styleService, this.parametersService);
         this.mapService.mapModel.next(erdblickModel);
-        this.mapService.mapView = new ErdblickView(erdblickModel, 'mapViewContainer', this.parametersService);
+        this.mapService.mapView = new ErdblickView(
+            erdblickModel,
+            'mapViewContainer',
+            this.highlightService,
+            this.parametersService);
         this.mapService.applyTileLimits(erdblickModel.maxLoadTiles, erdblickModel.maxVisuTiles);
 
         // Add debug API that can be easily called from browser's debug console
