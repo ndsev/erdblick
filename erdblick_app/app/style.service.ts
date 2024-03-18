@@ -10,7 +10,7 @@ import {
     BehaviorSubject,
     Observable,
     Subscriber,
-    catchError
+    catchError, Subject
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
@@ -50,6 +50,7 @@ export class StyleService {
     selectedStyleIdForEditing: BehaviorSubject<string> = new BehaviorSubject<string>("");
     styleBeingEdited: boolean = false;
     styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    styleEditedSaveTriggered: Subject<boolean> = new Subject<boolean>();
 
     builtinStylesCount = 0;
     importedStylesCount = 0;

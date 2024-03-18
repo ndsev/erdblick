@@ -1,9 +1,9 @@
-import {Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Input, Renderer2} from '@angular/core';
+import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2 } from '@angular/core';
 import { basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { autocompletion, CompletionContext, CompletionSource } from '@codemirror/autocomplete';
-import { EditorView, ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, ViewUpdate } from '@codemirror/view';
 import { linter, Diagnostic, lintGutter } from '@codemirror/lint';
 import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { StyleService } from "./style.service";
@@ -107,6 +107,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             extensions: [
                 basicSetup,
                 yaml(),
+                keymap.of([this.saveCmd()]),
                 syntaxHighlighting(defaultHighlightStyle),
                 autocompletion({override: [this.styleCompletions]}),
                 lintGutter(),
@@ -154,4 +155,14 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             options: completionsList
         }
     };
+
+    saveCmd() {
+        return {
+            key: 'Mod-s',
+            run: () => {
+                this.styleService.styleEditedSaveTriggered.next(true);
+                return true;
+            }
+        };
+    }
 }

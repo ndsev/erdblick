@@ -1,4 +1,4 @@
-import {Component, ViewChild} from "@angular/core";
+import {Component, HostListener, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {StyleService} from "./style.service";
@@ -163,6 +163,10 @@ import {Dialog} from "primeng/dialog";
                               [disabled]="!dataWasModified"></p-button>
                     <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
+                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
+                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                        <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
+                    </div>
                 </div>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
             </div>
@@ -184,6 +188,7 @@ export class MapPanelComponent {
     warningDialogVisible: boolean = false;
     mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
     editedStyleDataSubscription: Subscription = new Subscription();
+    savedStyleDataSubscription: Subscription = new Subscription();
     dataWasModified: boolean = false;
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
@@ -345,6 +350,9 @@ export class MapPanelComponent {
             const originalStyleData = this.styleService.styleData.get(styleId)?.data!;
             this.dataWasModified = !(editedStyleData.replace(/\n+$/, '') == originalStyleData.replace(/\n+$/, ''));
         });
+        this.savedStyleDataSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
+            this.applyEditedStyle();
+        });
     }
 
     applyEditedStyle() {
@@ -378,6 +386,7 @@ export class MapPanelComponent {
             }
         }
         this.editedStyleDataSubscription.unsubscribe();
+        this.savedStyleDataSubscription.unsubscribe();
     }
 
     discardStyleEdits() {
