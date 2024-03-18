@@ -537,16 +537,11 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
         auto resultVal = evalFun(labelTextExpression_);
-        if (resultVal.isa(simfil::ValueType::String)) {
-            auto resultText = resultVal.as<simfil::ValueType::String>();
-            if (!resultText.empty()) {
-                return resultText;
-            }
-            std::cout << "Empty return value for the label text expression: " << labelTextExpression_
-                      << ": " << resultVal.toString() << std::endl;
-            return labelText_;
+        auto resultText = resultVal.toString();
+        if (!resultText.empty()) {
+            return resultText;
         }
-        std::cout << "Invalid return value type for the label text expression: " << labelTextExpression_
+        std::cout << "Empty return value for the label text expression: " << labelTextExpression_
                   << ": " << resultVal.toString() << std::endl;
         return labelText_;
     }
