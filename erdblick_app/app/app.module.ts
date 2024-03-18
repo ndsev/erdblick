@@ -33,6 +33,7 @@ import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
 import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
+import {EditorComponent} from "./editor.component";
 
 @NgModule({
     declarations: [
@@ -40,7 +41,8 @@ import {FileUploadModule} from "primeng/fileupload";
         SearchMenuComponent,
         MapPanelComponent,
         InspectionPanelComponent,
-        PreferencesComponent
+        PreferencesComponent,
+        EditorComponent
     ],
     imports: [
         BrowserModule,

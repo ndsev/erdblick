@@ -33,9 +33,6 @@ Erdblick styles are defined as *YAML*-files, which must have a `rules` key that 
 feature visualisation rule objects. During runtime, a feature will be visualised according to each
 rule that matches it.
 
-<details>
-<summary>Show details</summary>
-
 ### Custom Style Declarations
 
 It is possible to apply own custom styles easily. 
@@ -56,6 +53,15 @@ For Erdblick to apply custom styles, it expects the following declarations for t
 where `url` field must be a path relative to `static/bundle/styles` and `id` is used to identify the particular style in GUI.
 
 It is also possible to export and import styles in GUI. Styles imported this way will persist in the local storage of the browser.
+
+### Editing Styles via Erdblick
+
+Both bundled and imported styles can be modified directly via a GUI editor included in Erdblick.
+If a style was modified this way, it will persist in the `local storage` of the browser 
+(if the `local storage` is cleared or reset, all of the modifications will be reset as well; 
+in case you would like to clear the styles yourself, you can do that via the preferences panel.
+
+The style editor automatically verifies YAML for syntax parsing errors and provides basic autocomplete. 
 
 ### Style Definitions
 

@@ -5,7 +5,7 @@ import {FeatureTile, FeatureWrapper} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.component";
 import {BehaviorSubject, Subject} from "rxjs";
-import {StyleService} from "./style.service";
+import {ErdblickStyle, StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
 import {ParametersService} from "./parameters.service";
 import {FeatureLayerStyle, MainModule as ErdblickCore} from "../../build/libs/core/erdblick-core";
@@ -23,11 +23,6 @@ type ViewportProperties = {
     camPosLat: number
 };
 
-type ErdblickStyleData = {
-    enabled: boolean,
-    featureLayerStyle: FeatureLayerStyle
-}
-
 /**
  * Erdblick view-model class. This class is responsible for keeping track
  * of the following objects:
@@ -43,8 +38,6 @@ export class ErdblickModel {
     static MAX_NUM_TILES_TO_LOAD = 2048;
     static MAX_NUM_TILES_TO_VISUALIZE = 512;
     private coreLib: ErdblickCore;
-    private styles: Map<string, ErdblickStyleData> | null;
-    private importedStyles: Map<string, ErdblickStyleData> | null;
     private maps: Map<string, MapInfoItem> | null;
     private loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
@@ -71,8 +64,6 @@ export class ErdblickModel {
                 public styleService: StyleService,
                 public parametersService: ParametersService) {
         this.coreLib = coreLibrary;
-        this.styles = null;
-        this.importedStyles = null;
         this.maps = null;
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
@@ -175,142 +166,116 @@ export class ErdblickModel {
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
-    loadStyles() {
-        if (this.styles) {
-            this.styles.forEach((style: ErdblickStyleData, _) => {
-                if (style) style.featureLayerStyle.delete();
+    private loadStyles() {
+        if (this.styleService.styleData) {
+            this.styleService.styleData.forEach((style: ErdblickStyle, _) => {
+                style.featureLayerStyle?.delete();
             });
         }
-        if (this.importedStyles) {
-            this.importedStyles.forEach((style: ErdblickStyleData, _) => {
-                if (style) style.featureLayerStyle.delete();
-            });
-        }
-        this.styles = new Map<string, ErdblickStyleData>();
-        this.importedStyles = new Map<string, ErdblickStyleData>();
 
         const parameters = this.parametersService.parameters.getValue();
         if (parameters) {
-            [...this.styleService.activatedStyles.keys()].forEach(styleId =>
-                this.styleService.activatedStyles.set(styleId, parameters.styles.includes(styleId)));
+            [...this.styleService.availableStylesActivations.keys()].forEach(styleId =>
+                this.styleService.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
         }
 
-        this.styleService.styleData.forEach((styleString: string, styleId: string) => {
-            const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString);
-            if (erdblickStyleData !== undefined && erdblickStyleData) {
-                this.styles!.set(styleId, erdblickStyleData);
-            }
-        });
-
-        this.styleService.importedStyleData.forEach((styleString: string, styleId: string) => {
-            const erdblickStyleData = this.loadErdblickStyleData(styleId, styleString, true);
-            if (erdblickStyleData !== undefined && erdblickStyleData) {
-                this.importedStyles!.set(styleId, erdblickStyleData);
-            }
+        this.styleService.styleData.forEach((style: ErdblickStyle, styleId: string) => {
+            this.loadErdblickStyleData(styleId);
         });
 
         console.log("Loaded styles.");
     }
 
-    private loadErdblickStyleData(styleId: string, styleString: string, imported: boolean = false): ErdblickStyleData | undefined {
-        const isAvailable = imported ? this.styleService.activatedImportedStyles.has(styleId) : this.styleService.activatedStyles.has(styleId);
-        if (isAvailable) {
-            const styleUint8Array = this.textEncoder.encode(styleString);
-            // Parse the style description into a WASM style object.
+    private loadErdblickStyleData(styleId: string) {
+        const style = this.styleService.styleData.get(styleId);
+        if (style !== undefined) {
+            const styleUint8Array = this.textEncoder.encode(style.data);
             const result = uint8ArrayToWasm(this.coreLib,
                 (wasmBuffer: any) => {
-                    return {
-                        enabled: imported ? this.styleService.activatedImportedStyles.get(styleId)! : this.styleService.activatedStyles.get(styleId)!,
-                        featureLayerStyle: new this.coreLib.FeatureLayerStyle(wasmBuffer)
+                    const featureLayerStyle = new this.coreLib.FeatureLayerStyle(wasmBuffer);
+                    if (featureLayerStyle) {
+                        style.featureLayerStyle = new this.coreLib.FeatureLayerStyle(wasmBuffer);
+                        this.styleService.styleData.set(styleId, style);
+                        return true;
                     }
+                    return false;
                 },
                 styleUint8Array);
-            if (result === undefined) {
-                console.error(`Encountered parsing error in style "${styleId}" for the following YAML data:\n${styleString}`)
-                this.styleService.errorStyleIds.set(styleId, "YAML Parse Error");
+            if (result === undefined || !result) {
+                console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.data}`)
+                this.styleService.erroredStyleIds.set(styleId, "YAML Parse Error");
             }
-            return result;
         }
-        return undefined;
     }
 
     reloadStyle(styleId: string) {
-        if (this.styles) {
-            if (this.styles.has(styleId) && this.styleService.styleData.has(styleId)) {
-                this.styleService.syncStyleYamlData(styleId).then(_ => {
-                    const styleString = this.styleService.styleData.get(styleId);
-                    if (styleString !== undefined) {
-                        this.styles!.get(styleId)?.featureLayerStyle?.delete();
-                        const erdblickStyleData= this.loadErdblickStyleData(styleId, styleString);
-                        if (erdblickStyleData !== undefined && erdblickStyleData) {
-                            this.styles!.set(styleId, erdblickStyleData);
-                        }
-                        this.tileVisualizationQueue = [];
-                        this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                            this.tileVisualizationDestructionTopic.next(tileVisu)
-                        );
-                        this.visualizedTileLayers.set(styleId, []);
-                        for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                            this.renderTileLayer(tileLayer, this.styles!.get(styleId), styleId);
-                        }
-                    }
-                });
-            }
-        }
-        console.log(`Reloaded style: ${styleId}.`);
-    }
-
-    cycleImportedStyle(styleId: string, remove= false) {
-        if (this.importedStyles) {
-            if (remove && !this.styleService.importedStyleData.has(styleId)) {
-                console.log(`No style data for: ${styleId}.`);
-                return;
-            }
-            const styleString = this.styleService.importedStyleData.get(styleId);
-            if (styleString === undefined) {
-                console.log(`Could not retrieve style data for: ${styleId}.`);
-                return;
-            }
-            if (remove) {
-                this.importedStyles!.get(styleId)?.featureLayerStyle?.delete();
-                this.importedStyles!.delete(styleId);
+        if (this.styleService.styleData.has(styleId)) {
+            this.styleService.syncStyleYamlData(styleId).then(_ => {
+                this.styleService.styleData.get(styleId)!.featureLayerStyle?.delete();
+                this.loadErdblickStyleData(styleId);
                 this.tileVisualizationQueue = [];
                 this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
                     this.tileVisualizationDestructionTopic.next(tileVisu)
                 );
-                this.visualizedTileLayers.delete(styleId);
-            } else {
-                const erdblickStyleData= this.loadErdblickStyleData(styleId, styleString, true);
-                if (erdblickStyleData !== undefined && erdblickStyleData) {
-                    this.importedStyles!.set(styleId, erdblickStyleData);
-                }
                 this.visualizedTileLayers.set(styleId, []);
                 for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                    this.renderTileLayer(tileLayer, this.importedStyles!.get(styleId), styleId);
+                    this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId)!, styleId);
                 }
-            }
+            });
+            console.log(`Reloaded style: ${styleId}.`);
         }
-        console.log(`Cycled imported style: ${styleId}.`);
+    }
+
+    cycleImportedStyle(styleId: string, remove= false) {
+        if (remove && !this.styleService.styleData.has(styleId)) {
+            console.log(`No style data for: ${styleId}.`);
+            return;
+        }
+        const style = this.styleService.styleData.get(styleId);
+        if (style === undefined) {
+            console.log(`Could not retrieve style for: ${styleId}.`);
+            return;
+        }
+        if (remove) {
+            style.featureLayerStyle?.delete();
+            this.styleService.availableStylesActivations.delete(styleId);
+            this.styleService.styleData.delete(styleId);
+            this.tileVisualizationQueue = [];
+            this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                this.tileVisualizationDestructionTopic.next(tileVisu)
+            );
+            this.visualizedTileLayers.delete(styleId);
+            this.styleService.importedStylesCount--;
+        } else {
+            this.loadErdblickStyleData(styleId);
+            this.visualizedTileLayers.set(styleId, []);
+            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId), styleId);
+            }
+            this.styleService.importedStylesCount++;
+        }
+        console.log(`Cycled imported style: ${styleId}. ${remove ? 'Removed' : 'Added' }.`);
     }
 
     private reapplyStyle(styleId: string, imported: boolean = false) {
-        const styleMap = imported ? this.importedStyles : this.styles;
-        if (!styleMap || !styleMap.has(styleId)) {
+        if (!this.styleService.styleData.has(styleId)) {
             return;
         }
-        const isActivated = imported ? this.styleService.activatedImportedStyles.get(styleId) : this.styleService.activatedStyles.get(styleId);
+        const isActivated = this.styleService.availableStylesActivations.get(styleId);
         if (isActivated === undefined) {
             return;
         }
-        const style = styleMap!.get(styleId);
-        if (style === undefined) {
+
+        if (!this.styleService.styleData.has(styleId)) {
             return;
         }
-        style.enabled = isActivated;
+        this.loadErdblickStyleData(styleId);
+        this.styleService.styleData.get(styleId)!.enabled = isActivated;
         this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
             this.tileVisualizationDestructionTopic.next(tileVisu)
         );
         if (isActivated) {
+            const style = this.styleService.styleData.get(styleId)!;
             this.visualizedTileLayers.set(styleId, []);
             for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
                 this.renderTileLayer(tileLayer, style, styleId);
@@ -321,15 +286,13 @@ export class ErdblickModel {
         console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
-    reapplyStyles(styleIds: Array<string>, imported: boolean = false) {
+    reapplyStyles(styleIds: Array<string>) {
         this.tileVisualizationQueue = [];
-        styleIds.forEach(styleId => this.reapplyStyle(styleId, imported));
+        styleIds.forEach(styleId => this.reapplyStyle(styleId));
     }
 
     reapplyAllStyles() {
-        if (this.styles) {
-            this.reapplyStyles([...this.styles.keys()]);
-        }
+        this.reapplyStyles([...this.styleService.availableStylesActivations.keys()]);
     }
 
     private reloadDataSources() {
@@ -389,10 +352,8 @@ export class ErdblickModel {
         return mapItem.layers.has(layerName) && mapItem.layers.get(layerName)!.visible;
     }
 
-    *allStyles(): Generator<[string, ErdblickStyleData], void, unknown> {
-        for (let styleIdAndData of this.styles!)
-            yield styleIdAndData;
-        for (let styleIdAndData of this.importedStyles!)
+    *allStyles(): Generator<[string, ErdblickStyle], void, unknown> {
+        for (let styleIdAndData of this.styleService.styleData)
             yield styleIdAndData;
     }
 
@@ -489,10 +450,8 @@ export class ErdblickModel {
                     return false;
                 }
                 let styleEnabled = false;
-                if (this.styles?.has(styleId)) {
-                    styleEnabled = this.styles?.get(styleId)?.enabled!;
-                } else if (this.importedStyles?.has(styleId)) {
-                    styleEnabled = this.importedStyles?.get(styleId)?.enabled!;
+                if (this.styleService.styleData.has(styleId)) {
+                    styleEnabled = this.styleService.styleData.get(styleId)?.enabled!;
                 }
                 if (styleId != "_builtin" && !styleEnabled) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
@@ -532,7 +491,7 @@ export class ErdblickModel {
         this.currentFetch.go();
     }
 
-    private addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyleData | null, styleId: string, preventCulling: any) {
+    private addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
         let tileLayer = new FeatureTile(this.coreLib, this.tileParser, tileLayerBlob, preventCulling);
 
         // Don't add a tile that is not supposed to be visible.
@@ -554,8 +513,9 @@ export class ErdblickModel {
             if (style && styleId) {
                 this.renderTileLayer(tileLayer, style, styleId);
             } else {
-                for (let [styleId, style] of this.allStyles())
+                this.styleService.styleData.forEach((style, styleId) => {
                     this.renderTileLayer(tileLayer, style, styleId);
+                });
             }
         });
     }

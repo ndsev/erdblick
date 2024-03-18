@@ -226,14 +226,16 @@ export class ErdblickView {
 
         // Apply additional highlight styles.
         for (let [styleId, styleData] of this.model.allStyles()) {
-            let visu = new TileVisualization(
-                resolvedFeature!.featureTile,
-                (tileKey: string)=>this.model.getFeatureTile(tileKey),
-                styleData.featureLayerStyle,
-                true,
-                feature.id);
-            this.model.tileVisualizationTopic.next(visu);
-            this.selectionVisualizations.push(visu);
+            if (styleData.featureLayerStyle) {
+                let visu = new TileVisualization(
+                    resolvedFeature!.featureTile,
+                    (tileKey: string)=>this.model.getFeatureTile(tileKey),
+                    styleData.featureLayerStyle,
+                    true,
+                    feature.id);
+                this.model.tileVisualizationTopic.next(visu);
+                this.selectionVisualizations.push(visu);
+            }
         }
     }
 
