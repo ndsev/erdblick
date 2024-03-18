@@ -161,7 +161,7 @@ import {Dialog} from "primeng/dialog";
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!dataWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Close"'
+                    <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
                 </div>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
