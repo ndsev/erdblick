@@ -67,6 +67,7 @@ export class StyleService {
             });
             this.availableStylesActivations.set(defaultStyle.id, true);
             this.erdblickBuiltinStyles = [defaultStyle];
+            this.builtinStylesCount++;
             let styleUrls: Array<ErdblickStyleEntry> = [];
             httpClient.get("/config.json", {responseType: "json"}).subscribe({
                 next: (data: any) => {
