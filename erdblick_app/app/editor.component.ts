@@ -13,6 +13,9 @@ const completionsList = [
     {label: "version", type: "property"},
     {label: "name", type: "property"},
     {label: "rules", type: "property"},
+    {label: "aspect", type: "property"},
+    {label: "mode", type: "property"},
+    {label: "selectable", type: "property"},
     {label: "opacity", type: "property"},
     {label: "label-color", type: "property"},
     {label: "label-outline-color", type: "property"},
@@ -45,6 +48,13 @@ const completionsList = [
     {label: "dash-length", type: "property"},
     {label: "dash-pattern", type: "property"},
     {label: "first-of", type: "property"},
+    {label: "relation-type", type: "property"},
+    {label: "relation-line-height-offset", type: "property"},
+    {label: "relation-line-end-markers", type: "property"},
+    {label: "relation-source-style", type: "property"},
+    {label: "relation-target-style", type: "property"},
+    {label: "relation-recursive", type: "property"},
+    {label: "relation-merge-twoway", type: "property"},
     {label: "FILL", type: "keyword"},
     {label: "OUTLINE", type: "keyword"},
     {label: "FILL_AND_OUTLINE", type: "keyword"},
@@ -60,7 +70,12 @@ const completionsList = [
     {label: "RIGHT", type: "keyword"},
     {label: "ABOVE", type: "keyword"},
     {label: "BELOW", type: "keyword"},
-    {label: "BASELINE", type: "keyword"}
+    {label: "BASELINE", type: "keyword"},
+    {label: "feature", type: "keyword"},
+    {label: "relation", type: "keyword"},
+    {label: "attribute", type: "keyword"},
+    {label: "normal", type: "keyword"},
+    {label: "highlight", type: "keyword"}
 ]
 
 @Component({
