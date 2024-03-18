@@ -38,9 +38,6 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
         type_.reset();
         filter_.clear();
         firstOfRules_.clear();
-        relationLineEndMarkerStyle_.reset();
-        relationSourceStyle_.reset();
-        relationTargetStyle_.reset();
     }
 }
 
