@@ -64,66 +64,69 @@ import {Dialog} from "primeng/dialog";
                 </div>
             </p-fieldset>
             <p-fieldset class="map-tab" legend="Styles">
-                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">No styles loaded.
+                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
+                    No styles loaded.
                 </div>
-                <div *ngIf="styleService.builtinStylesCount" class="styles-container">
-                    <div *ngFor="let style of styleService.styleData | keyvalue">
-                        <div *ngIf="!style.value.imported" class="flex-container">
+                <div class="styles-container">
+                    <div *ngIf="styleService.builtinStylesCount">
+                        <div *ngFor="let style of styleService.styleData | keyvalue">
+                            <div *ngIf="!style.value.imported" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
                                 {{ style.key }}
                             </span>
-                            <div class="layer-controls style-controls">
-                                <p-button (click)="showStyleEditor(style.key)"
-                                          icon="pi pi-file-edit"
-                                          label="" pTooltip="Edit style"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="toggleStyle(style.key)"
-                                          icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                          label="" pTooltip="Toggle style"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="resetStyle(style.key)"
-                                          icon="pi pi-refresh"
-                                          label="" pTooltip="Reload style from disk"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="exportStyle(style.key)"
-                                          icon="pi pi-file-export"
-                                          label="" pTooltip="Export style"
-                                          tooltipPosition="bottom">
-                                </p-button>
+                                <div class="layer-controls style-controls">
+                                    <p-button (click)="showStyleEditor(style.key)"
+                                              icon="pi pi-file-edit"
+                                              label="" pTooltip="Edit style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="toggleStyle(style.key)"
+                                              icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                              label="" pTooltip="Toggle style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="resetStyle(style.key)"
+                                              icon="pi pi-refresh"
+                                              label="" pTooltip="Reload style from disk"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="exportStyle(style.key)"
+                                              icon="pi pi-file-export"
+                                              label="" pTooltip="Export style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-                <div *ngIf="styleService.importedStylesCount" class="styles-container">
-                    <div *ngFor="let style of styleService.styleData | keyvalue">
-                        <div *ngIf="style.value.imported" class="flex-container">
+                    <div *ngIf="styleService.importedStylesCount">
+                        <div *ngFor="let style of styleService.styleData | keyvalue">
+                            <div *ngIf="style.value.imported" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
                                 {{ style.key }}
                             </span>
-                            <div class="layer-controls style-controls">
-                                <p-button (click)="showStyleEditor(style.key)"
-                                          icon="pi pi-file-edit"
-                                          label="" pTooltip="Edit style"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="toggleStyle(style.key)"
-                                          icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                          label="" pTooltip="Toggle style"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="removeStyle(style.key)"
-                                          icon="pi pi-trash"
-                                          label="" pTooltip="Remove style"
-                                          tooltipPosition="bottom">
-                                </p-button>
-                                <p-button (click)="exportStyle(style.key)"
-                                          icon="pi pi-file-export"
-                                          label="" pTooltip="Export style"
-                                          tooltipPosition="bottom">
-                                </p-button>
+                                <div class="layer-controls style-controls">
+                                    <p-button (click)="showStyleEditor(style.key)"
+                                              icon="pi pi-file-edit"
+                                              label="" pTooltip="Edit style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="toggleStyle(style.key)"
+                                              icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                              label="" pTooltip="Toggle style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="removeStyle(style.key)"
+                                              icon="pi pi-trash"
+                                              label="" pTooltip="Remove style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                    <p-button (click)="exportStyle(style.key)"
+                                              icon="pi pi-file-export"
+                                              label="" pTooltip="Export style"
+                                              tooltipPosition="bottom">
+                                    </p-button>
+                                </div>
                             </div>
                         </div>
                     </div>

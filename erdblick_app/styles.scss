@@ -308,8 +308,11 @@ body {
 
     .maps-container {
         overflow: auto;
-        max-height: calc(100vh - 30.5em);
+        max-height: calc(100vh - 33.75em);
         margin-top: 0.25em;
+        padding-right: 0.75em;
+        margin-right: -0.75em;
+        overflow-y: auto;
 
         .map-container {
             margin-top: 0.5em;
@@ -326,8 +329,11 @@ body {
 
     .styles-container {
         overflow: auto;
-        max-height: 10em;
+        max-height: 13.25em;
         margin-top: 0.25em;
+        padding-right: 0.75em;
+        margin-right: -0.75em;
+        overflow-y: auto;
     }
 
     .flex-container {
@@ -356,7 +362,7 @@ body {
             .p-fileupload {
                 span {
                     box-shadow: none;
-                    min-width: 3.4em;
+                    min-width: 6.4em;
                 }
             }
 
