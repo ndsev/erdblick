@@ -24,15 +24,6 @@ FetchContent_Declare(glm
     GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(glm)
 
-set(SIMFIL_WITH_MODEL_JSON YES)
-if (NOT TARGET simfil)
-  FetchContent_Declare(simfil
-    GIT_REPOSITORY "https://github.com/Klebert-Engineering/simfil.git"
-    GIT_TAG        "exception-handler"
-    GIT_SHALLOW    ON)
-  FetchContent_MakeAvailable(simfil)
-endif()
-
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
   GIT_TAG        "relations"
