@@ -109,8 +109,9 @@ export class ParametersService {
             pitch: params["pitch"] ? Number(params["pitch"]) : currentParameters.pitch,
             roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
         }
-        
-        if (newPosition.lon != currentParameters.lon ||
+
+        if (firstParamUpdate ||
+            newPosition.lon != currentParameters.lon ||
             newPosition.lat != currentParameters.lat ||
             newPosition.alt != currentParameters.alt ||
             newOrientation.heading != currentParameters.heading ||
