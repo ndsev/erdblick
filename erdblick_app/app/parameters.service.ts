@@ -109,18 +109,26 @@ export class ParametersService {
             pitch: params["pitch"] ? Number(params["pitch"]) : currentParameters.pitch,
             roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
         }
-        if (this.mapService.mapView !== undefined) {
-            this.mapService.mapView.viewer.camera.setView({
-                destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
-                orientation: newOrientation
-            });
+        
+        if (newPosition.lon != currentParameters.lon ||
+            newPosition.lat != currentParameters.lat ||
+            newPosition.alt != currentParameters.alt ||
+            newOrientation.heading != currentParameters.heading ||
+            newOrientation.pitch != currentParameters.pitch ||
+            newOrientation.roll != currentParameters.roll) {
+            if (this.mapService.mapView !== undefined) {
+                this.mapService.mapView.viewer.camera.setView({
+                    destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
+                    orientation: newOrientation
+                });
+            }
+            currentParameters.lon = newPosition.lon;
+            currentParameters.lat = newPosition.lat;
+            currentParameters.alt = newPosition.alt;
+            currentParameters.heading = newOrientation.heading;
+            currentParameters.roll = newOrientation.roll;
+            currentParameters.pitch = newOrientation.pitch;
         }
-        currentParameters.lon = newPosition.lon;
-        currentParameters.lat = newPosition.lat;
-        currentParameters.alt = newPosition.alt;
-        currentParameters.heading = newOrientation.heading;
-        currentParameters.roll = newOrientation.roll;
-        currentParameters.pitch = newOrientation.pitch;
 
         const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
         const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
