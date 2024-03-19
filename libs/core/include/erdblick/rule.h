@@ -71,6 +71,7 @@ public:
     [[nodiscard]] glm::fvec4 const& labelColor() const;
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     [[nodiscard]] float labelOutlineWidth() const;
+    [[nodiscard]] bool showBackground() const;
     [[nodiscard]] glm::fvec4 const& labelBackgroundColor() const;
     [[nodiscard]] std::pair<int, int> const& labelBackgroundPadding() const;
     [[nodiscard]] std::string const& labelHorizontalOrigin() const;
@@ -114,8 +115,9 @@ private:
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";
     glm::fvec4 labelColor_{1., 1., 1., 1.};
-    glm::fvec4 labelOutlineColor_{.0, .0, .0, .0};
-    float labelOutlineWidth_ = .0;
+    glm::fvec4 labelOutlineColor_{.0, .0, .0, .1};
+    float labelOutlineWidth_ = .1;
+    bool showBackground_ = false;
     glm::fvec4 labelBackgroundColor_{.0, .0, .0, .0};
     std::pair<int, int> labelBackgroundPadding_{0, 0};
     std::string labelHorizontalOrigin_ = "CENTER";
@@ -123,7 +125,7 @@ private:
     std::string labelHeightReference_ = "NONE";
     std::string labelTextExpression_;
     std::string labelText_;
-    std::string labelStyle_ = "FILL_AND_OUTLINE";
+    std::string labelStyle_ = "FILL";
     float labelScale_ = 1.;
     std::optional<std::pair<float, float>> labelPixelOffset_;
     std::optional<std::tuple<float, float, float>> labelEyeOffset_;

@@ -15,7 +15,6 @@ void CesiumPrimitiveLabelsCollection::addLabel(
         FeatureStyleRule const &style,
         uint32_t id,
         BoundEvalFun const& evalFun) {
-    JsValue label;
     auto const &color = style.labelColor();
     auto const &outlineColor = style.labelOutlineColor();
     auto const &bgColor = style.labelBackgroundColor();
@@ -30,6 +29,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
          {"fillColor", Cesium().Color.New(color.r, color.g, color.b, color.a)},
          {"outlineColor", Cesium().Color.New(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a)},
          {"outlineWidth", JsValue(style.labelOutlineWidth())},
+         {"showBackground", JsValue(style.showBackground())},
          {"backgroundColor", Cesium().Color.New(bgColor.r, bgColor.g, bgColor.b, bgColor.a)},
          {"backgroundPadding", Cesium().Cartesian2.New(padding.first, padding.second)},
          {"style", Cesium().LabelStyle[style.labelStyle()]},

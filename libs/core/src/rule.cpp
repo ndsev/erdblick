@@ -240,6 +240,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["label-background-color"].IsDefined()) {
         // Parse option to have a label background color.
+        showBackground_ = true;
         labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
     }
     if (yaml["label-background-padding"].IsDefined()) {
@@ -498,6 +499,11 @@ glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
 float FeatureStyleRule::labelOutlineWidth() const
 {
     return labelOutlineWidth_;
+}
+
+bool FeatureStyleRule::showBackground() const
+{
+    return showBackground_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
