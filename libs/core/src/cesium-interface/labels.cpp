@@ -35,8 +35,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
          {"style", Cesium().LabelStyle[style.labelStyle()]},
          {"horizontalOrigin", Cesium().HorizontalOrigin[style.labelHorizontalOrigin()]},
          {"verticalOrigin", Cesium().VerticalOrigin[style.labelVerticalOrigin()]},
-         {"scale", JsValue(style.labelScale())},
-         {"showBackground", JsValue(false)}
+         {"scale", JsValue(style.labelScale())}
     });
     if (auto const &nfs = style.nearFarScale()) {
         labelProperties.set("pixelOffsetScaleByDistance",
