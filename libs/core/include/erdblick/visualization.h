@@ -47,9 +47,15 @@ struct RecursiveRelationVisualizationState
         [[nodiscard]] bool readyToRender() const;
     };
 
-    std::map<std::string, std::deque<RelationToVisualize>>
-        relationsByFeatureId_;
+    // Keep track of which features provide which relations.
+    std::map<std::string, std::deque<RelationToVisualize>> relationsByFeatureId_;
+
+    // Keep track of features we still want to explore recursively.
     std::deque<mapget::model_ptr<mapget::Feature>> unexploredRelations_;
+
+    // Ensure that sourceStyle, targetStyle and endMarkerStyle
+    // are only ever applied once for each feature.
+    std::set<std::string> visualizedFeatures_;
 
     void populateAndRender(bool onlyUpdateTwowayFlags=false);
 

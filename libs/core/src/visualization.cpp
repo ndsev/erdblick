@@ -585,6 +585,11 @@ void RecursiveRelationVisualizationState::render(
         r.relation_->targetValidity() :
         r.targetFeature_->firstGeometry();
 
+    // Ensure that sourceStyle, targetStyle and endMarkerStyle
+    // are only ever applied once for each feature.
+    auto sourceId = r.sourceFeature_->id()->toString();
+    auto targetId = r.targetFeature_->id()->toString();
+
     // Create line geometry which connects source and target feature.
     if (sourceGeom && targetGeom)
     {
@@ -597,19 +602,25 @@ void RecursiveRelationVisualizationState::render(
             visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun);
         }
         if (rule_.relationLineEndMarkerStyle()) {
-            visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
-            visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+            if (visualizedFeatures_.emplace(sourceId + "-endmarker").second)
+                visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+            if (visualizedFeatures_.emplace(targetId + "-endmarker").second)
+                visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
         }
     }
 
     // Run source geometry visualization.
-    if (auto sourceRule = rule_.relationSourceStyle()) {
-        visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun);
+    if (sourceGeom && visualizedFeatures_.emplace(sourceId).second) {
+        if (auto sourceRule = rule_.relationSourceStyle()) {
+            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun);
+        }
     }
 
     // Run target geometry visualization.
-    if (auto targetRule = rule_.relationSourceStyle()) {
-        visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
+    if (targetGeom && visualizedFeatures_.emplace(targetId).second) {
+        if (auto targetRule = rule_.relationTargetStyle()) {
+            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
+        }
     }
 
     r.rendered_ = true;

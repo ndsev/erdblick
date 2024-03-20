@@ -114,8 +114,6 @@ Each rule within the YAML `rules` array can have the following fields:
 | `offset-scale-by-distance`    | Near and far pixel offset scaling properties of a Label based on the Label's distance from the camera.                                                                                                      | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]`  |
 | `first-of`                    | Mark a rule as a parent of a fallback rule list. See description below.                                                                                                                                     | Array of Rule objects.                                     | See example below.        |
 
-Sure, here are the additional sections to include in your documentation:
-
 ### Labels in Erdblick
 
 In Erdblick, labels are used to add textual information to the visualized geometries. Labels are always visualized in addition to the geometry itself and are positioned at the visual center of the geometry. For a label to be displayed, the `label-text` or `label-text-expression` property must be set in the style definition. When set, Erdblick renders the label according to the defined style properties, such as `label-color`, `label-font`, `label-scale`, etc.
