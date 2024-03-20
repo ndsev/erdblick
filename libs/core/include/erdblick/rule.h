@@ -57,6 +57,7 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
+    [[nodiscard]] double const& verticalOffset() const;
 
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
@@ -111,6 +112,7 @@ private:
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
+    double verticalOffset_ = .0;
 
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";
@@ -131,8 +133,6 @@ private:
     std::optional<std::tuple<float, float, float>> labelEyeOffset_;
     std::optional<std::array<float, 4>> translucencyByDistance_;
 
-    std::vector<FeatureStyleRule> firstOfRules_;
-
     std::optional<std::regex> relationType_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
@@ -140,6 +140,8 @@ private:
     std::shared_ptr<FeatureStyleRule> relationTargetStyle_;
     bool relationRecursive_ = false;
     bool relationMergeTwoWay_ = false;
+
+    std::vector<FeatureStyleRule> firstOfRules_;
 };
 
 }

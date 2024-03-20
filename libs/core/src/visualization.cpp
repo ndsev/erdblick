@@ -212,9 +212,9 @@ void FeatureLayerVisualization::addGeometry(
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
-        [&vertsCartesian](auto&& vertex)
+        [&vertsCartesian, &rule](auto&& vertex)
         {
-            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex));
+            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, rule.verticalOffset()));
             return true;
         });
 
@@ -248,7 +248,7 @@ void FeatureLayerVisualization::addGeometry(
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))),
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.verticalOffset())),
                 text,
                 rule,
                 id,
@@ -357,8 +357,8 @@ void erdblick::FeatureLayerVisualization::addLine(
     BoundEvalFun const& evalFun,
     double labelPositionHint)
 {
-    auto cartA = wgsToCartesian<glm::dvec3>(wgsA);
-    auto cartB = wgsToCartesian<glm::dvec3>(wgsB);
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.verticalOffset());
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.verticalOffset());
 
     addPolyLine(
         {cartA, cartB},
