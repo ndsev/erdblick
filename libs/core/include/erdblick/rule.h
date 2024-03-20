@@ -85,6 +85,8 @@ public:
     [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
     [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& translucencyByDistance() const;
+    [[nodiscard]] std::optional<std::array<float, 4>> const& scaleByDistance() const;
+    [[nodiscard]] std::optional<std::array<float, 4>> const& offsetScaleByDistance() const;
 
 private:
     void parse(YAML::Node const& yaml);
@@ -132,6 +134,8 @@ private:
     std::optional<std::pair<float, float>> labelPixelOffset_;
     std::optional<std::tuple<float, float, float>> labelEyeOffset_;
     std::optional<std::array<float, 4>> translucencyByDistance_;
+    std::optional<std::array<float, 4>> scaleByDistance_;
+    std::optional<std::array<float, 4>> offsetScaleByDistance_;
 
     std::optional<std::regex> relationType_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
