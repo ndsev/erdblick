@@ -59,6 +59,7 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
           return da < db;
         });
 
+    // For lines, return the shape-point closest to the average.
     if (g->geomType() == Geometry::GeomType::Line) {
         if (totalPoints % 2 == 1) {
             // Odd number of points: Return closest point.

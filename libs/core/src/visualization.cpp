@@ -212,9 +212,9 @@ void FeatureLayerVisualization::addGeometry(
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
-        [&vertsCartesian](auto&& vertex)
+        [&vertsCartesian, &rule](auto&& vertex)
         {
-            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex));
+            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, rule.verticalOffset()));
             return true;
         });
 
@@ -248,7 +248,7 @@ void FeatureLayerVisualization::addGeometry(
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom))),
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.verticalOffset())),
                 text,
                 rule,
                 id,
@@ -357,8 +357,8 @@ void erdblick::FeatureLayerVisualization::addLine(
     BoundEvalFun const& evalFun,
     double labelPositionHint)
 {
-    auto cartA = wgsToCartesian<glm::dvec3>(wgsA);
-    auto cartB = wgsToCartesian<glm::dvec3>(wgsB);
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.verticalOffset());
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.verticalOffset());
 
     addPolyLine(
         {cartA, cartB},
@@ -488,8 +488,16 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         }
     }
 
-    // Resolve target feature.
+    // Check if this relation was already added.
     auto targetRef = relation->target();
+    auto& relationsForThisFeature = relationsByFeatureId_[sourceFeature->id()->toString()];
+    for (auto& existingRelVisu : relationsForThisFeature) {
+        if (existingRelVisu.relation_->target()->toString() == targetRef->toString()) {
+            return;
+        }
+    }
+
+    // Resolve target feature.
     auto targetFeature =
         visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
 
@@ -510,7 +518,6 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         return;
 
     // Create new relation-to-visualize.
-    auto& relationsForThisFeature = relationsByFeatureId_[sourceFeature->id()->toString()];
     auto& newRelationVisu = relationsForThisFeature.emplace_back();
     newRelationVisu.relation_ = relation;
     newRelationVisu.sourceFeature_ = sourceFeature;

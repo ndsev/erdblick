@@ -149,6 +149,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, nearFarScale_->begin());
         }
     }
+    if (yaml["vertical-offset"].IsDefined()) {
+        // Parse option for the width of the feature outline color.
+        verticalOffset_ = yaml["vertical-offset"].as<double>();
+    }
 
     /////////////////////////////////////
     /// Line Style Fields
@@ -599,6 +603,11 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::scaleByDistance() c
 std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistance() const
 {
     return offsetScaleByDistance_;
+}
+
+double const& FeatureStyleRule::verticalOffset() const
+{
+    return verticalOffset_;
 }
 
 }

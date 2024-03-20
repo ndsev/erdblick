@@ -33,16 +33,14 @@ namespace erdblick
  * with altitude indicated in meters.
  */
 template <typename ResultVec = glm::vec3>
-ResultVec wgsToCartesian(mapget::Point const& wgsPoint, glm::dvec3 const& origin = glm::dvec3{.0, .0, .0})
+ResultVec wgsToCartesian(mapget::Point const& wgsPoint, double const& extraAltitude = .0)
 {
     namespace geo = CesiumGeospatial;
     auto& wgs84Elli = geo::Ellipsoid::WGS84;
-    auto cartoCoords = geo::Cartographic::fromDegrees(wgsPoint.x, wgsPoint.y, wgsPoint.z);
+    auto cartoCoords =
+        geo::Cartographic::fromDegrees(wgsPoint.x, wgsPoint.y, wgsPoint.z + extraAltitude);
     auto cartesian = wgs84Elli.cartographicToCartesian(cartoCoords);
-    return {
-        cartesian.x - origin.x,
-        cartesian.y - origin.y,
-        cartesian.z - origin.z};
+    return {cartesian.x, cartesian.y, cartesian.z};
 }
 
 }

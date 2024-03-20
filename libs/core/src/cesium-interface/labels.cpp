@@ -26,6 +26,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
          {"show", JsValue(true)},
          {"text", JsValue(labelText)},
          {"font", JsValue(style.labelFont())},
+         {"disableDepthTestDistance", JsValue(std::numeric_limits<double>::infinity())},
          {"fillColor", Cesium().Color.New(color.r, color.g, color.b, color.a)},
          {"outlineColor", Cesium().Color.New(outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a)},
          {"outlineWidth", JsValue(style.labelOutlineWidth())},
