@@ -290,6 +290,22 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             std::copy(components.begin(), components.begin()+4, translucencyByDistance_->begin());
         }
     }
+    if (yaml["scale-by-distance"].IsDefined()) {
+        // Parse option for near and far scale properties of a Label based on the Label's distance from the camera.
+        auto components = yaml["scale-by-distance"].as<std::vector<float>>();
+        if (components.size() >= 4) {
+            scaleByDistance_ = {.0};
+            std::copy(components.begin(), components.begin()+4, scaleByDistance_->begin());
+        }
+    }
+    if (yaml["offset-scale-by-distance"].IsDefined()) {
+        // Parse option for near and far offset scale properties of a Label based on the Label's distance from the camera.
+        auto components = yaml["offset-scale-by-distance"].as<std::vector<float>>();
+        if (components.size() >= 4) {
+            offsetScaleByDistance_ = {.0};
+            std::copy(components.begin(), components.begin()+4, offsetScaleByDistance_->begin());
+        }
+    }
 
     /////////////////////////////////////
     /// Sub-Rule Fields
@@ -573,6 +589,16 @@ std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEye
 std::optional<std::array<float, 4>> const& FeatureStyleRule::translucencyByDistance() const
 {
     return translucencyByDistance_;
+}
+
+std::optional<std::array<float, 4>> const& FeatureStyleRule::scaleByDistance() const
+{
+    return scaleByDistance_;
+}
+
+std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistance() const
+{
+    return offsetScaleByDistance_;
 }
 
 }

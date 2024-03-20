@@ -37,9 +37,16 @@ void CesiumPrimitiveLabelsCollection::addLabel(
          {"verticalOrigin", Cesium().VerticalOrigin[style.labelVerticalOrigin()]},
          {"scale", JsValue(style.labelScale())}
     });
-    if (auto const &nfs = style.nearFarScale()) {
-        labelProperties.set("pixelOffsetScaleByDistance",
+    if (auto const &sbd = style.scaleByDistance()) {
+        labelProperties.set("scaleByDistance",
+            Cesium().NearFarScalar.New((*sbd)[0], (*sbd)[1], (*sbd)[2], (*sbd)[3]));
+    } else if (auto const &nfs = style.nearFarScale() ) {
+        labelProperties.set("scaleByDistance",
             Cesium().NearFarScalar.New((*nfs)[0], (*nfs)[1], (*nfs)[2], (*nfs)[3]));
+    }
+    if (auto const &osbd = style.offsetScaleByDistance() ) {
+        labelProperties.set("pixelOffsetScaleByDistance",
+            Cesium().NearFarScalar.New((*osbd)[0], (*osbd)[1], (*osbd)[2], (*osbd)[3]));
     }
     if (auto const &pixelOffset = style.labelPixelOffset()) {
         labelProperties.set("pixelOffset",
