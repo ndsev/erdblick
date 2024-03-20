@@ -608,7 +608,7 @@ void RecursiveRelationVisualizationState::render(
     }
 
     // Run target geometry visualization.
-    if (auto targetRule = rule_.relationSourceStyle()) {
+    if (auto targetRule = rule_.relationTargetStyle()) {
         visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
     }
 
