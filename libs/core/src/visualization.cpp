@@ -488,8 +488,16 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         }
     }
 
-    // Resolve target feature.
+    // Check if this relation was already added.
     auto targetRef = relation->target();
+    auto& relationsForThisFeature = relationsByFeatureId_[sourceFeature->id()->toString()];
+    for (auto& existingRelVisu : relationsForThisFeature) {
+        if (existingRelVisu.relation_->target()->toString() == targetRef->toString()) {
+            return;
+        }
+    }
+
+    // Resolve target feature.
     auto targetFeature =
         visu_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
 
@@ -510,7 +518,6 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         return;
 
     // Create new relation-to-visualize.
-    auto& relationsForThisFeature = relationsByFeatureId_[sourceFeature->id()->toString()];
     auto& newRelationVisu = relationsForThisFeature.emplace_back();
     newRelationVisu.relation_ = relation;
     newRelationVisu.sourceFeature_ = sourceFeature;
