@@ -24,6 +24,24 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     std::cout << "Unsupported arrow mode: " << arrowStr << std::endl;
     return {};
 }
+
+std::optional<mapget::Geometry::GeomType> parseGeometryEnum(std::string const& enumStr) {
+    if (enumStr == "point") {
+        return mapget::Geometry::GeomType::Points;
+    }
+    else if (enumStr == "mesh") {
+        return mapget::Geometry::GeomType::Mesh;
+    }
+    else if (enumStr == "line") {
+        return mapget::Geometry::GeomType::Line;
+    }
+    else if (enumStr == "polygon") {
+        return mapget::Geometry::GeomType::Polygon;
+    }
+
+    std::cout << "Unsupported geometry type: " << enumStr << std::endl;
+    return {};
+}
 }
 
 FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
@@ -50,23 +68,15 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["geometry"].IsDefined()) {
         // Parse target geometry types.
         geometryTypes_ = 0;  // Reset inherited geometry types.
-       for (auto const& geometryStr : yaml["geometry"]) {
-            auto g = geometryStr.as<std::string>();
-            if (g == "point") {
-                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Points);
+        if (yaml["geometry"].IsSequence()) {
+            for (auto const& geometryStr : yaml["geometry"]) {
+                if (auto geomType = parseGeometryEnum(geometryStr.as<std::string>())) {
+                    geometryTypes_ |= geomTypeBit(*geomType);
+                }
             }
-            else if (g == "mesh") {
-                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Mesh);
-            }
-            else if (g == "line") {
-                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Line);
-            }
-            else if (g == "polygon") {
-                geometryTypes_ |= geomTypeBit(mapget::Geometry::GeomType::Polygon);
-            }
-            else {
-                std::cout << "Unsupported geometry type: " << g << std::endl;
-            }
+        }
+        else if (auto geomType = parseGeometryEnum(yaml["geometry"].as<std::string>())) {
+            geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
     if (yaml["aspect"].IsDefined()) {
