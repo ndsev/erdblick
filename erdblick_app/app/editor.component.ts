@@ -1,6 +1,6 @@
 import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2 } from '@angular/core';
 import { basicSetup } from 'codemirror';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Extension } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { autocompletion, CompletionContext, CompletionSource } from '@codemirror/autocomplete';
 import { EditorView, keymap, ViewUpdate } from '@codemirror/view';
@@ -127,6 +127,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 autocompletion({override: [this.styleCompletions]}),
                 lintGutter(),
                 this.yamlLinter,
+                this.stopMouseWheelClipboard,
                 EditorState.tabSize.of(2),
                 EditorView.updateListener.of((e: ViewUpdate) => {
                     this.styleService.styleEditedStateData.next(e.state.doc.toString());
@@ -139,7 +140,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         this.editorView?.destroy();
     }
 
-    yamlLinter = linter((view) => {
+    yamlLinter: Extension = linter((view) => {
         return new Promise((resolve) => {
             const results: Diagnostic[] = [];
             const doc = view.state.doc.toString();
@@ -159,6 +160,17 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
             resolve(results);
         });
     });
+
+    stopMouseWheelClipboard: Extension = EditorView.domEventHandlers({
+        mousedown: (event, view) => {
+            if (event.button === 1) {
+                event.preventDefault();
+                return true;
+            }
+            return false;
+        }
+    });
+
 
     styleCompletions: CompletionSource = (context: CompletionContext) => {
         let word = context.matchBefore(/\w*/);
