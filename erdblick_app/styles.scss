@@ -252,6 +252,8 @@ body {
         position: absolute;
         top: 4em;
         left: 0.5em;
+        overflow: auto;
+        max-height: calc(100vh - 9em);
     }
 
     .p-dialog-header {
@@ -307,12 +309,9 @@ body {
     }
 
     .maps-container {
-        overflow: auto;
-        max-height: calc(100vh - 33.75em);
         margin-top: 0.25em;
         padding-right: 0.75em;
         margin-right: -0.75em;
-        overflow-y: auto;
 
         .map-container {
             margin-top: 0.5em;
@@ -328,12 +327,9 @@ body {
     }
 
     .styles-container {
-        overflow: auto;
-        max-height: 13.25em;
         margin-top: 0.25em;
         padding-right: 0.75em;
         margin-right: -0.75em;
-        overflow-y: auto;
     }
 
     .flex-container {
@@ -519,17 +515,6 @@ body {
         .tabs-container {
             overflow: auto;
             max-height: 100vh;
-        }
-
-        .maps-container {
-            overflow: auto;
-            max-height: calc(100vh - 23em);
-            min-height: 10em;
-        }
-
-        .styles-container {
-            overflow: auto;
-            max-height: 10em;
         }
     }
 

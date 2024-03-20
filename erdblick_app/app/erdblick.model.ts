@@ -361,7 +361,7 @@ export class ErdblickModel {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
-        // Level: array of tileIds
+        // Map from level to array of tileIds
         let tileIdPerLevel = new Map<number, Array<bigint>>();
         for (let [_, level] of this.layerIdToLevel) {
             if (!tileIdPerLevel.has(level)) {
@@ -441,7 +441,7 @@ export class ErdblickModel {
             }
         }
 
-        // Update visualizations and visualization queue
+        // Update visualizations
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
                 if (!tileVisu.tile.preventCulling && (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) ||
@@ -466,6 +466,9 @@ export class ErdblickModel {
                 this.visualizedTileLayers.delete(styleId);
             }
         }
+
+        // Update Tile Visualization Queue
+        this.tileVisualizationQueue = [];
         for (const [styleId, tileVisus] of this.visualizedTileLayers) {
             tileVisus.forEach(tileVisu => {
                 if (tileVisu.isDirty()) {
