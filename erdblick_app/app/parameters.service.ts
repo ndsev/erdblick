@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
 import {MapInfoItem, MapService} from "./map.service";
-import {defaultStyle, StyleService} from "./style.service";
+import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math} from "cesium";
 import {Params} from "@angular/router";
@@ -28,7 +28,7 @@ const defaultParameters: ErdblickParameters = {
     osmOpacity: 30,
     osmEnabled: true,
     layers: [],
-    styles: [defaultStyle.id]
+    styles: []
 }
 
 @Injectable({providedIn: 'root'})
@@ -175,13 +175,16 @@ export class ParametersService {
         }
 
         let styles = currentParameters.styles;
+        let activateAll = false;
         if (params["styles"] && JSON.parse(params["styles"])) {
             styles = JSON.parse(params["styles"]);
+        } else if (firstParamUpdate) {
+            activateAll = true;
         }
         let currentStyles = new Array<string>();
         if (firstParamUpdate) {
             for (let styleId of this.styleService.availableStylesActivations.keys()) {
-                this.styleService.availableStylesActivations.set(styleId, false);
+                this.styleService.availableStylesActivations.set(styleId, activateAll);
             }
         }
         styles.forEach(styleId => {
