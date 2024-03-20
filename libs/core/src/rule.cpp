@@ -268,8 +268,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         labelStyle_ = yaml["label-style"].as<std::string>();
     }
     if (yaml["label-scale"].IsDefined()) {
-        // Parse label style string
-        labelStyle_ = yaml["label-scale"].as<std::string>();
+        // Parse label scale string
+        labelScale_ = yaml["label-scale"].as<float>();
     }
     if (yaml["label-pixel-offset"].IsDefined()) {
         // Parse option to have a label padding.
