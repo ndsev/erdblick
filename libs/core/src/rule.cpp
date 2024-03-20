@@ -198,13 +198,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["relation-source-style"].IsDefined()) {
         // Parse style for the relation source geometry.
-        relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
-        relationLineEndMarkerStyle_->parse(yaml["relation-source-style"]);
+        relationSourceStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationSourceStyle_->parse(yaml["relation-source-style"]);
     }
     if (yaml["relation-target-style"].IsDefined()) {
         // Parse style for the relation target geometry.
-        relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
-        relationLineEndMarkerStyle_->parse(yaml["relation-target-style"]);
+        relationTargetStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationTargetStyle_->parse(yaml["relation-target-style"]);
     }
     if (yaml["relation-recursive"].IsDefined()) {
         // Parse whether relations should be resolved recursively.
