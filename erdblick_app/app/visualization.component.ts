@@ -1,4 +1,4 @@
-import {Cartesian3, Color, Viewer, LabelCollection} from "cesium";
+import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "cesium";
 import {FeatureTile} from "./features.component";
 import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
@@ -10,22 +10,65 @@ interface LocateResponse {
     responses: Array<Array<LocateResolution>>
 }
 
+interface StyleWithIsDeleted extends FeatureLayerStyle {
+    isDeleted(): boolean;
+}
+
+/** */
+class LowDetailTileVisualization {
+    static visualizations: Map<string, LowDetailTileVisualization> = new Map<string, LowDetailTileVisualization>();
+
+    static get(tile: FeatureTile, viewer: Viewer): LowDetailTileVisualization {
+        if (LowDetailTileVisualization.visualizations.has(tile.id)) {
+            let result = this.visualizations.get(tile.id)!;
+            ++result.refCount;
+            return result;
+        }
+
+        return new LowDetailTileVisualization(viewer, tile);
+    }
+
+    refCount: number = 1;
+    private readonly entity: Entity;
+    private readonly id: string;
+
+    constructor(viewer: Viewer, tile: FeatureTile) {
+        let position = tile.coreLib.getTilePosition(BigInt(tile.tileId));
+        let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
+        this.entity = viewer.entities.add({
+            position: Cartesian3.fromDegrees(position.x, position.y),
+            point: {
+                pixelSize: 5,
+                color: color
+            }
+        });
+        this.id = tile.id;
+        LowDetailTileVisualization.visualizations.set(tile.id, this);
+    }
+
+    delete(viewer: Viewer) {
+        --this.refCount;
+        if (this.refCount <= 0) {
+            viewer.entities.remove(this.entity);
+            LowDetailTileVisualization.visualizations.delete(this.id);
+        }
+    }
+}
+
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
 export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
 
     private readonly coreLib: ErdblickCore;
-    private readonly style: any;
-    private entity: any;
-    private primitiveCollection: any;
-    private hasHighDetailVisualization: boolean;
-    private hasLowDetailVisualization: boolean;
-    private readonly numFeatures: number;
-    private readonly tileId: bigint;
-    private renderingInProgress: boolean;
-    private readonly highlight?: number;
-    private deleted: boolean;
+    private readonly style: StyleWithIsDeleted;
+    private lowDetailVisu: LowDetailTileVisualization|null = null;
+    private primitiveCollection: PrimitiveCollection|null = null;
+    private hasHighDetailVisualization: boolean = false;
+    private hasLowDetailVisualization: boolean = false;
+    private renderingInProgress: boolean = false;
+    private readonly highlight: number;
+    private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
 
     /**
@@ -45,20 +88,12 @@ export class TileVisualization {
     constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
         this.tile = tile;
         this.coreLib = tile.coreLib;
-        this.numFeatures = tile.numFeatures;
-        this.tileId = tile.tileId;
-        this.style = style;
+        this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlight = highlight === undefined ? 0xffffffff : highlight;
         this.deleted = false;
         this.auxTileFun = auxTileFun;
-
-        this.entity = null;  // Low-detail or empty -> Cesium point entity.
-        this.primitiveCollection = null; // High-detail -> PrimitiveCollection.
-
-        this.hasHighDetailVisualization = false; // Currently holding hd?
-        this.hasLowDetailVisualization = false; // Currently holding ld?
     }
 
     /**
@@ -156,15 +191,7 @@ export class TileVisualization {
             this.hasHighDetailVisualization = true;
         } else {
             // Else: Low-detail dot representation
-            let position = this.coreLib.getTilePosition(BigInt(this.tileId));
-            let color = (this.numFeatures <= 0) ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
-            this.entity = viewer.entities.add({
-                position: Cartesian3.fromDegrees(position.x, position.y),
-                point: {
-                    pixelSize: 5,
-                    color: color
-                }
-            });
+            this.lowDetailVisu = LowDetailTileVisualization.get(this.tile, viewer);
             this.hasLowDetailVisualization = true;
         }
 
@@ -189,9 +216,9 @@ export class TileVisualization {
                 this.primitiveCollection.destroy();
             this.primitiveCollection = null;
         }
-        if (this.entity) {
-            viewer.entities.remove(this.entity);
-            this.entity = null;
+        if (this.lowDetailVisu) {
+            this.lowDetailVisu.delete(viewer);
+            this.lowDetailVisu = null;
         }
         this.hasHighDetailVisualization = false;
         this.hasLowDetailVisualization = false;
@@ -211,7 +238,7 @@ export class TileVisualization {
      * underlying data is not empty.
      */
     private isHighDetailAndNotEmpty() {
-        return this.isHighDetail && (this.numFeatures > 0 || this.tile.preventCulling);
+        return this.isHighDetail && (this.tile.numFeatures > 0 || this.tile.preventCulling);
     }
 
     /**
