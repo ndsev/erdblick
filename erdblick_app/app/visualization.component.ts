@@ -14,7 +14,11 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
 }
 
-/** */
+/**
+ * Ensure that low-detail representations are only rendered once
+ * per map tile layer. Otherwise, they are rendered once per
+ * (style sheet, tile layer) combination.
+ */
 class LowDetailTileVisualization {
     static visualizations: Map<string, LowDetailTileVisualization> = new Map<string, LowDetailTileVisualization>();
 
@@ -28,6 +32,8 @@ class LowDetailTileVisualization {
         return new LowDetailTileVisualization(viewer, tile);
     }
 
+    // Keep track of how many TileVisualizations are using this low-detail one.
+    // We can delete this instance, as soon as refCount is 0.
     refCount: number = 1;
     private readonly entity: Entity;
     private readonly id: string;
