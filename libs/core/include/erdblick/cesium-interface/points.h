@@ -18,7 +18,8 @@ struct CesiumPointPrimitiveCollection
     void addPoint(
         const JsValue& position,
         FeatureStyleRule const& style,
-        uint32_t id);
+        uint32_t id,
+        BoundEvalFun const& evalFun);
 
     /**
      * Construct a JS Primitive from the provided Geometry instances.

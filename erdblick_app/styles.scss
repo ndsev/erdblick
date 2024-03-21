@@ -252,6 +252,8 @@ body {
         position: absolute;
         top: 4em;
         left: 0.5em;
+        overflow: auto;
+        max-height: calc(100vh - 9em);
     }
 
     .p-dialog-header {
@@ -307,9 +309,9 @@ body {
     }
 
     .maps-container {
-        overflow: auto;
-        max-height: calc(100vh - 30.5em);
         margin-top: 0.25em;
+        padding-right: 0.75em;
+        margin-right: -0.75em;
 
         .map-container {
             margin-top: 0.5em;
@@ -325,9 +327,9 @@ body {
     }
 
     .styles-container {
-        overflow: auto;
-        max-height: 10em;
         margin-top: 0.25em;
+        padding-right: 0.75em;
+        margin-right: -0.75em;
     }
 
     .flex-container {
@@ -336,10 +338,6 @@ body {
         display: flex;
         justify-content: space-between;
         align-items: center;
-
-        &:first-child {
-            margin-top: 0;
-        }
 
         span {
             font-size: 0.9em;
@@ -360,7 +358,7 @@ body {
             .p-fileupload {
                 span {
                     box-shadow: none;
-                    min-width: 3.4em;
+                    min-width: 6.4em;
                 }
             }
 
@@ -380,11 +378,18 @@ body {
 }
 
 .pref-dialog {
-    width: 25em;
     margin: 0;
 
     .p-button {
         margin: 0.5em 0.5em 0.5em 0;
+        width: 8em;
+    }
+
+    .button-container {
+        width: 30em;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 }
 
@@ -397,6 +402,31 @@ body {
     flex-direction: row;
 }
 
+.editor-dialog {
+    .p-dialog {
+        .p-dialog-content {
+            padding: 0 1.5rem 1rem 1.5rem;
+            max-height: calc(75vh + 3em);
+        }
+    }
+
+    .editor-container {
+        min-width: 30em;
+        width: 100%;
+        height: calc(100% - 4em);
+        max-height: calc(75vh - 2em);
+        margin: 0;
+        overflow: auto;
+        border: 1px solid silver;
+        display: flex;
+        flex-direction: row;
+    }
+
+    .cm-editor {
+        width: 0;
+        flex-grow: 1;
+    }
+}
 
 @media only screen and (max-width: 56em) {
     .help-button {
@@ -489,17 +519,6 @@ body {
             overflow: auto;
             max-height: 100vh;
         }
-
-        .maps-container {
-            overflow: auto;
-            max-height: calc(100vh - 23em);
-            min-height: 10em;
-        }
-
-        .styles-container {
-            overflow: auto;
-            max-height: 10em;
-        }
     }
 
     .p-overlaypanel:after, .p-overlaypanel:before{
@@ -572,5 +591,17 @@ body {
                 border-radius: 0;
             }
         }
+    }
+
+    .editor-dialog {
+        .p-dialog {
+           height: 100vh;
+           width: 100vw;
+        }
+
+       .editor-container {
+           width: 100%;
+           max-height: calc(100% - 3em);
+       }
     }
 }

@@ -232,6 +232,7 @@ public:
             diamondVertices[5], diamondVertices[0], diamondVertices[3]  // Bottom front-bottom triangle
         };
         diamondMeshFeature->addMesh(diamondTriangles);
+        diamondMeshFeature->addRelation("hasPoi", "PointOfInterest", {{"areaId", "TheBestArea"}, {"pointId", 200}});
 
         return result;
     }
@@ -247,7 +248,20 @@ public:
             filter: "properties.wayType == 'Bike'"
             color: "#3498db" # Blue color for Bike Way
             width: 10.0
-            arrow: "single"
+            arrow: "forward"
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL_AND_OUTLINE"
+            label-scale: 1
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -255,7 +269,19 @@ public:
             filter: "properties.wayType == 'Pedestrian'"
             color: "#2ecc71" # Green color for Pedestrian Way
             width: 15.0
-            arrow: "single"
+            arrow: "forward"
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL_AND_OUTLINE"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -264,6 +290,18 @@ public:
             color: "#f39c12" # Orange color for Any Way
             width: 30.0
             arrow: "double"
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.wayType as string"
+            label-text: "abc"
+            label-style: "OUTLINE"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -272,6 +310,18 @@ public:
             color: "#e74c3c" # Red color for Vehicle Way
             width: 30.0
             arrow: "double"
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - line
@@ -284,6 +334,18 @@ public:
             gap-color: "#e74c3c"
             dash-length: 20
             dash-pattern: 40000
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - polygon
@@ -320,29 +382,42 @@ public:
             type: "Sign"
             color: "#e342f5" # Dark color for Speed Limit Sign
             flat: true
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "OUTLINE"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
           - geometry:
               - mesh
             type: "Diamond"
             color: gold
             opacity: 0.5
+            label-color: "#00ccdd"
+            label-outline-color: "#111111"
+            label-outline-width: 1
+            label-font: "24px Helvetica"
+            label-background-color: "#00000000"
+            label-background-padding: [7, 5]
+            label-horizontal-origin: "LEFT"
+            label-vertical-origin: "BASELINE"
+            label-text-expression: "**.speedLimitKmh"
+            label-text: "abc"
+            label-style: "FILL"
+            near-far-scale: [1.5e2, 3, 8.0e6, 0.0]
 
-          #- geometry:
-          #    - label
-          #  type: "SignLabel"
-          #  font: "24px Helvetica",
-          #  fillColor: "#BBBBBB",
-          #  outlineColor: "#000000",
-          #  outlineWidth: 2,
-          #  backgroundColor: "#00000000",
-          #  backgroundPadding: [7, 5],
-          #  horizontalOrigin: "CENTER",
-          #  verticalOrigin: "CENTER",
-          #  heightReference: "NONE"
-          #  scale: 1.0,
-          #  scaleByDistance: [1.5e2, 3, 8.0e6, 0.0],
-          #  translucencyByDistance: [1.5e2, 3, 8.0e6, 0.0],
-          #  style: "FILL_AND_OUTLINE",
+          - type: "Diamond"
+            aspect: relation
+            color: red
+            width: 10
+            color-expression: "select(arr('red', 'green'), not $twoway as int)"
 
           # Fallback-rule-list for POI/PONI
           - type: "PointOf.*"

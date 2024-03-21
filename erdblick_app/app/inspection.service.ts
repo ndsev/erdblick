@@ -60,7 +60,7 @@ export class InspectionService {
                         }
                     } else {
                         // If it's a primitive value, set it as the node's data
-                        node.data = {k: key, v: value, t: typeof value};
+                        node.data = {k: key, v: value ? value : "null" , t: typeof value};
                     }
 
                     treeTableNodes.push(node);

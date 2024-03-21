@@ -30,11 +30,13 @@ export class ErdblickView {
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer;
+    private selectionVisualizations: TileVisualization[]
 
     /**
      * Construct a Cesium View with a Model.
      * @param {ErdblickModel} model
      * @param containerDomElementId Div which hosts the Cesium view.
+     * @param parameterService The parameter service, used to update
      */
     constructor(model: ErdblickModel,
                 containerDomElementId: string,
@@ -64,6 +66,9 @@ export class ErdblickView {
 
         // Holds the currently selected feature.
         this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
+
+        // Holds visualizations for the current selection for all present styles.
+        this.selectionVisualizations = [];
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
@@ -109,11 +114,14 @@ export class ErdblickView {
         this.tileVisForPrimitive = new Map();
 
         model.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
-            tileVis.render(this.viewer);
-            tileVis.forEachPrimitive((primitive: any) => {
-                this.tileVisForPrimitive.set(primitive, tileVis);
-            })
-            this.viewer.scene.requestRender();
+            tileVis.render(this.viewer).then(wasRendered => {
+                if (wasRendered) {
+                    tileVis.forEachPrimitive((primitive: any) => {
+                        this.tileVisForPrimitive.set(primitive, tileVis);
+                    })
+                    this.viewer.scene.requestRender();
+                }
+            });
         });
 
         model.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
@@ -187,24 +195,47 @@ export class ErdblickView {
     private setPickedCesiumFeature(feature: any) {
         if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
             return;
+
         // Restore the previously picked feature to its original color.
         if (this.pickedFeature && this.pickedFeatureOrigColor) {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        if (feature) {
-            // Highlight the new picked feature and remember its original color.
-            // Make sure that if the hovered feature is picked, we don't
-            // remember the hover color as the original color.
-            if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
-                this.setHoveredCesiumFeature(null);
-            }
-            this.pickedFeatureOrigColor = this.getFeatureColor(feature);
+        this.selectionVisualizations.forEach(visu => this.model.tileVisualizationDestructionTopic.next(visu));
+        this.selectionVisualizations = [];
+
+        // Get the actual mapget feature for the picked Cesium feature.
+        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
+        if (!resolvedFeature) {
+            this.selectionTopic.next(null);
+            return;
+        }
+
+        // Highlight the new picked feature and remember its original color.
+        // Make sure that if the hovered feature is picked, we don't
+        // remember the hover color as the original color.
+        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
+            this.setHoveredCesiumFeature(null);
+        }
+        this.pickedFeatureOrigColor = this.getFeatureColor(feature);
+        if (this.pickedFeatureOrigColor) {
             this.setFeatureColor(feature, Color.YELLOW);
             this.pickedFeature = feature;
-            this.selectionTopic.next(this.resolveFeature(feature.primitive, feature.id));
-        } else {
-            this.selectionTopic.next(null);
+            this.selectionTopic.next(resolvedFeature);
+        }
+
+        // Apply additional highlight styles.
+        for (let [styleId, styleData] of this.model.allStyles()) {
+            if (styleData.featureLayerStyle) {
+                let visu = new TileVisualization(
+                    resolvedFeature!.featureTile,
+                    (tileKey: string)=>this.model.getFeatureTile(tileKey),
+                    styleData.featureLayerStyle,
+                    true,
+                    feature.id);
+                this.model.tileVisualizationTopic.next(visu);
+                this.selectionVisualizations.push(visu);
+            }
         }
     }
 
@@ -224,7 +255,7 @@ export class ErdblickView {
     }
 
     /** Read the color of a cesium feature through its associated primitive. */
-    private getFeatureColor(feature: any) {
+    private getFeatureColor(feature: any): Color | null {
         if (feature.primitive.color !== undefined) {
             // Special treatment for point primitives.
             return feature.primitive.color.clone();
@@ -233,6 +264,9 @@ export class ErdblickView {
             return null;
         }
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
+        if (attributes.color === undefined) {
+            return null;
+        }
         return Color.fromBytes(...attributes.color);
     }
 

@@ -15,9 +15,10 @@ CesiumPointPrimitiveCollection::CesiumPointPrimitiveCollection() :
 void CesiumPointPrimitiveCollection::addPoint(
     const JsValue& position,
     FeatureStyleRule const& style,
-    uint32_t id)
+    uint32_t id,
+    BoundEvalFun const& evalFun)
 {
-    auto const& color = style.color();
+    auto const color = style.color(evalFun);
     auto const& oColor = style.outlineColor();
 
     auto options = JsValue::Dict({

@@ -9,6 +9,7 @@
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
+#include "simfil/exception-handler.h"
 
 #include "mapget/log.h"
 
@@ -87,6 +88,12 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
+/** Get the neighbor for a mapget tile id. */
+uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
+    mapget::TileId tid(tileIdValue);
+    return mapget::TileId(tid.x() + offsetX, tid.y() + offsetY, tid.z()).value_;
+}
+
 /** Get the full string key of a map tile feature layer. */
 std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
     auto tileKey = mapget::MapTileKey();
@@ -110,6 +117,13 @@ FeatureLayerStyle generateTestStyle() {
     return TestDataProvider::style();
 }
 
+/** Create a test style. */
+void setExceptionHandler(em::val handler) {
+    simfil::ThrowHandler::instance().set([handler](auto&& type, auto&& message){
+        handler(type, message);
+    });
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
@@ -127,7 +141,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("x", &mapget::Point::x)
         .field("y", &mapget::Point::y)
         .field("z", &mapget::Point::z);
-    em::register_vector<mapget::Point>("Points");
 
     ////////// Viewport
     em::value_object<Viewport>("Viewport")
@@ -189,11 +202,16 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     }
                     return self.at(i);
                 }));
+    em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, std::shared_ptr<mapget::TileFeatureLayer>>()
-        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection);
+        .constructor<FeatureLayerStyle const&, uint32_t>()
+        .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
+        .function("run", &FeatureLayerVisualization::run)
+        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
+        .function("externalReferences", &FeatureLayerVisualization::externalReferences)
+        .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
@@ -220,7 +238,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
 
+    ////////// Get tile id with vertical/horizontal offset
+    em::function("getTileNeighbor", &getTileNeighbor);
+
     ////////// Get a test tile/style
     em::function("generateTestTile", &generateTestTile);
     em::function("generateTestStyle", &generateTestStyle);
+
+    ////////// Set an exception handler
+    em::function("setExceptionHandler", &setExceptionHandler);
 }

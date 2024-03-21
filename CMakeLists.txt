@@ -26,11 +26,10 @@ FetchContent_MakeAvailable(glm)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "relations"
+  GIT_TAG        "main"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
-# Fetch cesium-native
 set(CESIUM_TESTS_ENABLED OFF)
 set(CESIUM_GLM_STRICT_ENABLED OFF)
 set(CESIUM_TRACING_ENABLED OFF)
@@ -48,8 +47,18 @@ FetchContent_Declare(yaml-cpp
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(yaml-cpp)
 
+# Erdblick Core Library
+
 add_subdirectory(libs/core)
 
 if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_subdirectory(test)
 endif()
+
+# Angular Build
+
+add_custom_target(erdblick-ui ALL
+  COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  DEPENDS erdblick-core
+)

@@ -28,14 +28,20 @@ struct CesiumPrimitive
      * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineMaterialAppearance.html
      * See https://cesium.com/learn/cesiumjs/ref-doc/Material.html
      */
-    static CesiumPrimitive withPolylineDashMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
+    static CesiumPrimitive withPolylineDashMaterialAppearance(
+        const FeatureStyleRule& style,
+        bool clampToGround,
+        glm::fvec4 const& resolvedColor);
 
     /**
      * Create a primitive which uses the PolylineMaterialAppearance for PolylineArrow material.
      * See https://cesium.com/learn/cesiumjs/ref-doc/PolylineMaterialAppearance.html
      * See https://cesium.com/learn/cesiumjs/ref-doc/Material.html
      */
-    static CesiumPrimitive withPolylineArrowMaterialAppearance(const FeatureStyleRule &style, bool clampToGround = false);
+    static CesiumPrimitive withPolylineArrowMaterialAppearance(
+        const FeatureStyleRule& style,
+        bool clampToGround,
+        glm::fvec4 const& resolvedColor);
 
     /**
      * Create a primitive which uses the PerInstanceColorAppearance.
@@ -53,9 +59,13 @@ struct CesiumPrimitive
      * must be a JS list of Point objects in Cesium cartesian coordinates.
      *
      * Note: In order to visualize the line correctly, the primitive
-     * must have been constructed using withPolylineColorAppearance.
+     * must have been constructed using withPolyline*Appearance.
      */
-    void addPolyLine(JsValue const& vertices, FeatureStyleRule const& style, uint32_t id);
+    void addPolyLine(
+        JsValue const& vertices,
+        FeatureStyleRule const& style,
+        uint32_t id,
+        BoundEvalFun const& evalFun);
 
     /**
      * Add a 3D polygon to the primitive. The provided vertices
@@ -64,7 +74,11 @@ struct CesiumPrimitive
      * Note: In order to visualize the polygon correctly, the primitive
      * must have been constructed using withPerInstanceColorAppearance.
      */
-    void addPolygon(JsValue const& vertices, FeatureStyleRule const& style, uint32_t id);
+    void addPolygon(
+        JsValue const& vertices,
+        FeatureStyleRule const& style,
+        uint32_t id,
+        BoundEvalFun const& evalFun);
 
     /**
      * Add a 3D triangle mesh to the primitive. The provided vertices
@@ -74,7 +88,11 @@ struct CesiumPrimitive
      * Note: In order to visualize the triangles correctly, the primitive
      * must have been constructed using withPerInstanceColorAppearance(true).
      */
-    void addTriangles(JsValue const& float64Array, FeatureStyleRule const& style, uint32_t id);
+    void addTriangles(
+        JsValue const& float64Array,
+        FeatureStyleRule const& style,
+        uint32_t id,
+        BoundEvalFun const& evalFun);
 
     /**
      * Constructs a JS Primitive from the provided Geometry instances.
@@ -91,7 +109,11 @@ private:
      * Add a Cesium GeometryInstance which wraps a Cesium Geometry,
      * and add it to this primitive's geometryInstances_ collection.
      */
-    void addGeometryInstance(const FeatureStyleRule& style, uint32_t id, const JsValue& geom);
+    void addGeometryInstance(
+        const FeatureStyleRule& style,
+        uint32_t id,
+        const JsValue& geom,
+        BoundEvalFun const& evalFun);
 
     /** Number of entries in geometryInstances_. */
     size_t numGeometryInstances_ = 0;
@@ -109,6 +131,9 @@ private:
     /** Flags to clamp geometries to ground. */
     bool clampToGround_ = false;
     bool polyLinePrimitive_ = false;
+
+    /** Flag to control if we need to compute the color for every geometry instance. */
+    bool perInstanceColor_ = false;
 };
 
 }

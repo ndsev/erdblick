@@ -3,9 +3,9 @@ import {ErdblickView} from "./erdblick.view";
 import {ErdblickModel} from "./erdblick.model";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
-import libErdblickCore, {Feature} from '../../build/libs/core/erdblick-core';
+import MainModuleFactory, {Feature, MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
 import {JumpTargetService} from "./jump.service";
-import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
+import {MapInfoItem, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
 import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
@@ -67,9 +67,13 @@ export class AppComponent {
                 this.version = data.toString();
             });
 
-        libErdblickCore().then((coreLib: any) => {
+        MainModuleFactory().then((coreLib: ErdblickCore) => {
             console.log("  ...done.")
             this.mapService.coreLib = coreLib;
+
+            coreLib.setExceptionHandler((excType: string, message: string) => {
+                throw new Error(`${excType}: ${message}`);
+            });
 
             this.styleService.stylesLoaded.subscribe(loaded => {
                 if (loaded) this.init();
@@ -105,7 +109,13 @@ export class AppComponent {
         });
 
         this.activatedRoute.queryParams.subscribe((params: Params) => {
-            this.parseAndApplyParams(params);
+            this.parametersService.parseAndApplyParams(params, this.firstParamUpdate);
+            if (this.firstParamUpdate) {
+                this.firstParamUpdate = false;
+                this.mapService.mapModel.getValue()?.update();
+                this.mapService.mapModel.getValue()?.reapplyAllStyles();
+            }
+            setTimeout(() => { this.mapService.mapView?.updateViewport() }, 1000);
         });
 
         this.parametersService.parameters.subscribe(parameters => {
@@ -113,102 +123,6 @@ export class AppComponent {
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries));
         });
-    }
-
-    private parseAndApplyParams(params: Params) {
-        let currentParameters = this.parametersService.parameters.getValue();
-        const newPosition = {
-            lon: params["lon"] ? Number(params["lon"]) : currentParameters.lon,
-            lat: params["lat"] ? Number(params["lat"]) : currentParameters.lat,
-            alt: params["alt"] ? Number(params["alt"]) : currentParameters.alt
-        }
-        const newOrientation = {
-            heading: params["heading"] ? Number(params["heading"]) : currentParameters.heading,
-            pitch: params["pitch"] ? Number(params["pitch"]) : currentParameters.pitch,
-            roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
-        }
-        if (this.mapService.mapView !== undefined) {
-            this.mapService.mapView.viewer.camera.setView({
-                destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
-                orientation: newOrientation
-            });
-        }
-        currentParameters.lon = newPosition.lon;
-        currentParameters.lat = newPosition.lat;
-        currentParameters.alt = newPosition.alt;
-        currentParameters.heading = newOrientation.heading;
-        currentParameters.roll = newOrientation.roll;
-        currentParameters.pitch = newOrientation.pitch;
-
-        const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
-        const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
-        this.mapService.osmEnabled = osmEnabled;
-        this.mapService.osmOpacityValue = osmOpacity;
-        if (osmEnabled) {
-            this.mapService.mapView?.updateOpenStreetMapLayer(osmOpacity / 100);
-        } else {
-            this.mapService.mapView?.updateOpenStreetMapLayer(0);
-        }
-        currentParameters.osmEnabled = osmEnabled;
-        currentParameters.osmOpacity = osmOpacity;
-
-        let layerNamesLevels = currentParameters.layers;
-        let currentLayers = new Array<Array<string>>;
-        if (params["layers"]) {
-            layerNamesLevels = JSON.parse(params["layers"]);
-        }
-        layerNamesLevels.forEach((nameLevel: Array<string>) => {
-            const name = nameLevel[0];
-            const level = Number(nameLevel[1]);
-            if (this.mapService.mapModel.getValue()) {
-                if (this.mapService.mapModel.getValue()!.layerIdToLevel.has(name)) {
-                    this.mapService.mapModel.getValue()!.layerIdToLevel.set(name, level);
-                }
-                const [encMapName, encLayerName] = name.split('/');
-                this.mapService.mapModel.getValue()!.availableMapItems.getValue().forEach(
-                    (mapItem: MapInfoItem, mapName: string) => {
-                        if (mapName == encMapName) {
-                            mapItem.visible = true;
-                            mapItem.layers.forEach((mapLayer, layerName) => {
-                                if (layerName == encLayerName) {
-                                    mapLayer.visible = true;
-                                    currentLayers.push([`${mapName}/${layerName}`, level.toString()])
-                                }
-                            });
-                        }
-                    });
-            }
-        });
-        if (currentLayers) {
-            currentParameters.layers = currentLayers;
-        }
-
-        if (!this.firstParamUpdate) {
-            let styles = currentParameters.styles;
-            if (params["styles"]) {
-                styles = JSON.parse(params["styles"]);
-            }
-            let currentStyles = new Array<string>();
-            styles.forEach(styleId => {
-                if (this.styleService.activatedStyles.has(styleId)) {
-                    this.styleService.activatedStyles.set(styleId, true);
-                    currentStyles.push(styleId);
-                }
-            })
-            if (currentStyles) {
-                currentParameters.styles = currentStyles;
-            }
-            this.parametersService.parameters.next(currentParameters);
-        }
-
-        if (Object.keys(params).length && this.firstParamUpdate) {
-            this.firstParamUpdate = false;
-            // Update if it loads later, than model fetches everything
-            this.mapService.mapModel.getValue()?.update();
-            this.mapService.mapModel.getValue()?.reapplyAllStyles();
-        }
-
-        setTimeout(() => { this.mapService.mapView?.updateViewport() }, 3000);
     }
 
     toggleOverlay(value: string, searchOverlay: OverlayPanel, event: any) {

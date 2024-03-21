@@ -26,7 +26,14 @@ CesiumLib::CesiumLib() :
     PolylineMaterialAppearance("PolylineMaterialAppearance"),
     Primitive("Primitive"),
     PrimitiveCollection("PrimitiveCollection"),
-    PrimitiveType("PrimitiveType")
+    PrimitiveType("PrimitiveType"),
+    Label("Label"),
+    LabelCollection("LabelCollection"),
+    HorizontalOrigin("HorizontalOrigin"),
+    VerticalOrigin("VerticalOrigin"),
+    LabelStyle("LabelStyle"),
+    Cartesian2("Cartesian2"),
+    Cartesian3("Cartesian3")
 {
 }
 

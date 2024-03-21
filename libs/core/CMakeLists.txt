@@ -10,12 +10,14 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/testdataprovider.h
   include/erdblick/aabb.h
   include/erdblick/stream.h
+  include/erdblick/geometry.h
 
   include/erdblick/cesium-interface/object.h
   include/erdblick/cesium-interface/primitive.h
   include/erdblick/cesium-interface/cesium.h
   include/erdblick/cesium-interface/point-conversion.h
   include/erdblick/cesium-interface/points.h
+  include/erdblick/cesium-interface/labels.h
 
   src/visualization.cpp
   src/style.cpp
@@ -24,17 +26,21 @@ set(ERDBLICK_SOURCE_FILES
   src/buffer.cpp
   src/aabb.cpp
   src/stream.cpp
+  src/geometry.cpp
 
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp
   src/cesium-interface/cesium.cpp
   src/cesium-interface/points.cpp
-  )
+  src/cesium-interface/labels.cpp
+)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
+  # target_compile_options(erdblick-core PRIVATE -fwasm-exceptions)
+  # target_link_options(erdblick-core PRIVATE -fwasm-exceptions)
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
     --profiling \
@@ -44,7 +50,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     -s EXPORT_ES6=1 \
     -s EXPORT_NAME='\"libErdblickCore\"' \
     -s WASM_BIGINT=1 \
-    -s NO_DISABLE_EXCEPTION_CATCHING \
     -s JS_MATH=0 \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s SINGLE_FILE=1 \
@@ -68,9 +73,3 @@ target_link_libraries(erdblick-core
     glm
     mapget-model
     yaml-cpp)
-
-add_custom_target(erdblick-ui ALL
-    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    DEPENDS erdblick-core
-)

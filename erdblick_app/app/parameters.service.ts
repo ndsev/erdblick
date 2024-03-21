@@ -1,8 +1,9 @@
 import {Injectable} from "@angular/core";
-import {MapService} from "./map.service";
+import {MapInfoItem, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math} from "cesium";
+import {Params} from "@angular/router";
 
 export interface ErdblickParameters {
      heading: number,
@@ -15,6 +16,19 @@ export interface ErdblickParameters {
      osmEnabled: boolean,
      layers: Array<Array<string>>,
      styles: Array<string>
+}
+
+const defaultParameters: ErdblickParameters = {
+    heading: 6.0,
+    pitch: -1.55,
+    roll: 0.25,
+    lon: 22.837473,
+    lat: 38.490817,
+    alt: 16000000,
+    osmOpacity: 30,
+    osmEnabled: true,
+    layers: [],
+    styles: []
 }
 
 @Injectable({providedIn: 'root'})
@@ -39,7 +53,7 @@ export class ParametersService {
                        alt: currentPositionCartographic.height
                    }
                }
-               const currentStyles = [...this.styleService.activatedStyles.keys()].filter(key => this.styleService.activatedStyles.get(key));
+               const currentStyles = [...this.styleService.availableStylesActivations.keys()].filter(key => this.styleService.availableStylesActivations.get(key));
                let currentLayers = new Array<Array<string>>;
                const mapModel = this.mapService.mapModel.getValue();
                if (mapModel) {
@@ -52,17 +66,18 @@ export class ParametersService {
                     });
                }
                this.parameters = new BehaviorSubject<ErdblickParameters>({
-                    heading: currentOrientation ? currentOrientation.heading : 6.0,
-                    pitch: currentOrientation ? currentOrientation.pitch : -1.55,
-                    roll: currentOrientation ? currentOrientation.roll : 0.25,
-                    lon: currentPosition ? currentPosition.lon : 22.837473,
-                    lat: currentPosition ? currentPosition.lat : 38.490817,
-                    alt: currentPosition ? currentPosition.alt : 16000000,
-                    osmOpacity: 30,
-                    osmEnabled: true,
+                    heading: currentOrientation ? currentOrientation.heading : defaultParameters.heading,
+                    pitch: currentOrientation ? currentOrientation.pitch : defaultParameters.pitch,
+                    roll: currentOrientation ? currentOrientation.roll : defaultParameters.roll,
+                    lon: currentPosition ? currentPosition.lon : defaultParameters.lon,
+                    lat: currentPosition ? currentPosition.lat : defaultParameters.lat,
+                    alt: currentPosition ? currentPosition.alt : defaultParameters.alt,
+                    osmOpacity: defaultParameters.osmOpacity,
+                    osmEnabled: defaultParameters.osmEnabled,
                     layers: currentLayers,
-                    styles: currentStyles
+                    styles: currentStyles.length ? currentStyles : defaultParameters.styles
                });
+                console.log(this.parameters)
           } else {
                this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
           }
@@ -80,6 +95,114 @@ export class ParametersService {
                return JSON.parse(parameters);
           }
           return null;
+     }
+
+    parseAndApplyParams(params: Params, firstParamUpdate: boolean = false) {
+        let currentParameters = this.parameters.getValue();
+        const newPosition = {
+            lon: params["lon"] ? Number(params["lon"]) : currentParameters.lon,
+            lat: params["lat"] ? Number(params["lat"]) : currentParameters.lat,
+            alt: params["alt"] ? Number(params["alt"]) : currentParameters.alt
+        }
+        const newOrientation = {
+            heading: params["heading"] ? Number(params["heading"]) : currentParameters.heading,
+            pitch: params["pitch"] ? Number(params["pitch"]) : currentParameters.pitch,
+            roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
+        }
+
+        if (firstParamUpdate ||
+            newPosition.lon != currentParameters.lon ||
+            newPosition.lat != currentParameters.lat ||
+            newPosition.alt != currentParameters.alt ||
+            newOrientation.heading != currentParameters.heading ||
+            newOrientation.pitch != currentParameters.pitch ||
+            newOrientation.roll != currentParameters.roll) {
+            if (this.mapService.mapView !== undefined) {
+                this.mapService.mapView.viewer.camera.setView({
+                    destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
+                    orientation: newOrientation
+                });
+            }
+            currentParameters.lon = newPosition.lon;
+            currentParameters.lat = newPosition.lat;
+            currentParameters.alt = newPosition.alt;
+            currentParameters.heading = newOrientation.heading;
+            currentParameters.roll = newOrientation.roll;
+            currentParameters.pitch = newOrientation.pitch;
+        }
+
+        const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
+        const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
+        this.mapService.osmEnabled = osmEnabled;
+        this.mapService.osmOpacityValue = osmOpacity;
+        if (osmEnabled) {
+            this.mapService.mapView?.updateOpenStreetMapLayer(osmOpacity / 100);
+        } else {
+            this.mapService.mapView?.updateOpenStreetMapLayer(0);
+        }
+        currentParameters.osmEnabled = osmEnabled;
+        currentParameters.osmOpacity = osmOpacity;
+
+        let layerNamesLevels = currentParameters.layers;
+        let currentLayers = new Array<Array<string>>;
+        if (params["layers"]) {
+            layerNamesLevels = JSON.parse(params["layers"]);
+        }
+        layerNamesLevels.forEach((nameLevel: Array<string>) => {
+            const name = nameLevel[0];
+            const level = Number(nameLevel[1]);
+            if (this.mapService.mapModel.getValue()) {
+                if (this.mapService.mapModel.getValue()!.layerIdToLevel.has(name)) {
+                    this.mapService.mapModel.getValue()!.layerIdToLevel.set(name, level);
+                }
+                const [encMapName, encLayerName] = name.split('/');
+                this.mapService.mapModel.getValue()!.availableMapItems.getValue().forEach(
+                    (mapItem: MapInfoItem, mapName: string) => {
+                        if (mapName == encMapName) {
+                            mapItem.visible = true;
+                            mapItem.layers.forEach((mapLayer, layerName) => {
+                                if (layerName == encLayerName) {
+                                    mapLayer.visible = true;
+                                    currentLayers.push([`${mapName}/${layerName}`, level.toString()])
+                                }
+                            });
+                        }
+                    });
+            }
+        });
+        if (currentLayers) {
+            currentParameters.layers = currentLayers;
+        }
+
+        let styles = currentParameters.styles;
+        let activateAll = false;
+        if (params["styles"] && JSON.parse(params["styles"])) {
+            styles = JSON.parse(params["styles"]);
+        } else if (firstParamUpdate) {
+            activateAll = true;
+        }
+        let currentStyles = new Array<string>();
+        if (firstParamUpdate) {
+            for (let styleId of this.styleService.availableStylesActivations.keys()) {
+                this.styleService.availableStylesActivations.set(styleId, activateAll);
+            }
+        }
+        styles.forEach(styleId => {
+            if (this.styleService.availableStylesActivations.has(styleId)) {
+                this.styleService.availableStylesActivations.set(styleId, true);
+                currentStyles.push(styleId);
+            }
+        })
+        if (currentStyles) {
+            currentParameters.styles = currentStyles;
+        }
+
+        this.parameters.next(currentParameters);
+    }
+
+     clearStorage() {
+         localStorage.removeItem('erdblickParameters');
+         this.parameters.next(defaultParameters);
      }
 
      private saveParameters() {
