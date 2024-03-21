@@ -1,4 +1,4 @@
-import {Component, HostListener, ViewChild} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
 import {StyleService} from "./style.service";
@@ -6,6 +6,7 @@ import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
+import {KeyValue} from "@angular/common";
 
 
 @Component({
@@ -35,7 +36,7 @@ import {Dialog} from "primeng/dialog";
                         <span class="font-bold white-space-nowrap map-header">
                             {{ mapItem.key }}
                         </span>
-                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue" class="flex-container">
+                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
                                 {{ mapLayer.key }}
                             </span>
@@ -69,7 +70,7 @@ import {Dialog} from "primeng/dialog";
                 </div>
                 <div class="styles-container">
                     <div *ngIf="styleService.builtinStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue">
+                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
                             <div *ngIf="!style.value.imported" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
                                 {{ style.key }}
@@ -100,7 +101,7 @@ import {Dialog} from "primeng/dialog";
                         </div>
                     </div>
                     <div *ngIf="styleService.importedStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue">
+                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
                             <div *ngIf="style.value.imported" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
                                 {{ style.key }}
@@ -132,7 +133,7 @@ import {Dialog} from "primeng/dialog";
                     </div>
                 </div>
                 <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
-                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue" class="flex-container">
+                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered" class="flex-container">
                         <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
                             {{ message.key }}: {{ message.value }} (see console)
                         </span>
@@ -400,5 +401,9 @@ export class MapPanelComponent {
 
     openStyleHelp() {
         window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
+    }
+
+    unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
+        return 0;
     }
 }

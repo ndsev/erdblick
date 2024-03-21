@@ -162,8 +162,8 @@ export class PreferencesComponent {
     }
 
     clearModifiedStyles() {
-        for (let styleId of this.styleService.styleData.keys()) {
-            if (!this.styleService.styleData.get(styleId)!.imported) {
+        for (let [styleId, style] of this.styleService.styleData) {
+            if (!style.imported && style.modified) {
                 this.mapService.reloadBuiltinStyle(styleId);
             }
         }

@@ -128,11 +128,15 @@ export class StyleService {
                     const result= await this.fetchStylesYamlSources([erdblickStyle]);
                     if (result !== undefined && result.get(styleId) !== undefined) {
                         const styleString = result.get(styleId)!;
+                        let enabled = true;
+                        if (this.availableStylesActivations.has(styleId)) {
+                            enabled = this.availableStylesActivations.get(styleId)!;
+                        }
                         this.styleData.set(styleId, {
                             id: styleId,
                             modified: false,
                             imported: false,
-                            enabled: true,
+                            enabled: enabled,
                             data: styleString,
                             featureLayerStyle: null
                         });
