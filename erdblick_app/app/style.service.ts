@@ -3,6 +3,7 @@ import {HttpClient} from "@angular/common/http";
 import {
     of,
     from,
+    forkJoin,
     map,
     mergeMap,
     reduce,
@@ -102,23 +103,35 @@ export class StyleService {
         });
     }
 
-    fetchStylesYamlSources(styles: Array<ErdblickStyleEntry>) {
-        return firstValueFrom(from(styles).pipe(
-            mergeMap(style =>
-                this.httpClient.get(style.url, {responseType: 'text'})
-                    .pipe(
-                        map(data => ({style, data})),
-                        catchError(error => {
-                            console.error('Error fetching style', style.id, error);
-                            return of({style, data: ""});
-                        })
-                    )
-            ),
-            reduce((acc, {style, data}) => {
-                acc.set(style.id, data);
-                return acc;
-            }, new Map<string, string>())
-        ));
+    async fetchStylesYamlSources(styles: Array<ErdblickStyleEntry>) {
+        const requests = styles.map((style, index) =>
+            this.httpClient.get(style.url, { responseType: 'text' })
+                .pipe(
+                    map(data => ({ index, data, styleId: style.id })),
+                    catchError(error => {
+                        console.error('Error fetching style', style.id, error);
+                        // Return an observable that emits a value, preserving the index and ID, with an empty data string on error.
+                        return of({ index, data: "", styleId: style.id });
+                    })
+                )
+        );
+
+        // Use await with firstValueFrom to wait for all HTTP requests to complete.
+        // The results array will maintain the order of the original requests.
+        const results = await firstValueFrom(forkJoin(requests));
+
+        // Sort the results by index to ensure they are in the same order as the input array.
+        // Although forkJoin preserves order, this is a safeguard.
+        results.sort((a, b) => a.index - b.index);
+
+        // Initialize an ordered map to hold the results.
+        const orderedMap = new Map<string, string>();
+        results.forEach(({ data, styleId }) => {
+            orderedMap.set(styleId, data);
+        });
+
+        // Return the map with the fetched styles in their original order.
+        return orderedMap;
     }
 
     async syncStyleYamlData(styleId: string) {
