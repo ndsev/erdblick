@@ -70,6 +70,7 @@ target_link_libraries(erdblick-core
     CesiumGeospatial
     CesiumGltf
     CesiumGltfWriter
-    glm
-    mapget-model
-    yaml-cpp)
+    CesiumUtility
+    glm::glm
+    mapget::model
+    yaml-cpp::yaml-cpp)

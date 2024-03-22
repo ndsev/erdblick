@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
+set -eu
 
-ci_dir="$(realpath ${BASH_SOURCE[0]} | xargs -I{} dirname {})"
-echo "Setting up Emscripten in: $ci_dir"
-cd "$ci_dir"
+BUILD_DIR="./build"
+PROFILE_DIR="./conan-profiles"
 
-git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk
-git pull
-./emsdk install latest
-./emsdk activate latest
-source ./emsdk_env.sh
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR/deps"
+mkdir -p "$BUILD_DIR/assets"
+
+conan install . \
+    -pr:b "$PROFILE_DIR/build.profile" \
+    -pr:h "$PROFILE_DIR/emscripten.profile" \
+    -s build_type=Release -s compiler.cppstd=20 -b missing -b editable \
+    -of "$BUILD_DIR"
