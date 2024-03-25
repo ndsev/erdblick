@@ -1,7 +1,7 @@
 "use strict";
 
 import {uint8ArrayFromWasm} from "./wasm";
-import {Cartesian3} from "cesium";
+import {Cartesian3} from "./cesium";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property

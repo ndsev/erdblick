@@ -27,23 +27,8 @@
                         "assets": [
                             {
                                 "glob": "**/*",
-                                "input": "node_modules/cesium/Build/Cesium/Workers",
-                                "output": "/bundle/cesium/Workers"
-                            },
-                            {
-                                "glob": "**/*",
-                                "input": "node_modules/cesium/Build/Cesium/ThirdParty",
-                                "output": "/bundle/cesium/ThirdParty"
-                            },
-                            {
-                                "glob": "**/*",
-                                "input": "node_modules/cesium/Build/Cesium/Assets",
-                                "output": "/bundle/cesium/Assets"
-                            },
-                            {
-                                "glob": "**/*",
-                                "input": "node_modules/cesium/Build/Cesium/Widgets",
-                                "output": "/bundle/cesium/Widgets"
+                                "input": "node_modules/cesium/Build/Cesium",
+                                "output": "/bundle/cesium"
                             },
                             {
                                 "glob": "**/*",

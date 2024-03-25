@@ -7,7 +7,6 @@ import MainModuleFactory, {Feature, MainModule as ErdblickCore} from '../../buil
 import {JumpTargetService} from "./jump.service";
 import {MapInfoItem, MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
-import {Cartesian3} from "cesium";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";

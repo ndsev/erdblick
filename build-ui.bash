@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 SOURCE_LOC=$1
 if [ -z $SOURCE_LOC ]; then
@@ -18,4 +19,5 @@ if [[ -z "$NG_DEVELOP" ]]; then
 else
   npm run build
 fi
+
 exit 0
