@@ -11,9 +11,10 @@ export class Fetch
     static CHUNK_HEADER_SIZE = 11;
     static CHUNK_TYPE_FIELDS = 1;
     static CHUNK_TYPE_FEATURES = 2;
+    static CHUNK_TYPE_END_OF_STREAM = 128;
     private url: string;
     private method: string;
-    private body: Object | null;
+    public bodyJson: string | null;
     private abortController: AbortController;
     private processChunks: boolean;
     private jsonCallback: any;
@@ -28,7 +29,7 @@ export class Fetch
     constructor(url: string) {
         this.url = url;
         this.method = 'GET';
-        this.body = null;
+        this.bodyJson = null;
         this.abortController = new AbortController();
         this.processChunks = false;
         this.jsonCallback = null;
@@ -51,8 +52,8 @@ export class Fetch
      * @param {object} body - The body of the request.
      * @return {Fetch} The Fetch instance for chaining.
      */
-    withBody(body: any) {
-        this.body = body;
+    withBody(bodyJson: string) {
+        this.bodyJson = bodyJson;
         return this;
     }
 
@@ -97,13 +98,9 @@ export class Fetch
             keepalive: false,
             mode: "same-origin"
         };
-        let headers: Record<string, any> = {
-            // TODO: Investigate why fetch actually refuses to pass this header.
-            //  Currently, the connection stays open for five seconds.
-            'Connection': 'close'
-        }
-        if (this.body) {
-            requestOptions["body"] = JSON.stringify(this.body);
+        let headers: Record<string, any> = {};
+        if (this.bodyJson) {
+            requestOptions["body"] = this.bodyJson;
             headers["Content-Type"] = "application/json";
         }
         requestOptions["headers"] = headers
@@ -154,6 +151,10 @@ export class Fetch
                 while (readIndex + Fetch.CHUNK_HEADER_SIZE <= accumulatedData.length) {
                     const type = accumulatedData[readIndex + 6];
                     const length = new DataView(accumulatedData.buffer, readIndex + 7, 4).getUint32(0, true);
+
+                    if (type == Fetch.CHUNK_TYPE_END_OF_STREAM) {
+                        this.abort();
+                    }
 
                     if (readIndex + Fetch.CHUNK_HEADER_SIZE + length <= accumulatedData.length) {
                         // Create a view for the current chunk frame
