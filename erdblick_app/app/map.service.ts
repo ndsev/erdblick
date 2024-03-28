@@ -45,30 +45,6 @@ export class MapService {
         });
     }
 
-    reloadBuiltinStyle(styleId: string) {
-        if (this.mapModel) {
-            this.mapModel.reloadStyle(styleId);
-        }
-    }
-
-    reapplyStyle(styleId: string) {
-        if (this.mapModel) {
-            this.mapModel.reapplyStyles([styleId]);
-        }
-    }
-
-    loadImportedStyle(styleId: string) {
-        if (this.mapModel) {
-            this.mapModel.cycleImportedStyle(styleId, false);
-        }
-    }
-
-    removeImportedStyle(styleId: string) {
-        if (this.mapModel) {
-            this.mapModel.cycleImportedStyle(styleId, true);
-        }
-    }
-
     applyTileLimits(tilesToLoadLimit: number, tilesToVisualizeLimit: number) {
         if (isNaN(tilesToLoadLimit) || isNaN(tilesToVisualizeLimit)) {
             return false;

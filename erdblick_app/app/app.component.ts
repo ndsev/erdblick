@@ -5,6 +5,7 @@ import {MapService} from "./map.service";
 import {ActivatedRoute, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
 import {OverlayPanel} from "primeng/overlaypanel";
+import {StyleService} from "./style.service";
 
 @Component({
     selector: 'app-root',
@@ -48,6 +49,7 @@ export class AppComponent {
                 private router: Router,
                 private activatedRoute: ActivatedRoute,
                 public mapService: MapService,
+                public styleService: StyleService,
                 public jumpToTargetService: JumpTargetService,
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
@@ -64,7 +66,7 @@ export class AppComponent {
             if (this.firstParamUpdate) {
                 this.firstParamUpdate = false;
                 this.mapService.mapModel.update();
-                this.mapService.mapModel.reapplyAllStyles();
+                this.styleService.reapplyAllStyles();
             }
             // setTimeout(() => { this.mapService.mapView?.updateViewport() }, 1000);
         });

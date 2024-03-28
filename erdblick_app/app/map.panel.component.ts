@@ -308,13 +308,13 @@ export class MapPanelComponent {
             }
             this.parameterService.parameters.next(parameters);
         }
-        this.mapService.reapplyStyle(styleId);
+        this.styleService.reapplyStyles([styleId]);
     }
 
     resetStyle(styleId: string) {
         if (this.styleService.styleData.has(styleId) && !this.styleService.styleData.get(styleId)!.imported) {
             this.styleService.availableStylesActivations.set(styleId, true);
-            this.mapService.reloadBuiltinStyle(styleId);
+            this.styleService.reloadStyle(styleId);
         }
     }
 
@@ -337,7 +337,7 @@ export class MapPanelComponent {
             this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader).subscribe(
                 (next) => {
                     if (next) {
-                        this.mapService.loadImportedStyle(styleId);
+                        this.styleService.cycleImportedStyle(styleId, false);
                     } else {
                         this.messageService.showError(`Could not read empty data for: ${styleId}`);
                     }
@@ -351,7 +351,7 @@ export class MapPanelComponent {
     }
 
     removeStyle(styleId: string) {
-        this.mapService.removeImportedStyle(styleId);
+        this.styleService.cycleImportedStyle(styleId, true);
         this.styleService.removeImportedStyle(styleId);
     }
 
@@ -383,7 +383,7 @@ export class MapPanelComponent {
             return;
         }
         this.styleService.updateStyle(styleId, styleData);
-        this.mapService.reapplyStyle(styleId);
+        this.styleService.reapplyStyles([styleId]);
         this.dataWasModified = false;
     }
 

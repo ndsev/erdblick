@@ -25,6 +25,7 @@ import {InspectionService} from "./inspection.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {ViewService} from "./view.service";
 import {CoreService} from "./core.service";
+import {StyleService} from "./style.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -65,6 +66,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     constructor(public mapService: MapService,
                 public coreService: CoreService,
                 public viewService: ViewService,
+                public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parameterService: ParametersService) {
 
@@ -287,7 +289,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
 
         // Apply additional highlight styles.
-        for (let [styleId, styleData] of this.mapService.mapModel.allStyles()) {
+        for (let [styleId, styleData] of this.styleService.allStyles()) {
             if (styleData.featureLayerStyle) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,

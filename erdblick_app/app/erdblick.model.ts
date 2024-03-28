@@ -103,13 +103,26 @@ export class ErdblickModel {
         ///////////////////////////////////////////////////////////////////////////
         //                                 BOOTSTRAP                             //
         ///////////////////////////////////////////////////////////////////////////
-
-        this.styleService.loadStyles();
         this.reloadDataSources();
 
         // Initial call to processTileStream, will keep calling itself
         this.processTileStream();
         this.processVisualizationTasks();
+
+        this.styleService.styleRemovedForId.subscribe(styleId => {
+            this.tileVisualizationQueue = [];
+            this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
+                this.tileVisualizationDestructionTopic.next(tileVisu)
+            );
+            this.visualizedTileLayers.delete(styleId);
+        });
+
+        this.styleService.styleAddedForId.subscribe(styleId => {
+            this.visualizedTileLayers.set(styleId, []);
+            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+                this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId)!, styleId);
+            }
+        });
     }
 
     private processTileStream() {
@@ -160,93 +173,6 @@ export class ErdblickModel {
         // Continue visualizing tiles with a delay.
         const delay = this.tileVisualizationQueue.length ? 0 : 10;
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
-    }
-
-    reloadStyle(styleId: string) {
-        if (this.styleService.styleData.has(styleId)) {
-            this.styleService.syncStyleYamlData(styleId).then(_ => {
-                this.styleService.styleData.get(styleId)!.featureLayerStyle?.delete();
-                this.styleService.loadErdblickStyleData(styleId);
-                this.tileVisualizationQueue = [];
-                this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                    this.tileVisualizationDestructionTopic.next(tileVisu)
-                );
-                this.visualizedTileLayers.set(styleId, []);
-                for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                    this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId)!, styleId);
-                }
-            });
-            console.log(`Reloaded style: ${styleId}.`);
-        }
-    }
-
-    cycleImportedStyle(styleId: string, remove= false) {
-        if (remove && !this.styleService.styleData.has(styleId)) {
-            console.log(`No style data for: ${styleId}.`);
-            return;
-        }
-        const style = this.styleService.styleData.get(styleId);
-        if (style === undefined) {
-            console.log(`Could not retrieve style for: ${styleId}.`);
-            return;
-        }
-        if (remove) {
-            style.featureLayerStyle?.delete();
-            this.styleService.availableStylesActivations.delete(styleId);
-            this.styleService.styleData.delete(styleId);
-            this.tileVisualizationQueue = [];
-            this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                this.tileVisualizationDestructionTopic.next(tileVisu)
-            );
-            this.visualizedTileLayers.delete(styleId);
-            this.styleService.importedStylesCount--;
-        } else {
-            this.styleService.loadErdblickStyleData(styleId);
-            this.visualizedTileLayers.set(styleId, []);
-            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId), styleId);
-            }
-            this.styleService.importedStylesCount++;
-        }
-        console.log(`Cycled imported style: ${styleId}. ${remove ? 'Removed' : 'Added' }.`);
-    }
-
-    private reapplyStyle(styleId: string, imported: boolean = false) {
-        if (!this.styleService.styleData.has(styleId)) {
-            return;
-        }
-        const isActivated = this.styleService.availableStylesActivations.get(styleId);
-        if (isActivated === undefined) {
-            return;
-        }
-
-        if (!this.styleService.styleData.has(styleId)) {
-            return;
-        }
-        this.styleService.loadErdblickStyleData(styleId);
-        this.styleService.styleData.get(styleId)!.enabled = isActivated;
-        this.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-            this.tileVisualizationDestructionTopic.next(tileVisu)
-        );
-        if (isActivated) {
-            const style = this.styleService.styleData.get(styleId)!;
-            this.visualizedTileLayers.set(styleId, []);
-            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
-                this.renderTileLayer(tileLayer, style, styleId);
-            }
-        } else {
-            this.visualizedTileLayers.set(styleId, []);
-        }
-        console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
-    }
-
-    reapplyStyles(styleIds: Array<string>) {
-        this.tileVisualizationQueue = [];
-        styleIds.forEach(styleId => this.reapplyStyle(styleId));
-    }
-
-    reapplyAllStyles() {
-        this.reapplyStyles([...this.styleService.availableStylesActivations.keys()]);
     }
 
     private reloadDataSources() {
@@ -304,11 +230,6 @@ export class ErdblickModel {
             return false;
         }
         return mapItem.layers.has(layerName) && mapItem.layers.get(layerName)!.visible;
-    }
-
-    *allStyles(): Generator<[string, ErdblickStyle], void, unknown> {
-        for (let styleIdAndData of this.styleService.styleData)
-            yield styleIdAndData;
     }
 
     update() {
