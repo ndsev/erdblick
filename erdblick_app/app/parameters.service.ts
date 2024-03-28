@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {MapInfoItem, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
-import {Cartesian3, Cartographic, Math} from "cesium";
+import {Cartesian3, Cartographic, Math} from "./cesium";
 import {Params} from "@angular/router";
 
 export interface ErdblickParameters {

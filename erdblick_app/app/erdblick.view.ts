@@ -16,7 +16,7 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer
-} from "cesium";
+} from "./cesium";
 import {ParametersService} from "./parameters.service";
 
 export class ErdblickView {

@@ -12,9 +12,8 @@ module.exports = {
     },
     module: {
         unknownContextCritical: false
-        // rules: [{
-        //     test: /\.css$/,
-        //     use: [ 'style-loader', 'css-loader', 'postcss-loader' ]
-        // }]
-    }
+    },
+    externals: {
+        'cesium': 'Cesium'
+    },
 };
