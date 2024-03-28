@@ -1,5 +1,5 @@
 import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "cesium";
-import {FeatureTile} from "./features.component";
+import {FeatureTile} from "./features.model";
 import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "./wasm";
 

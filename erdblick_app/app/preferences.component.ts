@@ -88,8 +88,8 @@ export class PreferencesComponent {
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        this.maxLoadTiles = this.tilesToLoadInput = this.mapService.mapModel.maxLoadTiles;
-        this.maxVisuTiles = this.tilesToVisualizeInput = this.mapService.mapModel.maxVisuTiles;
+        this.maxLoadTiles = this.tilesToLoadInput = this.mapService.maxLoadTiles;
+        this.maxVisuTiles = this.tilesToVisualizeInput = this.mapService.maxVisuTiles;
     }
 
     applyTileLimits() {
@@ -99,6 +99,10 @@ export class PreferencesComponent {
         }
         const result = this.mapService.applyTileLimits(this.tilesToLoadInput, this.tilesToVisualizeInput);
         if (result) {
+            let parameters = this.parametersService.parameters.getValue();
+            parameters.tilesToLoadLimit = this.tilesToLoadInput;
+            parameters.tilesToVisualizeLimit = this.tilesToVisualizeInput;
+            this.parametersService.parameters.next(parameters);
             this.messageService.showSuccess("Successfully updated tile limits!");
         } else {
             this.messageService.showError("Could not update tile limits!");

@@ -1,6 +1,6 @@
 "use strict";
 
-import {FeatureWrapper} from "./features.component";
+import {FeatureWrapper} from "./features.model";
 import {TileVisualization} from "./visualization.model"
 import {BehaviorSubject} from "rxjs"
 import {
@@ -22,7 +22,6 @@ import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {InspectionService} from "./inspection.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
-import {ViewService} from "./view.service";
 import {StyleService} from "./style.service";
 
 // Redeclare window with extended interface
@@ -57,12 +56,11 @@ export class ErdblickViewComponent implements AfterViewInit {
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
-     * @param viewService
+     * @param styleService
      * @param inspectionService
      * @param parameterService The parameter service, used to update
      */
     constructor(public mapService: MapService,
-                public viewService: ViewService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parameterService: ParametersService) {
@@ -75,7 +73,7 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.tileVisForPrimitive = new Map();
 
-        this.mapService.mapModel.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
+        this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
                 if (wasRendered) {
                     tileVis.forEachPrimitive((primitive: any) => {
@@ -86,7 +84,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             });
         });
 
-        this.mapService.mapModel.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
+        this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
             if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
                 this.setPickedCesiumFeature(null);
             }
@@ -100,8 +98,8 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.mapModel.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
-            this.viewService.cameraViewData.next({
+        this.mapService.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
+            this.parameterService.cameraViewData.next({
                 destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {
                     heading: Math.toRadians(0), // East, in radians.
@@ -195,7 +193,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Remove fullscreen button as unnecessary
         this.viewer.fullscreenButton.destroy();
 
-        this.viewService.cameraViewData.subscribe(cameraData => {
+        this.parameterService.cameraViewData.subscribe(cameraData => {
             if (cameraData) {
                 this.viewer.camera.setView({
                     destination: cameraData.destination,
@@ -204,18 +202,18 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         });
 
-        this.viewService.osmEnabled.subscribe(enabled => {
-            this.updateOpenStreetMapLayer(enabled ? this.viewService.osmOpacityValue.getValue() / 100: 0);
+        this.parameterService.osmEnabled.subscribe(enabled => {
+            this.updateOpenStreetMapLayer(enabled ? this.parameterService.osmOpacityValue.getValue() / 100: 0);
         });
 
-        this.viewService.osmOpacityValue.subscribe(value => {
+        this.parameterService.osmOpacityValue.subscribe(value => {
             this.updateOpenStreetMapLayer(value / 100);
         });
 
         // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService, this.viewService, this);
+        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
 
-        this.viewService.viewportToBeUpdated.subscribe(toBeUpdated => {
+        this.parameterService.viewportToBeUpdated.subscribe(toBeUpdated => {
             if (toBeUpdated) this.updateViewport();
         });
     }
@@ -266,7 +264,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        this.selectionVisualizations.forEach(visu => this.mapService.mapModel.tileVisualizationDestructionTopic.next(visu));
+        this.selectionVisualizations.forEach(visu => this.mapService.tileVisualizationDestructionTopic.next(visu));
         this.selectionVisualizations = [];
 
         // Get the actual mapget feature for the picked Cesium feature.
@@ -294,11 +292,11 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (styleData.featureLayerStyle) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,
-                    (tileKey: string)=>this.mapService.mapModel.getFeatureTile(tileKey),
+                    (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
                     styleData.featureLayerStyle,
                     true,
                     feature.id);
-                this.mapService.mapModel.tileVisualizationTopic.next(visu);
+                this.mapService.tileVisualizationTopic.next(visu);
                 this.selectionVisualizations.push(visu);
             }
         }
@@ -389,7 +387,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
         let expandLat = sizeLat * 0.25;
-        this.mapService.mapModel.setViewport({
+        this.mapService.setViewport({
             south: south - expandLat,
             west: west - expandLon,
             width: sizeLon + expandLon * 2,

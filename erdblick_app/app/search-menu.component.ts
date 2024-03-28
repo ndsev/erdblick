@@ -3,8 +3,8 @@ import {Cartesian3} from "cesium";
 import {InfoMessageService} from "./info.service";
 import {JumpTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
-import {ViewService} from "./view.service";
 import {coreLib} from "./wasm";
+import {ParametersService} from "./parameters.service";
 
 
 @Component({
@@ -30,7 +30,7 @@ export class SearchMenuComponent {
     value: string = "";
 
     constructor(public mapService: MapService,
-                public viewService: ViewService,
+                public parametersService: ParametersService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService) {
 
@@ -178,9 +178,9 @@ export class SearchMenuComponent {
         let lon = coordinates[1];
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
         let position = Cartesian3.fromDegrees(lon, lat, alt);
-        let orientation = this.viewService.collectCameraOrientation();
+        let orientation = this.parametersService.collectCameraOrientation();
         if (orientation) {
-            this.viewService.cameraViewData.next({
+            this.parametersService.cameraViewData.next({
                 destination: position,
                 orientation: orientation
             });

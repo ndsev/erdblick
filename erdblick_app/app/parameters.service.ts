@@ -1,22 +1,23 @@
 import {Injectable} from "@angular/core";
-import {MapInfoItem, MapService} from "./map.service";
+import {MapInfoItem, MapService, MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE} from "./map.service";
 import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math} from "cesium";
 import {Params} from "@angular/router";
-import {ViewService} from "./view.service";
 
 export interface ErdblickParameters {
-     heading: number,
-     pitch: number,
-     roll: number,
-     lon: number,
-     lat: number,
-     alt: number,
-     osmOpacity: number,
-     osmEnabled: boolean,
-     layers: Array<Array<string>>,
-     styles: Array<string>
+    heading: number,
+    pitch: number,
+    roll: number,
+    lon: number,
+    lat: number,
+    alt: number,
+    osmOpacity: number,
+    osmEnabled: boolean,
+    layers: Array<Array<string>>,
+    styles: Array<string>,
+    tilesToLoadLimit: number,
+    tilesToVisualizeLimit: number
 }
 
 const defaultParameters: ErdblickParameters = {
@@ -29,75 +30,89 @@ const defaultParameters: ErdblickParameters = {
     osmOpacity: 30,
     osmEnabled: true,
     layers: [],
-    styles: []
+    styles: [],
+    tilesToLoadLimit: MAX_NUM_TILES_TO_LOAD,
+    tilesToVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
 }
 
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
-     parameters: BehaviorSubject<ErdblickParameters>;
+    parameters: BehaviorSubject<ErdblickParameters>;
+    // TODO: Refactor away
+    viewportToBeUpdated: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
 
-     constructor(public mapService: MapService,
-                 public viewService: ViewService,
-                 public styleService: StyleService) {
-          let parameters = this.loadSavedParameters();
-          if (!parameters) {
-               const currentOrientation = this.viewService.collectCameraOrientation();
-               const currentCameraPosition = this.viewService.collectCameraPosition();
-               let currentPosition = null;
-               if (currentCameraPosition) {
-                   const currentPositionCartographic = Cartographic.fromCartesian(
-                       Cartesian3.fromElements(currentCameraPosition.x, currentCameraPosition.y, currentCameraPosition.z)
-                   );
-                   currentPosition = {
-                       lon: Math.toDegrees(currentPositionCartographic.longitude),
-                       lat: Math.toDegrees(currentPositionCartographic.latitude),
-                       alt: currentPositionCartographic.height
-                   }
-               }
-               const currentStyles = [...this.styleService.availableStylesActivations.keys()].filter(key => this.styleService.availableStylesActivations.get(key));
-               let currentLayers = new Array<Array<string>>;
-               const mapModel = this.mapService.mapModel;
-               if (mapModel) {
-                    mapModel.layerIdToLevel.forEach((level, mapLayerName) => {
-                        const [encMapName, encLayerName] = mapLayerName.split('/');
-                        const visible = mapService.mapModel.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
-                        if (visible !== undefined && visible) {
-                           currentLayers.push([mapLayerName, level.toString()]);
-                        }
-                    });
-               }
-               this.parameters = new BehaviorSubject<ErdblickParameters>({
-                    heading: currentOrientation ? currentOrientation.heading : defaultParameters.heading,
-                    pitch: currentOrientation ? currentOrientation.pitch : defaultParameters.pitch,
-                    roll: currentOrientation ? currentOrientation.roll : defaultParameters.roll,
-                    lon: currentPosition ? currentPosition.lon : defaultParameters.lon,
-                    lat: currentPosition ? currentPosition.lat : defaultParameters.lat,
-                    alt: currentPosition ? currentPosition.alt : defaultParameters.alt,
-                    osmOpacity: defaultParameters.osmOpacity,
-                    osmEnabled: defaultParameters.osmEnabled,
-                    layers: currentLayers,
-                    styles: currentStyles.length ? currentStyles : defaultParameters.styles
-               });
-               console.log(this.parameters.getValue())
-          } else {
-               this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
-          }
-          this.saveParameters();
-          this.parameters.subscribe(parameters => {
-               if (parameters) {
-                    this.saveParameters();
-               }
-          });
-     }
+    osmEnabled: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(true);
+    osmOpacityValue: BehaviorSubject<number> = new BehaviorSubject<number>(30);
+    cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
+        new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
+            destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),
+            orientation: {
+                heading: 6.0,
+                pitch: -1.55,
+                roll: 0.25,
+            }
+        });
 
-     loadSavedParameters(): ErdblickParameters | null {
-          const parameters = localStorage.getItem('erdblickParameters');
-          if (parameters) {
-               return JSON.parse(parameters);
-          }
-          return null;
-     }
+    constructor(public mapService: MapService,
+                public styleService: StyleService) {
+        let parameters = this.loadSavedParameters();
+        if (!parameters) {
+            const currentOrientation = this.collectCameraOrientation();
+            const currentCameraPosition = this.collectCameraPosition();
+            let currentPosition = null;
+            if (currentCameraPosition) {
+                const currentPositionCartographic = Cartographic.fromCartesian(
+                    Cartesian3.fromElements(currentCameraPosition.x, currentCameraPosition.y, currentCameraPosition.z)
+                );
+                currentPosition = {
+                    lon: Math.toDegrees(currentPositionCartographic.longitude),
+                    lat: Math.toDegrees(currentPositionCartographic.latitude),
+                    alt: currentPositionCartographic.height
+                }
+            }
+            const currentStyles = [...this.styleService.availableStylesActivations.keys()].filter(key => this.styleService.availableStylesActivations.get(key));
+            let currentLayers = new Array<Array<string>>;
+            this.mapService.layerIdToLevel.forEach((level, mapLayerName) => {
+                const [encMapName, encLayerName] = mapLayerName.split('/');
+                const visible = this.mapService.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
+                if (visible !== undefined && visible) {
+                    currentLayers.push([mapLayerName, level.toString()]);
+                }
+            });
+            this.parameters = new BehaviorSubject<ErdblickParameters>({
+                heading: currentOrientation ? currentOrientation.heading : defaultParameters.heading,
+                pitch: currentOrientation ? currentOrientation.pitch : defaultParameters.pitch,
+                roll: currentOrientation ? currentOrientation.roll : defaultParameters.roll,
+                lon: currentPosition ? currentPosition.lon : defaultParameters.lon,
+                lat: currentPosition ? currentPosition.lat : defaultParameters.lat,
+                alt: currentPosition ? currentPosition.alt : defaultParameters.alt,
+                osmOpacity: defaultParameters.osmOpacity,
+                osmEnabled: defaultParameters.osmEnabled,
+                layers: currentLayers,
+                styles: currentStyles.length ? currentStyles : defaultParameters.styles,
+                tilesToLoadLimit: defaultParameters.tilesToLoadLimit,
+                tilesToVisualizeLimit: defaultParameters.tilesToVisualizeLimit
+            });
+            console.log(this.parameters.getValue())
+        } else {
+            this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
+        }
+        this.saveParameters();
+        this.parameters.subscribe(parameters => {
+            if (parameters) {
+                this.saveParameters();
+            }
+        });
+    }
+
+    loadSavedParameters(): ErdblickParameters | null {
+        const parameters = localStorage.getItem('erdblickParameters');
+        if (parameters) {
+            return JSON.parse(parameters);
+        }
+        return null;
+    }
 
     parseAndApplyParams(params: Params, firstParamUpdate: boolean = false) {
         let currentParameters = this.parameters.getValue();
@@ -119,7 +134,7 @@ export class ParametersService {
             newOrientation.heading != currentParameters.heading ||
             newOrientation.pitch != currentParameters.pitch ||
             newOrientation.roll != currentParameters.roll) {
-            this.viewService.setView(Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt), newOrientation);
+            this.setView(Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt), newOrientation);
             currentParameters.lon = newPosition.lon;
             currentParameters.lat = newPosition.lat;
             currentParameters.alt = newPosition.alt;
@@ -130,8 +145,8 @@ export class ParametersService {
 
         const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
         const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
-        this.viewService.osmEnabled.next(osmEnabled);
-        this.viewService.osmOpacityValue.next(osmOpacity);
+        this.osmEnabled.next(osmEnabled);
+        this.osmOpacityValue.next(osmOpacity);
         currentParameters.osmEnabled = osmEnabled;
         currentParameters.osmOpacity = osmOpacity;
 
@@ -143,24 +158,22 @@ export class ParametersService {
         layerNamesLevels.forEach((nameLevel: Array<string>) => {
             const name = nameLevel[0];
             const level = Number(nameLevel[1]);
-            if (this.mapService.mapModel) {
-                if (this.mapService.mapModel.layerIdToLevel.has(name)) {
-                    this.mapService.mapModel.layerIdToLevel.set(name, level);
-                }
-                const [encMapName, encLayerName] = name.split('/');
-                this.mapService.mapModel.availableMapItems.getValue().forEach(
-                    (mapItem: MapInfoItem, mapName: string) => {
-                        if (mapName == encMapName) {
-                            mapItem.visible = true;
-                            mapItem.layers.forEach((mapLayer, layerName) => {
-                                if (layerName == encLayerName) {
-                                    mapLayer.visible = true;
-                                    currentLayers.push([`${mapName}/${layerName}`, level.toString()])
-                                }
-                            });
-                        }
-                    });
+            if (this.mapService.layerIdToLevel.has(name)) {
+                this.mapService.layerIdToLevel.set(name, level);
             }
+            const [encMapName, encLayerName] = name.split('/');
+            this.mapService.availableMapItems.getValue().forEach(
+                (mapItem: MapInfoItem, mapName: string) => {
+                    if (mapName == encMapName) {
+                        mapItem.visible = true;
+                        mapItem.layers.forEach((mapLayer, layerName) => {
+                            if (layerName == encLayerName) {
+                                mapLayer.visible = true;
+                                currentLayers.push([`${mapName}/${layerName}`, level.toString()])
+                            }
+                        });
+                    }
+                });
         });
         if (currentLayers) {
             currentParameters.layers = currentLayers;
@@ -192,12 +205,27 @@ export class ParametersService {
         this.parameters.next(currentParameters);
     }
 
-     clearStorage() {
-         localStorage.removeItem('erdblickParameters');
-         this.parameters.next(defaultParameters);
-     }
+    clearStorage() {
+        localStorage.removeItem('erdblickParameters');
+        this.parameters.next(defaultParameters);
+    }
 
-     private saveParameters() {
-          localStorage.setItem('erdblickParameters', JSON.stringify(this.parameters.getValue()));
-     }
+    private saveParameters() {
+        localStorage.setItem('erdblickParameters', JSON.stringify(this.parameters.getValue()));
+    }
+
+    setView(destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}) {
+        this.cameraViewData.next({
+            destination: destination,
+            orientation: orientation
+        });
+    }
+
+    collectCameraOrientation() {
+        return this.cameraViewData.getValue().orientation;
+    }
+
+    collectCameraPosition() {
+        return this.cameraViewData.getValue().destination;
+    }
 }

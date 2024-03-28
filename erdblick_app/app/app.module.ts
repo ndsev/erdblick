@@ -35,7 +35,6 @@ import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
-import {ViewService} from "./view.service";
 import {initialiseLibrary} from "./wasm";
 
 export function initialiseServices(styleService: StyleService) {
@@ -92,7 +91,6 @@ export function initialiseServices(styleService: StyleService) {
         JumpTargetService,
         InspectionService,
         ParametersService,
-        ViewService
     ],
     bootstrap: [AppComponent]
 })

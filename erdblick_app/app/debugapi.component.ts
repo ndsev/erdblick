@@ -4,7 +4,7 @@ import {coreLib, uint8ArrayFromWasm} from "./wasm";
 import {Cartesian3} from "cesium";
 import {MapService} from "./map.service";
 import {ErdblickViewComponent} from "./view.component";
-import {ViewService} from "./view.service";
+import {ParametersService} from "./parameters.service";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -28,7 +28,7 @@ export class ErdblickDebugApi {
      * @param mapView Reference to a ErdblickView instance
      */
     constructor(public mapService: MapService,
-                public viewService: ViewService,
+                public parametersService: ParametersService,
                 mapView: ErdblickViewComponent) {
         this.view = mapView;
     }
@@ -40,7 +40,7 @@ export class ErdblickDebugApi {
      */
     private setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.viewService.cameraViewData.next({
+        this.parametersService.cameraViewData.next({
             destination: Cartesian3.fromArray(cameraInfo.position),
             orientation: {
                 heading: cameraInfo.orientation.heading,
@@ -57,11 +57,11 @@ export class ErdblickDebugApi {
      */
     private getCamera() {
         const position = [
-            this.viewService.cameraViewData.getValue().destination.x,
-            this.viewService.cameraViewData.getValue().destination.y,
-            this.viewService.cameraViewData.getValue().destination.z,
+            this.parametersService.cameraViewData.getValue().destination.x,
+            this.parametersService.cameraViewData.getValue().destination.y,
+            this.parametersService.cameraViewData.getValue().destination.z,
         ];
-        const orientation = this.viewService.cameraViewData.getValue().orientation;
+        const orientation = this.parametersService.cameraViewData.getValue().orientation;
         return JSON.stringify({position, orientation});
     }
 
@@ -70,10 +70,10 @@ export class ErdblickDebugApi {
      */
     private showTestTile() {
         let tile = uint8ArrayFromWasm(coreLib, (sharedArr: any) => {
-            coreLib.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
+            coreLib.generateTestTile(sharedArr, this.mapService.tileParser);
         });
         let style = coreLib.generateTestStyle();
-        this.mapService.mapModel.addTileFeatureLayer(tile, {
+        this.mapService.addTileFeatureLayer(tile, {
             id: "_builtin",
             modified: false,
             imported: false,
