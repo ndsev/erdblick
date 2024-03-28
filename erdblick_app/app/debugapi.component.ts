@@ -1,8 +1,7 @@
 "use strict";
 
-import {uint8ArrayFromWasm} from "./wasm";
+import {coreLib, uint8ArrayFromWasm} from "./wasm";
 import {Cartesian3} from "cesium";
-import {CoreService} from "./core.service";
 import {MapService} from "./map.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ViewService} from "./view.service";
@@ -28,8 +27,7 @@ export class ErdblickDebugApi {
      * Initialize a new ErdblickDebugApi instance.
      * @param mapView Reference to a ErdblickView instance
      */
-    constructor(public coreService: CoreService,
-                public mapService: MapService,
+    constructor(public mapService: MapService,
                 public viewService: ViewService,
                 mapView: ErdblickViewComponent) {
         this.view = mapView;
@@ -71,19 +69,17 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     private showTestTile() {
-        let tile = uint8ArrayFromWasm(this.coreService.coreLib, (sharedArr: any) => {
-            this.coreService.coreLib!.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
+        let tile = uint8ArrayFromWasm(coreLib, (sharedArr: any) => {
+            coreLib.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
         });
-        if (this.coreService.coreLib !== undefined) {
-            let style = this.coreService.coreLib.generateTestStyle();
-            this.mapService.mapModel.addTileFeatureLayer(tile, {
-                id: "_builtin",
-                modified: false,
-                imported: false,
-                enabled: true,
-                data: "",
-                featureLayerStyle: style
-            }, "_builtin", true);
-        }
+        let style = coreLib.generateTestStyle();
+        this.mapService.mapModel.addTileFeatureLayer(tile, {
+            id: "_builtin",
+            modified: false,
+            imported: false,
+            enabled: true,
+            data: "",
+            featureLayerStyle: style
+        }, "_builtin", true);
     }
 }

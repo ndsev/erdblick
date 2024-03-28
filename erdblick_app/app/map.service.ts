@@ -1,8 +1,6 @@
 import {Injectable} from "@angular/core";
 import {ErdblickModel} from "./erdblick.model";
 import {StyleService} from "./style.service";
-import {CoreService} from "./core.service";
-import {BehaviorSubject} from "rxjs";
 
 export interface MapItemLayer extends Object {
     canRead: boolean;
@@ -36,9 +34,8 @@ export class MapService {
     tilesToLoadLimit: number = 0;
     tilesToVisualizeLimit: number = 0;
 
-    constructor(public coreService: CoreService,
-                public styleService: StyleService) {
-        this.mapModel = new ErdblickModel(this.coreService, this.styleService);
+    constructor(public styleService: StyleService) {
+        this.mapModel = new ErdblickModel(this.styleService);
         this.applyTileLimits(this.mapModel.maxLoadTiles, this.mapModel.maxVisuTiles);
 
         this.mapModel.mapInfoTopic.subscribe((mapItems: Map<string, MapInfoItem>) => {
@@ -53,11 +50,9 @@ export class MapService {
 
         this.tilesToLoadLimit = tilesToLoadLimit;
         this.tilesToVisualizeLimit = tilesToVisualizeLimit;
-        if (this.mapModel) {
-            this.mapModel.maxLoadTiles = this.tilesToLoadLimit;
-            this.mapModel.maxVisuTiles = this.tilesToVisualizeLimit;
-            this.mapModel.update();
-        }
+        this.mapModel.maxLoadTiles = this.tilesToLoadLimit;
+        this.mapModel.maxVisuTiles = this.tilesToVisualizeLimit;
+        this.mapModel.update();
 
         console.log(`Max tiles to load set to ${this.tilesToLoadLimit}`);
         console.log(`Max tiles to visualize set to ${this.tilesToVisualizeLimit}`);

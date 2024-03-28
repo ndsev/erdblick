@@ -2,12 +2,11 @@
 
 import {Fetch} from "./fetch.component";
 import {FeatureTile} from "./features.component";
-import {uint8ArrayToWasm} from "./wasm";
+import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
 import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
-import {CoreService} from "./core.service";
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
@@ -56,8 +55,7 @@ export class ErdblickModel {
     layerIdToLevel: Map<string, number> = new Map<string, number>();
     availableMapItems: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
 
-    constructor(public coreService: CoreService,
-                public styleService: StyleService) {
+    constructor(public styleService: StyleService) {
         this.maps = null;
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
@@ -80,7 +78,7 @@ export class ErdblickModel {
 
         // Instantiate the TileLayerParser, and set its callback
         // for when a new tile is received.
-        this.tileParser = new this.coreService.coreLib!.TileLayerParser();
+        this.tileParser = new coreLib.TileLayerParser();
 
         ///////////////////////////////////////////////////////////////////////////
         //                               MODEL EVENTS                            //
@@ -135,7 +133,7 @@ export class ErdblickModel {
 
             let [message, messageType] = this.tileStreamParsingQueue.shift();
             if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                uint8ArrayToWasm(this.coreService.coreLib!, (wasmBuffer: any) => {
+                uint8ArrayToWasm(coreLib, (wasmBuffer: any) => {
                     this.tileParser.readFieldDictUpdate(wasmBuffer);
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
@@ -176,7 +174,7 @@ export class ErdblickModel {
     private reloadDataSources() {
         new Fetch(infoUrl)
         .withBufferCallback((infoBuffer: any) => {
-            uint8ArrayToWasm(this.coreService.coreLib!, (wasmBuffer: any) => {
+            uint8ArrayToWasm(coreLib, (wasmBuffer: any) => {
                 this.tileParser.setDataSourceInfo(wasmBuffer);
             }, infoBuffer)
             console.log("Loaded data source info.");
@@ -238,7 +236,7 @@ export class ErdblickModel {
         let tileIdPerLevel = new Map<number, Array<bigint>>();
         for (let [_, level] of this.layerIdToLevel) {
             if (!tileIdPerLevel.has(level)) {
-                const allViewportTileIds = this.coreService.coreLib!.getTileIds(this.currentViewport, level, this.maxLoadTiles) as bigint[];
+                const allViewportTileIds = coreLib.getTileIds(this.currentViewport, level, this.maxLoadTiles) as bigint[];
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
                     ...this.currentVisibleTileIds,
@@ -290,7 +288,7 @@ export class ErdblickModel {
                         continue;
                     }
                     for (let tileId of tileIds!) {
-                        const tileMapLayerKey = this.coreService.coreLib!.getTileFeatureLayerKey(mapName, layerName, tileId);
+                        const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
                         if (this.checkMapLayerVisibility(mapName, layerName)) {
                             if (!this.loadedTileLayers.has(tileMapLayerKey)) {
                                 requestTilesForMapLayer.push(Number(tileId));
@@ -368,7 +366,7 @@ export class ErdblickModel {
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
-        let tileLayer = new FeatureTile(this.coreService.coreLib!, this.tileParser, tileLayerBlob, preventCulling);
+        let tileLayer = new FeatureTile(this.tileParser, tileLayerBlob, preventCulling);
 
         // Don't add a tile that is not supposed to be visible.
         if (!preventCulling) {

@@ -7,8 +7,8 @@ import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
-import {CoreService} from "./core.service";
 import {ViewService} from "./view.service";
+import {coreLib} from "./wasm";
 
 
 @Component({
@@ -205,7 +205,6 @@ export class MapPanelComponent {
 
     constructor(public mapService: MapService,
                 public viewService: ViewService,
-                public coreService: CoreService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public parameterService: ParametersService) {
@@ -222,11 +221,9 @@ export class MapPanelComponent {
 
     focus(tileId: bigint, event: any) {
         event.stopPropagation();
-        if (this.coreService.coreLib !== undefined) {
-            this.mapService.mapModel.zoomToWgs84PositionTopic.next(
-                this.coreService.coreLib.getTilePosition(BigInt(tileId))
-            );
-        }
+        this.mapService.mapModel.zoomToWgs84PositionTopic.next(
+            coreLib.getTilePosition(BigInt(tileId))
+        );
     }
 
     onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
@@ -265,7 +262,7 @@ export class MapPanelComponent {
 
     updateOSMOverlay() {
         if (this.viewService.osmEnabled.getValue()) {
-            this.viewService.osmOpacityValue.next(this.osmOpacityValue / 100);
+            this.viewService.osmOpacityValue.next(this.osmOpacityValue);
         } else {
             this.viewService.osmOpacityValue.next(0);
         }

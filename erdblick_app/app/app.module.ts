@@ -34,13 +34,13 @@ import {ParametersService} from "./parameters.service";
 import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
-import {CoreService} from "./core.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ViewService} from "./view.service";
+import {initialiseLibrary} from "./wasm";
 
-export function initialiseServices(coreService: CoreService, styleService: StyleService) {
+export function initialiseServices(styleService: StyleService) {
     return () => {
-        return coreService.initialiseLibrary().then(() => {
+        return initialiseLibrary().then(() => {
             return styleService.initialiseStyles();
         });
     }
@@ -83,14 +83,13 @@ export function initialiseServices(coreService: CoreService, styleService: Style
         {
             provide: APP_INITIALIZER,
             useFactory: initialiseServices,
-            deps: [CoreService, StyleService],
+            deps: [StyleService],
             multi: true
         },
         MapService,
         MessageService,
         InfoMessageService,
         JumpTargetService,
-        StyleService,
         InspectionService,
         ParametersService,
         ViewService

@@ -23,7 +23,6 @@ import {Feature} from "../../build/libs/core/erdblick-core";
 import {InspectionService} from "./inspection.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {ViewService} from "./view.service";
-import {CoreService} from "./core.service";
 import {StyleService} from "./style.service";
 
 // Redeclare window with extended interface
@@ -63,7 +62,6 @@ export class ErdblickViewComponent implements AfterViewInit {
      * @param parameterService The parameter service, used to update
      */
     constructor(public mapService: MapService,
-                public coreService: CoreService,
                 public viewService: ViewService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
@@ -207,15 +205,15 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.viewService.osmEnabled.subscribe(enabled => {
-            this.updateOpenStreetMapLayer(enabled ? this.viewService.osmOpacityValue.getValue() : 0);
+            this.updateOpenStreetMapLayer(enabled ? this.viewService.osmOpacityValue.getValue() / 100: 0);
         });
 
         this.viewService.osmOpacityValue.subscribe(value => {
-            this.updateOpenStreetMapLayer(value);
+            this.updateOpenStreetMapLayer(value / 100);
         });
 
         // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.coreService, this.mapService, this.viewService, this);
+        window.ebDebug = new ErdblickDebugApi(this.mapService, this.viewService, this);
 
         this.viewService.viewportToBeUpdated.subscribe(toBeUpdated => {
             if (toBeUpdated) this.updateViewport();

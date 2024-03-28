@@ -131,7 +131,7 @@ export class ParametersService {
         const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
         const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
         this.viewService.osmEnabled.next(osmEnabled);
-        this.viewService.osmOpacityValue.next(osmOpacity / 100);
+        this.viewService.osmOpacityValue.next(osmOpacity);
         currentParameters.osmEnabled = osmEnabled;
         currentParameters.osmOpacity = osmOpacity;
 

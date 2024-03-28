@@ -3,8 +3,8 @@ import {Cartesian3} from "cesium";
 import {InfoMessageService} from "./info.service";
 import {JumpTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
-import {CoreService} from "./core.service";
 import {ViewService} from "./view.service";
+import {coreLib} from "./wasm";
 
 
 @Component({
@@ -30,7 +30,6 @@ export class SearchMenuComponent {
     value: string = "";
 
     constructor(public mapService: MapService,
-                public coreService: CoreService,
                 public viewService: ViewService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService) {
@@ -89,16 +88,12 @@ export class SearchMenuComponent {
             this.messageService.showError("No value provided!");
             return;
         }
-        if (this.coreService.coreLib !== undefined) {
-            try {
-                let wgs84TileId = BigInt(value);
-                let position = this.coreService.coreLib.getTilePosition(wgs84TileId);
-                return [position.x, position.y, position.z]
-            } catch (e) {
-                this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
-            }
-        } else {
-            this.messageService.showError("Cannot access the core library. The library is not available.");
+        try {
+            let wgs84TileId = BigInt(value);
+            let position = coreLib.getTilePosition(wgs84TileId);
+            return [position.x, position.y, position.z]
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
         }
         return undefined;
     }

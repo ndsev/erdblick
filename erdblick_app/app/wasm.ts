@@ -1,4 +1,15 @@
-"use strict";
+import MainModuleFactory, {MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
+
+export let coreLib: ErdblickCore;
+
+export async function initialiseLibrary(): Promise<void> {
+    const lib = await MainModuleFactory();
+    console.log("  ...done.");
+    coreLib = lib;
+    coreLib.setExceptionHandler((excType: string, message_1: string) => {
+        throw new Error(`${excType}: ${message_1}`);
+    });
+}
 
 /**
  * Run a WASM function which places data in a SharedUint8Array,

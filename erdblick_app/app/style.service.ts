@@ -12,11 +12,7 @@ import {
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {uint8ArrayToWasm} from "./wasm";
-import {CoreService} from "./core.service";
-import {ParametersService} from "./parameters.service";
-import {MapService} from "./map.service";
-import {TileVisualization} from "./visualization.model";
+import {coreLib, uint8ArrayToWasm} from "./wasm";
 
 interface ErdblickStyleEntry {
     id: string,
@@ -56,9 +52,7 @@ export class StyleService {
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
 
-    constructor(private httpClient: HttpClient,
-                public coreService: CoreService) {
-    }
+    constructor(private httpClient: HttpClient) {}
 
     async initialiseStyles(): Promise<void> {
         try {
@@ -340,11 +334,11 @@ export class StyleService {
         const style = this.styleData.get(styleId);
         if (style !== undefined) {
             const styleUint8Array = this.textEncoder.encode(style.data);
-            const result = uint8ArrayToWasm(this.coreService.coreLib,
+            const result = uint8ArrayToWasm(coreLib,
                 (wasmBuffer: any) => {
-                    const featureLayerStyle = new this.coreService.coreLib!.FeatureLayerStyle(wasmBuffer);
+                    const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                     if (featureLayerStyle) {
-                        style.featureLayerStyle = new this.coreService.coreLib!.FeatureLayerStyle(wasmBuffer);
+                        style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                         this.styleData.set(styleId, style);
                         return true;
                     }
