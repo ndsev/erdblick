@@ -14,6 +14,7 @@ echo "Collecting npm modules."
 npm install
 
 echo "Building Angular distribution files."
+npm run lint
 if [[ -z "$NG_DEVELOP" ]]; then
   npm run build -- -c production
 else

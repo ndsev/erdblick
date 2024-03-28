@@ -1,0 +1,53 @@
+{
+  "env": {
+    "browser": true,
+    "es6": true,
+    "node": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended" // Assuming you're using TypeScript
+  ],
+  "globals": {
+    "Atomics": "readonly",
+    "SharedArrayBuffer": "readonly"
+  },
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": 2020,
+    "sourceType": "module"
+  },
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "rules": {
+    "no-restricted-imports": ["error", {
+      "paths": [{
+        "name": "cesium",
+        "message": "Please import Cesium modules only in erdblick_app/app/cesium.ts."
+      }],
+      "patterns": [{
+        "group": ["cesium/*"],
+        "message": "Please import Cesium modules only in erdblick_app/app/cesium.ts."
+      }]
+    }],
+    "prefer-const": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-unused-vars": "off",
+    "@typescript-eslint/ban-types": "off",
+    "no-extra-semi": "off",
+    "no-prototype-builtins": "off",
+    "@typescript-eslint/no-non-null-asserted-optional-chain": "off",
+    "no-constant-condition": "off",
+    "no-useless-escape": "off",
+    "@typescript-eslint/no-loss-of-precision": "off"
+  },
+  "overrides": [
+    {
+      "files": ["erdblick_app/app/cesium.ts"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ]
+}
