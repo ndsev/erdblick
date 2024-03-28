@@ -100,8 +100,8 @@ export class PreferencesComponent {
         const result = this.mapService.applyTileLimits(this.tilesToLoadInput, this.tilesToVisualizeInput);
         if (result) {
             let parameters = this.parametersService.parameters.getValue();
-            parameters.tilesToLoadLimit = this.tilesToLoadInput;
-            parameters.tilesToVisualizeLimit = this.tilesToVisualizeInput;
+            parameters.tilesLoadLimit = this.tilesToLoadInput;
+            parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
             this.parametersService.parameters.next(parameters);
             this.messageService.showSuccess("Successfully updated tile limits!");
         } else {

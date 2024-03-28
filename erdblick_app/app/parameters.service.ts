@@ -16,8 +16,8 @@ export interface ErdblickParameters {
     osmEnabled: boolean,
     layers: Array<Array<string>>,
     styles: Array<string>,
-    tilesToLoadLimit: number,
-    tilesToVisualizeLimit: number
+    tilesLoadLimit: number,
+    tilesVisualizeLimit: number
 }
 
 const defaultParameters: ErdblickParameters = {
@@ -31,8 +31,8 @@ const defaultParameters: ErdblickParameters = {
     osmEnabled: true,
     layers: [],
     styles: [],
-    tilesToLoadLimit: MAX_NUM_TILES_TO_LOAD,
-    tilesToVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
+    tilesLoadLimit: MAX_NUM_TILES_TO_LOAD,
+    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
 }
 
 @Injectable({providedIn: 'root'})
@@ -91,8 +91,8 @@ export class ParametersService {
                 osmEnabled: defaultParameters.osmEnabled,
                 layers: currentLayers,
                 styles: currentStyles.length ? currentStyles : defaultParameters.styles,
-                tilesToLoadLimit: defaultParameters.tilesToLoadLimit,
-                tilesToVisualizeLimit: defaultParameters.tilesToVisualizeLimit
+                tilesLoadLimit: defaultParameters.tilesLoadLimit,
+                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit
             });
             console.log(this.parameters.getValue())
         } else {
@@ -200,6 +200,12 @@ export class ParametersService {
         })
         if (currentStyles) {
             currentParameters.styles = currentStyles;
+        }
+        if (params["tilesLoadLimit"]) {
+            currentParameters.tilesLoadLimit = JSON.parse(params["tilesLoadLimit"]);
+        }
+        if (params["tilesVisualizeLimit"]) {
+            currentParameters.tilesVisualizeLimit = JSON.parse(params["tilesVisualizeLimit"]);
         }
 
         this.parameters.next(currentParameters);
