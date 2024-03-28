@@ -1,8 +1,7 @@
 import {Injectable} from "@angular/core";
 import {ErdblickModel} from "./erdblick.model";
-import {ErdblickView} from "./erdblick.view";
-import {BehaviorSubject} from "rxjs";
-import {MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
+import {StyleService} from "./style.service";
+import {CoreService} from "./core.service";
 
 export interface MapItemLayer extends Object {
     canRead: boolean;
@@ -28,62 +27,45 @@ export interface MapInfoItem extends Object {
     visible: boolean;
 }
 
+
 @Injectable({providedIn: 'root'})
 export class MapService {
 
-    mapModel: BehaviorSubject<ErdblickModel | null> = new BehaviorSubject<ErdblickModel | null>(null);
-    mapView: ErdblickView | undefined;
-    coreLib: ErdblickCore | undefined;
-    osmEnabled: boolean = true;
-    osmOpacityValue: number = 30;
+    mapModel: ErdblickModel;
     tilesToLoadLimit: number = 0;
     tilesToVisualizeLimit: number = 0;
 
-    constructor() {}
+    constructor(public coreService: CoreService,
+                public styleService: StyleService) {
+        this.mapModel = new ErdblickModel(this.coreService.coreLib!, this.styleService);
+        this.applyTileLimits(this.mapModel.maxLoadTiles, this.mapModel.maxVisuTiles);
 
-    collectCameraOrientation() {
-        if (this.mapView !== undefined) {
-            return {
-                heading: this.mapView.viewer.camera.heading,
-                pitch: this.mapView.viewer.camera.pitch,
-                roll: this.mapView.viewer.camera.roll
-            };
-        }
-        return null;
-    }
-
-    collectCameraPosition() {
-        if (this.mapView !== undefined) {
-            return {
-                x: this.mapView.viewer.camera.position.x,
-                y: this.mapView.viewer.camera.position.y,
-                z: this.mapView.viewer.camera.position.z
-            };
-        }
-        return null;
+        this.mapModel.mapInfoTopic.subscribe((mapItems: Map<string, MapInfoItem>) => {
+            this.mapModel.availableMapItems.next(mapItems);
+        });
     }
 
     reloadBuiltinStyle(styleId: string) {
-        if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.reloadStyle(styleId);
+        if (this.mapModel) {
+            this.mapModel.reloadStyle(styleId);
         }
     }
 
     reapplyStyle(styleId: string) {
-        if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.reapplyStyles([styleId]);
+        if (this.mapModel) {
+            this.mapModel.reapplyStyles([styleId]);
         }
     }
 
     loadImportedStyle(styleId: string) {
-        if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.cycleImportedStyle(styleId, false);
+        if (this.mapModel) {
+            this.mapModel.cycleImportedStyle(styleId, false);
         }
     }
 
     removeImportedStyle(styleId: string) {
-        if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.cycleImportedStyle(styleId, true);
+        if (this.mapModel) {
+            this.mapModel.cycleImportedStyle(styleId, true);
         }
     }
 
@@ -94,10 +76,10 @@ export class MapService {
 
         this.tilesToLoadLimit = tilesToLoadLimit;
         this.tilesToVisualizeLimit = tilesToVisualizeLimit;
-        if (this.mapModel.getValue()) {
-            this.mapModel.getValue()!.maxLoadTiles = this.tilesToLoadLimit;
-            this.mapModel.getValue()!.maxVisuTiles = this.tilesToVisualizeLimit;
-            this.mapModel.getValue()!.update();
+        if (this.mapModel) {
+            this.mapModel.maxLoadTiles = this.tilesToLoadLimit;
+            this.mapModel.maxVisuTiles = this.tilesToVisualizeLimit;
+            this.mapModel.update();
         }
 
         console.log(`Max tiles to load set to ${this.tilesToLoadLimit}`);

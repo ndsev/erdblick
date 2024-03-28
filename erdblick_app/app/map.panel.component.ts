@@ -7,6 +7,8 @@ import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
+import {CoreService} from "./core.service";
+import {ViewService} from "./view.service";
 
 
 @Component({
@@ -18,14 +20,14 @@ import {KeyValue} from "@angular/common";
                 <div class="osm-controls">
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button (click)="toggleOSMOverlay()" class="osm-button"
-                              icon="{{mapService.osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                              icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
                     </p-button>
                     <!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
-                    <div *ngIf="mapService.osmEnabled" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue"
+                    <div *ngIf="osmEnabled" style="display: inline-block">
+                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + osmOpacityValue"
                                class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
                                   class="w-full"></p-slider>
                     </div>
                 </div>
@@ -194,19 +196,24 @@ export class MapPanelComponent {
     editedStyleDataSubscription: Subscription = new Subscription();
     savedStyleDataSubscription: Subscription = new Subscription();
     dataWasModified: boolean = false;
+
+    osmEnabled: boolean;
+    osmOpacityValue: number;
+
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
 
     constructor(public mapService: MapService,
+                public viewService: ViewService,
+                public coreService: CoreService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public parameterService: ParametersService) {
-        this.mapService.mapModel.subscribe(mapModel => {
-            if (mapModel) {
-                mapModel.availableMapItems.subscribe(mapItems => this.mapItems = mapItems);
-            }
-        });
-
+        this.osmEnabled = this.viewService.osmEnabled.getValue();
+        this.osmOpacityValue = this.viewService.osmOpacityValue.getValue();
+        this.mapService.mapModel.availableMapItems.subscribe(
+            mapItems => this.mapItems = mapItems
+        );
     }
 
     showLayerDialog() {
@@ -215,9 +222,9 @@ export class MapPanelComponent {
 
     focus(tileId: bigint, event: any) {
         event.stopPropagation();
-        if (this.mapService.mapModel.getValue() && this.mapService.coreLib !== undefined) {
-            this.mapService.mapModel.getValue()!.zoomToWgs84PositionTopic.next(
-                this.mapService.coreLib.getTilePosition(BigInt(tileId))
+        if (this.coreService.coreLib !== undefined) {
+            this.mapService.mapModel.zoomToWgs84PositionTopic.next(
+                this.coreService.coreLib.getTilePosition(BigInt(tileId))
             );
         }
     }
@@ -225,8 +232,8 @@ export class MapPanelComponent {
     onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
         const mapLayerName = `${mapName}/${layerName}`;
         const level = event.toString();
-        if (this.mapService.mapModel.getValue()) {
-            this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapLayerName, Number(level));
+        if (this.mapService.mapModel) {
+            this.mapService.mapModel.layerIdToLevel.set(mapLayerName, Number(level));
             const parameters = this.parameterService.parameters.getValue();
             if (parameters) {
                 const mapItem = this.mapItems.get(mapName);
@@ -244,27 +251,28 @@ export class MapPanelComponent {
                     }
                 }
             }
-            this.mapService.mapModel.getValue()!.update();
+            this.mapService.mapModel.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
         }
     }
 
     toggleOSMOverlay() {
-        this.mapService.osmEnabled = !this.mapService.osmEnabled;
+        this.osmEnabled = !this.osmEnabled;
+        this.viewService.osmEnabled.next(this.osmEnabled);
         this.updateOSMOverlay();
     }
 
     updateOSMOverlay() {
-        if (this.mapService.osmEnabled) {
-            this.mapService.mapView?.updateOpenStreetMapLayer(this.mapService.osmOpacityValue / 100);
+        if (this.viewService.osmEnabled.getValue()) {
+            this.viewService.osmOpacityValue.next(this.osmOpacityValue / 100);
         } else {
-            this.mapService.mapView?.updateOpenStreetMapLayer(0);
+            this.viewService.osmOpacityValue.next(0);
         }
         const parameters = this.parameterService.parameters.getValue();
         if (parameters) {
-            parameters.osmEnabled = this.mapService.osmEnabled;
-            parameters.osmOpacity = this.mapService.osmOpacityValue;
+            parameters.osmEnabled = this.osmEnabled;
+            parameters.osmOpacity = this.osmOpacityValue;
             this.parameterService.parameters.next(parameters);
         }
     }
@@ -272,17 +280,17 @@ export class MapPanelComponent {
     toggleLayer(mapName: string, layerName: string, mapLayer: MapItemLayer) {
         const mapLayerName =`${mapName}/${layerName}`;
         mapLayer.visible = !mapLayer.visible;
-        if (this.mapService.mapModel.getValue()) {
+        if (this.mapService.mapModel) {
             const parameters = this.parameterService.parameters.getValue();
             if (parameters) {
                 if (mapLayer.visible) {
-                    parameters.layers.push([mapLayerName, this.mapService.mapModel.getValue()!.layerIdToLevel.get(mapLayerName)!.toString()]);
+                    parameters.layers.push([mapLayerName, this.mapService.mapModel.layerIdToLevel.get(mapLayerName)!.toString()]);
                 } else {
                     parameters.layers = parameters.layers.filter(layer => layer[0] != mapLayerName);
                 }
                 this.parameterService.parameters.next(parameters);
             }
-            this.mapService.mapModel.getValue()!.update();
+            this.mapService.mapModel.update();
         } else {
             this.messageService.showError("Cannot access the map model. The model is not available.");
         }

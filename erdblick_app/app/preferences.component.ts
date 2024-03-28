@@ -111,18 +111,12 @@ export class PreferencesComponent {
     maxVisuTiles: number = 0;
 
     constructor(private messageService: InfoMessageService,
-                private router: Router,
-                private route: ActivatedRoute,
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        this.mapService.mapModel.subscribe(mapModel => {
-            if (mapModel) {
-                this.maxLoadTiles = this.tilesToLoadInput = mapModel.maxLoadTiles;
-                this.maxVisuTiles = this.tilesToVisualizeInput = mapModel.maxVisuTiles;
-            }
-        });
+        this.maxLoadTiles = this.tilesToLoadInput = this.mapService.mapModel.maxLoadTiles;
+        this.maxVisuTiles = this.tilesToVisualizeInput = this.mapService.mapModel.maxVisuTiles;
     }
 
     applyTileLimits() {

@@ -2,6 +2,10 @@
 
 import {uint8ArrayFromWasm} from "./wasm";
 import {Cartesian3} from "cesium";
+import {CoreService} from "./core.service";
+import {MapService} from "./map.service";
+import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {f} from "../../static/bundle/cesium/Workers/chunk-LYPPBP4Q";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -19,17 +23,15 @@ export interface DebugWindow extends Window {
  */
 export class ErdblickDebugApi {
     private view: any;
-    private model: any;
-    private coreLib: any;
 
     /**
      * Initialize a new ErdblickDebugApi instance.
      * @param mapView Reference to a ErdblickView instance
      */
-    constructor(mapView: any) {
+    constructor(public coreService: CoreService,
+                public mapService: MapService,
+                mapView: any) {
         this.view = mapView;
-        this.model = mapView.model;
-        this.coreLib = mapView.model.coreLib;
     }
 
     /**
@@ -72,10 +74,21 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     private showTestTile() {
-        let tile = uint8ArrayFromWasm(this.coreLib, (sharedArr: any) => {
-            this.coreLib.generateTestTile(sharedArr, this.model.tileParser);
+        let tile = uint8ArrayFromWasm(this.coreService.coreLib, (sharedArr: any) => {
+            if (this.coreService.coreLib !== undefined) {
+                this.coreService.coreLib.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
+            }
         })
-        let style = this.coreLib.generateTestStyle();
-        this.model.addTileFeatureLayer(tile, style, "_builtin", true);
+        if (this.coreService.coreLib !== undefined) {
+            let style = this.coreService.coreLib.generateTestStyle();
+            this.mapService.mapModel.addTileFeatureLayer(tile, {
+                id: "_builtin",
+                modified: false,
+                imported: false,
+                enabled: true,
+                data: "",
+                featureLayerStyle: style
+            }, "_builtin", true);
+        }
     }
 }

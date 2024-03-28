@@ -4,6 +4,7 @@ import {StyleService} from "./style.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math} from "cesium";
 import {Params} from "@angular/router";
+import {ViewService} from "./view.service";
 
 export interface ErdblickParameters {
      heading: number,
@@ -37,11 +38,12 @@ export class ParametersService {
      parameters: BehaviorSubject<ErdblickParameters>;
 
      constructor(public mapService: MapService,
+                 public viewService: ViewService,
                  public styleService: StyleService) {
           let parameters = this.loadSavedParameters();
           if (!parameters) {
-               const currentOrientation = this.mapService.collectCameraOrientation();
-               const currentCameraPosition = this.mapService.collectCameraPosition();
+               const currentOrientation = this.viewService.collectCameraOrientation();
+               const currentCameraPosition = this.viewService.collectCameraPosition();
                let currentPosition = null;
                if (currentCameraPosition) {
                    const currentPositionCartographic = Cartographic.fromCartesian(
@@ -55,11 +57,11 @@ export class ParametersService {
                }
                const currentStyles = [...this.styleService.availableStylesActivations.keys()].filter(key => this.styleService.availableStylesActivations.get(key));
                let currentLayers = new Array<Array<string>>;
-               const mapModel = this.mapService.mapModel.getValue();
+               const mapModel = this.mapService.mapModel;
                if (mapModel) {
                     mapModel.layerIdToLevel.forEach((level, mapLayerName) => {
                         const [encMapName, encLayerName] = mapLayerName.split('/');
-                        const visible = mapService.mapModel.getValue()?.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
+                        const visible = mapService.mapModel.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
                         if (visible !== undefined && visible) {
                            currentLayers.push([mapLayerName, level.toString()]);
                         }
@@ -77,7 +79,7 @@ export class ParametersService {
                     layers: currentLayers,
                     styles: currentStyles.length ? currentStyles : defaultParameters.styles
                });
-                console.log(this.parameters)
+               console.log(this.parameters.getValue())
           } else {
                this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
           }
@@ -117,12 +119,7 @@ export class ParametersService {
             newOrientation.heading != currentParameters.heading ||
             newOrientation.pitch != currentParameters.pitch ||
             newOrientation.roll != currentParameters.roll) {
-            if (this.mapService.mapView !== undefined) {
-                this.mapService.mapView.viewer.camera.setView({
-                    destination: Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt),
-                    orientation: newOrientation
-                });
-            }
+            this.viewService.setView(Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt), newOrientation);
             currentParameters.lon = newPosition.lon;
             currentParameters.lat = newPosition.lat;
             currentParameters.alt = newPosition.alt;
@@ -133,13 +130,8 @@ export class ParametersService {
 
         const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
         const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
-        this.mapService.osmEnabled = osmEnabled;
-        this.mapService.osmOpacityValue = osmOpacity;
-        if (osmEnabled) {
-            this.mapService.mapView?.updateOpenStreetMapLayer(osmOpacity / 100);
-        } else {
-            this.mapService.mapView?.updateOpenStreetMapLayer(0);
-        }
+        this.viewService.osmEnabled.next(osmEnabled);
+        this.viewService.osmOpacityValue.next(osmOpacity / 100);
         currentParameters.osmEnabled = osmEnabled;
         currentParameters.osmOpacity = osmOpacity;
 
@@ -151,12 +143,12 @@ export class ParametersService {
         layerNamesLevels.forEach((nameLevel: Array<string>) => {
             const name = nameLevel[0];
             const level = Number(nameLevel[1]);
-            if (this.mapService.mapModel.getValue()) {
-                if (this.mapService.mapModel.getValue()!.layerIdToLevel.has(name)) {
-                    this.mapService.mapModel.getValue()!.layerIdToLevel.set(name, level);
+            if (this.mapService.mapModel) {
+                if (this.mapService.mapModel.layerIdToLevel.has(name)) {
+                    this.mapService.mapModel.layerIdToLevel.set(name, level);
                 }
                 const [encMapName, encLayerName] = name.split('/');
-                this.mapService.mapModel.getValue()!.availableMapItems.getValue().forEach(
+                this.mapService.mapModel.availableMapItems.getValue().forEach(
                     (mapItem: MapInfoItem, mapName: string) => {
                         if (mapName == encMapName) {
                             mapItem.visible = true;

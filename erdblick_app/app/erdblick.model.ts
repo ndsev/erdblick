@@ -3,7 +3,7 @@
 import {Fetch} from "./fetch.component";
 import {FeatureTile, FeatureWrapper} from "./features.component";
 import {uint8ArrayToWasm} from "./wasm";
-import {TileVisualization} from "./visualization.component";
+import {TileVisualization} from "./visualization.model";
 import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {MapInfoItem, MapItemLayer} from "./map.service";
@@ -49,7 +49,7 @@ export class ErdblickModel {
     private tileVisualizationQueue: [string, TileVisualization][];
     maxLoadTiles: number;
     maxVisuTiles: number;
-    private tileParser: any;
+    tileParser: any;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
     zoomToWgs84PositionTopic: Subject<any>;
@@ -61,8 +61,7 @@ export class ErdblickModel {
     private textEncoder: TextEncoder = new TextEncoder();
 
     constructor(coreLibrary: any,
-                public styleService: StyleService,
-                public parametersService: ParametersService) {
+                public styleService: StyleService) {
         this.coreLib = coreLibrary;
         this.maps = null;
         this.loadedTileLayers = new Map();
@@ -173,11 +172,11 @@ export class ErdblickModel {
             });
         }
 
-        const parameters = this.parametersService.parameters.getValue();
-        if (parameters) {
-            [...this.styleService.availableStylesActivations.keys()].forEach(styleId =>
-                this.styleService.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
-        }
+        // const parameters = this.parametersService.parameters.getValue();
+        // if (parameters) {
+        //     [...this.styleService.availableStylesActivations.keys()].forEach(styleId =>
+        //         this.styleService.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
+        // }
 
         this.styleService.styleData.forEach((style: ErdblickStyle, styleId: string) => {
             this.loadErdblickStyleData(styleId);
@@ -494,7 +493,7 @@ export class ErdblickModel {
         this.currentFetch.go();
     }
 
-    private addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
+    addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
         let tileLayer = new FeatureTile(this.coreLib, this.tileParser, tileLayerBlob, preventCulling);
 
         // Don't add a tile that is not supposed to be visible.
