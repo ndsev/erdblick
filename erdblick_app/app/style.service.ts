@@ -2,11 +2,8 @@ import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
     of,
-    from,
     forkJoin,
     map,
-    mergeMap,
-    reduce,
     firstValueFrom,
     BehaviorSubject,
     Observable,
@@ -15,6 +12,7 @@ import {
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {coreLib, uint8ArrayToWasm} from "./wasm";
 
 interface ErdblickStyleEntry {
     id: string,
@@ -39,7 +37,6 @@ export class StyleService {
 
     availableStylesActivations: Map<string, boolean> = new Map<string, boolean>();
     styleData: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
-    stylesLoaded: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
     private erdblickBuiltinStyles: Array<ErdblickStyleEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
@@ -51,56 +48,54 @@ export class StyleService {
     builtinStylesCount = 0;
     importedStylesCount = 0;
 
-    constructor(private httpClient: HttpClient) {
-        this.stylesLoaded.next(false);
-        let styleUrls: Array<ErdblickStyleEntry> = [];
-        httpClient.get("/config.json", {responseType: "json"}).subscribe({
-            next: (data: any) => {
-                if (data && data["styles"]) {
-                    styleUrls = [...data["styles"]];
-                    styleUrls.forEach((styleUrl: ErdblickStyleEntry) => {
-                        if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
-                            styleUrl.url = `/bundle/styles/${styleUrl.url}`;
-                        }
-                    });
-                    this.fetchStylesYamlSources(styleUrls).then(dataMap => {
-                        if (dataMap.size > 0) {
-                            dataMap.forEach((styleString, styleId) => {
-                                if (styleString) {
-                                    this.styleData.set(styleId, {
-                                        id: styleId,
-                                        modified: false,
-                                        imported: false,
-                                        enabled: true,
-                                        data: styleString,
-                                        featureLayerStyle: null
-                                    });
-                                    this.availableStylesActivations.set(styleId, true);
-                                    this.builtinStylesCount++;
-                                    styleUrls.forEach(styleUrl => {
-                                        if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
-                                    });
-                                } else {
-                                    this.erroredStyleIds.set(styleId, "Wrong URL / No data");
-                                    console.error(`Wrong URL or no data available for style: ${styleId}`);
-                                }
+    private textEncoder: TextEncoder = new TextEncoder();
+    styleRemovedForId: Subject<string> = new Subject<string>();
+    styleAddedForId: Subject<string> = new Subject<string>();
+
+    constructor(private httpClient: HttpClient) {}
+
+    async initialiseStyles(): Promise<void> {
+        try {
+            const data: any = await firstValueFrom(this.httpClient.get("/config.json", {responseType: "json"}));
+            if (data && data["styles"]) {
+                let styleUrls = [...data["styles"]] as [ErdblickStyleEntry];
+                styleUrls.forEach((styleUrl: ErdblickStyleEntry) => {
+                    if (!styleUrl.url.startsWith("http") && !styleUrl.url.startsWith("/bundle")) {
+                        styleUrl.url = `/bundle/styles/${styleUrl.url}`;
+                    }
+                });
+                const dataMap = await this.fetchStylesYamlSources(styleUrls);
+                if (dataMap.size > 0) {
+                    dataMap.forEach((styleString, styleId) => {
+                        if (styleString) {
+                            this.styleData.set(styleId, {
+                                id: styleId,
+                                modified: false,
+                                imported: false,
+                                enabled: true,
+                                data: styleString,
+                                featureLayerStyle: null
                             });
-                            this.retrieveModifiedBuiltinStyles();
+                            this.availableStylesActivations.set(styleId, true);
+                            this.builtinStylesCount++;
+                            styleUrls.forEach(styleUrl => {
+                                if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
+                            });
+                        } else {
+                            this.erroredStyleIds.set(styleId, "Wrong URL / No data");
+                            console.error(`Wrong URL or no data available for style: ${styleId}`);
                         }
-                        this.retrieveImportedStyles();
-                        this.stylesLoaded.next(true);
                     });
-                } else {
-                    this.retrieveImportedStyles();
-                    this.stylesLoaded.next(true);
+                    this.retrieveModifiedBuiltinStyles();
                 }
-            },
-            error: error => {
                 this.retrieveImportedStyles();
-                this.stylesLoaded.next(true);
-                console.log(error);
+            } else {
+                this.retrieveImportedStyles();
             }
-        });
+        } catch (error) {
+            this.retrieveImportedStyles();
+            console.error(error);
+        }
     }
 
     async fetchStylesYamlSources(styles: Array<ErdblickStyleEntry>) {
@@ -241,6 +236,7 @@ export class StyleService {
         // TODO: check if the style was modified and offer to export it
         this.availableStylesActivations.delete(styleId);
         this.styleData.delete(styleId);
+        this.cycleImportedStyle(styleId, true);
         this.saveImportedStyles();
     }
 
@@ -312,5 +308,114 @@ export class StyleService {
 
     clearStorageForBuiltinStyles() {
         localStorage.removeItem('builtinStyleData');
+    }
+
+    loadStyles() {
+        if (this.styleData) {
+            this.styleData.forEach((style: ErdblickStyle, _) => {
+                style.featureLayerStyle?.delete();
+            });
+        }
+
+        // const parameters = this.parametersService.parameters.getValue();
+        // if (parameters) {
+        //     [...this.availableStylesActivations.keys()].forEach(styleId =>
+        //         this.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
+        // }
+
+        this.styleData.forEach((style: ErdblickStyle, styleId: string) => {
+            this.loadErdblickStyleData(styleId);
+        });
+
+        console.log("Loaded styles.");
+    }
+
+    loadErdblickStyleData(styleId: string) {
+        const style = this.styleData.get(styleId);
+        if (style !== undefined) {
+            const styleUint8Array = this.textEncoder.encode(style.data);
+            const result = uint8ArrayToWasm(coreLib,
+                (wasmBuffer: any) => {
+                    const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                    if (featureLayerStyle) {
+                        style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                        this.styleData.set(styleId, style);
+                        return true;
+                    }
+                    return false;
+                },
+                styleUint8Array);
+            if (result === undefined || !result) {
+                console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.data}`)
+                this.erroredStyleIds.set(styleId, "YAML Parse Error");
+            }
+        }
+    }
+
+    reloadStyle(styleId: string) {
+        if (this.styleData.has(styleId)) {
+            this.syncStyleYamlData(styleId).then(_ => {
+                this.styleData.get(styleId)!.featureLayerStyle?.delete();
+                this.loadErdblickStyleData(styleId);
+                this.styleRemovedForId.next(styleId);
+                this.styleAddedForId.next(styleId);
+            });
+            console.log(`Reloaded style: ${styleId}.`);
+        }
+    }
+
+    cycleImportedStyle(styleId: string, remove= false) {
+        if (remove && !this.styleData.has(styleId)) {
+            console.log(`No style data for: ${styleId}.`);
+            return;
+        }
+        const style = this.styleData.get(styleId);
+        if (style === undefined) {
+            console.log(`Could not retrieve style for: ${styleId}.`);
+            return;
+        }
+        if (remove) {
+            style.featureLayerStyle?.delete();
+            this.availableStylesActivations.delete(styleId);
+            this.styleData.delete(styleId);
+            this.styleRemovedForId.next(styleId);
+            this.importedStylesCount--;
+        } else {
+            this.loadErdblickStyleData(styleId);
+            this.styleAddedForId.next(styleId);
+            this.importedStylesCount++;
+        }
+        console.log(`Cycled imported style: ${styleId}. ${remove ? 'Removed' : 'Added' }.`);
+    }
+
+    private reapplyStyle(styleId: string, imported: boolean = false) {
+        const isActivated = this.availableStylesActivations.get(styleId);
+        if (isActivated === undefined) {
+            return;
+        }
+        if (!this.styleData.has(styleId)) {
+            return;
+        }
+        this.loadErdblickStyleData(styleId);
+        this.styleData.get(styleId)!.enabled = isActivated;
+        this.styleRemovedForId.next(styleId);
+        if (isActivated) {
+            const style = this.styleData.get(styleId)!;
+            this.styleAddedForId.next(styleId);
+        }
+        console.log(`${isActivated ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+    }
+
+    reapplyStyles(styleIds: Array<string>) {
+        styleIds.forEach(styleId => this.reapplyStyle(styleId));
+    }
+
+    reapplyAllStyles() {
+        this.reapplyStyles([...this.availableStylesActivations.keys()]);
+    }
+
+    *allStyles(): Generator<[string, ErdblickStyle], void, unknown> {
+        for (let styleIdAndData of this.styleData)
+            yield styleIdAndData;
     }
 }

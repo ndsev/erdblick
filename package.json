@@ -1,6 +1,6 @@
 {
     "name": "erdblick",
-    "version": "0.3.1",
+    "version": "2024.1",
     "scripts": {
         "ng": "ng",
         "start": "ng serve",

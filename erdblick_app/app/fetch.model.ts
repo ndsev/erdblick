@@ -1,6 +1,3 @@
-"use strict";
-
-
 /**
  * A class to fetch data from a URL and process the response
  * for usage in JavaScript and WebAssembly.
