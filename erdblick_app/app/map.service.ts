@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {Fetch} from "./fetch.component";
+import {Fetch} from "./fetch.model";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
@@ -280,16 +280,6 @@ export class MapService {
             }
         }
 
-        // Abort previous fetch operation.
-        if (this.currentFetch) {
-            this.currentFetch.abort();
-            // Clear any unparsed messages from the previous stream.
-            this.tileStreamParsingQueue = [];
-        }
-
-        // Make sure that there are no unparsed bytes lingering from the previous response stream.
-        this.tileParser.reset();
-
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
@@ -301,47 +291,6 @@ export class MapService {
             }
         }
         this.loadedTileLayers = newTileLayers;
-
-        // Request non-present required tile layers.
-        // TODO: Consider tile TTL.
-        let requests = [];
-        if (this.maps) {
-            for (const [mapName, map] of this.maps) {
-                for (const [layerName, _] of map.layers) {
-                    // Find tile IDs which are not yet loaded for this map layer combination.
-                    let requestTilesForMapLayer = []
-                    let level = this.layerIdToLevel.get(mapName + '/' + layerName);
-                    if (level == undefined) {
-                        continue;
-                    }
-                    let tileIds = tileIdPerLevel.get(level!);
-                    if (tileIds == undefined) {
-                        continue;
-                    }
-                    for (let tileId of tileIds!) {
-                        const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
-                        if (this.checkMapLayerVisibility(mapName, layerName)) {
-                            if (!this.loadedTileLayers.has(tileMapLayerKey)) {
-                                requestTilesForMapLayer.push(Number(tileId));
-                            }
-                        } else {
-                            if (this.loadedTileLayers.has(tileMapLayerKey)) {
-                                this.removeTileLayer(this.loadedTileLayers.get(tileMapLayerKey));
-                                this.loadedTileLayers.delete(tileMapLayerKey);
-                            }
-                        }
-                    }
-                    // Only add a request if there are tiles to be loaded.
-                    if (requestTilesForMapLayer) {
-                        requests.push({
-                            mapId: mapName,
-                            layerId: layerName,
-                            tileIds: requestTilesForMapLayer
-                        });
-                    }
-                }
-            }
-        }
 
         // Update visualizations
         for (const styleId of this.visualizedTileLayers.keys()) {
@@ -379,14 +328,73 @@ export class MapService {
             });
         }
 
+        // Request non-present required tile layers.
+        // TODO: Consider tile TTL.
+        let requests = [];
+        if (this.maps) {
+            for (const [mapName, map] of this.maps) {
+                for (const [layerName, _] of map.layers) {
+                    // Find tile IDs which are not yet loaded for this map layer combination.
+                    let requestTilesForMapLayer = []
+                    let level = this.layerIdToLevel.get(mapName + '/' + layerName);
+                    if (level == undefined) {
+                        continue;
+                    }
+                    let tileIds = tileIdPerLevel.get(level!);
+                    if (tileIds == undefined) {
+                        continue;
+                    }
+                    for (let tileId of tileIds!) {
+                        const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layerName, tileId);
+                        if (this.checkMapLayerVisibility(mapName, layerName)) {
+                            if (!this.loadedTileLayers.has(tileMapLayerKey)) {
+                                requestTilesForMapLayer.push(Number(tileId));
+                            }
+                        } else {
+                            if (this.loadedTileLayers.has(tileMapLayerKey)) {
+                                this.removeTileLayer(this.loadedTileLayers.get(tileMapLayerKey));
+                                this.loadedTileLayers.delete(tileMapLayerKey);
+                            }
+                        }
+                    }
+                    // Only add a request if there are tiles to be loaded.
+                    if (requestTilesForMapLayer.length > 0) {
+                        requests.push({
+                            mapId: mapName,
+                            layerId: layerName,
+                            tileIds: requestTilesForMapLayer
+                        });
+                    }
+                }
+            }
+        }
+
+        // Nothing to do if all requests are empty.
+        if (requests.length === 0) {
+            return;
+        }
+
+        // Abort previous fetch operation, if it is different from the new one.
+        let newRequestBody = JSON.stringify({
+            requests: requests,
+            maxKnownFieldIds: this.tileParser.getFieldDictOffsets()
+        });
+        if (this.currentFetch) {
+            if (this.currentFetch.bodyJson === newRequestBody)
+                return;
+            this.currentFetch.abort();
+            // Clear any unparsed messages from the previous stream.
+            this.tileStreamParsingQueue = [];
+        }
+
+        // Make sure that there are no unparsed bytes lingering from the previous response stream.
+        this.tileParser.reset();
+
         // Launch the new fetch operation
         this.currentFetch = new Fetch(tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
-            .withBody({
-                requests: requests,
-                maxKnownFieldIds: this.tileParser.getFieldDictOffsets()
-            })
+            .withBody(newRequestBody)
             .withBufferCallback((message: any, messageType: any) => {
                 // Schedule the parsing of the newly arrived tile layer,
                 // but don't do it synchronously to avoid stalling the ongoing
@@ -395,6 +403,7 @@ export class MapService {
             });
         this.currentFetch.go();
     }
+
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
         let tileLayer = new FeatureTile(this.tileParser, tileLayerBlob, preventCulling);
