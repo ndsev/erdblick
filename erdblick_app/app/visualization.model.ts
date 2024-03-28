@@ -1,7 +1,7 @@
-import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "cesium";
 import {FeatureTile} from "./features.model";
-import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "./wasm";
+import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "./cesium";
+import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
 interface LocateResolution {
     tileId: string,

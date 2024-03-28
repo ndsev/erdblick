@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 SOURCE_LOC=$1
 if [ -z $SOURCE_LOC ]; then
@@ -13,9 +14,11 @@ echo "Collecting npm modules."
 npm install
 
 echo "Building Angular distribution files."
+npm run lint
 if [[ -z "$NG_DEVELOP" ]]; then
   npm run build -- -c production
 else
   npm run build
 fi
+
 exit 0

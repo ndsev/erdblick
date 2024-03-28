@@ -1,5 +1,5 @@
 import {Component} from "@angular/core";
-import {Cartesian3} from "cesium";
+import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {JumpTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";

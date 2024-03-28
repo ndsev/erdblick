@@ -15,7 +15,7 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer
-} from "cesium";
+} from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";

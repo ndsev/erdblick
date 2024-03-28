@@ -1,10 +1,8 @@
-"use strict";
-
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
-import {Cartesian3} from "cesium";
 import {MapService} from "./map.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ParametersService} from "./parameters.service";
+import {Cartesian3} from "./cesium";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
