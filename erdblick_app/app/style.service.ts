@@ -2,11 +2,8 @@ import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
     of,
-    from,
     forkJoin,
     map,
-    mergeMap,
-    reduce,
     firstValueFrom,
     BehaviorSubject,
     Observable,
@@ -15,6 +12,9 @@ import {
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {uint8ArrayToWasm} from "./wasm";
+import {CoreService} from "./core.service";
+import {ParametersService} from "./parameters.service";
 
 interface ErdblickStyleEntry {
     id: string,
@@ -51,7 +51,11 @@ export class StyleService {
     builtinStylesCount = 0;
     importedStylesCount = 0;
 
-    constructor(private httpClient: HttpClient) {
+    private textEncoder: TextEncoder = new TextEncoder();
+
+    constructor(private httpClient: HttpClient,
+                public coreService: CoreService,
+                public parametersService: ParametersService) {
         this.stylesLoaded.next(false);
         let styleUrls: Array<ErdblickStyleEntry> = [];
         httpClient.get("/config.json", {responseType: "json"}).subscribe({
@@ -312,5 +316,47 @@ export class StyleService {
 
     clearStorageForBuiltinStyles() {
         localStorage.removeItem('builtinStyleData');
+    }
+
+    loadStyles() {
+        if (this.styleData) {
+            this.styleData.forEach((style: ErdblickStyle, _) => {
+                style.featureLayerStyle?.delete();
+            });
+        }
+
+        const parameters = this.parametersService.parameters.getValue();
+        if (parameters) {
+            [...this.availableStylesActivations.keys()].forEach(styleId =>
+                this.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
+        }
+
+        this.styleData.forEach((style: ErdblickStyle, styleId: string) => {
+            this.loadErdblickStyleData(styleId);
+        });
+
+        console.log("Loaded styles.");
+    }
+
+    loadErdblickStyleData(styleId: string) {
+        const style = this.styleData.get(styleId);
+        if (style !== undefined) {
+            const styleUint8Array = this.textEncoder.encode(style.data);
+            const result = uint8ArrayToWasm(this.coreService.coreLib,
+                (wasmBuffer: any) => {
+                    const featureLayerStyle = new this.coreService.coreLib!.FeatureLayerStyle(wasmBuffer);
+                    if (featureLayerStyle) {
+                        style.featureLayerStyle = new this.coreService.coreLib!.FeatureLayerStyle(wasmBuffer);
+                        this.styleData.set(styleId, style);
+                        return true;
+                    }
+                    return false;
+                },
+                styleUint8Array);
+            if (result === undefined || !result) {
+                console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.data}`)
+                this.erroredStyleIds.set(styleId, "YAML Parse Error");
+            }
+        }
     }
 }

@@ -1,36 +1,9 @@
 import {Component} from '@angular/core';
-import {DebugWindow} from "./debugapi.component";
 import {InfoMessageService} from "./info.service";
-import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
-import {ActivatedRoute, Router} from "@angular/router";
-import {of} from "rxjs";
-
-// Redeclare window with extended interface
-declare let window: DebugWindow;
-
-export interface MapItemLayer extends Object {
-    canRead: boolean;
-    canWrite: boolean;
-    coverage: number[];
-    featureTypes: Object[];
-    layerId: string;
-    type: string;
-    version: Object;
-    zoomLevels: number[];
-}
-
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
-    layers: Map<string, MapItemLayer>;
-    mapId: string;
-    maxParallelJobs: number;
-    nodeId: string;
-    protocolVersion: Map<string, number>;
-}
 
 @Component({
     selector: 'pref-components',

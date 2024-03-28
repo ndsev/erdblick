@@ -2,7 +2,6 @@
 
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import { MainModule as ErdblickCore, TileLayerParser, TileFeatureLayer } from '../../build/libs/core/erdblick-core';
-import {Nullable} from "primeng/ts-helpers";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
