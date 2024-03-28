@@ -54,8 +54,8 @@ export class StyleService {
     private textEncoder: TextEncoder = new TextEncoder();
 
     constructor(private httpClient: HttpClient,
-                public coreService: CoreService,
-                public parametersService: ParametersService) {
+                // public parametersService: ParametersService,
+                public coreService: CoreService) {
         this.stylesLoaded.next(false);
         let styleUrls: Array<ErdblickStyleEntry> = [];
         httpClient.get("/config.json", {responseType: "json"}).subscribe({
@@ -325,11 +325,11 @@ export class StyleService {
             });
         }
 
-        const parameters = this.parametersService.parameters.getValue();
-        if (parameters) {
-            [...this.availableStylesActivations.keys()].forEach(styleId =>
-                this.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
-        }
+        // const parameters = this.parametersService.parameters.getValue();
+        // if (parameters) {
+        //     [...this.availableStylesActivations.keys()].forEach(styleId =>
+        //         this.availableStylesActivations.set(styleId, parameters.styles.includes(styleId)));
+        // }
 
         this.styleData.forEach((style: ErdblickStyle, styleId: string) => {
             this.loadErdblickStyleData(styleId);
