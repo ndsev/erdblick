@@ -4,6 +4,10 @@ import {Cartesian3} from "cesium";
 
 @Injectable({providedIn: 'root'})
 export class ViewService {
+
+    // TODO: Refactor away
+    viewportToBeUpdated: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
+
     osmEnabled: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(true);
     osmOpacityValue: BehaviorSubject<number> = new BehaviorSubject<number>(30);
     cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =

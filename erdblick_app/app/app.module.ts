@@ -38,8 +38,12 @@ import {CoreService} from "./core.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ViewService} from "./view.service";
 
-export function initializeLibrary(coreService: CoreService): () => Promise<void> {
-    return () => coreService.initializeLibrary();
+export function initialiseServices(coreService: CoreService, styleService: StyleService) {
+    return () => {
+        return coreService.initialiseLibrary().then(() => {
+            return styleService.initialiseStyles();
+        });
+    }
 }
 
 @NgModule({
@@ -78,8 +82,8 @@ export function initializeLibrary(coreService: CoreService): () => Promise<void>
     providers: [
         {
             provide: APP_INITIALIZER,
-            useFactory: initializeLibrary,
-            deps: [CoreService],
+            useFactory: initialiseServices,
+            deps: [CoreService, StyleService],
             multi: true
         },
         MapService,

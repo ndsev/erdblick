@@ -4,8 +4,8 @@ import {uint8ArrayFromWasm} from "./wasm";
 import {Cartesian3} from "cesium";
 import {CoreService} from "./core.service";
 import {MapService} from "./map.service";
-import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {f} from "../../static/bundle/cesium/Workers/chunk-LYPPBP4Q";
+import {ErdblickViewComponent} from "./view.component";
+import {ViewService} from "./view.service";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -30,7 +30,8 @@ export class ErdblickDebugApi {
      */
     constructor(public coreService: CoreService,
                 public mapService: MapService,
-                mapView: any) {
+                public viewService: ViewService,
+                mapView: ErdblickViewComponent) {
         this.view = mapView;
     }
 
@@ -41,7 +42,7 @@ export class ErdblickDebugApi {
      */
     private setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.view.viewer.camera.setView({
+        this.viewService.cameraViewData.next({
             destination: Cartesian3.fromArray(cameraInfo.position),
             orientation: {
                 heading: cameraInfo.orientation.heading,
@@ -58,15 +59,11 @@ export class ErdblickDebugApi {
      */
     private getCamera() {
         const position = [
-            this.view.viewer.camera.position.x,
-            this.view.viewer.camera.position.y,
-            this.view.viewer.camera.position.z
+            this.viewService.cameraViewData.getValue().destination.x,
+            this.viewService.cameraViewData.getValue().destination.y,
+            this.viewService.cameraViewData.getValue().destination.z,
         ];
-        const orientation = {
-            heading: this.view.viewer.camera.heading,
-            pitch: this.view.viewer.camera.pitch,
-            roll: this.view.viewer.camera.roll
-        };
+        const orientation = this.viewService.cameraViewData.getValue().orientation;
         return JSON.stringify({position, orientation});
     }
 
@@ -75,10 +72,8 @@ export class ErdblickDebugApi {
      */
     private showTestTile() {
         let tile = uint8ArrayFromWasm(this.coreService.coreLib, (sharedArr: any) => {
-            if (this.coreService.coreLib !== undefined) {
-                this.coreService.coreLib.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
-            }
-        })
+            this.coreService.coreLib!.generateTestTile(sharedArr, this.mapService.mapModel.tileParser);
+        });
         if (this.coreService.coreLib !== undefined) {
             let style = this.coreService.coreLib.generateTestStyle();
             this.mapService.mapModel.addTileFeatureLayer(tile, {

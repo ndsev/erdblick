@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {ErdblickModel} from "./erdblick.model";
 import {StyleService} from "./style.service";
 import {CoreService} from "./core.service";
+import {BehaviorSubject} from "rxjs";
 
 export interface MapItemLayer extends Object {
     canRead: boolean;
@@ -37,7 +38,7 @@ export class MapService {
 
     constructor(public coreService: CoreService,
                 public styleService: StyleService) {
-        this.mapModel = new ErdblickModel(this.coreService.coreLib!, this.styleService);
+        this.mapModel = new ErdblickModel(this.coreService, this.styleService);
         this.applyTileLimits(this.mapModel.maxLoadTiles, this.mapModel.maxVisuTiles);
 
         this.mapModel.mapInfoTopic.subscribe((mapItems: Map<string, MapInfoItem>) => {

@@ -6,7 +6,7 @@ export class CoreService {
 
     coreLib: ErdblickCore | undefined;
 
-    initializeLibrary(): Promise<void> {
+    initialiseLibrary(): Promise<void> {
         return MainModuleFactory().then((coreLib: ErdblickCore) => {
             console.log("  ...done.")
             this.coreLib = coreLib;

@@ -1,6 +1,5 @@
 "use strict";
 
-import {ErdblickModel} from "./erdblick.model";
 import {FeatureWrapper} from "./features.component";
 import {TileVisualization} from "./visualization.model"
 import {BehaviorSubject} from "rxjs"
@@ -216,7 +215,11 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.coreService, this.mapService, this);
+        window.ebDebug = new ErdblickDebugApi(this.coreService, this.mapService, this.viewService, this);
+
+        this.viewService.viewportToBeUpdated.subscribe(toBeUpdated => {
+            if (toBeUpdated) this.updateViewport();
+        });
     }
 
     /**
