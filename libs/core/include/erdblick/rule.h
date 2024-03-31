@@ -67,6 +67,10 @@ public:
     [[nodiscard]] bool relationRecursive() const;
     [[nodiscard]] bool relationMergeTwoWay() const;
 
+    [[nodiscard]] std::optional<std::regex> const& attributeType() const;
+    [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
+    [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
+
     [[nodiscard]] bool hasLabel() const;
     [[nodiscard]] std::string const& labelFont() const;
     [[nodiscard]] glm::fvec4 const& labelColor() const;
@@ -144,6 +148,10 @@ private:
     std::shared_ptr<FeatureStyleRule> relationTargetStyle_;
     bool relationRecursive_ = false;
     bool relationMergeTwoWay_ = false;
+
+    std::optional<std::regex> attributeType_;
+    std::optional<std::regex> attributeLayerType_;
+    std::optional<bool> attributeValidityGeometry_;
 
     std::vector<FeatureStyleRule> firstOfRules_;
 };

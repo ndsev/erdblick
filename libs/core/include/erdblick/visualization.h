@@ -135,6 +135,16 @@ private:
         FeatureStyleRule const& rule);
 
     /**
+     * Visualize an attribute.
+     */
+    void addAttribute(
+        mapget::model_ptr<mapget::Feature> const& feature,
+        std::string_view const& layer,
+        mapget::model_ptr<mapget::Attribute> const& attr,
+        uint32_t id,
+        const FeatureStyleRule& rule);
+
+    /**
      * Add some geometry. The Cesium conversion will be dispatched,
      * based on the geometry type and the style rule instructions.
      */

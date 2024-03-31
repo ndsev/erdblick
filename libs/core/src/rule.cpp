@@ -107,7 +107,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
         else {
             std::cout << "Unsupported mode: " << modeStr << std::endl;
-            return;
         }
     }
     if (yaml["type"].IsDefined()) {
@@ -229,6 +228,31 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["relation-merge-twoway"].IsDefined()) {
         // Parse whether bidirectional relations should be followed and merged.
         relationMergeTwoWay_ = yaml["relation-merge-twoway"].as<bool>();
+    }
+
+    /////////////////////////////////////
+    /// Attribute Rule Fields
+    /////////////////////////////////////
+
+    if (yaml["attribute-type"].IsDefined()) {
+        // Parse an attribute type regular expression, e.g. `SPEED_LIMIT_.*`
+        attributeType_ = yaml["attribute-type"].as<std::string>();
+    }
+    if (yaml["attribute-layer-type"].IsDefined()) {
+        // Parse an attribute type regular expression, e.g. `Road.*Layer`
+        attributeLayerType_ = yaml["attribute-layer-type"].as<std::string>();
+    }
+    if (yaml["attribute-validity-geom"].IsDefined()) {
+        // Parse an attribute validity requirement: any, required, or none
+        auto reqValidityStr = yaml["attribute-validity-geom"].as<std::string>();
+        if (reqValidityStr == "any")
+            attributeValidityGeometry_.reset();
+        else if (reqValidityStr == "required")
+            attributeValidityGeometry_ = true;
+        else if (reqValidityStr == "none")
+            attributeValidityGeometry_ = false;
+        else
+            std::cout << "Unsupported validity requirement: " << reqValidityStr << std::endl;
     }
 
     /////////////////////////////////////
@@ -618,6 +642,21 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistan
 double const& FeatureStyleRule::verticalOffset() const
 {
     return verticalOffset_;
+}
+
+std::optional<std::regex> const& FeatureStyleRule::attributeType() const
+{
+    return attributeType_;
+}
+
+std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const
+{
+    return attributeLayerType_;
+}
+
+std::optional<bool> const& FeatureStyleRule::attributeValidityGeometry() const
+{
+    return attributeValidityGeometry_;
 }
 
 }

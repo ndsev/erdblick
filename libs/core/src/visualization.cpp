@@ -188,7 +188,8 @@ void FeatureLayerVisualization::addFeature(
     uint32_t id,
     FeatureStyleRule const& rule)
 {
-    if (rule.aspect() == FeatureStyleRule::Feature) {
+    switch(rule.aspect()) {
+    case FeatureStyleRule::Feature: {
         auto boundEvalFun = [this, &feature](auto&& str){return evaluateExpression(str, *feature);};
         feature->geom()->forEachGeometry(
             [this, id, &rule, &boundEvalFun](auto&& geom)
@@ -197,9 +198,32 @@ void FeatureLayerVisualization::addFeature(
                     addGeometry(geom, id, rule, boundEvalFun);
                 return true;
             });
+        break;
     }
-    else if (rule.aspect() == FeatureStyleRule::Relation) {
+    case FeatureStyleRule::Relation: {
         relationStyleState_.emplace_back(rule, feature, *this);
+        break;
+    }
+    case FeatureStyleRule::Attribute: {
+        // Use const-version of the attribute layers, so the feature does not
+        // lazily initialize its attribute layer list.
+        if (auto attrLayers = const_cast<mapget::Feature const&>(*feature).attributeLayers()) {
+            attrLayers->forEachLayer([this, &rule, &feature](auto&& layerName, auto&& layer){
+                // Check if the attribute layer name is accepted for the rule.
+                if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
+                    if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
+                        return true;
+                }
+                // Iterate over all the layer's attributes.
+                layer->forEachAttribute([this, &rule, &feature, &layerName](auto&& attr){
+                    addAttribute(feature, layerName, attr, UnselectableId, rule);
+                    return true;
+                });
+                return true;
+            });
+        }
+        break;
+    }
     }
 }
 
@@ -439,6 +463,59 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
 
     std::cout << "Expression " << expression << " returned nothing." << std::endl;
     return simfil::Value::null();
+}
+
+void FeatureLayerVisualization::addAttribute(
+    model_ptr<Feature> const& feature,
+    std::string_view const& layer,
+    model_ptr<Attribute> const& attr,
+    uint32_t id,
+    const FeatureStyleRule& rule)
+{
+    // Check if the attribute type name is accepted for the rule.
+    if (auto const& attrTypeRegex = rule.attributeType()) {
+        auto attributeTypeId = attr->name();
+        if (!std::regex_match(attributeTypeId.begin(), attributeTypeId.end(), *attrTypeRegex)) {
+            return;
+        }
+    }
+
+    // Check if the attribute validity is accepted for the rule.
+    if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
+        if (*validityGeomRequired != attr->hasValidity()) {
+            return;
+        }
+    }
+
+    // Create simfil evaluation context for the rule.
+    auto const& constAttr = static_cast<mapget::Attribute const&>(*attr);
+    auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
+
+    simfil::OverlayNode attrEvaluationContext(simfil::Value::field(constAttr));
+
+    // Assemble simfil evaluation context.
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$name"),
+        simfil::Value(attr->name()));
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$feature"),
+        simfil::Value::field(constFeature));
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$layer"),
+        simfil::Value(layer));
+
+    // Function which can evaluate a simfil expression in the attribute context.
+    auto boundEvalFun = [this, &attrEvaluationContext](auto&& str)
+    {
+        return evaluateExpression(str, attrEvaluationContext);
+    };
+
+    // Draw validity geometry.
+    auto geom = attr->hasValidity() ? attr->validity() : feature->firstGeometry();
+    addGeometry(geom, UnselectableId, rule, boundEvalFun);
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
