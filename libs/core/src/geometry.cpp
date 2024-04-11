@@ -1,3 +1,5 @@
+#include "glm/glm.hpp"
+
 #include "geometry.h"
 
 Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
@@ -161,4 +163,46 @@ bool erdblick::isPointInsideTriangle(
     // If the point is on the same side of all edges, it is inside the triangle
     // Note: Using <= on all checks to include points lying exactly on an edge
     return (side0 <= 0 && side1 <= 0 && side2 <= 0) || (side0 >= 0 && side1 >= 0 && side2 >= 0);
+}
+
+glm::dvec3 erdblick::geometryNormal(const model_ptr<Geometry>& g)
+{
+    if (!g || g->numPoints() == 0) {
+        std::cerr << "Cannot obtain normal of null geometry." << std::endl;
+        return {};
+    }
+
+    auto firstPoint = g->pointAt(0);
+    double lat = firstPoint.y;
+
+    // Constants for conversion
+    constexpr double latitudeConversion = 110574.; // Meters per degree of latitude
+    constexpr double longitudeConversionAtEquator = 111320.; // Meters per degree of longitude at the equator
+
+    // Calculate conversion for longitude based on the latitude of the first point
+    double longitudeConversion = longitudeConversionAtEquator * glm::cos(glm::radians(lat));
+
+    // Calculate the scale factors to convert 1m into degrees for both latitude and longitude
+    double scaleFactorLatitude = 1.0 / latitudeConversion;
+    double scaleFactorLongitude = 1.0 / longitudeConversion;
+
+    // Specific handling for lines
+    if (g->geomType() == GeomType::Line && g->numPoints() >= 2) {
+        auto lastPoint = g->pointAt(g->numPoints() - 1);
+
+        // Create a perpendicular vector in the xy-plane.
+        glm::dvec3 result{firstPoint.y - lastPoint.y, lastPoint.x - firstPoint.x, 0};
+
+        // Normalize the delta to 1m using scale factors.
+        auto meters = result * glm::dvec3{longitudeConversion, latitudeConversion, 0.};
+        double scaleFactor = 1.0 / glm::length(meters);
+        result *= scaleFactor;
+        result.z = 1.; // Set z-component to 1 to represent a 1m altitude change.
+
+        return result;
+    }
+
+    // Default return value for non-line geometries or line geometries with less than 2 points.
+    // This represents a displacement of 1m in each dimension at the geometry's latitude.
+    return {scaleFactorLongitude, scaleFactorLatitude, 1.};
 }

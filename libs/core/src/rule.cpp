@@ -160,7 +160,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["vertical-offset"].IsDefined()) {
         // Parse option for the width of the feature outline color.
-        verticalOffset_ = yaml["vertical-offset"].as<double>();
+        offset_.y = yaml["vertical-offset"].as<double>();
+    }
+    if (yaml["offset"].IsDefined() && yaml["offset"].size() >= 1) {
+        offset_.x = yaml["offset"][0].as<double>();
+        offset_.y = yaml["offset"][1].as<double>();
+        offset_.z = yaml["offset"][2].as<double>();
     }
 
     /////////////////////////////////////
@@ -639,9 +644,9 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistan
     return offsetScaleByDistance_;
 }
 
-double const& FeatureStyleRule::verticalOffset() const
+glm::dvec3 const& FeatureStyleRule::offset() const
 {
-    return verticalOffset_;
+    return offset_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const

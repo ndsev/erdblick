@@ -57,7 +57,7 @@ public:
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
-    [[nodiscard]] double const& verticalOffset() const;
+    [[nodiscard]] glm::dvec3 const& offset() const;
 
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
@@ -118,7 +118,7 @@ private:
     glm::fvec4 outlineColor_{.0, .0, .0, .0};
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
-    double verticalOffset_ = .0;
+    glm::dvec3 offset_{.0, .0, .0};
 
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";

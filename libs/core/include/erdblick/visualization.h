@@ -142,15 +142,20 @@ private:
         std::string_view const& layer,
         mapget::model_ptr<mapget::Attribute> const& attr,
         uint32_t id,
-        const FeatureStyleRule& rule);
+        const FeatureStyleRule& rule,
+        uint32_t& offsetFactor,
+        glm::dvec3 const& offset);
 
     /**
      * Add some geometry. The Cesium conversion will be dispatched,
      * based on the geometry type and the style rule instructions.
      */
     void addGeometry(
-        mapget::model_ptr<mapget::Geometry> const& geom, uint32_t id, FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun);
+        mapget::model_ptr<mapget::Geometry> const& geom,
+        uint32_t id,
+        FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
 
     /**
      * Add a line which connects two points to the visualization.

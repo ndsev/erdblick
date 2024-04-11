@@ -188,14 +188,16 @@ void FeatureLayerVisualization::addFeature(
     uint32_t id,
     FeatureStyleRule const& rule)
 {
+    auto offset = geometryNormal(feature->firstGeometry()) * rule.offset();
+
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
         auto boundEvalFun = [this, &feature](auto&& str){return evaluateExpression(str, *feature);};
         feature->geom()->forEachGeometry(
-            [this, id, &rule, &boundEvalFun](auto&& geom)
+            [this, id, &rule, &boundEvalFun, &offset](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, id, rule, boundEvalFun);
+                    addGeometry(geom, id, rule, boundEvalFun, offset);
                 return true;
             });
         break;
@@ -207,21 +209,31 @@ void FeatureLayerVisualization::addFeature(
     case FeatureStyleRule::Attribute: {
         // Use const-version of the attribute layers, so the feature does not
         // lazily initialize its attribute layer list.
-        if (auto attrLayers = const_cast<mapget::Feature const&>(*feature).attributeLayers()) {
-            attrLayers->forEachLayer([this, &rule, &feature](auto&& layerName, auto&& layer){
-                // Check if the attribute layer name is accepted for the rule.
-                if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
-                    if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
-                        return true;
-                }
-                // Iterate over all the layer's attributes.
-                layer->forEachAttribute([this, &rule, &feature, &layerName](auto&& attr){
-                    addAttribute(feature, layerName, attr, UnselectableId, rule);
+        auto attrLayers = const_cast<mapget::Feature const&>(*feature).attributeLayers();
+        if (!attrLayers)
+            break;
+
+        uint32_t offsetFactor = 0;
+        attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
+            // Check if the attribute layer name is accepted for the rule.
+            if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
+                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
                     return true;
-                });
+            }
+            // Iterate over all the layer's attributes.
+            layer->forEachAttribute([&, this](auto&& attr){
+                addAttribute(
+                    feature,
+                    layerName,
+                    attr,
+                    id, // TODO: Rethink, how an attribute may be encoded in the id.
+                    rule,
+                    offsetFactor,
+                    offset);
                 return true;
             });
-        }
+            return true;
+        });
         break;
     }
     }
@@ -231,14 +243,18 @@ void FeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
     uint32_t id,
     FeatureStyleRule const& rule,
-    BoundEvalFun const& evalFun)
+    BoundEvalFun const& evalFun,
+    glm::dvec3 const& offset)
 {
+    if (!rule.selectable())
+        id = UnselectableId;
+
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
-        [&vertsCartesian, &rule](auto&& vertex)
+        [&vertsCartesian, &offset](auto&& vertex)
         {
-            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, rule.verticalOffset()));
+             vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
             return true;
         });
 
@@ -272,7 +288,7 @@ void FeatureLayerVisualization::addGeometry(
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.verticalOffset())),
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.offset())),
                 text,
                 rule,
                 id,
@@ -381,8 +397,8 @@ void erdblick::FeatureLayerVisualization::addLine(
     BoundEvalFun const& evalFun,
     double labelPositionHint)
 {
-    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.verticalOffset());
-    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.verticalOffset());
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.offset());
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.offset());
 
     addPolyLine(
         {cartA, cartB},
@@ -470,7 +486,9 @@ void FeatureLayerVisualization::addAttribute(
     std::string_view const& layer,
     model_ptr<Attribute> const& attr,
     uint32_t id,
-    const FeatureStyleRule& rule)
+    const FeatureStyleRule& rule,
+    uint32_t& offsetFactor,
+    glm::dvec3 const& offset)
 {
     // Check if the attribute type name is accepted for the rule.
     if (auto const& attrTypeRegex = rule.attributeType()) {
@@ -513,9 +531,17 @@ void FeatureLayerVisualization::addAttribute(
         return evaluateExpression(str, attrEvaluationContext);
     };
 
+    // Bump visual offset factor for next visualized attribute.
+    ++offsetFactor;
+
     // Draw validity geometry.
     auto geom = attr->hasValidity() ? attr->validity() : feature->firstGeometry();
-    addGeometry(geom, UnselectableId, rule, boundEvalFun);
+    addGeometry(
+        geom,
+        id,
+        rule,
+        boundEvalFun,
+        offset * static_cast<double>(offsetFactor));
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
