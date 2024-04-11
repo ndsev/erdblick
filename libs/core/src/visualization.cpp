@@ -288,7 +288,7 @@ void FeatureLayerVisualization::addGeometry(
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.offset())),
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), offset)),
                 text,
                 rule,
                 id,
@@ -395,10 +395,11 @@ void erdblick::FeatureLayerVisualization::addLine(
     uint32_t id,
     const erdblick::FeatureStyleRule& rule,
     BoundEvalFun const& evalFun,
+    glm::dvec3 const& offset,
     double labelPositionHint)
 {
-    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.offset());
-    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.offset());
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, offset);
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, offset);
 
     addPolyLine(
         {cartA, cartB},
@@ -695,6 +696,10 @@ void RecursiveRelationVisualizationState::render(
         r.relation_->targetValidity() :
         r.targetFeature_->firstGeometry();
 
+    // Get offset base vector.
+    auto offsetBase = geometryNormal(sourceGeom);
+    auto offset = offsetBase * rule_.offset();
+
     // Ensure that sourceStyle, targetStyle and endMarkerStyle
     // are only ever applied once for each feature.
     auto sourceId = r.sourceFeature_->id()->toString();
@@ -709,27 +714,39 @@ void RecursiveRelationVisualizationState::render(
         auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_.relationLineHeightOffset()};
 
         if (rule_.width() > 0) {
-            visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun);
+            visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun, offset);
         }
         if (rule_.relationLineEndMarkerStyle()) {
             if (visualizedFeatures_.emplace(sourceId + "-endmarker").second)
-                visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+                visu_.addLine(
+                    p1lo,
+                    p1hi,
+                    UnselectableId,
+                    *rule_.relationLineEndMarkerStyle(),
+                    boundEvalFun,
+                    offsetBase * rule_.relationLineEndMarkerStyle()->offset());
             if (visualizedFeatures_.emplace(targetId + "-endmarker").second)
-                visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+                visu_.addLine(
+                    p2lo,
+                    p2hi,
+                    UnselectableId,
+                    *rule_.relationLineEndMarkerStyle(),
+                    boundEvalFun,
+                    offsetBase * rule_.relationLineEndMarkerStyle()->offset());
         }
     }
 
     // Run source geometry visualization.
     if (sourceGeom && visualizedFeatures_.emplace(sourceId).second) {
         if (auto sourceRule = rule_.relationSourceStyle()) {
-            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun);
+            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun, offsetBase * sourceRule->offset());
         }
     }
 
     // Run target geometry visualization.
     if (targetGeom && visualizedFeatures_.emplace(targetId).second) {
         if (auto targetRule = rule_.relationTargetStyle()) {
-            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
+            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun, offsetBase * targetRule->offset());
         }
     }
 

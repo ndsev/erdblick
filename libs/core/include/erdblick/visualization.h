@@ -168,6 +168,7 @@ private:
         uint32_t id,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
+        glm::dvec3 const& offset,
         double labelPositionHint=0.5);
 
     /**
