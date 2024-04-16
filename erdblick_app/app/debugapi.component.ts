@@ -67,7 +67,7 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     private showTestTile() {
-        let tile = uint8ArrayFromWasm(coreLib, (sharedArr: any) => {
+        let tile = uint8ArrayFromWasm((sharedArr: any) => {
             coreLib.generateTestTile(sharedArr, this.mapService.tileParser);
         });
         let style = coreLib.generateTestStyle();

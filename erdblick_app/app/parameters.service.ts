@@ -1,9 +1,12 @@
 import {Injectable} from "@angular/core";
-import {MapInfoItem, MapService, MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE} from "./map.service";
-import {StyleService} from "./style.service";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, map} from "rxjs";
 import {Cartesian3, Cartographic, Math} from "./cesium";
 import {Params} from "@angular/router";
+import {layer} from "@codemirror/view";
+import {configs} from "@typescript-eslint/eslint-plugin";
+
+const MAX_NUM_TILES_TO_LOAD = 2048;
+const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 export interface ErdblickParameters {
     heading: number,
@@ -14,10 +17,11 @@ export interface ErdblickParameters {
     alt: number,
     osmOpacity: number,
     osmEnabled: boolean,
-    layers: Array<Array<string>>,
+    layers: Array<[string, number]>,
     styles: Array<string>,
     tilesLoadLimit: number,
-    tilesVisualizeLimit: number
+    tilesVisualizeLimit: number,
+    valuesFromInitialQueryParams: boolean
 }
 
 const defaultParameters: ErdblickParameters = {
@@ -32,15 +36,15 @@ const defaultParameters: ErdblickParameters = {
     layers: [],
     styles: [],
     tilesLoadLimit: MAX_NUM_TILES_TO_LOAD,
-    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
+    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE,
+    valuesFromInitialQueryParams: false
 }
 
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
     parameters: BehaviorSubject<ErdblickParameters>;
-    // TODO: Refactor away
-    viewportToBeUpdated: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
+    initialQueryParamsSet: boolean = false;
 
     osmEnabled: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(true);
     osmOpacityValue: BehaviorSubject<number> = new BehaviorSubject<number>(30);
@@ -54,12 +58,11 @@ export class ParametersService {
             }
         });
 
-    constructor(public mapService: MapService,
-                public styleService: StyleService) {
+    constructor() {
         let parameters = this.loadSavedParameters();
         if (!parameters) {
-            const currentOrientation = this.collectCameraOrientation();
-            const currentCameraPosition = this.collectCameraPosition();
+            const currentOrientation = this.getCameraOrientation();
+            const currentCameraPosition = this.getCameraPosition();
             let currentPosition = null;
             if (currentCameraPosition) {
                 const currentPositionCartographic = Cartographic.fromCartesian(
@@ -71,15 +74,6 @@ export class ParametersService {
                     alt: currentPositionCartographic.height
                 }
             }
-            const currentStyles = [...this.styleService.availableStylesActivations.keys()].filter(key => this.styleService.availableStylesActivations.get(key));
-            let currentLayers = new Array<Array<string>>;
-            this.mapService.layerIdToLevel.forEach((level, mapLayerName) => {
-                const [encMapName, encLayerName] = mapLayerName.split('/');
-                const visible = this.mapService.availableMapItems.getValue().get(encMapName)?.layers.get(encLayerName)?.visible;
-                if (visible !== undefined && visible) {
-                    currentLayers.push([mapLayerName, level.toString()]);
-                }
-            });
             this.parameters = new BehaviorSubject<ErdblickParameters>({
                 heading: currentOrientation ? currentOrientation.heading : defaultParameters.heading,
                 pitch: currentOrientation ? currentOrientation.pitch : defaultParameters.pitch,
@@ -89,10 +83,11 @@ export class ParametersService {
                 alt: currentPosition ? currentPosition.alt : defaultParameters.alt,
                 osmOpacity: defaultParameters.osmOpacity,
                 osmEnabled: defaultParameters.osmEnabled,
-                layers: currentLayers,
-                styles: currentStyles.length ? currentStyles : defaultParameters.styles,
+                layers: [],
+                styles: [],
                 tilesLoadLimit: defaultParameters.tilesLoadLimit,
-                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit
+                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit,
+                valuesFromInitialQueryParams: false
             });
             console.log(this.parameters.getValue())
         } else {
@@ -106,6 +101,64 @@ export class ParametersService {
         });
     }
 
+    p() {
+        return this.parameters.getValue();
+    }
+
+    setInitialMapLayers(layers: Array<[string, number]>) {
+        // Only set map layers, if there are no configured values yet.
+        if (this.p().layers.length) {
+            return;
+        }
+        this.p().layers = layers;
+        this.parameters.next(this.p());
+    }
+
+    setInitialStyles(styles: Array<string>) {
+        // Only set styles, if there are no configured values yet.
+        if (this.p().styles.length) {
+            return;
+        }
+        this.p().styles = styles;
+        this.parameters.next(this.p());
+    }
+
+    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number] {
+        const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
+        if (conf) {
+            return [true, conf[1]];
+        }
+        return [!this.p().layers.length, fallbackLevel];
+    }
+
+    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean) {
+        let mapLayer = mapId+"/"+layerId;
+        let conf = this.p().layers.find(val => val[0] == mapLayer);
+        if (conf && visible) {
+            conf[1] = level;
+        }
+        else if (conf) {
+            this.p().layers = this.p().layers.filter(val => val[0] !== mapLayer);
+        }
+        else if (visible) {
+            this.p().layers.push([mapLayer, level]);
+        }
+        this.parameters.next(this.p());
+    }
+
+    styleConfig(styleId: string): boolean {
+        return !this.p().styles.length || this.p().styles.find(sid => sid == styleId) !== undefined;
+    }
+
+    setStyleConfig(styleId: string, visible: boolean) {
+        let newStyles = this.p().styles.filter(val => val !== styleId);
+        if (visible) {
+            newStyles.push(styleId);
+        }
+        this.p().styles = newStyles;
+        this.parameters.next(this.p());
+    }
+
     loadSavedParameters(): ErdblickParameters | null {
         const parameters = localStorage.getItem('erdblickParameters');
         if (parameters) {
@@ -114,8 +167,8 @@ export class ParametersService {
         return null;
     }
 
-    parseAndApplyParams(params: Params, firstParamUpdate: boolean = false) {
-        let currentParameters = this.parameters.getValue();
+    parseAndApplyQueryParams(params: Params) {
+        let currentParameters = this.p();
         const newPosition = {
             lon: params["lon"] ? Number(params["lon"]) : currentParameters.lon,
             lat: params["lat"] ? Number(params["lat"]) : currentParameters.lat,
@@ -127,13 +180,14 @@ export class ParametersService {
             roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
         }
 
-        if (firstParamUpdate ||
+        if (!this.initialQueryParamsSet ||
             newPosition.lon != currentParameters.lon ||
             newPosition.lat != currentParameters.lat ||
             newPosition.alt != currentParameters.alt ||
             newOrientation.heading != currentParameters.heading ||
             newOrientation.pitch != currentParameters.pitch ||
-            newOrientation.roll != currentParameters.roll) {
+            newOrientation.roll != currentParameters.roll)
+        {
             this.setView(Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt), newOrientation);
             currentParameters.lon = newPosition.lon;
             currentParameters.lat = newPosition.lat;
@@ -150,56 +204,15 @@ export class ParametersService {
         currentParameters.osmEnabled = osmEnabled;
         currentParameters.osmOpacity = osmOpacity;
 
-        let layerNamesLevels = currentParameters.layers;
-        let currentLayers = new Array<Array<string>>;
         if (params["layers"]) {
-            layerNamesLevels = JSON.parse(params["layers"]);
+            let newLayers = JSON.parse(params["layers"]);
+            if (newLayers.length)
+                currentParameters.layers = newLayers;
         }
-        layerNamesLevels.forEach((nameLevel: Array<string>) => {
-            const name = nameLevel[0];
-            const level = Number(nameLevel[1]);
-            if (this.mapService.layerIdToLevel.has(name)) {
-                this.mapService.layerIdToLevel.set(name, level);
-            }
-            const [encMapName, encLayerName] = name.split('/');
-            this.mapService.availableMapItems.getValue().forEach(
-                (mapItem: MapInfoItem, mapName: string) => {
-                    if (mapName == encMapName) {
-                        mapItem.visible = true;
-                        mapItem.layers.forEach((mapLayer, layerName) => {
-                            if (layerName == encLayerName) {
-                                mapLayer.visible = true;
-                                currentLayers.push([`${mapName}/${layerName}`, level.toString()])
-                            }
-                        });
-                    }
-                });
-        });
-        if (currentLayers) {
-            currentParameters.layers = currentLayers;
-        }
-
-        let styles = currentParameters.styles;
-        let activateAll = false;
-        if (params["styles"] && JSON.parse(params["styles"])) {
-            styles = JSON.parse(params["styles"]);
-        } else if (firstParamUpdate) {
-            activateAll = true;
-        }
-        let currentStyles = new Array<string>();
-        if (firstParamUpdate) {
-            for (let styleId of this.styleService.availableStylesActivations.keys()) {
-                this.styleService.availableStylesActivations.set(styleId, activateAll);
-            }
-        }
-        styles.forEach(styleId => {
-            if (this.styleService.availableStylesActivations.has(styleId)) {
-                this.styleService.availableStylesActivations.set(styleId, true);
-                currentStyles.push(styleId);
-            }
-        })
-        if (currentStyles) {
-            currentParameters.styles = currentStyles;
+        if (params["styles"]) {
+            let newStyles = JSON.parse(params["styles"]);
+            if (newStyles.length)
+                currentParameters.styles = newStyles;
         }
         if (params["tilesLoadLimit"]) {
             currentParameters.tilesLoadLimit = JSON.parse(params["tilesLoadLimit"]);
@@ -208,6 +221,8 @@ export class ParametersService {
             currentParameters.tilesVisualizeLimit = JSON.parse(params["tilesVisualizeLimit"]);
         }
 
+        currentParameters.valuesFromInitialQueryParams = !this.initialQueryParamsSet;
+        this.initialQueryParamsSet = true;
         this.parameters.next(currentParameters);
     }
 
@@ -217,7 +232,7 @@ export class ParametersService {
     }
 
     private saveParameters() {
-        localStorage.setItem('erdblickParameters', JSON.stringify(this.parameters.getValue()));
+        localStorage.setItem('erdblickParameters', JSON.stringify(this.p()));
     }
 
     setView(destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}) {
@@ -227,11 +242,11 @@ export class ParametersService {
         });
     }
 
-    collectCameraOrientation() {
+    getCameraOrientation() {
         return this.cameraViewData.getValue().orientation;
     }
 
-    collectCameraPosition() {
+    getCameraPosition() {
         return this.cameraViewData.getValue().destination;
     }
 }

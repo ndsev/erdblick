@@ -178,7 +178,7 @@ export class SearchMenuComponent {
         let lon = coordinates[1];
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
         let position = Cartesian3.fromDegrees(lon, lat, alt);
-        let orientation = this.parametersService.collectCameraOrientation();
+        let orientation = this.parametersService.getCameraOrientation();
         if (orientation) {
             this.parametersService.cameraViewData.next({
                 destination: position,

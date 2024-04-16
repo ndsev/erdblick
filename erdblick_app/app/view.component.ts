@@ -212,10 +212,6 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
-
-        this.parameterService.viewportToBeUpdated.subscribe(toBeUpdated => {
-            if (toBeUpdated) this.updateViewport();
-        });
     }
 
     /**
@@ -288,7 +284,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
 
         // Apply additional highlight styles.
-        for (let [styleId, styleData] of this.styleService.allStyles()) {
+        for (let [styleId, styleData] of this.styleService.styleData) {
             if (styleData.featureLayerStyle) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,

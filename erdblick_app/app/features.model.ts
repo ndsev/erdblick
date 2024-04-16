@@ -1,6 +1,6 @@
 "use strict";
 
-import {coreLib, uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
+import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 
 /**
@@ -23,13 +23,12 @@ export class FeatureTile {
 
     /**
      * Construct a FeatureTile object.
-     * @param coreLib Reference to the WASM erdblick library.
      * @param parser Singleton TileLayerStream WASM object.
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
     constructor(parser: TileLayerParser, tileFeatureLayerBlob: any, preventCulling: boolean) {
-        let mapTileMetadata = uint8ArrayToWasm(coreLib, (wasmBlob: any) => {
+        let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
@@ -50,7 +49,7 @@ export class FeatureTile {
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasm(coreLib, (bufferToRead: any) => {
+        return uint8ArrayToWasm((bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
@@ -68,7 +67,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(coreLib, async (bufferToRead: any) => {
+        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.

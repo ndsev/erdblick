@@ -18,14 +18,14 @@ import {StyleService} from "./style.service";
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" 
-                   (click)="toggleOverlay(searchValue, searchoverlay, $event)" 
-                   (ngModelChange)="setTargetValue(searchValue)"/>
+            <input type="text" pInputText [(ngModel)]="searchValue"
+                   (click)="toggleSearchOverlay(searchValue, searchoverlay, $event)"
+                   (ngModelChange)="setSearchTargetValue(searchValue)"/>
         </span>
         <pref-components></pref-components>
         <inspection-panel></inspection-panel>
         <div id="info">
-            {{title}} {{version}}
+            {{ title }} {{ version }}
         </div>
         <router-outlet></router-outlet>
     `,
@@ -43,7 +43,6 @@ export class AppComponent {
     title: string = 'erdblick';
     version: string = "v0.3.0";
     searchValue: string = ""
-    firstParamUpdate: boolean = true;
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
@@ -60,16 +59,12 @@ export class AppComponent {
     }
 
     init() {
+        // Forward URL parameter changes to the ParameterService.
         this.activatedRoute.queryParams.subscribe((params: Params) => {
-            this.parametersService.parseAndApplyParams(params, this.firstParamUpdate);
-            if (this.firstParamUpdate) {
-                this.firstParamUpdate = false;
-                this.mapService.update();
-                this.styleService.reapplyAllStyles();
-            }
-            setTimeout(() => { this.parametersService.viewportToBeUpdated.next(true) }, 1000);
+            this.parametersService.parseAndApplyQueryParams(params);
         });
 
+        // Forward ParameterService updates to the URL.
         this.parametersService.parameters.subscribe(parameters => {
             const entries = [...Object.entries(parameters)];
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
@@ -77,7 +72,7 @@ export class AppComponent {
         });
     }
 
-    toggleOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
+    toggleSearchOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
         if (value) {
             searchOverlay.show(event);
             return;
@@ -85,7 +80,7 @@ export class AppComponent {
         searchOverlay.toggle(event);
     }
 
-    setTargetValue(value: string) {
+    setSearchTargetValue(value: string) {
         this.jumpToTargetService.targetValueSubject.next(value);
     }
 

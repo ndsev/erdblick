@@ -88,25 +88,21 @@ export class PreferencesComponent {
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        this.maxLoadTiles = this.tilesToLoadInput = this.mapService.maxLoadTiles;
-        this.maxVisuTiles = this.tilesToVisualizeInput = this.mapService.maxVisuTiles;
+        this.maxLoadTiles = this.tilesToLoadInput = this.parametersService.p().tilesLoadLimit;
+        this.maxVisuTiles = this.tilesToVisualizeInput = this.parametersService.p().tilesVisualizeLimit;
     }
 
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput)) {
+        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) || this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        const result = this.mapService.applyTileLimits(this.tilesToLoadInput, this.tilesToVisualizeInput);
-        if (result) {
-            let parameters = this.parametersService.parameters.getValue();
-            parameters.tilesLoadLimit = this.tilesToLoadInput;
-            parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
-            this.parametersService.parameters.next(parameters);
-            this.messageService.showSuccess("Successfully updated tile limits!");
-        } else {
-            this.messageService.showError("Could not update tile limits!");
-        }
+        let parameters = this.parametersService.p();
+        parameters.tilesLoadLimit = this.tilesToLoadInput;
+        parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
+        this.parametersService.parameters.next(parameters);
+        this.mapService.update();
+        this.messageService.showSuccess("Successfully updated tile limits!");
     }
 
     dialogVisible: boolean = false;
@@ -125,7 +121,7 @@ export class PreferencesComponent {
     clearImportedStyles() {
         for (let styleId of this.styleService.styleData.keys()) {
             if (this.styleService.styleData.get(styleId)!.imported) {
-                this.styleService.removeImportedStyle(styleId);
+                this.styleService.deleteStyle(styleId);
             }
         }
         this.styleService.clearStorageForImportedStyles();

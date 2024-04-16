@@ -35,13 +35,12 @@ import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
-import {initialiseLibrary} from "./wasm";
+import {initializeLibrary} from "./wasm";
 
-export function initialiseServices(styleService: StyleService) {
-    return () => {
-        return initialiseLibrary().then(() => {
-            return styleService.initialiseStyles();
-        });
+export function initializeServices(styleService: StyleService) {
+    return async () => {
+        await initializeLibrary();
+        return await styleService.initializeStyles();
     }
 }
 
@@ -81,7 +80,7 @@ export function initialiseServices(styleService: StyleService) {
     providers: [
         {
             provide: APP_INITIALIZER,
-            useFactory: initialiseServices,
+            useFactory: initializeServices,
             deps: [StyleService],
             multi: true
         },
