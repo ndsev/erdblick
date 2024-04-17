@@ -54,7 +54,7 @@ export class StyleService {
     {
         this.parameterService.parameters.subscribe(params => {
             // This subscription exists specifically to catch the values of the query parameters.
-            if (!params.valuesFromInitialQueryParams)
+            if (this.parameterService.initialQueryParamsSet)
                 return;
             for (let [styleId, style] of this.styleData) {
                 style.enabled = this.parameterService.styleConfig(styleId);
@@ -137,13 +137,15 @@ export class StyleService {
     }
 
     async syncStyleYamlData(styleId: string) {
-        this.deleteStyle(styleId);
         for (const erdblickStyle of this.erdblickBuiltinStyles) {
             if (erdblickStyle.id == styleId) {
                 try {
                     const result= await this.fetchStylesYamlSources([erdblickStyle]);
                     if (result !== undefined && result.get(styleId) !== undefined) {
                         const styleString = result.get(styleId)!;
+                        if (this.styleData.has(styleId)) {
+                            this.styleData.get(styleId)!.featureLayerStyle?.delete();
+                        }
                         this.styleData.set(styleId, {
                             id: styleId,
                             modified: false,
@@ -153,6 +155,7 @@ export class StyleService {
                             featureLayerStyle: null
                         });
                         this.saveModifiedBuiltinStyles();
+                        this.reapplyStyle(styleId);
                     }
                 } catch (error) {
                     console.error('Style retrieval failed:', error);
@@ -242,13 +245,13 @@ export class StyleService {
             return;
         style.featureLayerStyle?.delete();
         this.styleRemovedForId.next(styleId);
+        this.styleData.delete(styleId);
         if (style.imported) {
             this.importedStylesCount--;
             this.saveImportedStyles();
         }
         else
             this.saveModifiedBuiltinStyles();
-        this.styleData.delete(styleId);
     }
 
     setStyleData(styleId: string, styleData: string) {
@@ -280,23 +283,23 @@ export class StyleService {
     loadImportedStyles() {
         const importedStyleData = localStorage.getItem('importedStyleData');
         if (importedStyleData) {
-            JSON.parse(importedStyleData).forEach((style: ErdblickStyle, styleId: string) => {
+            for (let [styleId, style] of JSON.parse(importedStyleData)) {
                 style.featureLayerStyle = null;
                 this.styleData.set(styleId, style);
                 this.importedStylesCount++;
-            });
+            }
         }
     }
 
     loadModifiedBuiltinStyles() {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
-            JSON.parse(modifiedBuiltinStyleData).forEach((style: ErdblickStyle, styleId: string) => {
+            for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 if (this.styleData.has(styleId)) {
                     style.featureLayerStyle = null;
                     this.styleData.set(styleId, style);
                 }
-            });
+            }
         }
     }
 
@@ -332,10 +335,7 @@ export class StyleService {
 
     reloadStyle(styleId: string) {
         if (this.styleData.has(styleId)) {
-            this.syncStyleYamlData(styleId).then(_ => {
-                this.reapplyStyle(styleId);
-            });
-            console.log(`Reloaded style: ${styleId}.`);
+            this.syncStyleYamlData(styleId);
         }
     }
 

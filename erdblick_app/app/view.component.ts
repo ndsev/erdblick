@@ -171,21 +171,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
-            const parameters = this.parameterService.parameters.getValue();
-            if (parameters) {
-                const currentPositionCartographic = Cartographic.fromCartesian(
-                    Cartesian3.fromElements(
-                        this.viewer.camera.position.x, this.viewer.camera.position.y, this.viewer.camera.position.z
-                    )
-                );
-                parameters.lon = Math.toDegrees(currentPositionCartographic.longitude);
-                parameters.lat = Math.toDegrees(currentPositionCartographic.latitude);
-                parameters.alt = currentPositionCartographic.height;
-                parameters.heading = this.viewer.camera.heading;
-                parameters.pitch = this.viewer.camera.pitch;
-                parameters.roll = this.viewer.camera.roll;
-                this.parameterService.parameters.next(parameters);
-            }
+            this.parameterService.setCameraState(this.viewer.camera);
             this.updateViewport();
         });
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
@@ -194,12 +180,11 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.fullscreenButton.destroy();
 
         this.parameterService.cameraViewData.subscribe(cameraData => {
-            if (cameraData) {
-                this.viewer.camera.setView({
-                    destination: cameraData.destination,
-                    orientation: cameraData.orientation
-                });
-            }
+            this.viewer.camera.setView({
+                destination: cameraData.destination,
+                orientation: cameraData.orientation
+            });
+            this.updateViewport();
         });
 
         this.parameterService.osmEnabled.subscribe(enabled => {

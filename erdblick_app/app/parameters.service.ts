@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, map} from "rxjs";
-import {Cartesian3, Cartographic, Math} from "./cesium";
+import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
 import {Params} from "@angular/router";
 import {layer} from "@codemirror/view";
 import {configs} from "@typescript-eslint/eslint-plugin";
@@ -20,8 +20,7 @@ export interface ErdblickParameters {
     layers: Array<[string, number]>,
     styles: Array<string>,
     tilesLoadLimit: number,
-    tilesVisualizeLimit: number,
-    valuesFromInitialQueryParams: boolean
+    tilesVisualizeLimit: number
 }
 
 const defaultParameters: ErdblickParameters = {
@@ -36,8 +35,7 @@ const defaultParameters: ErdblickParameters = {
     layers: [],
     styles: [],
     tilesLoadLimit: MAX_NUM_TILES_TO_LOAD,
-    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE,
-    valuesFromInitialQueryParams: false
+    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
 }
 
 @Injectable({providedIn: 'root'})
@@ -86,8 +84,7 @@ export class ParametersService {
                 layers: [],
                 styles: [],
                 tilesLoadLimit: defaultParameters.tilesLoadLimit,
-                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit,
-                valuesFromInitialQueryParams: false
+                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit
             });
             console.log(this.parameters.getValue())
         } else {
@@ -147,7 +144,7 @@ export class ParametersService {
     }
 
     styleConfig(styleId: string): boolean {
-        return !this.p().styles.length || this.p().styles.find(sid => sid == styleId) !== undefined;
+        return !this.p().styles.length || this.p().styles.includes(styleId);
     }
 
     setStyleConfig(styleId: string, visible: boolean) {
@@ -156,6 +153,21 @@ export class ParametersService {
             newStyles.push(styleId);
         }
         this.p().styles = newStyles;
+        this.parameters.next(this.p());
+    }
+
+    setCameraState(camera: Camera) {
+        const currentPositionCartographic = Cartographic.fromCartesian(
+            Cartesian3.fromElements(
+                camera.position.x, camera.position.y, camera.position.z
+            )
+        );
+        this.p().lon = Math.toDegrees(currentPositionCartographic.longitude);
+        this.p().lat = Math.toDegrees(currentPositionCartographic.latitude);
+        this.p().alt = currentPositionCartographic.height;
+        this.p().heading = camera.heading;
+        this.p().pitch = camera.pitch;
+        this.p().roll = camera.roll;
         this.parameters.next(this.p());
     }
 
@@ -221,9 +233,8 @@ export class ParametersService {
             currentParameters.tilesVisualizeLimit = JSON.parse(params["tilesVisualizeLimit"]);
         }
 
-        currentParameters.valuesFromInitialQueryParams = !this.initialQueryParamsSet;
-        this.initialQueryParamsSet = true;
         this.parameters.next(currentParameters);
+        this.initialQueryParamsSet = true;
     }
 
     clearStorage() {

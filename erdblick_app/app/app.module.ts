@@ -37,10 +37,11 @@ import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
 import {initializeLibrary} from "./wasm";
 
-export function initializeServices(styleService: StyleService) {
+export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
         await initializeLibrary();
-        return await styleService.initializeStyles();
+        await styleService.initializeStyles();
+        await mapService.initialize();
     }
 }
 
@@ -81,7 +82,7 @@ export function initializeServices(styleService: StyleService) {
         {
             provide: APP_INITIALIZER,
             useFactory: initializeServices,
-            deps: [StyleService],
+            deps: [StyleService, MapService],
             multi: true
         },
         MapService,

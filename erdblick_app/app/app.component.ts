@@ -2,10 +2,11 @@ import {Component} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
-import {ActivatedRoute, Params, Router} from "@angular/router";
+import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
 import {OverlayPanel} from "primeng/overlaypanel";
 import {StyleService} from "./style.service";
+import {filter} from "rxjs";
 
 @Component({
     selector: 'app-root',
@@ -59,13 +60,22 @@ export class AppComponent {
     }
 
     init() {
+        this.router.events.subscribe()
         // Forward URL parameter changes to the ParameterService.
-        this.activatedRoute.queryParams.subscribe((params: Params) => {
-            this.parametersService.parseAndApplyQueryParams(params);
+        this.router.events.pipe(
+            // Filter the events to only include NavigationEnd events
+            filter(event => event instanceof NavigationEnd)
+        ).subscribe((event) => {
+            this.parametersService.parseAndApplyQueryParams(this.activatedRoute.snapshot.queryParams);
         });
 
         // Forward ParameterService updates to the URL.
         this.parametersService.parameters.subscribe(parameters => {
+            // Only forward new parameters into the query, if we have
+            // parsed the initial values.
+            if (!this.parametersService.initialQueryParamsSet) {
+                return;
+            }
             const entries = [...Object.entries(parameters)];
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries));
