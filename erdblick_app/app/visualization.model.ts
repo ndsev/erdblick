@@ -1,6 +1,7 @@
+import {FeatureTile} from "./features.model";
+import {coreLib} from "./wasm";
 import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "./cesium";
-import {FeatureTile} from "./features.component";
-import {TileFeatureLayer, MainModule as ErdblickCore, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
 interface LocateResolution {
     tileId: string,
@@ -39,7 +40,7 @@ class LowDetailTileVisualization {
     private readonly id: string;
 
     constructor(viewer: Viewer, tile: FeatureTile) {
-        let position = tile.coreLib.getTilePosition(BigInt(tile.tileId));
+        let position = coreLib.getTilePosition(BigInt(tile.tileId));
         let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
         this.entity = viewer.entities.add({
             position: Cartesian3.fromDegrees(position.x, position.y),
@@ -66,7 +67,6 @@ export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
 
-    private readonly coreLib: ErdblickCore;
     private readonly style: StyleWithIsDeleted;
     private lowDetailVisu: LowDetailTileVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
@@ -93,7 +93,6 @@ export class TileVisualization {
      */
     constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
         this.tile = tile;
-        this.coreLib = tile.coreLib;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
@@ -125,7 +124,7 @@ export class TileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let visualization = new this.coreLib.FeatureLayerVisualization(
+                let visualization = new coreLib.FeatureLayerVisualization(
                     this.style,
                     this.highlight!);
                 visualization.addTileFeatureLayer(tileFeatureLayer);

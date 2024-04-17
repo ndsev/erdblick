@@ -1,8 +1,7 @@
 "use strict";
 
-import {ErdblickModel} from "./erdblick.model";
-import {FeatureWrapper} from "./features.component";
-import {TileVisualization} from "./visualization.component"
+import {FeatureWrapper} from "./features.model";
+import {TileVisualization} from "./visualization.model"
 import {BehaviorSubject} from "rxjs"
 import {
     Cartesian2,
@@ -18,31 +17,115 @@ import {
     Viewer
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
+import {AfterViewInit, Component} from "@angular/core";
+import {MapService} from "./map.service";
+import {Feature} from "../../build/libs/core/erdblick-core";
+import {InspectionService} from "./inspection.service";
+import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
+import {StyleService} from "./style.service";
 
-export class ErdblickView {
-    viewer: Viewer;
-    private model: ErdblickModel;
+// Redeclare window with extended interface
+declare let window: DebugWindow;
+
+@Component({
+    selector: 'erdblick-view',
+    template: `
+        <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+    `,
+    styles: [`
+        @media only screen and (max-width: 56em) {
+            .elevated {
+                bottom: 3.5em;
+                padding-bottom: 0;
+            }
+        }
+    `]
+})
+export class ErdblickViewComponent implements AfterViewInit {
+    viewer!: Viewer;
     private pickedFeature: any = null;
     private pickedFeatureOrigColor: Color | null = null;
     private hoveredFeature: any = null;
     private hoveredFeatureOrigColor: Color | null = null;
-    private mouseHandler: ScreenSpaceEventHandler;
+    private mouseHandler: ScreenSpaceEventHandler | null = null;
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
-    private openStreetMapLayer: ImageryLayer;
+    private openStreetMapLayer: ImageryLayer | null = null;
     private selectionVisualizations: TileVisualization[]
 
     /**
      * Construct a Cesium View with a Model.
-     * @param {ErdblickModel} model
-     * @param containerDomElementId Div which hosts the Cesium view.
+     * @param mapService The map model service providing access to data
+     * @param styleService
+     * @param inspectionService
      * @param parameterService The parameter service, used to update
      */
-    constructor(model: ErdblickModel,
-                containerDomElementId: string,
+    constructor(public mapService: MapService,
+                public styleService: StyleService,
+                public inspectionService: InspectionService,
                 public parameterService: ParametersService) {
-        this.model = model;
-        this.viewer = new Viewer(containerDomElementId,
+
+        // Holds the currently selected feature.
+        this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
+
+        // Holds visualizations for the current selection for all present styles.
+        this.selectionVisualizations = [];
+
+        this.tileVisForPrimitive = new Map();
+
+        this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
+            tileVis.render(this.viewer).then(wasRendered => {
+                if (wasRendered) {
+                    tileVis.forEachPrimitive((primitive: any) => {
+                        this.tileVisForPrimitive.set(primitive, tileVis);
+                    })
+                    this.viewer.scene.requestRender();
+                }
+            });
+        });
+
+        this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
+            if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
+                this.setPickedCesiumFeature(null);
+            }
+            if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
+                this.setHoveredCesiumFeature(null);
+            }
+            tileVis.forEachPrimitive((primitive: any) => {
+                this.tileVisForPrimitive.delete(primitive);
+            })
+            tileVis.destroy(this.viewer);
+            this.viewer.scene.requestRender();
+        });
+
+        this.mapService.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
+            this.parameterService.cameraViewData.next({
+                destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
+                orientation: {
+                    heading: Math.toRadians(0), // East, in radians.
+                    pitch: Math.toRadians(-90), // Directly looking down.
+                    roll: 0 // No rotation
+                }
+            });
+        });
+
+        this.selectionTopic.subscribe(selectedFeatureWrapper => {
+            if (!selectedFeatureWrapper) {
+                this.inspectionService.isInspectionPanelVisible = false;
+                return;
+            }
+
+            selectedFeatureWrapper.peek((feature: Feature) => {
+                this.inspectionService.selectedFeatureGeoJsonText = feature.geojson() as string;
+                this.inspectionService.selectedFeatureIdText = feature.id() as string;
+                this.inspectionService.isInspectionPanelVisible = true;
+                this.inspectionService.loadFeatureData();
+            })
+        });
+    }
+
+    ngAfterViewInit() {
+        this.viewer = new Viewer("mapViewContainer",
             {
                 baseLayerPicker: false,
                 animation: false,
@@ -59,16 +142,11 @@ export class ErdblickView {
                 baseLayer: false
             }
         );
+
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
 
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-
-        // Holds the currently selected feature.
-        this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
-
-        // Holds visualizations for the current selection for all present styles.
-        this.selectionVisualizations = [];
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
@@ -93,66 +171,32 @@ export class ErdblickView {
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
-            const parameters = this.parameterService.parameters.getValue();
-            if (parameters) {
-                const currentPositionCartographic = Cartographic.fromCartesian(
-                    Cartesian3.fromElements(
-                        this.viewer.camera.position.x, this.viewer.camera.position.y, this.viewer.camera.position.z
-                    )
-                );
-                parameters.lon = Math.toDegrees(currentPositionCartographic.longitude);
-                parameters.lat = Math.toDegrees(currentPositionCartographic.latitude);
-                parameters.alt = currentPositionCartographic.height;
-                parameters.heading = this.viewer.camera.heading;
-                parameters.pitch = this.viewer.camera.pitch;
-                parameters.roll = this.viewer.camera.roll;
-                this.parameterService.parameters.next(parameters);
-            }
+            this.parameterService.setCameraState(this.viewer.camera);
             this.updateViewport();
         });
-
-        this.tileVisForPrimitive = new Map();
-
-        model.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
-            tileVis.render(this.viewer).then(wasRendered => {
-                if (wasRendered) {
-                    tileVis.forEachPrimitive((primitive: any) => {
-                        this.tileVisForPrimitive.set(primitive, tileVis);
-                    })
-                    this.viewer.scene.requestRender();
-                }
-            });
-        });
-
-        model.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-            if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
-                this.setPickedCesiumFeature(null);
-            }
-            if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
-                this.setHoveredCesiumFeature(null);
-            }
-            tileVis.forEachPrimitive((primitive: any) => {
-                this.tileVisForPrimitive.delete(primitive);
-            })
-            tileVis.destroy(this.viewer);
-            this.viewer.scene.requestRender();
-        });
-
-        model.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
-            this.viewer.camera.setView({
-                destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
-                orientation: {
-                    heading: Math.toRadians(0), // East, in radians.
-                    pitch: Math.toRadians(-90), // Directly looking down.
-                    roll: 0 // No rotation
-                }
-            });
-        });
-
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
 
         // Remove fullscreen button as unnecessary
         this.viewer.fullscreenButton.destroy();
+
+        this.parameterService.cameraViewData.subscribe(cameraData => {
+            this.viewer.camera.setView({
+                destination: cameraData.destination,
+                orientation: cameraData.orientation
+            });
+            this.updateViewport();
+        });
+
+        this.parameterService.osmEnabled.subscribe(enabled => {
+            this.updateOpenStreetMapLayer(enabled ? this.parameterService.osmOpacityValue.getValue() / 100: 0);
+        });
+
+        this.parameterService.osmOpacityValue.subscribe(value => {
+            this.updateOpenStreetMapLayer(value / 100);
+        });
+
+        // Add debug API that can be easily called from browser's debug console
+        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
     }
 
     /**
@@ -201,7 +245,7 @@ export class ErdblickView {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        this.selectionVisualizations.forEach(visu => this.model.tileVisualizationDestructionTopic.next(visu));
+        this.selectionVisualizations.forEach(visu => this.mapService.tileVisualizationDestructionTopic.next(visu));
         this.selectionVisualizations = [];
 
         // Get the actual mapget feature for the picked Cesium feature.
@@ -225,15 +269,15 @@ export class ErdblickView {
         }
 
         // Apply additional highlight styles.
-        for (let [styleId, styleData] of this.model.allStyles()) {
+        for (let [styleId, styleData] of this.styleService.styleData) {
             if (styleData.featureLayerStyle) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,
-                    (tileKey: string)=>this.model.getFeatureTile(tileKey),
+                    (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
                     styleData.featureLayerStyle,
                     true,
                     feature.id);
-                this.model.tileVisualizationTopic.next(visu);
+                this.mapService.tileVisualizationTopic.next(visu);
                 this.selectionVisualizations.push(visu);
             }
         }
@@ -324,7 +368,7 @@ export class ErdblickView {
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
         let expandLat = sizeLat * 0.25;
-        this.model.setViewport({
+        this.mapService.setViewport({
             south: south - expandLat,
             west: west - expandLon,
             width: sizeLon + expandLon * 2,
@@ -343,7 +387,9 @@ export class ErdblickView {
     }
 
     updateOpenStreetMapLayer(opacity: number) {
-        this.openStreetMapLayer.alpha = opacity;
-        this.viewer.scene.requestRender();
+        if (this.openStreetMapLayer) {
+            this.openStreetMapLayer.alpha = opacity;
+            this.viewer.scene.requestRender();
+        }
     }
 }

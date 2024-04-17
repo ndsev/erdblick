@@ -36,6 +36,8 @@ export type  PrimitiveCollection = Cesium.PrimitiveCollection;
 export const PrimitiveCollection = Cesium.PrimitiveCollection;
 export type  Entity = Cesium.Entity;
 export const Entity = Cesium.Entity;
+export type  Camera = Cesium.Camera;
+export const Camera = Cesium.Camera;
 
 // Math is a namespace.
 

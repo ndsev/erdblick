@@ -1,12 +1,13 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {MapInfoItem, MapItemLayer, MapService} from "./map.service";
+import {MapInfoItem, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
+import {coreLib} from "./wasm";
 
 
 @Component({
@@ -18,14 +19,13 @@ import {KeyValue} from "@angular/common";
                 <div class="osm-controls">
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button (click)="toggleOSMOverlay()" class="osm-button"
-                              icon="{{mapService.osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                              icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
                     </p-button>
-                    <!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
-                    <div *ngIf="mapService.osmEnabled" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + mapService.osmOpacityValue"
+                    <div *ngIf="osmEnabled" style="display: inline-block">
+                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + osmOpacityValue"
                                class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="mapService.osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
                                   class="w-full"></p-slider>
                     </div>
                 </div>
@@ -41,7 +41,7 @@ import {KeyValue} from "@angular/common";
                                 {{ mapLayer.key }}
                             </span>
                             <div class="layer-controls">
-                                <p-button (click)="toggleLayer(mapItem.key, mapLayer.key, mapLayer.value)"
+                                <p-button (click)="toggleLayer(mapItem.key, mapLayer.key)"
                                           icon="{{mapLayer.value.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                           label="" pTooltip="Toggle layer" tooltipPosition="bottom">
                                 </p-button>
@@ -194,6 +194,10 @@ export class MapPanelComponent {
     editedStyleDataSubscription: Subscription = new Subscription();
     savedStyleDataSubscription: Subscription = new Subscription();
     dataWasModified: boolean = false;
+
+    osmEnabled: boolean;
+    osmOpacityValue: number;
+
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
 
@@ -201,12 +205,11 @@ export class MapPanelComponent {
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public parameterService: ParametersService) {
-        this.mapService.mapModel.subscribe(mapModel => {
-            if (mapModel) {
-                mapModel.availableMapItems.subscribe(mapItems => this.mapItems = mapItems);
-            }
-        });
-
+        this.osmEnabled = this.parameterService.osmEnabled.getValue();
+        this.osmOpacityValue = this.parameterService.osmOpacityValue.getValue();
+        this.mapService.maps.subscribe(
+            mapItems => this.mapItems = mapItems
+        );
     }
 
     showLayerDialog() {
@@ -215,99 +218,46 @@ export class MapPanelComponent {
 
     focus(tileId: bigint, event: any) {
         event.stopPropagation();
-        if (this.mapService.mapModel.getValue() && this.mapService.coreLib !== undefined) {
-            this.mapService.mapModel.getValue()!.zoomToWgs84PositionTopic.next(
-                this.mapService.coreLib.getTilePosition(BigInt(tileId))
-            );
-        }
+        this.mapService.zoomToWgs84PositionTopic.next(
+            coreLib.getTilePosition(BigInt(tileId))
+        );
     }
 
     onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
-        const mapLayerName = `${mapName}/${layerName}`;
-        const level = event.toString();
-        if (this.mapService.mapModel.getValue()) {
-            this.mapService.mapModel.getValue()!.layerIdToLevel.set(mapLayerName, Number(level));
-            const parameters = this.parameterService.parameters.getValue();
-            if (parameters) {
-                const mapItem = this.mapItems.get(mapName);
-                if (mapItem !== undefined) {
-                    for (const [name, layer] of mapItem.layers) {
-                        if (name == layerName && layer.visible) {
-                            let includes = false;
-                            parameters.layers.forEach(layer => {
-                                includes = layer[0] == mapLayerName;
-                                if (includes) layer[1] = level;
-                            })
-                            if (!includes) parameters.layers.push([mapLayerName, level]);
-                            this.parameterService.parameters.next(parameters);
-                        }
-                    }
-                }
-            }
-            this.mapService.mapModel.getValue()!.update();
-        } else {
-            this.messageService.showError("Cannot access the map model. The model is not available.");
-        }
+        this.mapService.setMapLayerLevel(mapName, layerName, Number(event.toString()));
     }
 
     toggleOSMOverlay() {
-        this.mapService.osmEnabled = !this.mapService.osmEnabled;
+        this.osmEnabled = !this.osmEnabled;
+        this.parameterService.osmEnabled.next(this.osmEnabled);
         this.updateOSMOverlay();
     }
 
     updateOSMOverlay() {
-        if (this.mapService.osmEnabled) {
-            this.mapService.mapView?.updateOpenStreetMapLayer(this.mapService.osmOpacityValue / 100);
+        if (this.parameterService.osmEnabled.getValue()) {
+            this.parameterService.osmOpacityValue.next(this.osmOpacityValue);
         } else {
-            this.mapService.mapView?.updateOpenStreetMapLayer(0);
+            this.parameterService.osmOpacityValue.next(0);
         }
         const parameters = this.parameterService.parameters.getValue();
         if (parameters) {
-            parameters.osmEnabled = this.mapService.osmEnabled;
-            parameters.osmOpacity = this.mapService.osmOpacityValue;
+            parameters.osmEnabled = this.osmEnabled;
+            parameters.osmOpacity = this.osmOpacityValue;
             this.parameterService.parameters.next(parameters);
         }
     }
 
-    toggleLayer(mapName: string, layerName: string, mapLayer: MapItemLayer) {
-        const mapLayerName =`${mapName}/${layerName}`;
-        mapLayer.visible = !mapLayer.visible;
-        if (this.mapService.mapModel.getValue()) {
-            const parameters = this.parameterService.parameters.getValue();
-            if (parameters) {
-                if (mapLayer.visible) {
-                    parameters.layers.push([mapLayerName, this.mapService.mapModel.getValue()!.layerIdToLevel.get(mapLayerName)!.toString()]);
-                } else {
-                    parameters.layers = parameters.layers.filter(layer => layer[0] != mapLayerName);
-                }
-                this.parameterService.parameters.next(parameters);
-            }
-            this.mapService.mapModel.getValue()!.update();
-        } else {
-            this.messageService.showError("Cannot access the map model. The model is not available.");
-        }
+    toggleLayer(mapName: string, layerName: string) {
+        this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
     toggleStyle(styleId: string) {
-        const isActivated = !this.styleService.availableStylesActivations.get(styleId);
-        this.styleService.availableStylesActivations.set(styleId, isActivated);
-        const parameters = this.parameterService.parameters.getValue();
-        if (parameters) {
-            if (isActivated) {
-                parameters.styles.push(styleId);
-            } else {
-                parameters.styles = parameters.styles.filter(style => style != styleId);
-            }
-            this.parameterService.parameters.next(parameters);
-        }
-        this.mapService.reapplyStyle(styleId);
+        this.styleService.toggleStyle(styleId);
     }
 
     resetStyle(styleId: string) {
-        if (this.styleService.styleData.has(styleId) && !this.styleService.styleData.get(styleId)!.imported) {
-            this.styleService.availableStylesActivations.set(styleId, true);
-            this.mapService.reloadBuiltinStyle(styleId);
-        }
+        this.styleService.reloadStyle(styleId);
+        this.styleService.toggleStyle(styleId, true);
     }
 
     exportStyle(styleId: string) {
@@ -326,25 +276,21 @@ export class MapPanelComponent {
                 styleId = styleId.slice(0, -4);
             }
             styleId = `${styleId} (Imported)`
-            this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader).subscribe(
-                (next) => {
-                    if (next) {
-                        this.mapService.loadImportedStyle(styleId);
-                    } else {
+            this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader)
+                .then((ok) => {
+                    if (!ok) {
                         this.messageService.showError(`Could not read empty data for: ${styleId}`);
                     }
-                },
-                (error) => {
+                })
+                .catch((error) => {
                     this.messageService.showError(`Error occurred while trying to import style: ${styleId}`);
                     console.log(error);
-                }
-            );
+                });
         }
     }
 
     removeStyle(styleId: string) {
-        this.mapService.removeImportedStyle(styleId);
-        this.styleService.removeImportedStyle(styleId);
+        this.styleService.deleteStyle(styleId);
     }
 
     showStyleEditor(styleId: string) {
@@ -374,8 +320,7 @@ export class MapPanelComponent {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
-        this.styleService.updateStyle(styleId, styleData);
-        this.mapService.reapplyStyle(styleId);
+        this.styleService.setStyleData(styleId, styleData);
         this.dataWasModified = false;
     }
 

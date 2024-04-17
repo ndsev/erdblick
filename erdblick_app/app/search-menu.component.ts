@@ -1,8 +1,10 @@
-import {Component, OnInit} from "@angular/core";
+import {Component} from "@angular/core";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {JumpTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
+import {coreLib} from "./wasm";
+import {ParametersService} from "./parameters.service";
 
 
 @Component({
@@ -27,7 +29,8 @@ export class SearchMenuComponent {
     searchItems: Array<JumpTarget> = [];
     value: string = "";
 
-    constructor(private mapService: MapService,
+    constructor(public mapService: MapService,
+                public parametersService: ParametersService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService) {
 
@@ -85,16 +88,12 @@ export class SearchMenuComponent {
             this.messageService.showError("No value provided!");
             return;
         }
-        if (this.mapService.coreLib) {
-            try {
-                let wgs84TileId = BigInt(value);
-                let position = this.mapService.coreLib.getTilePosition(wgs84TileId);
-                return [position.x, position.y, position.z]
-            } catch (e) {
-                this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
-            }
-        } else {
-            this.messageService.showError("Cannot access the map model. The model is not available.");
+        try {
+            let wgs84TileId = BigInt(value);
+            let position = coreLib.getTilePosition(wgs84TileId);
+            return [position.x, position.y, position.z]
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
         }
         return undefined;
     }
@@ -179,16 +178,12 @@ export class SearchMenuComponent {
         let lon = coordinates[1];
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : 15000;
         let position = Cartesian3.fromDegrees(lon, lat, alt);
-        let orientation = this.mapService.collectCameraOrientation();
+        let orientation = this.parametersService.getCameraOrientation();
         if (orientation) {
-            if (this.mapService.mapView !== undefined) {
-                this.mapService.mapView.viewer.camera.setView({
-                    destination: position,
-                    orientation: orientation
-                });
-            } else {
-                this.messageService.showError("Cannot set camera information. The view is not available.");
-            }
+            this.parametersService.cameraViewData.next({
+                destination: position,
+                orientation: orientation
+            });
         }
     }
 

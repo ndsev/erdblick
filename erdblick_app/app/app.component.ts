@@ -1,24 +1,17 @@
 import {Component} from '@angular/core';
-import {ErdblickView} from "./erdblick.view";
-import {ErdblickModel} from "./erdblick.model";
-import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {HttpClient} from "@angular/common/http";
-import MainModuleFactory, {Feature, MainModule as ErdblickCore} from '../../build/libs/core/erdblick-core';
 import {JumpTargetService} from "./jump.service";
-import {MapInfoItem, MapService} from "./map.service";
-import {ActivatedRoute, Params, Router} from "@angular/router";
-import {StyleService} from "./style.service";
-import {InspectionService} from "./inspection.service";
+import {MapService} from "./map.service";
+import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
 import {OverlayPanel} from "primeng/overlaypanel";
-
-// Redeclare window with extended interface
-declare let window: DebugWindow;
+import {StyleService} from "./style.service";
+import {filter} from "rxjs";
 
 @Component({
     selector: 'app-root',
     template: `
-        <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <erdblick-view></erdblick-view>
         <map-panel></map-panel>
         <p-toast position="bottom-center" key="tc"></p-toast>
         <p-overlayPanel #searchoverlay>
@@ -26,14 +19,14 @@ declare let window: DebugWindow;
         </p-overlayPanel>
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue" 
-                   (click)="toggleOverlay(searchValue, searchoverlay, $event)" 
-                   (ngModelChange)="setTargetValue(searchValue)"/>
+            <input type="text" pInputText [(ngModel)]="searchValue"
+                   (click)="toggleSearchOverlay(searchValue, searchoverlay, $event)"
+                   (ngModelChange)="setSearchTargetValue(searchValue)"/>
         </span>
         <pref-components></pref-components>
         <inspection-panel></inspection-panel>
         <div id="info">
-            {{title}} {{version}}
+            {{ title }} {{ version }}
         </div>
         <router-outlet></router-outlet>
     `,
@@ -51,80 +44,45 @@ export class AppComponent {
     title: string = 'erdblick';
     version: string = "v0.3.0";
     searchValue: string = ""
-    firstParamUpdate: boolean = true;
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
                 private activatedRoute: ActivatedRoute,
                 public mapService: MapService,
-                public jumpToTargetService: JumpTargetService,
                 public styleService: StyleService,
-                public inspectionService: InspectionService,
+                public jumpToTargetService: JumpTargetService,
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
             });
-
-        MainModuleFactory().then((coreLib: ErdblickCore) => {
-            console.log("  ...done.")
-            this.mapService.coreLib = coreLib;
-
-            coreLib.setExceptionHandler((excType: string, message: string) => {
-                throw new Error(`${excType}: ${message}`);
-            });
-
-            this.styleService.stylesLoaded.subscribe(loaded => {
-                if (loaded) this.init();
-            });
-        });
+        this.init();
     }
 
     init() {
-        let erdblickModel = new ErdblickModel(this.mapService.coreLib, this.styleService, this.parametersService);
-        this.mapService.mapModel.next(erdblickModel);
-        this.mapService.mapView = new ErdblickView(erdblickModel, 'mapViewContainer', this.parametersService);
-        this.mapService.applyTileLimits(erdblickModel.maxLoadTiles, erdblickModel.maxVisuTiles);
+        this.router.events.subscribe()
+        // Forward URL parameter changes to the ParameterService.
+        this.router.events.pipe(
+            // Filter the events to only include NavigationEnd events
+            filter(event => event instanceof NavigationEnd)
+        ).subscribe((event) => {
+            this.parametersService.parseAndApplyQueryParams(this.activatedRoute.snapshot.queryParams);
+        });
 
-        // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService.mapView);
-
-        this.mapService.mapView.selectionTopic.subscribe(selectedFeatureWrapper => {
-            if (!selectedFeatureWrapper) {
-                this.inspectionService.isInspectionPanelVisible = false;
+        // Forward ParameterService updates to the URL.
+        this.parametersService.parameters.subscribe(parameters => {
+            // Only forward new parameters into the query, if we have
+            // parsed the initial values.
+            if (!this.parametersService.initialQueryParamsSet) {
                 return;
             }
-
-            selectedFeatureWrapper.peek((feature: Feature) => {
-                this.inspectionService.selectedFeatureGeoJsonText = feature.geojson() as string;
-                this.inspectionService.selectedFeatureIdText = feature.id() as string;
-                this.inspectionService.isInspectionPanelVisible = true;
-                this.inspectionService.loadFeatureData();
-            })
-        });
-
-        this.mapService.mapModel.getValue()!.mapInfoTopic.subscribe((mapItems: Map<string, MapInfoItem>) => {
-            this.mapService.mapModel.getValue()!.availableMapItems.next(mapItems);
-        });
-
-        this.activatedRoute.queryParams.subscribe((params: Params) => {
-            this.parametersService.parseAndApplyParams(params, this.firstParamUpdate);
-            if (this.firstParamUpdate) {
-                this.firstParamUpdate = false;
-                this.mapService.mapModel.getValue()?.update();
-                this.mapService.mapModel.getValue()?.reapplyAllStyles();
-            }
-            setTimeout(() => { this.mapService.mapView?.updateViewport() }, 1000);
-        });
-
-        this.parametersService.parameters.subscribe(parameters => {
             const entries = [...Object.entries(parameters)];
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries));
         });
     }
 
-    toggleOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
+    toggleSearchOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
         if (value) {
             searchOverlay.show(event);
             return;
@@ -132,7 +90,7 @@ export class AppComponent {
         searchOverlay.toggle(event);
     }
 
-    setTargetValue(value: string) {
+    setSearchTargetValue(value: string) {
         this.jumpToTargetService.targetValueSubject.next(value);
     }
 

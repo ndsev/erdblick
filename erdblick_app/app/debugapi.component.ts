@@ -1,6 +1,7 @@
-"use strict";
-
-import {uint8ArrayFromWasm} from "./wasm";
+import {coreLib, uint8ArrayFromWasm} from "./wasm";
+import {MapService} from "./map.service";
+import {ErdblickViewComponent} from "./view.component";
+import {ParametersService} from "./parameters.service";
 import {Cartesian3} from "./cesium";
 
 /**
@@ -19,17 +20,15 @@ export interface DebugWindow extends Window {
  */
 export class ErdblickDebugApi {
     private view: any;
-    private model: any;
-    private coreLib: any;
 
     /**
      * Initialize a new ErdblickDebugApi instance.
      * @param mapView Reference to a ErdblickView instance
      */
-    constructor(mapView: any) {
+    constructor(public mapService: MapService,
+                public parametersService: ParametersService,
+                mapView: ErdblickViewComponent) {
         this.view = mapView;
-        this.model = mapView.model;
-        this.coreLib = mapView.model.coreLib;
     }
 
     /**
@@ -39,7 +38,7 @@ export class ErdblickDebugApi {
      */
     private setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.view.viewer.camera.setView({
+        this.parametersService.cameraViewData.next({
             destination: Cartesian3.fromArray(cameraInfo.position),
             orientation: {
                 heading: cameraInfo.orientation.heading,
@@ -56,15 +55,11 @@ export class ErdblickDebugApi {
      */
     private getCamera() {
         const position = [
-            this.view.viewer.camera.position.x,
-            this.view.viewer.camera.position.y,
-            this.view.viewer.camera.position.z
+            this.parametersService.cameraViewData.getValue().destination.x,
+            this.parametersService.cameraViewData.getValue().destination.y,
+            this.parametersService.cameraViewData.getValue().destination.z,
         ];
-        const orientation = {
-            heading: this.view.viewer.camera.heading,
-            pitch: this.view.viewer.camera.pitch,
-            roll: this.view.viewer.camera.roll
-        };
+        const orientation = this.parametersService.cameraViewData.getValue().orientation;
         return JSON.stringify({position, orientation});
     }
 
@@ -72,10 +67,17 @@ export class ErdblickDebugApi {
      * Generate a test TileFeatureLayer, and show it.
      */
     private showTestTile() {
-        let tile = uint8ArrayFromWasm(this.coreLib, (sharedArr: any) => {
-            this.coreLib.generateTestTile(sharedArr, this.model.tileParser);
-        })
-        let style = this.coreLib.generateTestStyle();
-        this.model.addTileFeatureLayer(tile, style, "_builtin", true);
+        let tile = uint8ArrayFromWasm((sharedArr: any) => {
+            coreLib.generateTestTile(sharedArr, this.mapService.tileParser!);
+        });
+        let style = coreLib.generateTestStyle();
+        this.mapService.addTileFeatureLayer(tile, {
+            id: "_builtin",
+            modified: false,
+            imported: false,
+            enabled: true,
+            data: "",
+            featureLayerStyle: style
+        }, "_builtin", true);
     }
 }

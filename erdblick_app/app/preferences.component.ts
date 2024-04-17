@@ -1,36 +1,10 @@
 import {Component} from '@angular/core';
-import {DebugWindow} from "./debugapi.component";
 import {InfoMessageService} from "./info.service";
-import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
-import {ActivatedRoute, Router} from "@angular/router";
-import {of} from "rxjs";
-
-// Redeclare window with extended interface
-declare let window: DebugWindow;
-
-export interface MapItemLayer extends Object {
-    canRead: boolean;
-    canWrite: boolean;
-    coverage: number[];
-    featureTypes: Object[];
-    layerId: string;
-    type: string;
-    version: Object;
-    zoomLevels: number[];
-}
-
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
-    layers: Map<string, MapItemLayer>;
-    mapId: string;
-    maxParallelJobs: number;
-    nodeId: string;
-    protocolVersion: Map<string, number>;
-}
+import {Router} from "@angular/router";
 
 @Component({
     selector: 'pref-components',
@@ -111,31 +85,26 @@ export class PreferencesComponent {
     maxVisuTiles: number = 0;
 
     constructor(private messageService: InfoMessageService,
-                private router: Router,
-                private route: ActivatedRoute,
+                public router: Router,
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        this.mapService.mapModel.subscribe(mapModel => {
-            if (mapModel) {
-                this.maxLoadTiles = this.tilesToLoadInput = mapModel.maxLoadTiles;
-                this.maxVisuTiles = this.tilesToVisualizeInput = mapModel.maxVisuTiles;
-            }
-        });
+        this.maxLoadTiles = this.tilesToLoadInput = this.parametersService.p().tilesLoadLimit;
+        this.maxVisuTiles = this.tilesToVisualizeInput = this.parametersService.p().tilesVisualizeLimit;
     }
 
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput)) {
+        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) || this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        const result = this.mapService.applyTileLimits(this.tilesToLoadInput, this.tilesToVisualizeInput);
-        if (result) {
-            this.messageService.showSuccess("Successfully updated tile limits!");
-        } else {
-            this.messageService.showError("Could not update tile limits!");
-        }
+        let parameters = this.parametersService.p();
+        parameters.tilesLoadLimit = this.tilesToLoadInput;
+        parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
+        this.parametersService.parameters.next(parameters);
+        this.mapService.update();
+        this.messageService.showSuccess("Successfully updated tile limits!");
     }
 
     dialogVisible: boolean = false;
@@ -149,13 +118,13 @@ export class PreferencesComponent {
 
     clearURLProperties() {
         this.parametersService.clearStorage();
+        window.location.href = this.router.url.split('?')[0];
     }
 
     clearImportedStyles() {
         for (let styleId of this.styleService.styleData.keys()) {
             if (this.styleService.styleData.get(styleId)!.imported) {
-                this.mapService.removeImportedStyle(styleId);
-                this.styleService.availableStylesActivations.delete(styleId);
+                this.styleService.deleteStyle(styleId);
             }
         }
         this.styleService.clearStorageForImportedStyles();
@@ -164,7 +133,7 @@ export class PreferencesComponent {
     clearModifiedStyles() {
         for (let [styleId, style] of this.styleService.styleData) {
             if (!style.imported && style.modified) {
-                this.mapService.reloadBuiltinStyle(styleId);
+                this.styleService.reloadStyle(styleId);
             }
         }
         this.styleService.clearStorageForBuiltinStyles();

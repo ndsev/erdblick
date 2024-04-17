@@ -1,4 +1,4 @@
-import {NgModule} from '@angular/core';
+import {APP_INITIALIZER, NgModule} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 
 import {AppRoutingModule} from './app-routing.module';
@@ -34,6 +34,16 @@ import {ParametersService} from "./parameters.service";
 import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
+import {ErdblickViewComponent} from "./view.component";
+import {initializeLibrary} from "./wasm";
+
+export function initializeServices(styleService: StyleService, mapService: MapService) {
+    return async () => {
+        await initializeLibrary();
+        await styleService.initializeStyles();
+        await mapService.initialize();
+    }
+}
 
 @NgModule({
     declarations: [
@@ -42,7 +52,8 @@ import {EditorComponent} from "./editor.component";
         MapPanelComponent,
         InspectionPanelComponent,
         PreferencesComponent,
-        EditorComponent
+        EditorComponent,
+        ErdblickViewComponent
     ],
     imports: [
         BrowserModule,
@@ -68,13 +79,18 @@ import {EditorComponent} from "./editor.component";
         FileUploadModule
     ],
     providers: [
+        {
+            provide: APP_INITIALIZER,
+            useFactory: initializeServices,
+            deps: [StyleService, MapService],
+            multi: true
+        },
         MapService,
         MessageService,
         InfoMessageService,
         JumpTargetService,
-        StyleService,
         InspectionService,
-        ParametersService
+        ParametersService,
     ],
     bootstrap: [AppComponent]
 })

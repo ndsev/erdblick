@@ -1,8 +1,7 @@
 "use strict";
 
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
-import { MainModule as ErdblickCore, TileLayerParser, TileFeatureLayer } from '../../build/libs/core/erdblick-core';
-import {Nullable} from "primeng/ts-helpers";
+import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -17,7 +16,6 @@ export class FeatureTile {
     layerName: string;
     tileId: bigint;
     numFeatures: number;
-    coreLib: ErdblickCore;
     private parser: TileLayerParser;
     preventCulling: boolean;
     private readonly tileFeatureLayerBlob: any;
@@ -25,13 +23,12 @@ export class FeatureTile {
 
     /**
      * Construct a FeatureTile object.
-     * @param coreLib Reference to the WASM erdblick library.
      * @param parser Singleton TileLayerStream WASM object.
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(coreLib: ErdblickCore, parser: TileLayerParser, tileFeatureLayerBlob: any, preventCulling: boolean) {
-        let mapTileMetadata = uint8ArrayToWasm(coreLib, (wasmBlob: any) => {
+    constructor(parser: TileLayerParser, tileFeatureLayerBlob: any, preventCulling: boolean) {
+        let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
@@ -39,7 +36,6 @@ export class FeatureTile {
         this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
         this.numFeatures = mapTileMetadata.numFeatures;
-        this.coreLib = coreLib;
         this.parser = parser;
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
@@ -53,7 +49,7 @@ export class FeatureTile {
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasm(this.coreLib, (bufferToRead: any) => {
+        return uint8ArrayToWasm((bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
@@ -71,7 +67,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(this.coreLib, async (bufferToRead: any) => {
+        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
