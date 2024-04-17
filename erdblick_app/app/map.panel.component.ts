@@ -1,6 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {MapInfoItem, LayerInfoItem, MapService} from "./map.service";
+import {MapInfoItem, MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
@@ -22,7 +22,6 @@ import {coreLib} from "./wasm";
                               icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
                     </p-button>
-                    <!--                    <p-inputSwitch [(ngModel)]="mapService.osmEnabled" (ngModelChange)="updateOSMOverlay()"></p-inputSwitch>-->
                     <div *ngIf="osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="'Opacity: ' + osmOpacityValue"
                                class="w-full slider-input"/>

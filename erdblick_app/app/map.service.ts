@@ -3,7 +3,7 @@ import {Fetch} from "./fetch.model";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
-import {BehaviorSubject, map, Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";

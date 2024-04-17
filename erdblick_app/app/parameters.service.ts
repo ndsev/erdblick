@@ -1,9 +1,7 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject, map} from "rxjs";
+import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
 import {Params} from "@angular/router";
-import {layer} from "@codemirror/view";
-import {configs} from "@typescript-eslint/eslint-plugin";
 
 const MAX_NUM_TILES_TO_LOAD = 2048;
 const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -239,7 +237,6 @@ export class ParametersService {
 
     clearStorage() {
         localStorage.removeItem('erdblickParameters');
-        this.parameters.next(defaultParameters);
     }
 
     private saveParameters() {
