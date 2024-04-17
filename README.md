@@ -214,7 +214,7 @@ For attributes, style expressions (e.g. `color-expression`) are evaluated in a c
 * `$feature`: The feature of the attribute.
 * `direction`: Attribute direction if set.
 * `validity`: Attribute validity geometry if set.
-* (Additional value fields of the attribute, e.g. `speedLimitKmh`)
+* Top-level fields of the attribute with their nested members, e.g. `attributeValue.speedLimitKmh`.
 
 **Note:** To avoid colliding geometries when multiple attributes are visualized for the same feature,
 set the `offset` field. The spatial `offset` will be multiplied, so it is possible to "stack" attributes
