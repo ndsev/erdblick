@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
-import {Params} from "@angular/router";
+import {Params, Router} from "@angular/router";
 
 const MAX_NUM_TILES_TO_LOAD = 2048;
 const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -54,7 +54,7 @@ export class ParametersService {
             }
         });
 
-    constructor() {
+    constructor(public router: Router) {
         let parameters = this.loadSavedParameters();
         if (!parameters) {
             const currentOrientation = this.getCameraOrientation();
@@ -172,9 +172,66 @@ export class ParametersService {
     loadSavedParameters(): ErdblickParameters | null {
         const parameters = localStorage.getItem('erdblickParameters');
         if (parameters) {
-            return JSON.parse(parameters);
+            const parsedParameters = JSON.parse(parameters);
+            if (this.areValidParameters(parsedParameters)) {
+                return parsedParameters;
+            }
+            console.error("Retrieved stored URL parameters are malformed!")
+            console.log("Will reset URL parameters.")
+            this.resetStorage();
         }
         return null;
+    }
+
+    private areValidParameters(obj: any): obj is ErdblickParameters {
+        const parameterFields: Map<string, string> = new Map([
+            ['heading', 'number'],
+            ['pitch', 'number'],
+            ['roll', 'number'],
+            ['lon', 'number'],
+            ['lat', 'number'],
+            ['alt', 'number'],
+            ['osmOpacity', 'number'],
+            ['osmEnabled', 'boolean'],
+            ['layers', 'array-tuple'],
+            ['styles', 'array-string'],
+            ['tilesLoadLimit', 'number'],
+            ['tilesVisualizeLimit', 'number']
+        ]);
+
+        for (const [field, type] of parameterFields) {
+            if (obj[field] === undefined) {
+                console.error(`Missing field: ${field}`);
+                return false;
+            }
+            switch (type) {
+                case 'number':
+                    if (typeof obj[field] !== 'number') {
+                        console.error(`Invalid type for ${field}: expected number, got ${typeof obj[field]}`);
+                        return false;
+                    }
+                    break;
+                case 'boolean':
+                    if (typeof obj[field] !== 'boolean') {
+                        console.error(`Invalid type for ${field}: expected boolean, got ${typeof obj[field]}`);
+                        return false;
+                    }
+                    break;
+                case 'array-tuple':
+                    if (!Array.isArray(obj[field]) || !obj[field].every((item: any) => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'number')) {
+                        console.error(`Invalid type for ${field}: expected array of [string, number] tuples`);
+                        return false;
+                    }
+                    break;
+                case 'array-string':
+                    if (!Array.isArray(obj[field]) || !obj[field].every((item: any) => typeof item === 'string')) {
+                        console.error(`Invalid type for ${field}: expected array of strings`);
+                        return false;
+                    }
+                    break;
+            }
+        }
+        return true;
     }
 
     parseAndApplyQueryParams(params: Params) {
@@ -235,8 +292,9 @@ export class ParametersService {
         this.initialQueryParamsSet = true;
     }
 
-    clearStorage() {
+    resetStorage() {
         localStorage.removeItem('erdblickParameters');
+        window.location.href = this.router.url.split('?')[0];
     }
 
     private saveParameters() {

@@ -4,7 +4,6 @@ import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
-import {Router} from "@angular/router";
 
 @Component({
     selector: 'pref-components',
@@ -85,7 +84,6 @@ export class PreferencesComponent {
     maxVisuTiles: number = 0;
 
     constructor(private messageService: InfoMessageService,
-                public router: Router,
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
@@ -117,8 +115,7 @@ export class PreferencesComponent {
     }
 
     clearURLProperties() {
-        this.parametersService.clearStorage();
-        window.location.href = this.router.url.split('?')[0];
+        this.parametersService.resetStorage();
     }
 
     clearImportedStyles() {
