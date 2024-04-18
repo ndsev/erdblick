@@ -32,9 +32,11 @@ bool isPointInsideTriangle(Point const& p, Point const& p0, Point const& p1, Poi
 Point geometryCenter(model_ptr<Geometry> const& g);
 
 /**
- * Calculate a normal vector for the geometry. This is used as
- * an offset factor for attribute validity visualizations.
+ * Calculate a local WGS84 coordinate system for the geometry.
+ * The axes are scaled, such that each represents approx. 1m
+ * in real-world length. The y-axis will point in the direction
+ * (first-point -> last-point). The x-axis is perpendicular.
  */
-glm::dvec3 geometryNormal(model_ptr<Geometry> const& g);
+glm::dmat3x3 localWgs84UnitCoordinateSystem(const model_ptr<Geometry>& g);
 
 }  // namespace erdblick

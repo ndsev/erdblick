@@ -1,6 +1,7 @@
 #include "glm/glm.hpp"
 
 #include "geometry.h"
+#include "cesium-interface/point-conversion.h"
 
 Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
 {
@@ -165,44 +166,32 @@ bool erdblick::isPointInsideTriangle(
     return (side0 <= 0 && side1 <= 0 && side2 <= 0) || (side0 >= 0 && side1 >= 0 && side2 >= 0);
 }
 
-glm::dvec3 erdblick::geometryNormal(const model_ptr<Geometry>& g)
+glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>& g)
 {
-    if (!g || g->numPoints() == 0) {
-        std::cerr << "Cannot obtain normal of null geometry." << std::endl;
-        return {};
+    if (!g || g->geomType() != simfil::Geometry::GeomType::Line || g->numPoints() < 2) {
+        constexpr auto latMetersPerDegree = 110574.; // Meters per degree of latitude
+        constexpr auto lonMetersPerDegree = 111320.; // Meters per degree of longitude at equator
+        return {
+            {1./lonMetersPerDegree, .0, .0},
+            {.0, 1./latMetersPerDegree, .0},
+            {.0, .0, 1.}};
     }
 
-    auto firstPoint = g->pointAt(0);
-    double lat = firstPoint.y;
+    auto const aWgs = g->pointAt(0);
+    auto const a = wgsToCartesian<glm::dvec3>(aWgs);
+    auto const b = wgsToCartesian<glm::dvec3>(g->pointAt(g->numPoints() - 1));
+    auto const c = wgsToCartesian<glm::dvec3>(aWgs, {.0, .0, 1.});
+    auto const forward = glm::normalize(b - a);
+    auto const up = glm::normalize(c - a);
+    auto const sideways = glm::cross(forward, up);
+    auto const aWgsForward = cartesianToWgs<glm::dvec3>(a + forward);
+    auto const aWgsSideways = cartesianToWgs<glm::dvec3>(a + sideways);
 
-    // Constants for conversion
-    constexpr double latitudeConversion = 110574.; // Meters per degree of latitude
-    constexpr double longitudeConversionAtEquator = 111320.; // Meters per degree of longitude at the equator
+    glm::dmat3x3 result = {
+        aWgsSideways - glm::dvec3(aWgs.x, aWgs.y, aWgs.z),
+        aWgsForward - glm::dvec3(aWgs.x, aWgs.y, aWgs.z),
+        {.0, .0, 1.},
+    };
 
-    // Calculate conversion for longitude based on the latitude of the first point
-    double longitudeConversion = longitudeConversionAtEquator * glm::cos(glm::radians(lat));
-
-    // Calculate the scale factors to convert 1m into degrees for both latitude and longitude
-    double scaleFactorLatitude = 1.0 / latitudeConversion;
-    double scaleFactorLongitude = 1.0 / longitudeConversion;
-
-    // Specific handling for lines
-    if (g->geomType() == GeomType::Line && g->numPoints() >= 2) {
-        auto lastPoint = g->pointAt(g->numPoints() - 1);
-
-        // Create a perpendicular vector in the xy-plane.
-        glm::dvec3 result{firstPoint.y - lastPoint.y, lastPoint.x - firstPoint.x, 0};
-
-        // Normalize the delta to 1m using scale factors.
-        auto meters = result * glm::dvec3{longitudeConversion, latitudeConversion, 0.};
-        double scaleFactor = 1.0 / glm::length(meters);
-        result *= scaleFactor;
-        result.z = 1.; // Set z-component to 1 to represent a 1m altitude change.
-
-        return result;
-    }
-
-    // Default return value for non-line geometries or line geometries with less than 2 points.
-    // This represents a displacement of 1m in each dimension at the geometry's latitude.
-    return {scaleFactorLongitude, scaleFactorLatitude, 1.};
+    return result;
 }

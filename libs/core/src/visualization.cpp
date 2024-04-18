@@ -188,7 +188,7 @@ void FeatureLayerVisualization::addFeature(
     uint32_t id,
     FeatureStyleRule const& rule)
 {
-    auto offset = geometryNormal(feature->firstGeometry()) * rule.offset();
+    auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
@@ -697,7 +697,7 @@ void RecursiveRelationVisualizationState::render(
         r.targetFeature_->firstGeometry();
 
     // Get offset base vector.
-    auto offsetBase = geometryNormal(sourceGeom);
+    auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeom);
     auto offset = offsetBase * rule_.offset();
 
     // Ensure that sourceStyle, targetStyle and endMarkerStyle
