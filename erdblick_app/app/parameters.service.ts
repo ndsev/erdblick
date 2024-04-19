@@ -202,7 +202,7 @@ export class ParametersService {
             parsedParameters = JSON.parse(parameters);
         return Object.keys(erdblickParameters).reduce((acc, key: string) => {
             const descriptor = erdblickParameters[key];
-            let value = parsedParameters!.hasOwnProperty(key) ? descriptor.converter(parsedParameters[key]) : descriptor.default;
+            let value = parsedParameters!.hasOwnProperty(key) ? parsedParameters[key] : descriptor.default;
             acc[key] = descriptor.validator(value) ? value : descriptor.default;
             return acc;
         }, {} as any);
@@ -215,11 +215,17 @@ export class ParametersService {
         Object.keys(erdblickParameters).forEach(key => {
             const descriptor = erdblickParameters[key];
             if (params.hasOwnProperty(key)) {
-                const value = descriptor.converter(params[key]);
-                if (descriptor.validator(value)) {
-                    updatedParameters[key] = value;
-                } else {
-                    console.warn(`Invalid query param for ${key}, using default.`);
+                try {
+                    const value = descriptor.converter(params[key]);
+                    if (descriptor.validator(value)) {
+                        updatedParameters[key] = value;
+                    } else {
+                        console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
+                        updatedParameters[key] = descriptor.default;
+                    }
+                }
+                catch (e) {
+                    console.warn(`Invalid query param  ${params[key]} for ${key}, using default.`);
                     updatedParameters[key] = descriptor.default;
                 }
             }
