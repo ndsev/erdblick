@@ -221,8 +221,9 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the hovered feature.
      */
     private setHoveredCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature))
+        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
             return;
+        }
         // Restore the previously hovered feature to its original color.
         if (this.hoveredFeature && this.hoveredFeatureOrigColor) {
             this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
@@ -240,8 +241,9 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the picked feature.
      */
     private setPickedCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
+        if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
             return;
+        }
 
         // Restore the previously picked feature to its original color.
         if (this.pickedFeature && this.pickedFeatureOrigColor) {
@@ -294,8 +296,9 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
             return;
         }
-        if (feature.primitive.isDestroyed())
+        if (feature.primitive.isDestroyed()) {
             return;
+        }
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
         attributes.color = ColorGeometryInstanceAttribute.toValue(color);
         this.viewer.scene.requestRender();

@@ -1,12 +1,12 @@
-import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2 } from '@angular/core';
-import { basicSetup } from 'codemirror';
-import { EditorState, Extension } from '@codemirror/state';
-import { yaml } from '@codemirror/lang-yaml';
-import { autocompletion, CompletionContext, CompletionSource } from '@codemirror/autocomplete';
-import { EditorView, keymap, ViewUpdate } from '@codemirror/view';
-import { linter, Diagnostic, lintGutter } from '@codemirror/lint';
-import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
-import { StyleService } from "./style.service";
+import {Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2} from '@angular/core';
+import {basicSetup} from 'codemirror';
+import {EditorState, Extension} from '@codemirror/state';
+import {yaml} from '@codemirror/lang-yaml';
+import {autocompletion, CompletionContext, CompletionSource} from '@codemirror/autocomplete';
+import {EditorView, keymap, ViewUpdate} from '@codemirror/view';
+import {linter, Diagnostic, lintGutter} from '@codemirror/lint';
+import {syntaxHighlighting, defaultHighlightStyle} from "@codemirror/language"
+import {StyleService} from "./style.service";
 import * as jsyaml from 'js-yaml';
 
 const completionsList = [

@@ -198,8 +198,9 @@ export class ParametersService {
     loadSavedParameters(): ErdblickParameters | null {
         let parsedParameters: Record<string, any> = {};
         const parameters = localStorage.getItem('erdblickParameters');
-        if (parameters)
+        if (parameters) {
             parsedParameters = JSON.parse(parameters);
+        }
         return Object.keys(erdblickParameters).reduce((acc, key: string) => {
             const descriptor = erdblickParameters[key];
             let value = parsedParameters!.hasOwnProperty(key) ? parsedParameters[key] : descriptor.default;
