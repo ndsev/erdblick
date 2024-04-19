@@ -188,18 +188,54 @@ void FeatureLayerVisualization::addFeature(
     uint32_t id,
     FeatureStyleRule const& rule)
 {
-    if (rule.aspect() == FeatureStyleRule::Feature) {
+    auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
+
+    switch(rule.aspect()) {
+    case FeatureStyleRule::Feature: {
         auto boundEvalFun = [this, &feature](auto&& str){return evaluateExpression(str, *feature);};
         feature->geom()->forEachGeometry(
-            [this, id, &rule, &boundEvalFun](auto&& geom)
+            [this, id, &rule, &boundEvalFun, &offset](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, id, rule, boundEvalFun);
+                    addGeometry(geom, id, rule, boundEvalFun, offset);
                 return true;
             });
+        break;
     }
-    else if (rule.aspect() == FeatureStyleRule::Relation) {
+    case FeatureStyleRule::Relation: {
         relationStyleState_.emplace_back(rule, feature, *this);
+        break;
+    }
+    case FeatureStyleRule::Attribute: {
+        // Use const-version of the attribute layers, so the feature does not
+        // lazily initialize its attribute layer list.
+        auto attrLayers = const_cast<mapget::Feature const&>(*feature).attributeLayers();
+        if (!attrLayers)
+            break;
+
+        uint32_t offsetFactor = 0;
+        attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
+            // Check if the attribute layer name is accepted for the rule.
+            if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
+                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
+                    return true;
+            }
+            // Iterate over all the layer's attributes.
+            layer->forEachAttribute([&, this](auto&& attr){
+                addAttribute(
+                    feature,
+                    layerName,
+                    attr,
+                    id, // TODO: Rethink, how an attribute may be encoded in the id.
+                    rule,
+                    offsetFactor,
+                    offset);
+                return true;
+            });
+            return true;
+        });
+        break;
+    }
     }
 }
 
@@ -207,14 +243,18 @@ void FeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
     uint32_t id,
     FeatureStyleRule const& rule,
-    BoundEvalFun const& evalFun)
+    BoundEvalFun const& evalFun,
+    glm::dvec3 const& offset)
 {
+    if (!rule.selectable())
+        id = UnselectableId;
+
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
-        [&vertsCartesian, &rule](auto&& vertex)
+        [&vertsCartesian, &offset](auto&& vertex)
         {
-            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, rule.verticalOffset()));
+             vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
             return true;
         });
 
@@ -248,7 +288,7 @@ void FeatureLayerVisualization::addGeometry(
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
             labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), rule.verticalOffset())),
+                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), offset)),
                 text,
                 rule,
                 id,
@@ -355,10 +395,11 @@ void erdblick::FeatureLayerVisualization::addLine(
     uint32_t id,
     const erdblick::FeatureStyleRule& rule,
     BoundEvalFun const& evalFun,
+    glm::dvec3 const& offset,
     double labelPositionHint)
 {
-    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, rule.verticalOffset());
-    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, rule.verticalOffset());
+    auto cartA = wgsToCartesian<glm::dvec3>(wgsA, offset);
+    auto cartB = wgsToCartesian<glm::dvec3>(wgsB, offset);
 
     addPolyLine(
         {cartA, cartB},
@@ -439,6 +480,69 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
 
     std::cout << "Expression " << expression << " returned nothing." << std::endl;
     return simfil::Value::null();
+}
+
+void FeatureLayerVisualization::addAttribute(
+    model_ptr<Feature> const& feature,
+    std::string_view const& layer,
+    model_ptr<Attribute> const& attr,
+    uint32_t id,
+    const FeatureStyleRule& rule,
+    uint32_t& offsetFactor,
+    glm::dvec3 const& offset)
+{
+    // Check if the attribute type name is accepted for the rule.
+    if (auto const& attrTypeRegex = rule.attributeType()) {
+        auto attributeTypeId = attr->name();
+        if (!std::regex_match(attributeTypeId.begin(), attributeTypeId.end(), *attrTypeRegex)) {
+            return;
+        }
+    }
+
+    // Check if the attribute validity is accepted for the rule.
+    if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
+        if (*validityGeomRequired != attr->hasValidity()) {
+            return;
+        }
+    }
+
+    // Create simfil evaluation context for the rule.
+    auto const& constAttr = static_cast<mapget::Attribute const&>(*attr);
+    auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
+
+    simfil::OverlayNode attrEvaluationContext(simfil::Value::field(constAttr));
+
+    // Assemble simfil evaluation context.
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$name"),
+        simfil::Value(attr->name()));
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$feature"),
+        simfil::Value::field(constFeature));
+    attrEvaluationContext
+        .set(
+        internalFieldsDictCopy_->emplace("$layer"),
+        simfil::Value(layer));
+
+    // Function which can evaluate a simfil expression in the attribute context.
+    auto boundEvalFun = [this, &attrEvaluationContext](auto&& str)
+    {
+        return evaluateExpression(str, attrEvaluationContext);
+    };
+
+    // Bump visual offset factor for next visualized attribute.
+    ++offsetFactor;
+
+    // Draw validity geometry.
+    auto geom = attr->hasValidity() ? attr->validity() : feature->firstGeometry();
+    addGeometry(
+        geom,
+        id,
+        rule,
+        boundEvalFun,
+        offset * static_cast<double>(offsetFactor));
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
@@ -592,6 +696,10 @@ void RecursiveRelationVisualizationState::render(
         r.relation_->targetValidity() :
         r.targetFeature_->firstGeometry();
 
+    // Get offset base vector.
+    auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeom);
+    auto offset = offsetBase * rule_.offset();
+
     // Ensure that sourceStyle, targetStyle and endMarkerStyle
     // are only ever applied once for each feature.
     auto sourceId = r.sourceFeature_->id()->toString();
@@ -606,27 +714,39 @@ void RecursiveRelationVisualizationState::render(
         auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_.relationLineHeightOffset()};
 
         if (rule_.width() > 0) {
-            visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun);
+            visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun, offset);
         }
         if (rule_.relationLineEndMarkerStyle()) {
             if (visualizedFeatures_.emplace(sourceId + "-endmarker").second)
-                visu_.addLine(p1lo, p1hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+                visu_.addLine(
+                    p1lo,
+                    p1hi,
+                    UnselectableId,
+                    *rule_.relationLineEndMarkerStyle(),
+                    boundEvalFun,
+                    offsetBase * rule_.relationLineEndMarkerStyle()->offset());
             if (visualizedFeatures_.emplace(targetId + "-endmarker").second)
-                visu_.addLine(p2lo, p2hi, UnselectableId, *rule_.relationLineEndMarkerStyle(), boundEvalFun, 1.);
+                visu_.addLine(
+                    p2lo,
+                    p2hi,
+                    UnselectableId,
+                    *rule_.relationLineEndMarkerStyle(),
+                    boundEvalFun,
+                    offsetBase * rule_.relationLineEndMarkerStyle()->offset());
         }
     }
 
     // Run source geometry visualization.
     if (sourceGeom && visualizedFeatures_.emplace(sourceId).second) {
         if (auto sourceRule = rule_.relationSourceStyle()) {
-            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun);
+            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun, offsetBase * sourceRule->offset());
         }
     }
 
     // Run target geometry visualization.
     if (targetGeom && visualizedFeatures_.emplace(targetId).second) {
         if (auto targetRule = rule_.relationTargetStyle()) {
-            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun);
+            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun, offsetBase * targetRule->offset());
         }
     }
 

@@ -1,4 +1,7 @@
+#include "glm/glm.hpp"
+
 #include "geometry.h"
+#include "cesium-interface/point-conversion.h"
 
 Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
 {
@@ -161,4 +164,34 @@ bool erdblick::isPointInsideTriangle(
     // If the point is on the same side of all edges, it is inside the triangle
     // Note: Using <= on all checks to include points lying exactly on an edge
     return (side0 <= 0 && side1 <= 0 && side2 <= 0) || (side0 >= 0 && side1 >= 0 && side2 >= 0);
+}
+
+glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>& g)
+{
+    if (!g || g->geomType() != simfil::Geometry::GeomType::Line || g->numPoints() < 2) {
+        constexpr auto latMetersPerDegree = 110574.; // Meters per degree of latitude
+        constexpr auto lonMetersPerDegree = 111320.; // Meters per degree of longitude at equator
+        return {
+            {1./lonMetersPerDegree, .0, .0},
+            {.0, 1./latMetersPerDegree, .0},
+            {.0, .0, 1.}};
+    }
+
+    auto const aWgs = g->pointAt(0);
+    auto const a = wgsToCartesian<glm::dvec3>(aWgs);
+    auto const b = wgsToCartesian<glm::dvec3>(g->pointAt(g->numPoints() - 1));
+    auto const c = wgsToCartesian<glm::dvec3>(aWgs, {.0, .0, 1.});
+    auto const forward = glm::normalize(b - a);
+    auto const up = glm::normalize(c - a);
+    auto const sideways = glm::cross(forward, up);
+    auto const aWgsForward = cartesianToWgs<glm::dvec3>(a + forward);
+    auto const aWgsSideways = cartesianToWgs<glm::dvec3>(a + sideways);
+
+    glm::dmat3x3 result = {
+        aWgsSideways - glm::dvec3(aWgs.x, aWgs.y, aWgs.z),
+        aWgsForward - glm::dvec3(aWgs.x, aWgs.y, aWgs.z),
+        {.0, .0, 1.},
+    };
+
+    return result;
 }
