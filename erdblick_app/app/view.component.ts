@@ -273,7 +273,7 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Apply additional highlight styles.
         for (let [styleId, styleData] of this.styleService.styleData) {
-            if (styleData.featureLayerStyle) {
+            if (styleData.featureLayerStyle && styleData.enabled) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,
                     (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
