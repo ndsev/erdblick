@@ -188,7 +188,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.parameterService.osmEnabled.subscribe(enabled => {
-            this.updateOpenStreetMapLayer(enabled ? this.parameterService.osmOpacityValue.getValue() / 100: 0);
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = enabled;
+                this.viewer.scene.requestRender();
+            }
         });
 
         this.parameterService.osmOpacityValue.subscribe(value => {

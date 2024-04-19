@@ -6,7 +6,7 @@ import {Params, Router} from "@angular/router";
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
-interface ErdblickParameters {
+interface ErdblickParameters extends Record<string, any> {
     heading: number,
     pitch: number,
     roll: number,
@@ -21,20 +21,77 @@ interface ErdblickParameters {
     tilesVisualizeLimit: number
 }
 
-const defaultParameters: ErdblickParameters = {
-    heading: 6.0,
-    pitch: -1.55,
-    roll: 0.25,
-    lon: 22.837473,
-    lat: 38.490817,
-    alt: 16000000,
-    osmOpacity: 30,
-    osmEnabled: true,
-    layers: [],
-    styles: [],
-    tilesLoadLimit: MAX_NUM_TILES_TO_LOAD,
-    tilesVisualizeLimit: MAX_NUM_TILES_TO_VISUALIZE
+interface ParameterDescriptor {
+    // Convert the setting to the correct type, e.g. Number.
+    converter: (val: any)=>any,
+    // Check if the converted value is good, or the default must be used.
+    validator: (val: any)=>boolean,
+    // Default value.
+    default: any
 }
+
+const erdblickParameters: Record<string, ParameterDescriptor> = {
+    heading: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: 6.0
+    },
+    pitch: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: -1.55
+    },
+    roll: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: 0.25
+    },
+    lon: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: 22.837473
+    },
+    lat: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: 38.490817
+    },
+    alt: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val),
+        default: 16000000
+    },
+    osmOpacity: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
+        default: 30
+    },
+    osmEnabled: {
+        converter: val => val === 'true',
+        validator: val => typeof val === 'boolean',
+        default: true
+    },
+    layers: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'number'),
+        default: []
+    },
+    styles: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        default: []
+    },
+    tilesLoadLimit: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        default: MAX_NUM_TILES_TO_LOAD
+    },
+    tilesVisualizeLimit: {
+        converter: Number,
+        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        default: MAX_NUM_TILES_TO_VISUALIZE
+    }
+};
 
 @Injectable({providedIn: 'root'})
 export class ParametersService {
@@ -56,38 +113,7 @@ export class ParametersService {
 
     constructor(public router: Router) {
         let parameters = this.loadSavedParameters();
-        if (!parameters) {
-            const currentOrientation = this.getCameraOrientation();
-            const currentCameraPosition = this.getCameraPosition();
-            let currentPosition = null;
-            if (currentCameraPosition) {
-                const currentPositionCartographic = Cartographic.fromCartesian(
-                    Cartesian3.fromElements(currentCameraPosition.x, currentCameraPosition.y, currentCameraPosition.z)
-                );
-                currentPosition = {
-                    lon: Math.toDegrees(currentPositionCartographic.longitude),
-                    lat: Math.toDegrees(currentPositionCartographic.latitude),
-                    alt: currentPositionCartographic.height
-                }
-            }
-            this.parameters = new BehaviorSubject<ErdblickParameters>({
-                heading: currentOrientation ? currentOrientation.heading : defaultParameters.heading,
-                pitch: currentOrientation ? currentOrientation.pitch : defaultParameters.pitch,
-                roll: currentOrientation ? currentOrientation.roll : defaultParameters.roll,
-                lon: currentPosition ? currentPosition.lon : defaultParameters.lon,
-                lat: currentPosition ? currentPosition.lat : defaultParameters.lat,
-                alt: currentPosition ? currentPosition.alt : defaultParameters.alt,
-                osmOpacity: defaultParameters.osmOpacity,
-                osmEnabled: defaultParameters.osmEnabled,
-                layers: [],
-                styles: [],
-                tilesLoadLimit: defaultParameters.tilesLoadLimit,
-                tilesVisualizeLimit: defaultParameters.tilesVisualizeLimit
-            });
-            console.log(this.parameters.getValue())
-        } else {
-            this.parameters = new BehaviorSubject<ErdblickParameters>(parameters);
-        }
+        this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();
         this.parameters.subscribe(parameters => {
             if (parameters) {
@@ -170,125 +196,45 @@ export class ParametersService {
     }
 
     loadSavedParameters(): ErdblickParameters | null {
+        let parsedParameters: Record<string, any> = {};
         const parameters = localStorage.getItem('erdblickParameters');
-        if (parameters) {
-            const parsedParameters = JSON.parse(parameters);
-            if (this.areValidParameters(parsedParameters)) {
-                return parsedParameters;
-            }
-            console.error("Retrieved stored URL parameters are malformed!")
-            console.log("Will reset URL parameters.")
-            this.resetStorage();
-        }
-        return null;
-    }
-
-    private areValidParameters(obj: any): obj is ErdblickParameters {
-        const parameterFields: Map<string, string> = new Map([
-            ['heading', 'number'],
-            ['pitch', 'number'],
-            ['roll', 'number'],
-            ['lon', 'number'],
-            ['lat', 'number'],
-            ['alt', 'number'],
-            ['osmOpacity', 'number'],
-            ['osmEnabled', 'boolean'],
-            ['layers', 'array-tuple'],
-            ['styles', 'array-string'],
-            ['tilesLoadLimit', 'number'],
-            ['tilesVisualizeLimit', 'number']
-        ]);
-
-        for (const [field, type] of parameterFields) {
-            if (obj[field] === undefined) {
-                console.error(`Missing field: ${field}`);
-                return false;
-            }
-            switch (type) {
-                case 'number':
-                    if (typeof obj[field] !== 'number') {
-                        console.error(`Invalid type for ${field}: expected number, got ${typeof obj[field]}`);
-                        return false;
-                    }
-                    break;
-                case 'boolean':
-                    if (typeof obj[field] !== 'boolean') {
-                        console.error(`Invalid type for ${field}: expected boolean, got ${typeof obj[field]}`);
-                        return false;
-                    }
-                    break;
-                case 'array-tuple':
-                    if (!Array.isArray(obj[field]) || !obj[field].every((item: any) => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'number')) {
-                        console.error(`Invalid type for ${field}: expected array of [string, number] tuples`);
-                        return false;
-                    }
-                    break;
-                case 'array-string':
-                    if (!Array.isArray(obj[field]) || !obj[field].every((item: any) => typeof item === 'string')) {
-                        console.error(`Invalid type for ${field}: expected array of strings`);
-                        return false;
-                    }
-                    break;
-            }
-        }
-        return true;
+        if (parameters)
+            parsedParameters = JSON.parse(parameters);
+        return Object.keys(erdblickParameters).reduce((acc, key: string) => {
+            const descriptor = erdblickParameters[key];
+            let value = parsedParameters!.hasOwnProperty(key) ? descriptor.converter(parsedParameters[key]) : descriptor.default;
+            acc[key] = descriptor.validator(value) ? value : descriptor.default;
+            return acc;
+        }, {} as any);
     }
 
     parseAndApplyQueryParams(params: Params) {
         let currentParameters = this.p();
-        const newPosition = {
-            lon: params["lon"] ? Number(params["lon"]) : currentParameters.lon,
-            lat: params["lat"] ? Number(params["lat"]) : currentParameters.lat,
-            alt: params["alt"] ? Number(params["alt"]) : currentParameters.alt
-        }
-        const newOrientation = {
-            heading: params["heading"] ? Number(params["heading"]) : currentParameters.heading,
-            pitch: params["pitch"] ? Number(params["pitch"]) : currentParameters.pitch,
-            roll: params["roll"] ? Number(params["roll"]) : currentParameters.roll
+        let updatedParameters: ErdblickParameters = { ...currentParameters };
+
+        Object.keys(erdblickParameters).forEach(key => {
+            const descriptor = erdblickParameters[key];
+            if (params.hasOwnProperty(key)) {
+                const value = descriptor.converter(params[key]);
+                if (descriptor.validator(value)) {
+                    updatedParameters[key] = value;
+                } else {
+                    console.warn(`Invalid query param for ${key}, using default.`);
+                    updatedParameters[key] = descriptor.default;
+                }
+            }
+        });
+
+        if (!this.initialQueryParamsSet) {
+            this.setView(Cartesian3.fromDegrees(updatedParameters.lon, updatedParameters.lat, updatedParameters.alt), {
+                heading: updatedParameters.heading,
+                pitch: updatedParameters.pitch,
+                roll: updatedParameters.roll
+            });
         }
 
-        if (!this.initialQueryParamsSet ||
-            newPosition.lon != currentParameters.lon ||
-            newPosition.lat != currentParameters.lat ||
-            newPosition.alt != currentParameters.alt ||
-            newOrientation.heading != currentParameters.heading ||
-            newOrientation.pitch != currentParameters.pitch ||
-            newOrientation.roll != currentParameters.roll)
-        {
-            this.setView(Cartesian3.fromDegrees(newPosition.lon, newPosition.lat, newPosition.alt), newOrientation);
-            currentParameters.lon = newPosition.lon;
-            currentParameters.lat = newPosition.lat;
-            currentParameters.alt = newPosition.alt;
-            currentParameters.heading = newOrientation.heading;
-            currentParameters.roll = newOrientation.roll;
-            currentParameters.pitch = newOrientation.pitch;
-        }
-
-        const osmEnabled = params["osmEnabled"] ? params["osmEnabled"] == "true" : currentParameters.osmEnabled;
-        const osmOpacity = params["osmOpacity"] ? Number(params["osmOpacity"]) : currentParameters.osmOpacity;
-        this.osmEnabled.next(osmEnabled);
-        this.osmOpacityValue.next(osmOpacity);
-        currentParameters.osmEnabled = osmEnabled;
-        currentParameters.osmOpacity = osmOpacity;
-
-        if (params["layers"]) {
-            let newLayers = JSON.parse(params["layers"]);
-            if (newLayers.length)
-                currentParameters.layers = newLayers;
-        }
-        if (params["styles"]) {
-            let newStyles = JSON.parse(params["styles"]);
-            if (newStyles.length)
-                currentParameters.styles = newStyles;
-        }
-        if (params["tilesLoadLimit"]) {
-            currentParameters.tilesLoadLimit = JSON.parse(params["tilesLoadLimit"]);
-        }
-        if (params["tilesVisualizeLimit"]) {
-            currentParameters.tilesVisualizeLimit = JSON.parse(params["tilesVisualizeLimit"]);
-        }
-
-        this.parameters.next(currentParameters);
+        // Update BehaviorSubject with the new parameters
+        this.parameters.next(updatedParameters);
         this.initialQueryParamsSet = true;
     }
 
