@@ -3,10 +3,10 @@ import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 
-const MAX_NUM_TILES_TO_LOAD = 2048;
-const MAX_NUM_TILES_TO_VISUALIZE = 512;
+export const MAX_NUM_TILES_TO_LOAD = 2048;
+export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
-export interface ErdblickParameters {
+interface ErdblickParameters {
     heading: number,
     pitch: number,
     roll: number,
