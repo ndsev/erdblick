@@ -3,8 +3,7 @@ import {InfoMessageService} from "./info.service";
 import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
-import {ParametersService} from "./parameters.service";
-import {Router} from "@angular/router";
+import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} from "./parameters.service";
 
 @Component({
     selector: 'pref-components',
@@ -22,7 +21,7 @@ import {Router} from "@angular/router";
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput"/>
-                    <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="maxLoadTiles"></p-slider>
+                    <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
                 </div>
             </div>
             <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
@@ -30,7 +29,7 @@ import {Router} from "@angular/router";
                 <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToVisualizeInput"/>
-                    <p-slider [(ngModel)]="tilesToVisualizeInput" class="w-full" [min]="0" [max]="maxVisuTiles"></p-slider>
+                    <p-slider [(ngModel)]="tilesToVisualizeInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_VISUALIZE"></p-slider>
                 </div>
             </div>
             <!-- Apply button -->
@@ -81,21 +80,21 @@ export class PreferencesComponent {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
-    maxLoadTiles: number = 0;
-    maxVisuTiles: number = 0;
 
     constructor(private messageService: InfoMessageService,
-                public router: Router,
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        this.maxLoadTiles = this.tilesToLoadInput = this.parametersService.p().tilesLoadLimit;
-        this.maxVisuTiles = this.tilesToVisualizeInput = this.parametersService.p().tilesVisualizeLimit;
+        this.parametersService.parameters.subscribe(parameters => {
+            this.tilesToLoadInput = parameters.tilesLoadLimit;
+            this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
+        });
     }
 
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) || this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
+        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) ||
+            this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
@@ -117,8 +116,7 @@ export class PreferencesComponent {
     }
 
     clearURLProperties() {
-        this.parametersService.clearStorage();
-        window.location.href = this.router.url.split('?')[0];
+        this.parametersService.resetStorage();
     }
 
     clearImportedStyles() {
@@ -138,4 +136,7 @@ export class PreferencesComponent {
         }
         this.styleService.clearStorageForBuiltinStyles();
     }
+
+    protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
+    protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
 }

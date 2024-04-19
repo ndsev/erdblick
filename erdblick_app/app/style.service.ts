@@ -54,8 +54,9 @@ export class StyleService {
     {
         this.parameterService.parameters.subscribe(params => {
             // This subscription exists specifically to catch the values of the query parameters.
-            if (this.parameterService.initialQueryParamsSet)
+            if (this.parameterService.initialQueryParamsSet) {
                 return;
+            }
             for (let [styleId, style] of this.styleData) {
                 style.enabled = this.parameterService.styleConfig(styleId);
             }
@@ -66,8 +67,9 @@ export class StyleService {
     async initializeStyles(): Promise<void> {
         try {
             const data: any = await firstValueFrom(this.httpClient.get("/config.json", {responseType: "json"}));
-            if (!data || !data.styles)
+            if (!data || !data.styles) {
                 throw new Error("Missing style configuration in config.json.");
+            }
 
             let styleUrls = [...data["styles"]] as [StyleConfigEntry];
             styleUrls.forEach((styleEntry: StyleConfigEntry) => {
@@ -83,7 +85,6 @@ export class StyleService {
                     console.error(`Wrong URL or no data available for style: ${styleId}`);
                     return;
                 }
-
                 this.styleData.set(styleId, {
                     id: styleId,
                     modified: false,
@@ -107,31 +108,26 @@ export class StyleService {
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
         const requests = styles.map((style, index) =>
-            this.httpClient.get(style.url, { responseType: 'text' })
-                .pipe(
-                    map(data => ({ index, data, styleId: style.id })),
-                    catchError(error => {
-                        console.error('Error fetching style', style.id, error);
-                        // Return an observable that emits a value, preserving the index and ID, with an empty data string on error.
-                        return of({ index, data: "", styleId: style.id });
-                    })
-                )
+            this.httpClient.get(style.url, { responseType: 'text' }).pipe(
+                map(data => ({ index, data, styleId: style.id })),
+                catchError(error => {
+                    console.error('Error fetching style', style.id, error);
+                    // Return an observable that emits a value, preserving the index and ID, with an empty data string on error.
+                    return of({ index, data: "", styleId: style.id });
+                })
+            )
         );
-
         // Use await with firstValueFrom to wait for all HTTP requests to complete.
         // The results array will maintain the order of the original requests.
         const results = await firstValueFrom(forkJoin(requests));
-
         // Sort the results by index to ensure they are in the same order as the input array.
         // Although forkJoin preserves order, this is a safeguard.
         results.sort((a, b) => a.index - b.index);
-
         // Initialize an ordered map to hold the results.
         const orderedMap = new Map<string, string>();
         results.forEach(({ data, styleId }) => {
             orderedMap.set(styleId, data);
         });
-
         // Return the map with the fetched styles in their original order.
         return orderedMap;
     }
@@ -174,17 +170,14 @@ export class StyleService {
             const blob = new Blob([content.data], { type: 'text/plain;charset=utf-8' });
             // Create a URL for the blob
             const url = window.URL.createObjectURL(blob);
-
             // Create a temporary anchor tag to trigger the download
             const a = document.createElement('a');
             a.href = url;
             a.download = `${styleId}.yaml`;
-
             // Append the anchor to the body, trigger the download, and remove the anchor
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-
             // Revoke the blob URL to free up resources
             window.URL.revokeObjectURL(url);
         } catch (e) {
@@ -361,8 +354,9 @@ export class StyleService {
     }
 
     toggleStyle(styleId: string, enabled: boolean|undefined = undefined) {
-        if (!this.styleData.has(styleId))
-            return
+        if (!this.styleData.has(styleId)) {
+            return;
+        }
         let style = this.styleData.get(styleId)!;
         style.enabled = enabled !== undefined ? enabled : !style.enabled;
         this.reapplyStyle(styleId);

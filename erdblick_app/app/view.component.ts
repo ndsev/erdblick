@@ -188,7 +188,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.parameterService.osmEnabled.subscribe(enabled => {
-            this.updateOpenStreetMapLayer(enabled ? this.parameterService.osmOpacityValue.getValue() / 100: 0);
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = enabled;
+                this.viewer.scene.requestRender();
+            }
         });
 
         this.parameterService.osmOpacityValue.subscribe(value => {
@@ -218,8 +221,9 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the hovered feature.
      */
     private setHoveredCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature))
+        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
             return;
+        }
         // Restore the previously hovered feature to its original color.
         if (this.hoveredFeature && this.hoveredFeatureOrigColor) {
             this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
@@ -237,8 +241,9 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the picked feature.
      */
     private setPickedCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
+        if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
             return;
+        }
 
         // Restore the previously picked feature to its original color.
         if (this.pickedFeature && this.pickedFeatureOrigColor) {
@@ -270,7 +275,7 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Apply additional highlight styles.
         for (let [styleId, styleData] of this.styleService.styleData) {
-            if (styleData.featureLayerStyle) {
+            if (styleData.featureLayerStyle && styleData.enabled) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,
                     (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
@@ -291,8 +296,9 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
             return;
         }
-        if (feature.primitive.isDestroyed())
+        if (feature.primitive.isDestroyed()) {
             return;
+        }
         const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
         attributes.color = ColorGeometryInstanceAttribute.toValue(color);
         this.viewer.scene.requestRender();

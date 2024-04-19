@@ -1,22 +1,46 @@
-import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2 } from '@angular/core';
-import { basicSetup } from 'codemirror';
-import { EditorState, Extension } from '@codemirror/state';
-import { yaml } from '@codemirror/lang-yaml';
-import { autocompletion, CompletionContext, CompletionSource } from '@codemirror/autocomplete';
-import { EditorView, keymap, ViewUpdate } from '@codemirror/view';
-import { linter, Diagnostic, lintGutter } from '@codemirror/lint';
-import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
-import { StyleService } from "./style.service";
+import {Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2} from '@angular/core';
+import {basicSetup} from 'codemirror';
+import {EditorState, Extension} from '@codemirror/state';
+import {yaml} from '@codemirror/lang-yaml';
+import {autocompletion, CompletionContext, CompletionSource} from '@codemirror/autocomplete';
+import {EditorView, keymap, ViewUpdate} from '@codemirror/view';
+import {linter, Diagnostic, lintGutter} from '@codemirror/lint';
+import {syntaxHighlighting, defaultHighlightStyle} from "@codemirror/language"
+import {StyleService} from "./style.service";
 import * as jsyaml from 'js-yaml';
 
 const completionsList = [
     {label: "version", type: "property"},
     {label: "name", type: "property"},
     {label: "rules", type: "property"},
+    {label: "geometry", type: "property"},
     {label: "aspect", type: "property"},
     {label: "mode", type: "property"},
+    {label: "type", type: "property"},
+    {label: "filter", type: "property"},
     {label: "selectable", type: "property"},
+    {label: "color", type: "property"},
+    {label: "color-expression", type: "property"},
     {label: "opacity", type: "property"},
+    {label: "width", type: "property"},
+    {label: "flat", type: "property"},
+    {label: "outline-color", type: "property"},
+    {label: "outline-width", type: "property"},
+    {label: "near-far-scale", type: "property"},
+    {label: "vertical-offset", type: "property"},
+    {label: "arrow", type: "property"},
+    {label: "dashed", type: "property"},
+    {label: "gap-color", type: "property"},
+    {label: "dash-length", type: "property"},
+    {label: "dash-pattern", type: "property"},
+    {label: "relation-type", type: "property"},
+    {label: "relation-line-height-offset", type: "property"},
+    {label: "relation-line-end-markers", type: "property"},
+    {label: "relation-source-style", type: "property"},
+    {label: "relation-target-style", type: "property"},
+    {label: "relation-recursive", type: "property"},
+    {label: "relation-merge-twoway", type: "property"},
+    {label: "relation-merge-twoway", type: "property"},
     {label: "label-color", type: "property"},
     {label: "label-outline-color", type: "property"},
     {label: "label-font", type: "property"},
@@ -31,30 +55,11 @@ const completionsList = [
     {label: "label-pixel-offset", type: "property"},
     {label: "label-eye-offset", type: "property"},
     {label: "translucency-by-distance", type: "property"},
-    {label: "geometry", type: "property"},
-    {label: "type", type: "property"},
-    {label: "filter", type: "property"},
-    {label: "color", type: "property"},
-    {label: "opacity", type: "property"},
-    {label: "width", type: "property"},
-    {label: "flat", type: "property"},
-    {label: "false", type: "property"},
-    {label: "outline-color", type: "property"},
-    {label: "outline-width", type: "property"},
-    {label: "near-far-scale", type: "property"},
-    {label: "arrow", type: "property"},
-    {label: "dashed", type: "property"},
-    {label: "gap-color", type: "property"},
-    {label: "dash-length", type: "property"},
-    {label: "dash-pattern", type: "property"},
+    {label: "scale-by-distance", type: "property"},
+    {label: "offset-scale-by-distance", type: "property"},
     {label: "first-of", type: "property"},
-    {label: "relation-type", type: "property"},
-    {label: "relation-line-height-offset", type: "property"},
-    {label: "relation-line-end-markers", type: "property"},
-    {label: "relation-source-style", type: "property"},
-    {label: "relation-target-style", type: "property"},
-    {label: "relation-recursive", type: "property"},
-    {label: "relation-merge-twoway", type: "property"},
+    {label: "attribute-type", type: "property"},
+    {label: "attribute-layer-type", type: "property"},
     {label: "FILL", type: "keyword"},
     {label: "OUTLINE", type: "keyword"},
     {label: "FILL_AND_OUTLINE", type: "keyword"},
@@ -75,7 +80,9 @@ const completionsList = [
     {label: "relation", type: "keyword"},
     {label: "attribute", type: "keyword"},
     {label: "normal", type: "keyword"},
-    {label: "highlight", type: "keyword"}
+    {label: "highlight", type: "keyword"},
+    {label: "Lane", type: "keyword"},
+    {label: "Boundary", type: "keyword"}
 ]
 
 @Component({
