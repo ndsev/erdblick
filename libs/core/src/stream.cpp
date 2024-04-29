@@ -68,7 +68,7 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedFieldDicts_->operator()(nodeId); });
+        [this](auto&& nodeId) { return cachedFieldDicts_->getFieldDict(nodeId); });
     return result;
 }
 

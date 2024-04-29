@@ -11,6 +11,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/aabb.h
   include/erdblick/stream.h
   include/erdblick/geometry.h
+  include/erdblick/inspection.h
 
   include/erdblick/cesium-interface/object.h
   include/erdblick/cesium-interface/primitive.h
@@ -27,6 +28,7 @@ set(ERDBLICK_SOURCE_FILES
   src/aabb.cpp
   src/stream.cpp
   src/geometry.cpp
+  src/inspection.cpp
 
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp

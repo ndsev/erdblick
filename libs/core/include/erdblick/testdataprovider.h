@@ -108,7 +108,7 @@ public:
         // Get a field dictionary which the parser can later pick up again,
         // and also inform the parser about the layer info used by features
         // in the test data.
-        fieldNames_ = tileLayerParser.cachedFieldDicts_->operator()("TestDataNode");
+        fieldNames_ = tileLayerParser.cachedFieldDicts_->getFieldDict("TestDataNode");
         tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
