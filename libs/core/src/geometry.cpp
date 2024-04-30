@@ -168,13 +168,15 @@ bool erdblick::isPointInsideTriangle(
 
 glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>& g)
 {
+    constexpr auto latMetersPerDegree = 110574.; // Meters per degree of latitude
+    constexpr auto lonMetersPerDegree = 111320.; // Meters per degree of longitude at equator
+    constexpr glm::dmat3x3 defaultResult = {
+        {1./lonMetersPerDegree, .0, .0},
+        {.0, 1./latMetersPerDegree, .0},
+        {.0, .0, 1.}};
+
     if (!g || g->geomType() != simfil::Geometry::GeomType::Line || g->numPoints() < 2) {
-        constexpr auto latMetersPerDegree = 110574.; // Meters per degree of latitude
-        constexpr auto lonMetersPerDegree = 111320.; // Meters per degree of longitude at equator
-        return {
-            {1./lonMetersPerDegree, .0, .0},
-            {.0, 1./latMetersPerDegree, .0},
-            {.0, .0, 1.}};
+        return defaultResult;
     }
 
     auto const aWgs = g->pointAt(0);
@@ -192,6 +194,10 @@ glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>&
         aWgsForward - glm::dvec3(aWgs.x, aWgs.y, aWgs.z),
         {.0, .0, 1.},
     };
+
+    if (glm::any(glm::isnan(result[0])) || glm::any(glm::isnan(result[1])) || glm::any(glm::isnan(result[2]))) {
+        return defaultResult;
+    }
 
     return result;
 }
