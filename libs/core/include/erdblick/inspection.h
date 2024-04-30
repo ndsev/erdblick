@@ -41,7 +41,7 @@ class InspectionConverter
 
         ~InspectionNodeScope();
         InspectionNodeScope(InspectionNodeScope const&) = delete;
-        InspectionNodeScope(InspectionNodeScope&&) = default;
+        InspectionNodeScope(InspectionNodeScope&&);
         InspectionNodeScope(InspectionNode* n, InspectionConverter* c);
 
         InspectionNode* node_ = nullptr;
@@ -51,7 +51,7 @@ class InspectionConverter
     using OptionalValueAndType = std::optional<std::pair<JsValue, ValueType>>;
 
 public:
-    void convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
+    JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
 
     InspectionNodeScope push(InspectionNode* node);
     InspectionNodeScope push(std::string_view const& key, ValueType type=Null);

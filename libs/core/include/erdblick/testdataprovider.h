@@ -129,7 +129,7 @@ public:
             "TestMap",
             layerInfo_,
             fieldNames_);
-        result->setPrefix({{"areaId", "TheBestArea"}});
+        result->setIdPrefix({{"areaId", "TheBestArea"}});
 
         // Create a function to generate a random coordinate between two given points
         auto randomPointBetween = [&](const auto& point1, const auto& point2, double baseHeight) {

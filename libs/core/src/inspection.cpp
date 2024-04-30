@@ -4,7 +4,7 @@
 
 using namespace erdblick;
 
-void InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& featurePtr)
+JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& featurePtr)
 {
     fieldDict_ = featurePtr->model().fieldNames();
     featureId_ = featurePtr->id()->toString();
@@ -12,12 +12,14 @@ void InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& feat
     // Identifiers section.
     {
         auto scope = push(convertStringView("Identifiers"), Section);
-        for (auto const& [k, v] : featurePtr->id()->keyValuePairs()) {
-            auto& entry = current_->children_.emplace_back();
-            entry.key_ = convertStringView(k);
-            std::visit([&entry](auto&& vv){
-                entry.value_ = JsValue(vv);
-            }, v);
+        push("type", String)->value_ = convertStringView(featurePtr->typeId());
+        if (auto prefix = featurePtr->model().getIdPrefix()) {
+            for (auto const& [k, v] : prefix->fields()) {
+                convertField(k, v);
+            }
+        }
+        for (auto const& [k, v] : featurePtr->id()->fields()) {
+            convertField(k, v);
         }
     }
 
@@ -38,7 +40,6 @@ void InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& feat
             convertAttributeLayer(layerName, layer);
             return true;
         });
-        pop();
     }
 
     // Relation section.
@@ -62,8 +63,9 @@ void InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& feat
             convertGeometry(JsValue(geomIndex++), geom);
             return true;
         });
-        pop();
     }
+
+    return root_.childrenToJsValue();
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
@@ -306,7 +308,8 @@ JsValue InspectionConverter::InspectionNode::childrenToJsValue() const
 
 InspectionConverter::InspectionNodeScope::~InspectionNodeScope()
 {
-    converter_->pop();
+    if (converter_)
+        converter_->pop();
 }
 
 InspectionConverter::InspectionNode&
@@ -325,4 +328,12 @@ InspectionConverter::InspectionNodeScope::InspectionNodeScope(
     InspectionConverter::InspectionNode* n,
     InspectionConverter* c) : node_(n), converter_(c)
 {
+}
+
+InspectionConverter::InspectionNodeScope::InspectionNodeScope(
+    InspectionConverter::InspectionNodeScope&& other)
+{
+    converter_ = other.converter_;
+    other.converter_ = nullptr;
+    node_ = other.node_;
 }
