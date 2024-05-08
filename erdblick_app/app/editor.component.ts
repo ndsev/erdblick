@@ -110,15 +110,14 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                     this.renderer.removeChild(this.editorRef.nativeElement, child);
                 }
                 this.editorView = new EditorView({
-                    state: this.createEditorState(),
+                    state: this.createEditorState(styleId),
                     parent: this.editorRef.nativeElement
                 });
             }
         });
     }
 
-    createEditorState() {
-        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
+    createEditorState(styleId: string) {
         if (this.styleService.styleData.has(styleId)) {
             this.styleData = `${this.styleService.styleData.get(styleId)!.data}\n\n\n\n\n`;
         } else {

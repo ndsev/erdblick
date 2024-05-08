@@ -10,7 +10,7 @@ import {
     Color,
     ColorGeometryInstanceAttribute,
     ImageryLayer,
-    Math,
+    CesiumMath,
     ScreenSpaceEventHandler,
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
@@ -51,7 +51,10 @@ export class ErdblickViewComponent implements AfterViewInit {
     selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
-    private selectionVisualizations: TileVisualization[]
+    private tilesGridLayer: ImageryLayer | null = null;
+    private tilesGridSubLayer: ImageryLayer | null = null;
+    private tilesGridSuperLayer: ImageryLayer | null = null;
+    private selectionVisualizations: TileVisualization[];
 
     /**
      * Construct a Cesium View with a Model.
@@ -102,8 +105,8 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.parameterService.cameraViewData.next({
                 destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
                 orientation: {
-                    heading: Math.toRadians(0), // East, in radians.
-                    pitch: Math.toRadians(-90), // Directly looking down.
+                    heading: CesiumMath.toRadians(0), // East, in radians.
+                    pitch: CesiumMath.toRadians(-90), // Directly looking down.
                     roll: 0 // No rotation
                 }
             });
@@ -187,15 +190,11 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.updateViewport();
         });
 
-        this.parameterService.osmEnabled.subscribe(enabled => {
+        this.parameterService.parameters.subscribe(parameters => {
             if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = enabled;
-                this.viewer.scene.requestRender();
+                this.openStreetMapLayer.show = parameters.osm;
+                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
             }
-        });
-
-        this.parameterService.osmOpacityValue.subscribe(value => {
-            this.updateOpenStreetMapLayer(value / 100);
         });
 
         // Add debug API that can be easily called from browser's debug console
@@ -272,14 +271,14 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
 
         // Apply additional highlight styles.
-        for (let [styleId, styleData] of this.styleService.styleData) {
+        for (let [_, styleData] of this.styleService.styleData) {
             if (styleData.featureLayerStyle && styleData.enabled) {
                 let visu = new TileVisualization(
                     resolvedFeature!.featureTile,
                     (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
                     styleData.featureLayerStyle,
                     true,
-                    feature.id);
+                    resolvedFeature.peek((f: Feature) => f.id()));
                 this.mapService.tileVisualizationTopic.next(visu);
                 this.selectionVisualizations.push(visu);
             }
@@ -341,12 +340,12 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         if (centerCartesian !== undefined) {
             let centerCartographic = Cartographic.fromCartesian(centerCartesian);
-            centerLon = Math.toDegrees(centerCartographic.longitude);
-            centerLat = Math.toDegrees(centerCartographic.latitude);
+            centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
+            centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
         } else {
             let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
-            centerLon = Math.toDegrees(cameraCartographic.longitude);
-            centerLat = Math.toDegrees(cameraCartographic.latitude);
+            centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
+            centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
         }
 
         let rectangle = this.viewer.camera.computeViewRectangle();
@@ -355,10 +354,10 @@ export class ErdblickViewComponent implements AfterViewInit {
             return;
         }
 
-        let west = Math.toDegrees(rectangle.west);
-        let south = Math.toDegrees(rectangle.south);
-        let east = Math.toDegrees(rectangle.east);
-        let north = Math.toDegrees(rectangle.north);
+        let west = CesiumMath.toDegrees(rectangle.west);
+        let south = CesiumMath.toDegrees(rectangle.south);
+        let east = CesiumMath.toDegrees(rectangle.east);
+        let north = CesiumMath.toDegrees(rectangle.north);
         let sizeLon = east - west;
         let sizeLat = north - south;
 
@@ -386,6 +385,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         return new UrlTemplateImageryProvider({
             url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
             maximumLevel: 19,
+            tileWidth: 100,
+            tileHeight: 100
         });
     }
 

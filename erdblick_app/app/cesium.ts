@@ -30,6 +30,11 @@ export type  ScreenSpaceEventType = Cesium.ScreenSpaceEventType;
 export const ScreenSpaceEventType = Cesium.ScreenSpaceEventType;
 export type  UrlTemplateImageryProvider = Cesium.UrlTemplateImageryProvider;
 export const UrlTemplateImageryProvider = Cesium.UrlTemplateImageryProvider;
+export type  Rectangle = Cesium.Rectangle;
+export const Rectangle = Cesium.Rectangle;
+export type  HeightReference = Cesium.HeightReference;
+export const HeightReference = Cesium.HeightReference;
+
 export type  Viewer = Cesium.Viewer;
 export const Viewer = Cesium.Viewer;
 export type  PrimitiveCollection = Cesium.PrimitiveCollection;
@@ -41,4 +46,4 @@ export const Camera = Cesium.Camera;
 
 // Math is a namespace.
 
-export const Math = Cesium.Math;
+export const CesiumMath = Cesium.Math;

@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
-import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
+import {BehaviorSubject, Subject} from "rxjs";
+import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
@@ -13,9 +13,9 @@ interface ErdblickParameters extends Record<string, any> {
     lon: number,
     lat: number,
     alt: number,
+    osm: boolean,
     osmOpacity: number,
-    osmEnabled: boolean,
-    layers: Array<[string, number]>,
+    layers: Array<[string, number, boolean, boolean]>,
     styles: Array<string>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number
@@ -66,14 +66,14 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
         default: 30
     },
-    osmEnabled: {
+    osm: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
         default: true
     },
     layers: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'number'),
+        validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 4 && typeof item[0] === 'string' && typeof item[1] === 'number' && typeof item[2] === 'boolean' && typeof item[3] === 'boolean'),
         default: []
     },
     styles: {
@@ -99,8 +99,7 @@ export class ParametersService {
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
 
-    osmEnabled: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(true);
-    osmOpacityValue: BehaviorSubject<number> = new BehaviorSubject<number>(30);
+    osmEnabled: Subject<boolean> = new Subject<boolean>();
     cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
         new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
             destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),
@@ -126,7 +125,7 @@ export class ParametersService {
         return this.parameters.getValue();
     }
 
-    setInitialMapLayers(layers: Array<[string, number]>) {
+    setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
         // Only set map layers, if there are no configured values yet.
         if (this.p().layers.length) {
             return;
@@ -146,23 +145,21 @@ export class ParametersService {
 
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number] {
         const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
-        if (conf) {
+        if (conf !== undefined && conf[2]) {
             return [true, conf[1]];
         }
         return [!this.p().layers.length, fallbackLevel];
     }
 
-    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean) {
-        let mapLayer = mapId+"/"+layerId;
-        let conf = this.p().layers.find(val => val[0] == mapLayer);
-        if (conf && visible) {
+    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
+        let mapLayerName = mapId+"/"+layerId;
+        let conf = this.p().layers.find(val => val[0] == mapLayerName);
+        if (conf !== undefined) {
             conf[1] = level;
-        }
-        else if (conf) {
-            this.p().layers = this.p().layers.filter(val => val[0] !== mapLayer);
-        }
-        else if (visible) {
-            this.p().layers.push([mapLayer, level]);
+            conf[2] = visible;
+            conf[3] = tileBorders;
+        } else if (visible) {
+            this.p().layers.push([mapLayerName, level, visible, tileBorders]);
         }
         this.parameters.next(this.p());
     }
@@ -186,8 +183,8 @@ export class ParametersService {
                 camera.position.x, camera.position.y, camera.position.z
             )
         );
-        this.p().lon = Math.toDegrees(currentPositionCartographic.longitude);
-        this.p().lat = Math.toDegrees(currentPositionCartographic.latitude);
+        this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
+        this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
         this.p().alt = currentPositionCartographic.height;
         this.p().heading = camera.heading;
         this.p().pitch = camera.pitch;
@@ -223,8 +220,7 @@ export class ParametersService {
                         console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
                         updatedParameters[key] = descriptor.default;
                     }
-                }
-                catch (e) {
+                } catch (e) {
                     console.warn(`Invalid query param  ${params[key]} for ${key}, using default.`);
                     updatedParameters[key] = descriptor.default;
                 }

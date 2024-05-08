@@ -19,6 +19,7 @@ export interface LayerInfoItem extends Object {
     zoomLevels: Array<number>;
     level: number;
     visible: boolean;
+    tileBorders: boolean;
 }
 
 export interface MapInfoItem extends Object {
@@ -28,6 +29,7 @@ export interface MapInfoItem extends Object {
     maxParallelJobs: number;
     nodeId: string;
     protocolVersion: {major: number, minor: number, patch: number};
+    visible: boolean;
 }
 
 const infoUrl = "/sources";
@@ -58,7 +60,6 @@ type ViewportProperties = {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
-
     private loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: any;
@@ -67,6 +68,8 @@ export class MapService {
     private currentHighDetailTileIds: Set<bigint>;
     private tileStreamParsingQueue: any[];
     private tileVisualizationQueue: [string, TileVisualization][];
+
+    private tileBordersPerLayer: Map<string, boolean> = new Map<string, boolean>();
 
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
@@ -209,7 +212,7 @@ export class MapService {
                     }, infoBuffer);
                 })
                 .withJsonCallback((result: Array<MapInfoItem>) => {
-                    let mapLayerLevels = new Array<[string, number]>();
+                    let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
                     let maps = new Map<string, MapInfoItem>(result.map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
                         let defCoverage = [0n];
@@ -218,10 +221,18 @@ export class MapService {
                                 layerInfo.coverage = defCoverage;
                             }
                             [layerInfo.visible, layerInfo.level] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
-                            mapLayerLevels.push([mapInfo.mapId + '/' + layerId, 13]);
+                            layerInfo.tileBorders = false;
+                            this.tileBordersPerLayer.set(mapInfo.mapId + '/' + layerId, layerInfo.tileBorders);
+                            mapLayerLevels.push([
+                                mapInfo.mapId + '/' + layerId,
+                                layerInfo.level,
+                                layerInfo.visible,
+                                layerInfo.tileBorders
+                            ]);
                             layers.set(layerId, layerInfo);
                         }
                         mapInfo.layers = layers;
+                        mapInfo.visible = true;
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
@@ -245,17 +256,51 @@ export class MapService {
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.visible : false;
     }
 
-    toggleMapLayerVisibility(mapId: string, layerId: string, visible: boolean|undefined=undefined) {
+    toggleMapLayerVisibility(mapId: string, layerId: string) {
+        const mapItem = this.maps.getValue().get(mapId);
+        if (mapItem === undefined) {
+            return;
+        }
+        if (layerId) {
+            const layer = mapItem.layers.get(layerId);
+            if (layer !== undefined) {
+                // visible = visible !== undefined ? visible : !mapItem.layers.get(layerId)!.visible;
+                // mapItem.layers.get(layerId)!.visible = visible;
+                this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
+            }
+        } else {
+            mapItem.layers.forEach(layer => {
+                this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
+            });
+        }
+        this.update();
+    }
+
+    toggleLayerTileBorderVisibility(mapId: string, layerId: string) {
         const mapItem = this.maps.getValue().get(mapId);
         if (!mapItem)
             return;
         if (mapItem.layers.has(layerId)) {
-            visible = visible !== undefined ? visible : !mapItem.layers.get(layerId)!.visible;
-            mapItem.layers.get(layerId)!.visible = visible;
-            this.parameterService.setMapLayerConfig(
-                mapId, layerId, mapItem.layers.get(layerId)!.level, mapItem.layers.get(layerId)!.visible);
+            const layer = mapItem.layers.get(layerId)!;
+            const hasTileBorders = !layer.tileBorders;
+            mapItem.layers.get(layerId)!.tileBorders = hasTileBorders;
+            this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
+            this.update();
+            this.tileBordersPerLayer.set(mapId + '/' + layerId, hasTileBorders);
         }
-        this.update();
+    }
+
+    hasLayerTileBorderVisibilityChanged(mapId: string, layerId: string) {
+        const mapItem = this.maps.getValue().get(mapId);
+        if (mapItem !== undefined && mapItem.layers.has(layerId)) {
+            const hasTileBorders = mapItem.layers.get(layerId)!.tileBorders;
+            const hadTileBorders = this.tileBordersPerLayer.get(mapId + '/' + layerId);
+            if (hadTileBorders !== undefined) {
+                return hasTileBorders != hadTileBorders;
+            }
+            return true;
+        }
+        return false;
     }
 
     setMapLayerLevel(mapId: string, layerId: string, level: number) {
@@ -263,9 +308,8 @@ export class MapService {
         if (!mapItem)
             return;
         if (mapItem.layers.has(layerId)) {
-            mapItem.layers.get(layerId)!.level = level;
-            this.parameterService.setMapLayerConfig(
-                mapId, layerId, mapItem.layers.get(layerId)!.level, mapItem.layers.get(layerId)!.visible);
+            const layer = mapItem.layers.get(layerId)!;
+            this.parameterService.setMapLayerConfig(mapId, layerId, level, layer.visible, layer.tileBorders);
         }
         this.update();
     }
@@ -294,7 +338,8 @@ export class MapService {
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
                 const allViewportTileIds = coreLib.getTileIds(
-                    this.currentViewport, level,
+                    this.currentViewport,
+                    level,
                     this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
@@ -351,7 +396,9 @@ export class MapService {
         this.tileVisualizationQueue = [];
         for (const [styleId, tileVisus] of this.visualizedTileLayers) {
             tileVisus.forEach(tileVisu => {
-                if (tileVisu.isDirty()) {
+                console.log(this.hasLayerTileBorderVisibilityChanged(tileVisu.tile.mapName, tileVisu.tile.layerName))
+                if (tileVisu.isDirty() ||
+                    this.hasLayerTileBorderVisibilityChanged(tileVisu.tile.mapName, tileVisu.tile.layerName)) {
                     this.tileVisualizationQueue.push([styleId, tileVisu]);
                 }
             });
@@ -484,11 +531,17 @@ export class MapService {
         if ((style as ErdblickStyle).enabled !== undefined && !(style as ErdblickStyle).enabled) {
             return;
         }
+        let hasTileBox = false;
+        if (this.tileBordersPerLayer.has(tileLayer.mapName+'/'+tileLayer.layerName)) {
+            hasTileBox = this.tileBordersPerLayer.get(tileLayer.mapName+'/'+tileLayer.layerName)!;
+        }
         let visu = new TileVisualization(
             tileLayer,
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
-            tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId));
+            tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
+            undefined,
+            hasTileBox);
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);

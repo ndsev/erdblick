@@ -1,6 +1,13 @@
 import {FeatureTile} from "./features.model";
 import {coreLib} from "./wasm";
-import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "./cesium";
+import {
+    Color,
+    Viewer,
+    PrimitiveCollection,
+    Entity,
+    Rectangle,
+    HeightReference
+} from "./cesium";
 import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 
 interface LocateResolution {
@@ -20,44 +27,49 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  * per map tile layer. Otherwise, they are rendered once per
  * (style sheet, tile layer) combination.
  */
-class LowDetailTileVisualization {
-    static visualizations: Map<string, LowDetailTileVisualization> = new Map<string, LowDetailTileVisualization>();
+class TileBoxVisualization {
+    static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
 
-    static get(tile: FeatureTile, viewer: Viewer): LowDetailTileVisualization {
-        if (LowDetailTileVisualization.visualizations.has(tile.id)) {
-            let result = this.visualizations.get(tile.id)!;
+    static get(tile: FeatureTile, viewer: Viewer): TileBoxVisualization {
+        if (TileBoxVisualization.visualizations.has(tile.tileId)) {
+            let result = this.visualizations.get(tile.tileId)!;
             ++result.refCount;
             return result;
         }
 
-        return new LowDetailTileVisualization(viewer, tile);
+        return new TileBoxVisualization(viewer, tile);
     }
 
     // Keep track of how many TileVisualizations are using this low-detail one.
     // We can delete this instance, as soon as refCount is 0.
     refCount: number = 1;
     private readonly entity: Entity;
-    private readonly id: string;
+    private readonly id: bigint;
 
-    constructor(viewer: Viewer, tile: FeatureTile) {
-        let position = coreLib.getTilePosition(BigInt(tile.tileId));
-        let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
+    constructor(viewer: Viewer,
+                tile: FeatureTile,
+                color: Color = Color.AQUA) {
+        let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
+        // let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
         this.entity = viewer.entities.add({
-            position: Cartesian3.fromDegrees(position.x, position.y),
-            point: {
-                pixelSize: 5,
-                color: color
+            rectangle: {
+                coordinates: Rectangle.fromDegrees(...tileBox),
+                height: HeightReference.CLAMP_TO_GROUND,
+                material: Color.TRANSPARENT,
+                outlineWidth: 2,
+                outline: true,
+                outlineColor: color
             }
         });
-        this.id = tile.id;
-        LowDetailTileVisualization.visualizations.set(tile.id, this);
+        this.id = tile.tileId;
+        TileBoxVisualization.visualizations.set(tile.tileId, this);
     }
 
     delete(viewer: Viewer) {
         --this.refCount;
         if (this.refCount <= 0) {
             viewer.entities.remove(this.entity);
-            LowDetailTileVisualization.visualizations.delete(this.id);
+            TileBoxVisualization.visualizations.delete(this.id);
         }
     }
 }
@@ -66,9 +78,10 @@ class LowDetailTileVisualization {
 export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
+    hasTileBoxGrid: boolean;
 
     private readonly style: StyleWithIsDeleted;
-    private lowDetailVisu: LowDetailTileVisualization|null = null;
+    private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasLowDetailVisualization: boolean = false;
@@ -91,7 +104,7 @@ export class TileVisualization {
      *  have `mode: highlight` set, otherwise, only rules with the default
      *  `mode: normal` are executed.
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number, boxGrid: boolean = false) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
@@ -99,6 +112,7 @@ export class TileVisualization {
         this.highlight = highlight === undefined ? 0xffffffff : highlight;
         this.deleted = false;
         this.auxTileFun = auxTileFun;
+        this.hasTileBoxGrid = boxGrid;
     }
 
     /**
@@ -194,9 +208,11 @@ export class TileVisualization {
                 viewer.scene.primitives.add(this.primitiveCollection);
             }
             this.hasHighDetailVisualization = true;
-        } else {
-            // Else: Low-detail dot representation
-            this.lowDetailVisu = LowDetailTileVisualization.get(this.tile, viewer);
+        }
+
+        if (this.hasTileBoxGrid) {
+            // Else: Low-detail bounding box representation
+            this.lowDetailVisu = TileBoxVisualization.get(this.tile, viewer);
             this.hasLowDetailVisualization = true;
         }
 

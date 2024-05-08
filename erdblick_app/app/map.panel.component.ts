@@ -34,20 +34,26 @@ import {coreLib} from "./wasm";
                 <div *ngIf="mapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
+<!--                            <p-checkbox [(ngModel)]="mapItem.value.visible"-->
+<!--                                        (ngModelChange)="toggleLayer(mapItem.key, '')"-->
+<!--                                        [label]="mapItem.key" [binary]="true"/>-->
                             {{ mapItem.key }}
                         </span>
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
                             <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                                {{ mapLayer.key }}
+                                <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                            (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
+                                            [label]="mapLayer.key" [binary]="true"/>
                             </span>
                             <div class="layer-controls">
-                                <p-button (click)="toggleLayer(mapItem.key, mapLayer.key)"
-                                          icon="{{mapLayer.value.visible ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                          label="" pTooltip="Toggle layer" tooltipPosition="bottom">
+                                <!--                                <p-checkbox [(ngModel)]="gridEnabled" (ngModelChange)="updateGrid()" label="Grid" [value]="true" />-->
+                                <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
+                                          [icon]="mapLayer.value.tileBorders ? 'pi pi-circle-on' : 'pi pi-circle-off'"
+                                          label="" pTooltip="Toggle tile borders" tooltipPosition="bottom">
                                 </p-button>
                                 <p-button *ngIf="mapLayer.value.coverage[0]"
                                           (click)="focus(mapLayer.value.coverage[0], $event)"
-                                          icon="pi pi-search"
+                                          icon="pi pi-plus-circle"
                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom">
                                 </p-button>
                                 <p-inputNumber [(ngModel)]="mapLayer.value.level"
@@ -133,7 +139,8 @@ import {coreLib} from "./wasm";
                     </div>
                 </div>
                 <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
-                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered" class="flex-container">
+                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                         class="flex-container">
                         <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
                             {{ message.key }}: {{ message.value }} (see console)
                         </span>
@@ -159,7 +166,8 @@ import {coreLib} from "./wasm";
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
         </p-button>
-        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog class="editor-dialog">
+        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
+                  class="editor-dialog">
             <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -195,8 +203,8 @@ export class MapPanelComponent {
     savedStyleDataSubscription: Subscription = new Subscription();
     dataWasModified: boolean = false;
 
-    osmEnabled: boolean;
-    osmOpacityValue: number;
+    osmEnabled: boolean = true;
+    osmOpacityValue: number = 30;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
@@ -205,8 +213,10 @@ export class MapPanelComponent {
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public parameterService: ParametersService) {
-        this.osmEnabled = this.parameterService.osmEnabled.getValue();
-        this.osmOpacityValue = this.parameterService.osmOpacityValue.getValue();
+        this.parameterService.parameters.subscribe(parameters => {
+            this.osmEnabled = parameters.osm;
+            this.osmOpacityValue = parameters.osmOpacity;
+        });
         this.mapService.maps.subscribe(
             mapItems => this.mapItems = mapItems
         );
@@ -229,25 +239,24 @@ export class MapPanelComponent {
 
     toggleOSMOverlay() {
         this.osmEnabled = !this.osmEnabled;
-        this.parameterService.osmEnabled.next(this.osmEnabled);
         this.updateOSMOverlay();
     }
 
     updateOSMOverlay() {
-        if (this.parameterService.osmEnabled.getValue()) {
-            this.parameterService.osmOpacityValue.next(this.osmOpacityValue);
-        } else {
-            this.parameterService.osmOpacityValue.next(0);
-        }
         const parameters = this.parameterService.parameters.getValue();
         if (parameters) {
-            parameters.osmEnabled = this.osmEnabled;
+            parameters.osm = this.osmEnabled;
             parameters.osmOpacity = this.osmOpacityValue;
             this.parameterService.parameters.next(parameters);
         }
+        this.parameterService.osmEnabled.next(this.osmEnabled);
     }
 
-    toggleLayer(mapName: string, layerName: string) {
+    toggleTileBorders(mapName: string, layerName: string) {
+        this.mapService.toggleLayerTileBorderVisibility(mapName, layerName);
+    }
+
+    toggleLayer(mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
