@@ -6,6 +6,7 @@
 #include "stream.h"
 #include "style.h"
 #include "testdataprovider.h"
+#include "inspection.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -166,7 +167,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "geojson",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return self->toGeoJson().dump(4); }));
+                    return self->toGeoJson().dump(4); }))
+        .function(
+            "inspectionModel",
+            std::function<em::val(FeaturePtr&)>(
+                [](FeaturePtr& self) {
+                    return *InspectionConverter().convert(self); }));
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
