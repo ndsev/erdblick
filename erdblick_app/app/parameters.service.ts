@@ -143,12 +143,12 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number] {
+    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
         const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
         if (conf !== undefined && conf[2]) {
-            return [true, conf[1]];
+            return [true, conf[1], conf[3]];
         }
-        return [!this.p().layers.length, fallbackLevel];
+        return [!this.p().layers.length, fallbackLevel, false];
     }
 
     setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {

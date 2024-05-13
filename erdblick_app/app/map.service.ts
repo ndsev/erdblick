@@ -122,7 +122,7 @@ export class MapService {
         });
         this.styleService.styleAddedForId.subscribe(styleId => {
             this.visualizedTileLayers.set(styleId, []);
-            for (let [_, tileLayer] of this.loadedTileLayers.entries()) {
+            for (let [_, tileLayer] of this.loadedTileLayers) {
                 this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId)!, styleId);
             }
         });
@@ -220,8 +220,7 @@ export class MapService {
                             if (layerInfo.coverage.length == 0) {
                                 layerInfo.coverage = defCoverage;
                             }
-                            [layerInfo.visible, layerInfo.level] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
-                            layerInfo.tileBorders = false;
+                            [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             this.tileBordersPerLayer.set(mapInfo.mapId + '/' + layerId, layerInfo.tileBorders);
                             mapLayerLevels.push([
                                 mapInfo.mapId + '/' + layerId,
@@ -396,9 +395,7 @@ export class MapService {
         this.tileVisualizationQueue = [];
         for (const [styleId, tileVisus] of this.visualizedTileLayers) {
             tileVisus.forEach(tileVisu => {
-                console.log(this.hasLayerTileBorderVisibilityChanged(tileVisu.tile.mapName, tileVisu.tile.layerName))
-                if (tileVisu.isDirty() ||
-                    this.hasLayerTileBorderVisibilityChanged(tileVisu.tile.mapName, tileVisu.tile.layerName)) {
+                if (tileVisu.isDirty()) {
                     this.tileVisualizationQueue.push([styleId, tileVisu]);
                 }
             });
