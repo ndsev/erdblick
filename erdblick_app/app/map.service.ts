@@ -284,22 +284,9 @@ export class MapService {
             const hasTileBorders = !layer.tileBorders;
             mapItem.layers.get(layerId)!.tileBorders = hasTileBorders;
             this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
-            this.update();
             this.tileBordersPerLayer.set(mapId + '/' + layerId, hasTileBorders);
+            this.update();
         }
-    }
-
-    hasLayerTileBorderVisibilityChanged(mapId: string, layerId: string) {
-        const mapItem = this.maps.getValue().get(mapId);
-        if (mapItem !== undefined && mapItem.layers.has(layerId)) {
-            const hasTileBorders = mapItem.layers.get(layerId)!.tileBorders;
-            const hadTileBorders = this.tileBordersPerLayer.get(mapId + '/' + layerId);
-            if (hadTileBorders !== undefined) {
-                return hasTileBorders != hadTileBorders;
-            }
-            return true;
-        }
-        return false;
     }
 
     setMapLayerLevel(mapId: string, layerId: string, level: number) {
@@ -368,8 +355,10 @@ export class MapService {
         // Update visualizations
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
+                const mapName = tileVisu.tile.mapName;
+                const layerName = tileVisu.tile.layerName;
                 if (!tileVisu.tile.preventCulling && (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) ||
-                    !this.getMapLayerVisibility(tileVisu.tile.mapName, tileVisu.tile.layerName))) {
+                    !this.getMapLayerVisibility(mapName, layerName))) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
@@ -380,6 +369,9 @@ export class MapService {
                 if (styleId != "_builtin" && !styleEnabled) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
+                }
+                if (this.tileBordersPerLayer.has(`${mapName}/${layerName}`)) {
+                    tileVisu.hasTileBorder = this.tileBordersPerLayer.get(`${mapName}/${layerName}`)!;
                 }
                 tileVisu.isHighDetail = this.currentHighDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
                 return true;
@@ -528,17 +520,14 @@ export class MapService {
         if ((style as ErdblickStyle).enabled !== undefined && !(style as ErdblickStyle).enabled) {
             return;
         }
-        let hasTileBox = false;
-        if (this.tileBordersPerLayer.has(tileLayer.mapName+'/'+tileLayer.layerName)) {
-            hasTileBox = this.tileBordersPerLayer.get(tileLayer.mapName+'/'+tileLayer.layerName)!;
-        }
+        const hasTileBorder = this.tileBordersPerLayer.has(tileLayer.mapName+'/'+tileLayer.layerName) && this.tileBordersPerLayer.get(tileLayer.mapName+'/'+tileLayer.layerName)!;
         let visu = new TileVisualization(
             tileLayer,
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
             undefined,
-            hasTileBox);
+            hasTileBorder);
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);

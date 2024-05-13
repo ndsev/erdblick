@@ -78,7 +78,7 @@ class TileBoxVisualization {
 export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
-    hasTileBoxGrid: boolean;
+    hasTileBorder: boolean = false;
 
     private readonly style: StyleWithIsDeleted;
     private lowDetailVisu: TileBoxVisualization|null = null;
@@ -103,8 +103,9 @@ export class TileVisualization {
      * @param highlight Controls whether the visualization will run rules that
      *  have `mode: highlight` set, otherwise, only rules with the default
      *  `mode: normal` are executed.
+     * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number, boxGrid: boolean = false) {
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number, boxGrid?: boolean) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
@@ -112,7 +113,7 @@ export class TileVisualization {
         this.highlight = highlight === undefined ? 0xffffffff : highlight;
         this.deleted = false;
         this.auxTileFun = auxTileFun;
-        this.hasTileBoxGrid = boxGrid;
+        this.hasTileBorder = boxGrid === undefined ? false : boxGrid;
     }
 
     /**
@@ -210,7 +211,7 @@ export class TileVisualization {
             this.hasHighDetailVisualization = true;
         }
 
-        if (this.hasTileBoxGrid) {
+        if (this.hasTileBorder) {
             // Else: Low-detail bounding box representation
             this.lowDetailVisu = TileBoxVisualization.get(this.tile, viewer);
             this.hasLowDetailVisualization = true;
@@ -269,7 +270,8 @@ export class TileVisualization {
     isDirty() {
         return (
             (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
-            (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization)
+            (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization) ||
+            (this.hasTileBorder != this.hasLowDetailVisualization)
         );
     }
 }
