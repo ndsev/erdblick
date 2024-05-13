@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
+import {MapService} from "./map.service";
 
 export interface JumpTarget {
     name: string;
@@ -13,10 +14,11 @@ export interface JumpTarget {
 @Injectable({providedIn: 'root'})
 export class JumpTargetService {
 
-    targetValueSubject = new Subject<string>();
-    availableOptions = new Subject<Array<JumpTarget>>();
+    targetValueSubject = new BehaviorSubject<string>("");
+    jumpTargets = new BehaviorSubject<Array<JumpTarget>>([]);
+    extJumpTargets: Array<JumpTarget> = [];
 
-    constructor(private httpClient: HttpClient) {
+    constructor(private httpClient: HttpClient, private mapService: MapService) {
         httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
@@ -28,24 +30,43 @@ export class JumpTargetService {
                                 import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
                                     return plugin.default() as Array<JumpTarget>;
                                 }).then((jumpTargets: Array<JumpTarget>) => {
-                                    this.availableOptions.next(jumpTargets);
+                                    this.extJumpTargets = jumpTargets;
+                                    this.update();
                                 }).catch((error) => {
-                                    this.availableOptions.next([]);
                                     console.log(error);
                                 });
                                 return;
                             }
                         }
-                        this.availableOptions.next([]);
                     } catch (error) {
-                        this.availableOptions.next([]);
                         console.log(error);
                     }
                 },
                 error: error => {
-                    this.availableOptions.next([]);
                     console.log(error);
                 }
             });
+
+        // Filter out feature jump targets based on search value.
+        this.targetValueSubject.subscribe(value => {
+            this.update();
+        })
+    }
+
+    update() {
+        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
+        let featureJumpTargetsConverted = [];
+        if (featureJumpTargets) {
+            featureJumpTargetsConverted = featureJumpTargets.map((fjt: any) => {
+                return {
+                    name: `Jump to ${fjt.name}`,
+                    label: JSON.stringify(fjt.idParts) + "<br>" + fjt.error,
+                    enabled: !fjt.error,
+                    jump: (value: string) => { return; },
+                    validate: (value: string) => { return !fjt.error; },
+                }
+            });
+        }
+        this.jumpTargets.next([...this.extJumpTargets, ...featureJumpTargetsConverted]);
     }
 }

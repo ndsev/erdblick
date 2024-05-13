@@ -39,7 +39,7 @@ export class SearchMenuComponent {
             this.validateMenuItems();
         });
 
-        this.jumpToTargetService.availableOptions.subscribe((jumpTargets: Array<JumpTarget>) => {
+        this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<JumpTarget>) => {
             this.searchItems = [
                 ...jumpTargets,
                 ...[

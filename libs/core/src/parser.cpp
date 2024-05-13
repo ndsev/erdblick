@@ -57,7 +57,7 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                 }
             }
         }
-        
+
         info_.emplace(dsInfo.mapId_, std::move(dsInfo));
     }
 }
