@@ -9,7 +9,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/color.h
   include/erdblick/testdataprovider.h
   include/erdblick/aabb.h
-  include/erdblick/stream.h
+  include/erdblick/parser.h
   include/erdblick/geometry.h
   include/erdblick/inspection.h
 
@@ -26,7 +26,7 @@ set(ERDBLICK_SOURCE_FILES
   src/color.cpp
   src/buffer.cpp
   src/aabb.cpp
-  src/stream.cpp
+  src/parser.cpp
   src/geometry.cpp
   src/inspection.cpp
 

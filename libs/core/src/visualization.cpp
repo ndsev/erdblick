@@ -579,9 +579,6 @@ void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowa
     }
 }
 
-template<typename T>
-struct always_false : std::false_type {};
-
 void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& sourceFeature, const model_ptr<Relation>& relation, bool onlyUpdateTwowayFlags)
 {
     // Check if the relation type name is accepted for the rule.
@@ -642,15 +639,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         JsValue featureIdParts = JsValue::List();
         for (auto const& [key, value] : relation->target()->keyValuePairs()) {
             featureIdParts.push(JsValue(std::string(key)));
-            std::visit([&featureIdParts](auto&& v){
-                if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string_view>) {
-                    featureIdParts.push(JsValue(std::string(v)));
-                } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
-                    featureIdParts.push(JsValue(v));
-                } else {
-                    static_assert(always_false<decltype(v)>::value, "Type of 'v' is neither std::string_view nor int64_t");
-                }
-            }, value);
+            featureIdParts.push(JsValue::fromVariant(value));
         }
 
         JsValue newExtReferenceToResolve = JsValue::Dict();

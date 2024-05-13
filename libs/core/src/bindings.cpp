@@ -3,7 +3,7 @@
 #include "aabb.h"
 #include "buffer.h"
 #include "visualization.h"
-#include "stream.h"
+#include "parser.h"
 #include "style.h"
 #include "testdataprovider.h"
 #include "inspection.h"
@@ -246,6 +246,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function(
+            "filterFeatureJumpTargets",
+            std::function<
+                NativeJsValue(TileLayerParser const&, std::string)>(
+                [](TileLayerParser const& self, std::string input)
+                {
+                    auto result = self.filterFeatureJumpTargets(input);
+                    auto convertedResult = JsValue::List();
+                    for (auto const& r : result)
+                        convertedResult.push(r.toJsValue());
+                    return *convertedResult;
+                }))
         .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <variant>
+
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
 #else
@@ -14,6 +16,9 @@ using NativeJsValue = emscripten::val;
 #else
 using NativeJsValue = nlohmann::json;
 #endif
+
+template<typename T>
+struct always_false : std::false_type {};
 
 /**
  * Class representing an emscripten JavaScript object,
@@ -49,6 +54,24 @@ struct JsValue
      * @param coordinates Float64 buffer to fill the typed array.
      */
     static JsValue Float64Array(std::vector<double> const& coordinates);
+
+    /** Construct a JsValue from a variant with specific alternatives. */
+    template<typename T>
+    static JsValue fromVariant(T const& variant) {
+        JsValue result;
+        std::visit([&result](auto&& v){
+            if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string_view>) {
+                result = JsValue(std::string(v));
+            } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string>) {
+                result = JsValue(v);
+            } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
+                result = JsValue(v);
+            } else {
+                static_assert(always_false<decltype(v)>::value, "Type of 'v' is not supported.");
+            }
+        }, variant);
+        return result;
+    }
 
     /**
      * Constructs a JavaScript or JSON null value.
