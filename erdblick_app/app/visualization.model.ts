@@ -1,14 +1,19 @@
 import {FeatureTile} from "./features.model";
 import {coreLib} from "./wasm";
 import {
+    Cartesian3,
     Color,
-    Viewer,
-    PrimitiveCollection,
     Entity,
+    HorizontalOrigin,
+    LabelStyle,
+    PrimitiveCollection,
     Rectangle,
-    HeightReference
+    VerticalOrigin,
+    DistanceDisplayCondition,
+    Viewer
 } from "./cesium";
-import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
+import {HeightReference} from "cesium";
 
 interface LocateResolution {
     tileId: string,
@@ -30,28 +35,29 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
 class TileBoxVisualization {
     static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
 
-    static get(tile: FeatureTile, viewer: Viewer): TileBoxVisualization {
+    static get(tile: FeatureTile, level: number, viewer: Viewer): TileBoxVisualization {
         if (TileBoxVisualization.visualizations.has(tile.tileId)) {
             let result = this.visualizations.get(tile.tileId)!;
             ++result.refCount;
             return result;
         }
 
-        return new TileBoxVisualization(viewer, tile);
+        return new TileBoxVisualization(viewer, tile, level);
     }
 
     // Keep track of how many TileVisualizations are using this low-detail one.
     // We can delete this instance, as soon as refCount is 0.
     refCount: number = 1;
-    private readonly entity: Entity;
+    private readonly entities: Array<Entity>;
     private readonly id: bigint;
 
     constructor(viewer: Viewer,
                 tile: FeatureTile,
+                level: number,
                 color: Color = Color.AQUA) {
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         // let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
-        this.entity = viewer.entities.add({
+        this.entities = [viewer.entities.add({
             rectangle: {
                 coordinates: Rectangle.fromDegrees(...tileBox),
                 height: HeightReference.CLAMP_TO_GROUND,
@@ -60,7 +66,23 @@ class TileBoxVisualization {
                 outline: true,
                 outlineColor: color
             }
-        });
+        })];
+        const centerLongitude = (tileBox[0] + tileBox[2]) / 2;
+        const centerLatitude = (tileBox[1] + tileBox[3]) / 2;
+        const distance = 10000000 / Math.pow(1.55, level);
+        this.entities.push(viewer.entities.add({
+            position: Cartesian3.fromDegrees(centerLongitude, centerLatitude),
+            label: {
+                text: `Level ${level}`,
+                font: '14pt monospace',
+                fillColor: Color.AQUA,
+                style: LabelStyle.FILL,
+                verticalOrigin: VerticalOrigin.CENTER,
+                horizontalOrigin: HorizontalOrigin.CENTER,
+                heightReference: HeightReference.CLAMP_TO_GROUND,
+                distanceDisplayCondition: new DistanceDisplayCondition(0, distance)
+            }
+        }));
         this.id = tile.tileId;
         TileBoxVisualization.visualizations.set(tile.tileId, this);
     }
@@ -68,7 +90,7 @@ class TileBoxVisualization {
     delete(viewer: Viewer) {
         --this.refCount;
         if (this.refCount <= 0) {
-            viewer.entities.remove(this.entity);
+            this.entities.forEach(entity => viewer.entities.remove(entity));
             TileBoxVisualization.visualizations.delete(this.id);
         }
     }
@@ -79,6 +101,7 @@ export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     hasTileBorder: boolean = false;
+    level: number = 13;
 
     private readonly style: StyleWithIsDeleted;
     private lowDetailVisu: TileBoxVisualization|null = null;
@@ -213,7 +236,7 @@ export class TileVisualization {
 
         if (this.hasTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.tile, viewer);
+            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.level, viewer);
             this.hasLowDetailVisualization = true;
         }
 

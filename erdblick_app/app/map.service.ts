@@ -520,14 +520,16 @@ export class MapService {
         if ((style as ErdblickStyle).enabled !== undefined && !(style as ErdblickStyle).enabled) {
             return;
         }
-        const hasTileBorder = this.tileBordersPerLayer.has(tileLayer.mapName+'/'+tileLayer.layerName) && this.tileBordersPerLayer.get(tileLayer.mapName+'/'+tileLayer.layerName)!;
+        const mapName = tileLayer.mapName;
+        const layerName = tileLayer.layerName;
         let visu = new TileVisualization(
             tileLayer,
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
             undefined,
-            hasTileBorder);
+            this.tileBordersPerLayer.has(`${mapName}/${layerName}`) && this.tileBordersPerLayer.get(`${mapName}/${layerName}`)!);
+        visu.level = this.getMapLayerLevel(mapName, layerName);
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);
