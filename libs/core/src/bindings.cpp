@@ -217,7 +217,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, uint32_t>()
+        .constructor<FeatureLayerStyle const&, std::string>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)

@@ -20,14 +20,14 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
-    uint32_t highlightFeatureIndex)
+    std::string highlightFeatureId)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
       style_(style),
-      highlightFeatureIndex_(highlightFeatureIndex),
+      highlightFeatureId_(highlightFeatureId),
       externalRelationReferences_(JsValue::List())
 {
 }
@@ -54,15 +54,15 @@ void FeatureLayerVisualization::run()
     uint32_t featureId = 0;
 
     for (auto&& feature : *tile_) {
-        if (highlightFeatureIndex_ != UnselectableId) {
-            if (featureId != highlightFeatureIndex_) {
+        if (!highlightFeatureId_.empty()) {
+            if (feature->id()->toString() != highlightFeatureId_) {
                 ++featureId;
                 continue;
             }
         }
 
         for (auto&& rule : style_.rules()) {
-            if (highlightFeatureIndex_ != UnselectableId) {
+            if (!highlightFeatureId_.empty()) {
                 if (rule.mode() != FeatureStyleRule::Highlight)
                     continue;
             }

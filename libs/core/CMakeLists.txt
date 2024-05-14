@@ -46,7 +46,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
     --profiling \
-    --embind-emit-tsd erdblick-core.d.ts \
+    --emit-tsd erdblick-core.d.ts \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
