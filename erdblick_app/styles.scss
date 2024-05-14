@@ -192,6 +192,7 @@ body {
         table {
             direction: ltr;
             font-size: smaller;
+            border-collapse: collapse;
 
             td {
                 padding: 0;
@@ -285,6 +286,57 @@ body {
         }
     }
 
+    .grid-controls {
+        display: flex;
+        align-items: flex-start;
+        gap: 1em;
+        margin-top: 0.25em;
+        flex-direction: column;
+        justify-content: flex-start;
+
+        & > div {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            margin-top: 0.25em;
+            flex-direction: row;
+        }
+
+        button {
+            width: 2em;
+            height: 2em;
+            box-shadow: none;
+        }
+
+        .slider-input {
+            width: 14em;
+        }
+
+        .grid-level {
+            display: flex;
+            gap: 0.5em;
+            justify-content: flex-end;
+
+            button {
+                width: 2em;
+                height: 2em;
+                box-shadow: none;
+            }
+
+            input {
+                margin: 0;
+            }
+
+            .p-inputnumber-buttons-horizontal .p-inputnumber-input {
+                order: 2;
+                border-radius: 0;
+                width: 3em;
+                text-align: center;
+                height: 2em;
+            }
+        }
+    }
+
     .p-fieldset {
         margin-bottom: 0.5em;
 
@@ -360,6 +412,10 @@ body {
                     box-shadow: none;
                     min-width: 6.4em;
                 }
+            }
+
+            input {
+                margin: 0;
             }
 
             .p-inputnumber-buttons-horizontal .p-inputnumber-input {

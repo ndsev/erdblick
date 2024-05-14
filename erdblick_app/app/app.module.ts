@@ -36,6 +36,7 @@ import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
 import {initializeLibrary} from "./wasm";
+import {CheckboxModule} from "primeng/checkbox";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -76,7 +77,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FieldsetModule,
         InputSwitchModule,
         SliderModule,
-        FileUploadModule
+        FileUploadModule,
+        CheckboxModule
     ],
     providers: [
         {

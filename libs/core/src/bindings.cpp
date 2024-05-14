@@ -89,6 +89,17 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
+/** Get the center position for a mapget tile id in WGS84. */
+em::val getTileBox(uint64_t tileIdValue) {
+    mapget::TileId tid(tileIdValue);
+    return *JsValue::List({
+        JsValue(tid.sw().x),
+        JsValue(tid.sw().y),
+        JsValue(tid.ne().x),
+        JsValue(tid.ne().y)
+    });
+}
+
 /** Get the neighbor for a mapget tile id. */
 uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
     mapget::TileId tid(tileIdValue);
@@ -212,7 +223,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, uint32_t>()
+        .constructor<FeatureLayerStyle const&, std::string>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
@@ -240,6 +251,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getTilePosition", &getTilePosition);
+
+    ////////// Return coordinates for a rectangle representing the bounding box of the tile
+    em::function("getTileBox", &getTileBox);
 
     ////////// Get full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);

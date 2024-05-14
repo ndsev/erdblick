@@ -153,7 +153,7 @@ export class FeatureWrapper {
         if (this.featureTile.disposed) {
             throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
         }
-        return this.featureTile.peek((tileFeatureLayer: any) => {
+        return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature = tileFeatureLayer.at(this.index);
             let result = null;
             if (callback) {

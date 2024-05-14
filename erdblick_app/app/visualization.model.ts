@@ -1,7 +1,15 @@
 import {FeatureTile} from "./features.model";
 import {coreLib} from "./wasm";
-import {Cartesian3, Color, Viewer, PrimitiveCollection, Entity} from "./cesium";
-import {TileFeatureLayer, FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {
+    Color,
+    Entity,
+    PrimitiveCollection,
+    Rectangle,
+    Viewer,
+    CallbackProperty,
+    HeightReference
+} from "./cesium";
+import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
 interface LocateResolution {
     tileId: string,
@@ -20,44 +28,58 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  * per map tile layer. Otherwise, they are rendered once per
  * (style sheet, tile layer) combination.
  */
-class LowDetailTileVisualization {
-    static visualizations: Map<string, LowDetailTileVisualization> = new Map<string, LowDetailTileVisualization>();
+class TileBoxVisualization {
+    static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
 
-    static get(tile: FeatureTile, viewer: Viewer): LowDetailTileVisualization {
-        if (LowDetailTileVisualization.visualizations.has(tile.id)) {
-            let result = this.visualizations.get(tile.id)!;
+    static get(tile: FeatureTile, featureCount: number, viewer: Viewer): TileBoxVisualization {
+        if (TileBoxVisualization.visualizations.has(tile.tileId)) {
+            let result = this.visualizations.get(tile.tileId)!;
             ++result.refCount;
+            result.featureCount += featureCount;
             return result;
         }
 
-        return new LowDetailTileVisualization(viewer, tile);
+        return new TileBoxVisualization(viewer, tile, featureCount);
     }
 
     // Keep track of how many TileVisualizations are using this low-detail one.
     // We can delete this instance, as soon as refCount is 0.
     refCount: number = 1;
+    featureCount: number = 0;
     private readonly entity: Entity;
-    private readonly id: string;
+    private readonly id: bigint;
 
-    constructor(viewer: Viewer, tile: FeatureTile) {
-        let position = coreLib.getTilePosition(BigInt(tile.tileId));
-        let color = tile.numFeatures <= 0 ? Color.ALICEBLUE.withAlpha(.5) : Color.LAWNGREEN.withAlpha(.5);
+    constructor(viewer: Viewer,
+                tile: FeatureTile,
+                featureCount: number) {
+        let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         this.entity = viewer.entities.add({
-            position: Cartesian3.fromDegrees(position.x, position.y),
-            point: {
-                pixelSize: 5,
-                color: color
+            rectangle: {
+                coordinates: Rectangle.fromDegrees(...tileBox),
+                height: HeightReference.CLAMP_TO_GROUND,
+                material: Color.TRANSPARENT,
+                outlineWidth: 2,
+                outline: true,
+                outlineColor: new CallbackProperty((time, result) => {
+                    if (this.featureCount > 0) {
+                        return Color.YELLOW.withAlpha(0.7);
+                    } else {
+                        return Color.AQUA.withAlpha(0.3);
+                    }
+                }, false)
             }
         });
-        this.id = tile.id;
-        LowDetailTileVisualization.visualizations.set(tile.id, this);
+        this.id = tile.tileId;
+        this.featureCount = featureCount;
+        TileBoxVisualization.visualizations.set(tile.tileId, this);
     }
 
-    delete(viewer: Viewer) {
+    delete(viewer: Viewer, featureCount: number) {
         --this.refCount;
+        this.featureCount -= featureCount;
         if (this.refCount <= 0) {
             viewer.entities.remove(this.entity);
-            LowDetailTileVisualization.visualizations.delete(this.id);
+            TileBoxVisualization.visualizations.delete(this.id);
         }
     }
 }
@@ -66,14 +88,15 @@ class LowDetailTileVisualization {
 export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
+    showTileBorder: boolean = false;
 
     private readonly style: StyleWithIsDeleted;
-    private lowDetailVisu: LowDetailTileVisualization|null = null;
+    private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
-    private hasLowDetailVisualization: boolean = false;
+    private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
-    private readonly highlight: number;
+    private readonly highlight: string;
     private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
 
@@ -90,15 +113,17 @@ export class TileVisualization {
      * @param highlight Controls whether the visualization will run rules that
      *  have `mode: highlight` set, otherwise, only rules with the default
      *  `mode: normal` are executed.
+     * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: number) {
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: string, boxGrid?: boolean) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
-        this.highlight = highlight === undefined ? 0xffffffff : highlight;
+        this.highlight = highlight === undefined ? "" : highlight;
         this.deleted = false;
         this.auxTileFun = auxTileFun;
+        this.showTileBorder = boxGrid === undefined ? false : boxGrid;
     }
 
     /**
@@ -194,10 +219,12 @@ export class TileVisualization {
                 viewer.scene.primitives.add(this.primitiveCollection);
             }
             this.hasHighDetailVisualization = true;
-        } else {
-            // Else: Low-detail dot representation
-            this.lowDetailVisu = LowDetailTileVisualization.get(this.tile, viewer);
-            this.hasLowDetailVisualization = true;
+        }
+
+        if (this.showTileBorder) {
+            // Else: Low-detail bounding box representation
+            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer);
+            this.hasTileBorder = true;
         }
 
         this.renderingInProgress = false;
@@ -222,11 +249,11 @@ export class TileVisualization {
             this.primitiveCollection = null;
         }
         if (this.lowDetailVisu) {
-            this.lowDetailVisu.delete(viewer);
+            this.lowDetailVisu.delete(viewer, this.tile.numFeatures);
             this.lowDetailVisu = null;
         }
         this.hasHighDetailVisualization = false;
-        this.hasLowDetailVisualization = false;
+        this.hasTileBorder = false;
     }
 
     /**
@@ -253,7 +280,8 @@ export class TileVisualization {
     isDirty() {
         return (
             (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
-            (!this.isHighDetailAndNotEmpty() && !this.hasLowDetailVisualization)
+            (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
+            (this.showTileBorder != this.hasTileBorder)
         );
     }
 }
