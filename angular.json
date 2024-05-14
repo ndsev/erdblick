@@ -55,6 +55,7 @@
                             "node_modules/primeng/resources/themes/lara-light-blue/theme.css",
                             "node_modules/primeng/resources/primeng.min.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
+                            "node_modules/material-icons/iconfont/material-icons.css",
                             "erdblick_app/styles.scss"
                         ],
                         "scripts": [

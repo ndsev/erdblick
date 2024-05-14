@@ -48,13 +48,15 @@ import {coreLib} from "./wasm";
                             <div class="layer-controls">
                                 <!--                                <p-checkbox [(ngModel)]="gridEnabled" (ngModelChange)="updateGrid()" label="Grid" [value]="true" />-->
                                 <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
-                                          [icon]="mapLayer.value.tileBorders ? 'pi pi-circle-on' : 'pi pi-circle-off'"
-                                          label="" pTooltip="Toggle tile borders" tooltipPosition="bottom">
+                                          label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                          [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
                                 </p-button>
                                 <p-button *ngIf="mapLayer.value.coverage[0]"
                                           (click)="focus(mapLayer.value.coverage[0], $event)"
-                                          icon="pi pi-plus-circle"
-                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom">
+                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom"
+                                          [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                                 </p-button>
                                 <p-inputNumber [(ngModel)]="mapLayer.value.level"
                                                (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.key)"
