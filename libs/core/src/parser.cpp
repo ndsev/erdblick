@@ -31,7 +31,6 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
         for (auto const& [_, l] : dsInfo.layers_) {
             for (auto const& tp : l->featureTypes_) {
                 for (auto const& composition : tp.uniqueIdCompositions_) {
-                    std::cout << tp.name_ << std::endl;
                     for (auto const& withOptionals : {false, true}) {
                         std::vector<mapget::IdPart> idParts;
                         std::stringstream compositionId;
@@ -44,15 +43,14 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                             }
                         }
 
-                        std::cout << compositionId.str() << std::endl;
-
                         auto& typeInfo = featureJumpTargets_[compositionId.str()];
                         if (typeInfo.idParts_.empty()) {
                             typeInfo.idParts_ = idParts;
                             typeInfo.name_ = tp.name_;
                             typeInfo.layerInfo_ = l;
                         }
-                        typeInfo.mapAndLayerNames_.emplace_back(dsInfo.mapId_, l->layerId_);
+                        if (std::ranges::find(typeInfo.maps_, dsInfo.mapId_) == typeInfo.maps_.end())
+                            typeInfo.maps_.emplace_back(dsInfo.mapId_);
                     }
                 }
             }
@@ -148,7 +146,6 @@ TileLayerParser::resolveMapLayerInfo(std::string const& mapId, std::string const
     auto it = info_[mapId].layers_.find(layerId);
     if (it != map.layers_.end())
         return it->second;
-    std::cout << "Using fallback layer info: " << fallbackLayerInfo_->layerId_ << std::endl;
     return fallbackLayerInfo_;
 }
 

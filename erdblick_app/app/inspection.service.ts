@@ -1,6 +1,8 @@
 import {Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {BehaviorSubject} from "rxjs";
+import {MapService} from "./map.service";
+import {Feature} from "../../build/libs/core/erdblick-core";
 
 @Injectable({providedIn: 'root'})
 export class InspectionService {

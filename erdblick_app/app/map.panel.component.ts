@@ -8,6 +8,7 @@ import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {coreLib} from "./wasm";
+import {SidePanelService} from "./panel.service";
 
 
 @Component({
@@ -214,7 +215,9 @@ export class MapPanelComponent {
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
-                public parameterService: ParametersService) {
+                public parameterService: ParametersService,
+                private sidePanelService: SidePanelService)
+    {
         this.parameterService.parameters.subscribe(parameters => {
             this.osmEnabled = parameters.osm;
             this.osmOpacityValue = parameters.osmOpacity;
@@ -222,10 +225,18 @@ export class MapPanelComponent {
         this.mapService.maps.subscribe(
             mapItems => this.mapItems = mapItems
         );
+        this.sidePanelService.activeSidePanel.subscribe(activePanel => {
+            if (activePanel != SidePanelService.MAPS) {
+                this.layerDialogVisible = false;
+            }
+        })
     }
 
     showLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
+        if (this.layerDialogVisible) {
+            this.sidePanelService.activeSidePanel.next(SidePanelService.MAPS);
+        }
     }
 
     focus(tileId: bigint, event: any) {

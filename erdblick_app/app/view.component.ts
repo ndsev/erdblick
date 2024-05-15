@@ -20,7 +20,6 @@ import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
-import {InspectionService} from "./inspection.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
 

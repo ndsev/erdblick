@@ -5,38 +5,55 @@ import {JumpTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
+import {setSearchQuery} from "@codemirror/search";
+import {SidePanelService} from "./panel.service";
 
 
 @Component({
-    selector: 'search-menu-items',
+    selector: 'search-panel',
     template: `
-        <div class="search-menu-wrapper">
+        <span class="p-input-icon-left search-input">
+            <i class="pi pi-search"></i>
+            <input type="text" pInputText [(ngModel)]="value"
+                   (click)="showSearchOverlay($event)"
+                   (ngModelChange)="setSearchValue(value)"/>
+        </span>
+        <p-dialog class="search-menu-dialog" header="" [(visible)]="searchMenuVisible"
+                  [position]="'topleft'" [draggable]="false" [resizable]="false" header="Search Options">
             <div class="search-menu" *ngFor="let item of searchItems">
                 <p-divider></p-divider>
-                <p (click)="jumpToWGS84(item.jump(value))" class="search-option" [ngClass]="{'item-disabled': !item.enabled }"><span>{{item.name}}</span><br>{{item.label}}</p>
+                <p (click)="jumpToWGS84(item.jump(value))" class="search-option"
+                   [ngClass]="{'item-disabled': !item.enabled }"><span class="search-option-name">{{ item.name }}</span><br><span [innerHTML]="item.label"></span></p>
             </div>
-        </div>
+        </p-dialog>
     `,
     styles: [`
         .item-disabled {
-            color: lightgrey;
+            color: darkgrey;
             pointer-events: none;
         }
     `]
 })
-export class SearchMenuComponent {
+export class SearchPanelComponent {
 
     searchItems: Array<JumpTarget> = [];
     value: string = "";
+    searchMenuVisible: boolean = false;
 
     constructor(public mapService: MapService,
                 public parametersService: ParametersService,
                 private messageService: InfoMessageService,
-                private jumpToTargetService: JumpTargetService) {
+                private jumpToTargetService: JumpTargetService,
+                private sidePanelService: SidePanelService) {
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
-            this.value = event;
             this.validateMenuItems();
+        });
+
+        this.sidePanelService.activeSidePanel.subscribe((panel)=>{
+            if (panel != SidePanelService.SEARCH) {
+                this.searchMenuVisible = false;
+            }
         });
 
         this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<JumpTarget>) => {
@@ -171,7 +188,6 @@ export class SearchMenuComponent {
 
     jumpToWGS84(coordinates: number[] | undefined) {
         if (coordinates === undefined) {
-            this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
         let lat = coordinates[0];
@@ -230,5 +246,16 @@ export class SearchMenuComponent {
     validateWGS84(value: string, isLonLat: boolean = false) {
         const coords = this.parseWgs84Coordinates(value, isLonLat);
         return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
+    }
+
+    showSearchOverlay(event: Event) {
+        this.searchMenuVisible = true;
+        this.sidePanelService.activeSidePanel.next(SidePanelService.SEARCH);
+        event.stopPropagation();
+    }
+
+    setSearchValue(value: string) {
+        this.value = value;
+        this.jumpToTargetService.targetValueSubject.next(value);
     }
 }

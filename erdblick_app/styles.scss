@@ -224,28 +224,34 @@ body {
     }
 }
 
-.search-menu {
-    &:first-child {
-        .p-divider {
-            display: none;
+.search-menu-dialog {
+    .search-menu {
+        &:first-child {
+            .p-divider {
+                display: none;
+            }
         }
-    }
 
-    .search-option {
-        text-align: left;
-        font-size: small;
-        margin: 0;
-        background: none;
-        border: none;
-        cursor: pointer;
+        .search-option {
+            text-align: left;
+            font-size: 0.9em;
+            margin: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
 
-        span {
-            font-weight: bold;
+            .search-option-name {
+                font-weight: bold;
+            }
+
+            .search-option-warning {
+                color: burlywood;
+            }
         }
     }
 }
 
-.map-layer-dialog {
+.map-layer-dialog, .search-menu-dialog {
     .p-dialog {
         width: 25em;
         min-width: 25em;
@@ -257,12 +263,25 @@ body {
         max-height: calc(100vh - 9em);
     }
 
+    .p-dialog-content {
+        padding: 0.5em;
+    }
+
+    .p-dialog-header {
+        padding: 0.5em;
+
+        .p-dialog-title {
+            font-size: medium;
+        }
+    }
+}
+
+.map-layer-dialog {
     .p-dialog-header {
         display: none;
     }
 
     .p-dialog-content {
-        padding: 0.5em 0.5em 0 0.5em;
         border-top-right-radius: 6px;
         border-top-left-radius: 6px;
     }
@@ -283,6 +302,7 @@ body {
 
         .slider-input {
             width: 14em;
+            font-size: 0.9em;
         }
     }
 
@@ -551,7 +571,7 @@ body {
         }
     }
 
-    .map-layer-dialog {
+    .map-layer-dialog, .search-menu-dialog {
         .p-dialog {
             width: 100vw !important;
             height: calc(100vh - 3em) !important;
@@ -580,19 +600,6 @@ body {
     .p-overlaypanel:after, .p-overlaypanel:before{
         left: unset !important;
         right: 1.25rem !important;
-    }
-
-    .search-menu-wrapper {
-        width: calc(100vw - 2.5rem);
-        max-height: 55vh;
-        overflow: auto;
-        margin: 0;
-
-        .search-menu {
-            .search-option {
-                font-size: medium;
-            }
-        }
     }
 
     .inspect-panel {

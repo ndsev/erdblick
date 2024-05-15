@@ -2,6 +2,8 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapService} from "./map.service";
+import {LocateResponse} from "./visualization.model";
+import {SidePanelService} from "./panel.service";
 
 export interface JumpTarget {
     name: string;

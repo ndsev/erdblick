@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./info.service";
-import {SearchMenuComponent} from "./search-menu.component";
+import {SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
@@ -37,6 +37,8 @@ import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
 import {initializeLibrary} from "./wasm";
 import {CheckboxModule} from "primeng/checkbox";
+import {InputTextModule} from "primeng/inputtext";
+import {SidePanelService} from "./panel.service";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -49,7 +51,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
 @NgModule({
     declarations: [
         AppComponent,
-        SearchMenuComponent,
+        SearchPanelComponent,
         MapPanelComponent,
         InspectionPanelComponent,
         PreferencesComponent,
@@ -78,7 +80,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         InputSwitchModule,
         SliderModule,
         FileUploadModule,
-        CheckboxModule
+        CheckboxModule,
+        InputTextModule
     ],
     providers: [
         {
@@ -93,6 +96,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         JumpTargetService,
         InspectionService,
         ParametersService,
+        SidePanelService
     ],
     bootstrap: [AppComponent]
 })

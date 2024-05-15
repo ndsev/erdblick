@@ -1,12 +1,13 @@
 import {Injectable} from "@angular/core";
 import {Fetch} from "./fetch.model";
-import {FeatureTile} from "./features.model";
+import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
 import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
-import {FeatureLayerStyle, TileLayerParser} from '../../build/libs/core/erdblick-core';
+import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";
+import {SidePanelService} from "./panel.service";
 
 export interface LayerInfoItem extends Object {
     canRead: boolean;
@@ -240,10 +241,6 @@ export class MapService {
                 .go();
         });
     }
-
-    ///////////////////////////////////////////////////////////////////////////
-    //                          MAP UPDATE CONTROLS                          //
-    ///////////////////////////////////////////////////////////////////////////
 
     getMapLayerVisibility(mapId: string, layerId: string) {
         const mapItem = this.maps.getValue().get(mapId);

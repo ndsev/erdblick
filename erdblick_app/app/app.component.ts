@@ -4,7 +4,6 @@ import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
-import {OverlayPanel} from "primeng/overlaypanel";
 import {StyleService} from "./style.service";
 import {filter} from "rxjs";
 
@@ -14,15 +13,7 @@ import {filter} from "rxjs";
         <erdblick-view></erdblick-view>
         <map-panel></map-panel>
         <p-toast position="bottom-center" key="tc"></p-toast>
-        <p-overlayPanel #searchoverlay>
-            <search-menu-items></search-menu-items>
-        </p-overlayPanel>
-        <span class="p-input-icon-left search-input">
-            <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue"
-                   (click)="toggleSearchOverlay(searchValue, searchoverlay, $event)"
-                   (ngModelChange)="setSearchTargetValue(searchValue)"/>
-        </span>
+        <search-panel #searchoverlay></search-panel>
         <pref-components></pref-components>
         <inspection-panel></inspection-panel>
         <div id="info">
@@ -80,18 +71,6 @@ export class AppComponent {
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries));
         });
-    }
-
-    toggleSearchOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
-        if (value) {
-            searchOverlay.show(event);
-            return;
-        }
-        searchOverlay.toggle(event);
-    }
-
-    setSearchTargetValue(value: string) {
-        this.jumpToTargetService.targetValueSubject.next(value);
     }
 
     updateQueryParams(params: Params): void {
