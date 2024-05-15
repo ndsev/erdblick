@@ -143,23 +143,11 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
         auto firstResolution = resolutionList.at(0);
         auto typeId = firstResolution["typeId"].as<std::string>();
         auto featureIdParts = firstResolution["featureId"];
-        auto numFeatureIdParts = featureIdParts.size();
-        mapget::KeyValuePairs featureIdPartsVec;
-        for (auto kvIndex = 0; kvIndex < numFeatureIdParts; kvIndex += 2) {
-            auto key = featureIdParts.at(kvIndex).as<std::string>();
-            auto value = featureIdParts.at(kvIndex + 1);
-            if (value.type() == JsValue::Type::Number) {
-                featureIdPartsVec.emplace_back(key, value.as<int64_t>());
-            }
-            else if (value.type() == JsValue::Type::String) {
-                featureIdPartsVec.emplace_back(key, value.as<std::string>());
-            }
-        }
 
         // Find the target feature in any of the available tiles.
         mapget::model_ptr<mapget::Feature> targetFeature;
         for (auto const& tile : allTiles_) {
-            targetFeature = tile->find(typeId, featureIdPartsVec);
+            targetFeature = tile->find(typeId, featureIdParts.toKeyValuePairs());
             if (targetFeature)
                 break;
         }

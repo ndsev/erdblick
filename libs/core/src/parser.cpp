@@ -21,8 +21,6 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     // Parse data source info
     auto srcInfoParsed = nlohmann::json::parse(dataSourceInfoJson.toString());
 
-    std::cout << dataSourceInfoJson.toString() << std::endl;
-
     // Index available feature types by their feature id compositions.
     // These will be the available jump-to-feature targets.
     // For each composition, allow a version with and without optional params.
@@ -153,30 +151,42 @@ std::vector<TileLayerParser::FilteredFeatureJumpTarget>
 TileLayerParser::filterFeatureJumpTargets(const std::string& queryString) const
 {
     std::vector<FilteredFeatureJumpTarget> results;
-    std::regex sep("[.,;|\\s]+"); // Regex to split the input based on multiple delimiters
+    std::regex sep("[\\.,;|\\s]+"); // Regex to split the input based on multiple delimiters
     std::vector<std::string> tokens(
         std::sregex_token_iterator(queryString.begin(), queryString.end(), sep, -1),
         std::sregex_token_iterator());
 
+    // Find applicable feature types based on the prefix.
     std::string prefix;
-    if (!tokens.empty())
+    std::vector<FeatureJumpTarget const*> targetsWithPrefixMatch;
+    if (!tokens.empty()) {
         prefix = tokens[0];
+        for (const auto& [_, target] : featureJumpTargets_) {
+            if (!prefix.empty() && target.name_.substr(0, prefix.size()) == prefix)
+                targetsWithPrefixMatch.push_back(&target);
+        }
+    }
 
-    // Find applicable feature types based on the prefix
-    for (const auto& [_, target] : featureJumpTargets_) {
-        if (!prefix.empty() && target.name_.substr(0, prefix.size()) != prefix)
-            continue;
+    // Match all targets if there are no matching ones, or there is no prefix.
+    if (targetsWithPrefixMatch.empty()) {
+        for (const auto& [_, target] : featureJumpTargets_) {
+            targetsWithPrefixMatch.push_back(&target);
+        }
+        prefix.clear();
+    }
 
-        FilteredFeatureJumpTarget result{target, {}, std::nullopt};
+    // Try to match the parameters.
+    for (const auto& target : targetsWithPrefixMatch) {
+        FilteredFeatureJumpTarget result{*target, {}, std::nullopt};
 
-        size_t tokenIndex = 1; // Start parsing after the prefix
-        for (const auto& part : target.idParts_) {
-            auto partError = std::string("Expecting ")+nlohmann::json(part.datatype_).dump();
+        size_t tokenIndex = !prefix.empty() ? 1 : 0; // Start parsing after the prefix.
+        for (const auto& part : target->idParts_) {
+            auto partError = "?";
 
             if (tokenIndex >= tokens.size()) {
                 result.error_ = "Insufficient parameters.";
                 result.parsedParams_.emplace_back(part.idPartLabel_, partError);
-                continue; // Skip optional parts if no more tokens
+                continue; // Skip optional parts if no more tokens.
             }
 
             std::variant<int64_t, std::string> parsedValue = tokens[tokenIndex++];
@@ -205,11 +215,11 @@ JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const
         {"name", JsValue(jumpTarget_.name_)},
         {"error", error_ ? JsValue(*error_) : JsValue()},
     });
-    auto mapLayerNameList = JsValue::List();
-    for (auto const& [m, l] : jumpTarget_.mapAndLayerNames_) {
-        mapLayerNameList.push(JsValue::List({JsValue(m), JsValue(l)}));
+    auto mapNameList = JsValue::List();
+    for (auto const& m : jumpTarget_.maps_) {
+        mapNameList.push(JsValue(m));
     }
-    result.set("mapLayers", mapLayerNameList);
+    result.set("maps", mapNameList);
     auto idPartList = JsValue::List();
     for (auto const& [key, value] : parsedParams_) {
         idPartList.push(JsValue::Dict({

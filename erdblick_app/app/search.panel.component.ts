@@ -187,7 +187,12 @@ export class SearchPanelComponent {
     }
 
     jumpToWGS84(coordinates: number[] | undefined) {
+        this.searchMenuVisible = false;
+        if (coordinates === null) {
+            return;
+        }
         if (coordinates === undefined) {
+            this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
         let lat = coordinates[0];

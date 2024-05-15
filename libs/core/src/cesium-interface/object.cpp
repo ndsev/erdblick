@@ -133,6 +133,23 @@ JsValue::Type JsValue::type() const
 #endif
 }
 
+mapget::KeyValuePairs JsValue::toKeyValuePairs() const
+{
+    auto numFeatureIdParts = size();
+    mapget::KeyValuePairs result;
+    for (auto kvIndex = 0; kvIndex < numFeatureIdParts; kvIndex += 2) {
+        auto key = at(kvIndex).as<std::string>();
+        auto value = at(kvIndex + 1);
+        if (value.type() == JsValue::Type::Number) {
+            result.emplace_back(key, value.as<int64_t>());
+        }
+        else if (value.type() == JsValue::Type::String) {
+            result.emplace_back(key, value.as<std::string>());
+        }
+    }
+    return result;
+}
+
 CesiumClass::CesiumClass(const std::string& className)
     : className_(className)
 {

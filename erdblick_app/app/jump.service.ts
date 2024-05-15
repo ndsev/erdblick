@@ -13,6 +13,13 @@ export interface JumpTarget {
     validate: (value: string) => boolean;
 }
 
+interface FeatureJumpAction {
+    name: string;
+    error: string|null;
+    idParts: Array<{key: string, value: string|number}>;
+    maps: Array<string>;
+}
+
 @Injectable({providedIn: 'root'})
 export class JumpTargetService {
 
@@ -59,16 +66,61 @@ export class JumpTargetService {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
         if (featureJumpTargets) {
-            featureJumpTargetsConverted = featureJumpTargets.map((fjt: any) => {
+            featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
+                let label = fjt.idParts.map(idPart => `${idPart.key}=${idPart.value}`).join(" | ")
+                if (fjt.error) {
+                    label += `<br><span class="search-option-warning">${fjt.error}</span>`;
+                }
                 return {
                     name: `Jump to ${fjt.name}`,
-                    label: JSON.stringify(fjt.idParts) + "<br>" + fjt.error,
+                    label: label,
                     enabled: !fjt.error,
-                    jump: (value: string) => { return; },
+                    jump: (value: string) => { this.jumpToFeature(fjt).then(); return null; },
                     validate: (value: string) => { return !fjt.error; },
                 }
             });
         }
         this.jumpTargets.next([...this.extJumpTargets, ...featureJumpTargetsConverted]);
+    }
+
+    async highlightFeature(mapId: string, featureId: string) {
+        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId);
+        if (!featureJumpTargets.length) {
+            console.error(`Error highlighting ${featureId}!`);
+        }
+        await this.jumpToFeature(featureJumpTargets[0], false);
+    }
+
+    async jumpToFeature(action: FeatureJumpAction, moveCamera: boolean=true) {
+        // Select the map.
+        let selectedMap = action.maps[0];
+        // TODO: Interactive selection if there is more than 1 map.
+
+        // Locate the feature.
+        let resolveMe = {requests: [{
+            typeId: action.name,
+            mapId: action.maps[0],
+            featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
+        }]};
+        let response = await fetch("/locate", {
+            body: JSON.stringify(resolveMe),
+            method: "POST"
+        }).catch((err)=>console.error(`Error during /locate call: ${err}`));
+        if (!response) {
+            return;
+        }
+        let extRefsResolved = await response.json() as LocateResponse;
+        if (extRefsResolved.responses[0].length < 1) {
+            // TODO: Show Error
+            return;
+        }
+        let selectThisFeature = extRefsResolved.responses[0][0];
+
+        // Set feature-to-select on MapService.
+        await this.mapService.selectFeature(
+            selectThisFeature.tileId,
+            selectThisFeature.typeId,
+            selectThisFeature.featureId,
+            moveCamera);
     }
 }

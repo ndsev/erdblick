@@ -69,7 +69,7 @@ public:
     struct FeatureJumpTarget
     {
         std::string name_;
-        std::vector<std::pair<std::string, std::string>> mapAndLayerNames_;
+        std::vector<std::string> maps_;
         std::vector<mapget::IdPart> idParts_;
         std::shared_ptr<mapget::LayerInfo> layerInfo_;
     };

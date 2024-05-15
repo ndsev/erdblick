@@ -12,7 +12,21 @@ export class InspectionService {
     selectedFeatureGeoJsonText: string = "";
     selectedFeatureIdText: string = "";
 
-    constructor() { }
+    constructor(mapService: MapService) {
+        mapService.selectionTopic.subscribe(selectedFeature => {
+            if (!selectedFeature) {
+                this.isInspectionPanelVisible = false;
+                return;
+            }
+
+            selectedFeature.peek((feature: Feature) => {
+                this.selectedFeatureGeoJsonText = feature.geojson() as string;
+                this.selectedFeatureIdText = feature.id() as string;
+                this.isInspectionPanelVisible = true;
+                this.loadFeatureData();
+            })
+        })
+    }
 
     getFeatureTreeData() {
         let jsonData = JSON.parse(this.selectedFeatureGeoJsonText);

@@ -11,11 +11,13 @@ import {
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
-interface LocateResolution {
+export interface LocateResolution {
     tileId: string,
+    typeId: string,
+    featureId: Array<string|number>
 }
 
-interface LocateResponse {
+export interface LocateResponse {
     responses: Array<Array<LocateResolution>>
 }
 

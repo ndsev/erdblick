@@ -69,14 +69,26 @@ export class MapService {
     private currentHighDetailTileIds: Set<bigint>;
     private tileStreamParsingQueue: any[];
     private tileVisualizationQueue: [string, TileVisualization][];
+    private selectionVisualizations: TileVisualization[];
 
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
     zoomToWgs84PositionTopic: Subject<any>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
+    selectionTopic: BehaviorSubject<FeatureWrapper|null> = new BehaviorSubject<FeatureWrapper|null>(null);
+    selectionTileRequest: {
+        remoteRequest: {
+            mapId: string,
+            layerId: string,
+            tileIds: Array<bigint>
+        },
+        tileKey: string,
+        resolve: null|((tile: FeatureTile)=>void),
+        reject: null|((why: any)=>void),
+    }|null = null;
 
-    constructor(public styleService: StyleService, public parameterService: ParametersService) {
+    constructor(public styleService: StyleService, public parameterService: ParametersService, private sidePanelService: SidePanelService) {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -93,6 +105,7 @@ export class MapService {
         this.currentHighDetailTileIds = new Set();
         this.tileStreamParsingQueue = [];
         this.tileVisualizationQueue = [];
+        this.selectionVisualizations = [];
 
         // Triggered when a tile layer is freshly rendered and should be added to the frontend.
         this.tileVisualizationTopic = new Subject<any>(); // {FeatureTile}
@@ -138,6 +151,29 @@ export class MapService {
         })
 
         await this.reloadDataSources();
+
+        this.selectionTopic.subscribe(selectedFeatureWrapper => {
+            this.selectionVisualizations.forEach(visu => this.tileVisualizationDestructionTopic.next(visu));
+            this.selectionVisualizations = [];
+
+            this.sidePanelService.activeSidePanel.next(SidePanelService.NONE);
+            if (!selectedFeatureWrapper)
+                return;
+
+            // Apply additional highlight styles.
+            for (let [_, styleData] of this.styleService.styleData) {
+                if (styleData.featureLayerStyle && styleData.enabled) {
+                    let visu = new TileVisualization(
+                        selectedFeatureWrapper!.featureTile,
+                        (tileKey: string)=>this.getFeatureTile(tileKey),
+                        styleData.featureLayerStyle,
+                        true,
+                        selectedFeatureWrapper.peek((f: Feature) => f.id()));
+                    this.tileVisualizationTopic.next(visu);
+                    this.selectionVisualizations.push(visu);
+                }
+            }
+        });
     }
 
     private processTileStream() {
@@ -395,6 +431,10 @@ export class MapService {
         // Request non-present required tile layers.
         // TODO: Consider tile TTL.
         let requests = [];
+        if (this.selectionTileRequest) {
+            requests.push(this.selectionTileRequest.remoteRequest);
+        }
+
         for (const [mapName, map] of this.maps.getValue()) {
             for (const [layerName, _] of map.layers) {
                 if (!this.getMapLayerVisibility(mapName, layerName)) {
@@ -463,6 +503,12 @@ export class MapService {
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
+
+        // Consider, if this tile is a selection tile request.
+        if (this.selectionTileRequest && tileLayer.id == this.selectionTileRequest.tileKey) {
+            this.selectionTileRequest.resolve!(tileLayer);
+            this.selectionTileRequest = null;
+        }
 
         // Don't add a tile that is not supposed to be visible.
         if (!preventCulling) {
@@ -543,5 +589,43 @@ export class MapService {
 
     getFeatureTile(tileKey: string): FeatureTile|null {
         return this.loadedTileLayers.get(tileKey) || null;
+    }
+
+    async loadTileForSelection(tileKey: string) {
+        if (this.loadedTileLayers.has(tileKey)) {
+            return this.loadedTileLayers.get(tileKey)!;
+        }
+
+        let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
+        this.selectionTileRequest = {
+            remoteRequest: {
+                mapId: mapId,
+                layerId: layerId,
+                tileIds: [tileId],
+            },
+            tileKey: tileKey,
+            resolve: null,
+            reject: null,
+        }
+
+        return new Promise<FeatureTile>((resolve, reject)=>{
+            this.selectionTileRequest!.resolve = resolve;
+            this.selectionTileRequest!.reject = reject;
+        })
+    }
+
+    async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, zoom: boolean=false) {
+        let tile = await this.loadTileForSelection(tileKey);
+        let feature = new FeatureWrapper(
+            tile.peek(layer => layer.findFeatureIndex(typeId, idParts)),
+            tile);
+        if (feature.index < 0) {
+            // TODO: Show error if feature.index < 0.
+            return;
+        }
+        this.selectionTopic.next(feature);
+        if (zoom) {
+            // TODO: Zoom to extent of feature.
+        }
     }
 }

@@ -116,6 +116,12 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     return tileKey.toString();
 }
 
+/** Get mapId, layerId and tileId of a MapTileKey. */
+NativeJsValue parseTileFeatureLayerKey(std::string const& key) {
+    auto tileKey = mapget::MapTileKey(key);
+    return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
+}
+
 /** Create a test tile over New York. */
 void generateTestTile(SharedUint8Array& output, TileLayerParser& parser) {
     auto tile = TestDataProvider(parser).getTestLayer(-74.0060, 40.7128, 9);
@@ -218,6 +224,17 @@ EMSCRIPTEN_BINDINGS(erdblick)
                         mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
                     }
                     return self.at(i);
+                }))
+        .function(
+            "findFeatureIndex",
+            std::function<
+                int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
+                [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
+                {
+                    auto idPartsKvp = JsValue(idParts).toKeyValuePairs();
+                    if (auto result = self.find(type, idPartsKvp))
+                        return result->addr().index();
+                    return -1;
                 }));
     em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
@@ -267,8 +284,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);
 
-    ////////// Get full id of a TileFeatureLayer
+    ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
+    em::function("parseTileFeatureLayerKey", &parseTileFeatureLayerKey);
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);

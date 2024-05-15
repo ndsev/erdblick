@@ -1,6 +1,7 @@
 #pragma once
 
 #include <variant>
+#include "mapget/model/info.h"
 
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
@@ -65,7 +66,7 @@ struct JsValue
             } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string>) {
                 result = JsValue(v);
             } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
-                result = JsValue(v);
+                result = JsValue(static_cast<double>(v));
             } else {
                 static_assert(always_false<decltype(v)>::value, "Type of 'v' is not supported.");
             }
@@ -111,7 +112,7 @@ struct JsValue
      * is a list. For both EMSCRIPTEN and the mock version,
      * it will return value_[i].
      */
-    JsValue at(uint32_t index) const;
+    [[nodiscard]] JsValue at(uint32_t index) const;
 
     /**
      * Set an object field or dictionary entry to a given value.
@@ -161,6 +162,9 @@ struct JsValue
     inline NativeJsValue& operator*() {return value_;};
     inline const NativeJsValue& operator*() const {return value_;};
 
+    /** Turn a [key, value, keyN, valueN, ...] list into KeyValuePairs. */
+    [[nodiscard]] mapget::KeyValuePairs toKeyValuePairs() const;
+
     /**
      * Actual JS or JSON object.
      */
@@ -185,14 +189,14 @@ ReturnType JsValue::call(std::string const& methodName, Args... args)
 struct CesiumClass : public JsValue
 {
 public:
-    CesiumClass(std::string const& className);
+    explicit CesiumClass(std::string const& className);
 
     /**
      * Create a new instance of the represented class using the provided arguments.
      * For EMSCRIPTEN, it utilizes value_.new_(Args...).
      * For the mock version, it will return an empty nlohmann JSON object.
      */
-    JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
+    [[nodiscard]] JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
     template<typename... Args>
     JsValue New(Args... args) const;
 
