@@ -52,7 +52,6 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tilesGridLayer: ImageryLayer | null = null;
     private tilesGridSubLayer: ImageryLayer | null = null;
     private tilesGridSuperLayer: ImageryLayer | null = null;
-    private selectionVisualizations: TileVisualization[];
 
     /**
      * Construct a Cesium View with a Model.
