@@ -99,7 +99,6 @@ export class ParametersService {
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
 
-    osmEnabled: Subject<boolean> = new Subject<boolean>();
     cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
         new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
             destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),

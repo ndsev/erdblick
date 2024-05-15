@@ -262,7 +262,6 @@ export class MapPanelComponent {
             parameters.osmOpacity = this.osmOpacityValue;
             this.parameterService.parameters.next(parameters);
         }
-        this.parameterService.osmEnabled.next(this.osmEnabled);
     }
 
     toggleTileBorders(mapName: string, layerName: string) {

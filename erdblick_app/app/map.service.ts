@@ -581,7 +581,7 @@ export class MapService {
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
-            undefined,
+            "",
             this.getMapLayerBorderState(mapName, layerName));
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {

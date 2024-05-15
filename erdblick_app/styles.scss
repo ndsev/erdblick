@@ -151,6 +151,19 @@ body {
         padding: 0;
     }
 
+    .filter-container {
+        width: 100%;
+    }
+
+    .filter-input {
+        height: 2.5em;
+        width: 100%;
+        padding-left: 2.5em;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+        direction: ltr;
+    }
+
     .resizable-container {
         width: 30em;
         min-width: 30em;
@@ -159,7 +172,7 @@ body {
         overflow: auto;
         direction: rtl;
         max-width: calc(100vw - 27em);
-        max-height: calc(100vh - 4.5em);
+        max-height: calc(100vh - 8.5em);
 
         .resize-handle {
             display: none;
@@ -168,19 +181,6 @@ body {
         .p-tree {
             border: none;
             padding: 0;
-            direction: ltr;
-        }
-
-        .filter-container {
-            width: 100%;
-        }
-
-        .filter-input {
-            height: 2.5em;
-            width: 100%;
-            padding-left: 2.5em;
-            border-radius: 6px;
-            border: solid 1px lightgray;
             direction: ltr;
         }
 
@@ -508,6 +508,42 @@ body {
     .cm-editor {
         width: 0;
         flex-grow: 1;
+    }
+}
+
+/* Tooltip container */
+.css-tooltip {
+    position: relative;
+    display: inline-block;
+    border-bottom: 1px dotted black;
+
+    .tooltiptext {
+        visibility: hidden;
+        width: 120px;
+        background-color: black;
+        color: #fff;
+        text-align: center;
+        padding: 5px 0;
+        border-radius: 6px;
+        position: absolute;
+        z-index: 10;
+        top: -5px;
+        right: 105%;
+    }
+
+    .tooltiptext::after {
+        content: " ";
+        position: absolute;
+        top: 50%;
+        right: 100%; /* To the left of the tooltip */
+        margin-top: -5px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: transparent black transparent transparent;
+    }
+
+    &:hover .tooltiptext {
+        visibility: visible;
     }
 }
 

@@ -113,12 +113,12 @@ export class TileVisualization {
      *  `mode: normal` are executed.
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight?: string, boxGrid?: boolean) {
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight: string = "", boxGrid?: boolean) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
-        this.highlight = highlight === undefined ? "" : highlight;
+        this.highlight = highlight;
         this.deleted = false;
         this.auxTileFun = auxTileFun;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
