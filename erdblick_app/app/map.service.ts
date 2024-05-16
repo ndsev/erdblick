@@ -355,7 +355,7 @@ export class MapService {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
-        // Map from level to array of tileIds
+        // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
@@ -378,9 +378,13 @@ export class MapService {
 
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
+        let evictTileLayer = (tileLayer: FeatureTile) => {
+            return !tileLayer.preventCulling && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
+                !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName) ||
+                tileLayer.level() != this.getMapLayerLevel(tileLayer.mapName, tileLayer.layerName))
+        }
         for (let tileLayer of this.loadedTileLayers.values()) {
-            if (!tileLayer.preventCulling && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
-                !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName))) {
+            if (evictTileLayer(tileLayer)) {
                 tileLayer.destroy();
             } else {
                 newTileLayers.set(tileLayer.id, tileLayer);
@@ -393,8 +397,7 @@ export class MapService {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
                 const mapName = tileVisu.tile.mapName;
                 const layerName = tileVisu.tile.layerName;
-                if (!tileVisu.tile.preventCulling && (!this.currentVisibleTileIds.has(tileVisu.tile.tileId) ||
-                    !this.getMapLayerVisibility(mapName, layerName))) {
+                if (tileVisu.tile.disposed) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
@@ -410,7 +413,7 @@ export class MapService {
                 tileVisu.isHighDetail = this.currentHighDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
                 return true;
             });
-            if (tileVisus !== undefined && tileVisus.length) {
+            if (tileVisus && tileVisus.length) {
                 this.visualizedTileLayers.set(styleId, tileVisus);
             } else {
                 this.visualizedTileLayers.delete(styleId);

@@ -122,6 +122,10 @@ export class FeatureTile {
             return await FeatureTile.peekMany(tiles, cb, parsedTiles);
         });
     }
+
+    level() {
+        return Number(this.tileId & BigInt(0xffff));
+    }
 }
 
 /**
