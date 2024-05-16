@@ -90,7 +90,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.moveToWgs84PositionTopic.subscribe((pos: Cartesian2|Cartesian3) => {
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number}) => {
             this.parameterService.cameraViewData.next({
                 // Convert lon/lat to Cartesian3 using current camera altitude.
                 destination: Cartesian3.fromDegrees(
