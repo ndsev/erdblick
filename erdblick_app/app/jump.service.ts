@@ -3,7 +3,7 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapService} from "./map.service";
 import {LocateResponse} from "./visualization.model";
-import {SidePanelService} from "./panel.service";
+import {InfoMessageService} from "./info.service";
 
 export interface JumpTarget {
     name: string;
@@ -27,7 +27,14 @@ export class JumpTargetService {
     jumpTargets = new BehaviorSubject<Array<JumpTarget>>([]);
     extJumpTargets: Array<JumpTarget> = [];
 
-    constructor(private httpClient: HttpClient, private mapService: MapService) {
+    // Communication channels with the map selection dialog (in SearchPanelComponent).
+    // The mapSelectionSubject triggers the display of the dialog, and
+    // the setSelectedMap promise resolver is used by the dialog to communicate the
+    // user's choice.
+    mapSelectionSubject = new Subject<Array<string>>();
+    setSelectedMap: ((choice: string|null)=>void)|null = null;
+
+    constructor(private httpClient: HttpClient, private mapService: MapService, private messageService: InfoMessageService) {
         httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
@@ -111,7 +118,7 @@ export class JumpTargetService {
         }
         let extRefsResolved = await response.json() as LocateResponse;
         if (extRefsResolved.responses[0].length < 1) {
-            // TODO: Show Error
+            this.messageService.showError("Could not locate feature!")
             return;
         }
         let selectThisFeature = extRefsResolved.responses[0][0];

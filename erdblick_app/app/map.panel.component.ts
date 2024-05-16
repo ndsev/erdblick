@@ -241,7 +241,7 @@ export class MapPanelComponent {
 
     focus(tileId: bigint, event: any) {
         event.stopPropagation();
-        this.mapService.zoomToWgs84PositionTopic.next(
+        this.mapService.moveToWgs84PositionTopic.next(
             coreLib.getTilePosition(BigInt(tileId))
         );
     }

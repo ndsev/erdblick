@@ -8,6 +8,7 @@ import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";
 import {SidePanelService} from "./panel.service";
+import {InfoMessageService} from "./info.service";
 
 export interface LayerInfoItem extends Object {
     canRead: boolean;
@@ -74,21 +75,21 @@ export class MapService {
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    zoomToWgs84PositionTopic: Subject<any>;
+    moveToWgs84PositionTopic: Subject<{x: number, y: number}>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
     selectionTopic: BehaviorSubject<FeatureWrapper|null> = new BehaviorSubject<FeatureWrapper|null>(null);
     selectionTileRequest: {
         remoteRequest: {
             mapId: string,
             layerId: string,
-            tileIds: Array<bigint>
+            tileIds: Array<number>
         },
         tileKey: string,
         resolve: null|((tile: FeatureTile)=>void),
         reject: null|((why: any)=>void),
     }|null = null;
 
-    constructor(public styleService: StyleService, public parameterService: ParametersService, private sidePanelService: SidePanelService) {
+    constructor(public styleService: StyleService, public parameterService: ParametersService, private sidePanelService: SidePanelService, private messageService: InfoMessageService) {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -114,7 +115,7 @@ export class MapService {
         this.tileVisualizationDestructionTopic = new Subject<any>(); // {FeatureTile}
 
         // Triggered when the user requests to zoom to a map layer.
-        this.zoomToWgs84PositionTopic = new Subject<any>(); // {.x,.y}
+        this.moveToWgs84PositionTopic = new Subject<{x: number, y: number}>();
     }
 
     public async initialize() {
@@ -351,8 +352,6 @@ export class MapService {
     }
 
     update() {
-        console.log("Update")
-
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
@@ -389,7 +388,7 @@ export class MapService {
         }
         this.loadedTileLayers = newTileLayers;
 
-        // Update visualizations
+        // Update visualizations.
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
                 const mapName = tileVisu.tile.mapName;
@@ -418,7 +417,7 @@ export class MapService {
             }
         }
 
-        // Update Tile Visualization Queue
+        // Update Tile Visualization Queue.
         this.tileVisualizationQueue = [];
         for (const [styleId, tileVisus] of this.visualizedTileLayers) {
             tileVisus.forEach(tileVisu => {
@@ -433,6 +432,12 @@ export class MapService {
         let requests = [];
         if (this.selectionTileRequest) {
             requests.push(this.selectionTileRequest.remoteRequest);
+
+            if (this.currentFetch) {
+                // Disable the re-fetch filtering logic by setting the old
+                // fetches' body to null.
+                this.currentFetch.bodyJson = null;
+            }
         }
 
         for (const [mapName, map] of this.maps.getValue()) {
