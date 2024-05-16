@@ -254,50 +254,50 @@ export class MapPanelComponent {
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
-                    {
-                        label: 'Toggle All off but This',
-                        command: () => {
-                            for (const id of this.styleService.styleData.keys()) {
-                                this.styleService.styleData.get(id)!.enabled = styleId == id;
-                                this.parameterService.setStyleConfig(id, styleId == id);
-                            }
-                            this.styleService.reapplyAllStyles();
-                            this.mapService.update();
-                        }
-                    },
-                    {
-                        label: 'Toggle All on but This',
-                        command: () => {
-                            for (const id of this.styleService.styleData.keys()) {
-                                this.styleService.styleData.get(id)!.enabled = styleId != id;
-                                this.parameterService.setStyleConfig(id, styleId != id);
-                            }
-                            this.styleService.reapplyAllStyles();
-                            this.mapService.update();
-                        }
-                    },
-                    {
-                        label: 'Toggle All Off',
-                        command: () => {
-                            for (const id of this.styleService.styleData.keys()) {
-                                this.styleService.styleData.get(id)!.enabled = false;
-                                this.parameterService.setStyleConfig(id, false);
-                            }
-                            this.styleService.reapplyAllStyles();
-                            this.mapService.update();
-                        }
-                    },
-                    {
-                        label: 'Toggle All On',
-                        command: () => {
-                            for (const id of this.styleService.styleData.keys()) {
-                                this.styleService.styleData.get(id)!.enabled = true;
-                                this.parameterService.setStyleConfig(id, true);
-                            }
-                            this.styleService.reapplyAllStyles();
-                            this.mapService.update();
-                        }
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = styleId == id;
+                        this.parameterService.setStyleConfig(id, styleId == id);
                     }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = styleId != id;
+                        this.parameterService.setStyleConfig(id, styleId != id);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = false;
+                        this.parameterService.setStyleConfig(id, false);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = true;
+                        this.parameterService.setStyleConfig(id, true);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            }
         ];
     }
 
