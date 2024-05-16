@@ -90,13 +90,17 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: Cartesian2|Cartesian3) => {
             this.parameterService.cameraViewData.next({
-                destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
+                // Convert lon/lat to Cartesian3 using current camera altitude.
+                destination: Cartesian3.fromDegrees(
+                    pos.x,
+                    pos.y,
+                    Cartographic.fromCartesian(this.viewer.camera.position).height),
                 orientation: {
                     heading: CesiumMath.toRadians(0), // East, in radians.
                     pitch: CesiumMath.toRadians(-90), // Directly looking down.
-                    roll: 0 // No rotation
+                    roll: 0 // No rotation.
                 }
             });
         });

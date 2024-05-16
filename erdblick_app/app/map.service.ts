@@ -622,7 +622,7 @@ export class MapService {
         return selectionTilePromise;
     }
 
-    async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, zoom: boolean=false) {
+    async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, focus: boolean=false) {
         let tile = await this.loadTileForSelection(tileKey);
         let feature = new FeatureWrapper(
             tile.peek(layer => layer.findFeatureIndex(typeId, idParts)),
@@ -635,8 +635,9 @@ export class MapService {
             return;
         }
         this.selectionTopic.next(feature);
-        if (zoom) {
-            // TODO: Zoom to extent of feature.
+        if (focus) {
+            const position = feature.peek((parsedFeature: Feature)=>parsedFeature.center());
+            this.moveToWgs84PositionTopic.next(position);
         }
     }
 }

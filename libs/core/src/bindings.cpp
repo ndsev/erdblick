@@ -7,6 +7,7 @@
 #include "style.h"
 #include "testdataprovider.h"
 #include "inspection.h"
+#include "geometry.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -89,7 +90,7 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
-/** Get the center position for a mapget tile id in WGS84. */
+/** Get the bounding box for a mapget tile id in WGS84. */
 em::val getTileBox(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
     return *JsValue::List({
@@ -189,7 +190,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "inspectionModel",
             std::function<em::val(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return *InspectionConverter().convert(self); }));
+                    return *InspectionConverter().convert(self); }))
+        .function(
+            "center",
+            std::function<mapget::Point(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return geometryCenter(self->firstGeometry());
+                }));
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
