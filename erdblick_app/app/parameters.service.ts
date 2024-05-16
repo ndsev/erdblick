@@ -7,6 +7,7 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 interface ErdblickParameters extends Record<string, any> {
+    selected: Array<string>,
     heading: number,
     pitch: number,
     roll: number,
@@ -31,6 +32,11 @@ interface ParameterDescriptor {
 }
 
 const erdblickParameters: Record<string, ParameterDescriptor> = {
+    selected: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        default: []
+    },
     heading: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
@@ -139,6 +145,16 @@ export class ParametersService {
             return;
         }
         this.p().styles = styles;
+        this.parameters.next(this.p());
+    }
+
+    setSelectedFeature(mapId: string, featureId: string) {
+        this.p().selected = [mapId, featureId];
+        this.parameters.next(this.p());
+    }
+
+    unsetSelectedFeature() {
+        this.p().selected = [];
         this.parameters.next(this.p());
     }
 

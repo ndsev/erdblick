@@ -1,9 +1,11 @@
-import {Component, OnInit} from "@angular/core";
+import {Component, OnInit, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {TreeNode, TreeTableNode} from "primeng/api";
+import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService, InspectionValueType} from "./inspection.service";
 import {DomSanitizer, SafeHtml} from "@angular/platform-browser";
 import {JumpTargetService} from "./jump.service";
+import {Menu} from "primeng/menu";
+import {ParametersService} from "./parameters.service";
 
 interface Column {
     field: string;
@@ -19,20 +21,20 @@ interface Column {
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">
                         <i class="pi pi-sitemap mr-2"></i>&nbsp;
-                        <span class="vertical-align-middle">{{ inspectionService.selectedFeatureIdText }}</span>
+                        <span class="vertical-align-middle">{{ inspectionService.selectedFeatureIdName }}</span>
                     </div>
                 </ng-template>
                 <ng-template pTemplate="content">
                     <div class="flex justify-content-end align-items-center"
                          style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
                         <div class="p-input-icon-left filter-container">
-                            <i class="pi pi-filter"></i>
+                            <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                             <input class="filter-input" type="text" pInputText
                                    placeholder="Filter data for selected feature"
-                                   (input)="filterTree($event)"/>
+                                   (input)="filter($event)"/>
                         </div>
                         <div>
-                            <p-button (click)="jumpToFeature(inspectionService.selectedFeatureIdText)"
+                            <p-button (click)="jumpToFeature(inspectionService.selectedFeatureIdName)"
                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                       [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
@@ -53,9 +55,6 @@ interface Column {
                         </div>
                         <p-treeTable #tt [value]="filteredTree" [columns]="cols"
                                      class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
-                            <!--                            <ng-template pTemplate="caption">-->
-                            <!--                                -->
-                            <!--                            </ng-template>-->
                             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                                 <tr [ttRow]="rowNode"
                                     [ngClass]="{'section-style': rowData['type']==InspectionValueType.Section}"
@@ -66,15 +65,15 @@ interface Column {
                                              [tooltipOptions]="tooltipOptions">
                                             <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                             </p-treeTableToggler>
-                                            <span (click)="$event.stopPropagation()">{{ rowData['key'] }}</span>
+                                            <span (click)="onKeyClick($event, rowData)"
+                                                  style="cursor: pointer">{{ rowData['key'] }}</span>
                                         </div>
                                     </td>
-                                    <!--                                    <td [innerHtml]="getInnerInspectionHtml(rowData)">-->
                                     <td [class]="getStyleClassByType(rowData['type'])">
                                         <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                                              [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
                                              [tooltipOptions]="tooltipOptions">
-                                            <span (click)="copyToClipboard(rowData['value'])"
+                                            <span (click)="onValueClick(rowData)"
                                                   (mouseover)="highlightFeature(rowData)"
                                                   (mouseout)="stopHighlight(rowData)">{{ rowData['value'] }}</span>
                                             <span *ngIf="rowData.hasOwnProperty('info')">
@@ -97,6 +96,21 @@ interface Column {
                 </ng-template>
             </p-accordionTab>
         </p-accordion>
+        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="1000"
+                [style]="{'font-size': '0.9em'}"></p-menu>
+        <p-overlayPanel #filterPanel class="filter-panel">
+            <div class="font-bold white-space-nowrap" style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
+                <span>
+                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree(filterQuery)" label="Filter by Keys" [binary]="true"/>
+                </span>
+                <span>
+                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree(filterQuery)" label="Filter by Values" [binary]="true"/>
+                </span>
+                <span>
+                    <p-checkbox [(ngModel)]="filterOnlyRelations" (ngModelChange)="filterTree(filterQuery)" label="Filter by Features" [binary]="true"/>
+                </span>
+            </div>
+        </p-overlayPanel>
     `,
     styles: [`
         .section-style {
@@ -127,6 +141,14 @@ export class InspectionPanelComponent implements OnInit  {
         showDelay: 1000,
         autoHide: false
     };
+    filterQuery = "";
+    filterByKeys = true;
+    filterByValues = true;
+    filterOnlyRelations = false;
+
+    @ViewChild('inspectionMenu') inspectionMenu!: Menu;
+    inspectionMenuItems: MenuItem[] | undefined;
+    inspectionMenuVisible: boolean = false;
 
     constructor(private sanitizer: DomSanitizer,
                 private messageService: InfoMessageService,
@@ -181,8 +203,12 @@ export class InspectionPanelComponent implements OnInit  {
         }
     }
 
-    filterTree(event: any) {
-        const query = event.target.value.toLowerCase();
+    filter(event: any) {
+        this.filterQuery = event.target.value.toLowerCase();
+        this.filterTree(this.filterQuery);
+    }
+
+    filterTree(query: string) {
         if (!query) {
             this.filteredTree = JSON.parse(this.jsonTree);
             this.expandTreeNodes(this.filteredTree);
@@ -191,9 +217,14 @@ export class InspectionPanelComponent implements OnInit  {
 
         const filterNodes = (nodes: TreeTableNode[]): TreeTableNode[] => {
             return nodes.reduce<TreeTableNode[]>((filtered, node) => {
-                const key = String(node.data.k).toLowerCase();
-                const value = String(node.data.v).toLowerCase();
-                let matches = key.includes(query) || value.includes(query);
+                let matches = false;
+                if (this.filterByKeys && this.filterByValues) {
+                    matches = String(node.data.key).toLowerCase().includes(query) || String(node.data.value).toLowerCase().includes(query);
+                } else if (this.filterByKeys) {
+                    matches = String(node.data.key).toLowerCase().includes(query);
+                } else if (this.filterByValues) {
+                    matches = String(node.data.value).toLowerCase().includes(query);
+                }
 
                 if (node.children) {
                     let filteredChildren = filterNodes(node.children);
@@ -221,15 +252,54 @@ export class InspectionPanelComponent implements OnInit  {
         this.filteredTree = [...this.filteredTree];
     }
 
-    jumpToFeature(featureId: string) {
-        console.log("Jumping!")
+    onKeyClick(event: MouseEvent, rowData: any) {
+        this.inspectionMenu.toggle(event);
+        event.stopPropagation()
+        this.inspectionMenuItems = [
+            {
+                label: 'Find Features with this Value',
+                command: () => {
+                }
+            },
+            {
+                label: 'Copy Path to this Node',
+                command: () => {
+                }
+            },
+            {
+                label: 'Copy Key/Value',
+                command: () => {
+                }
+            },
+            {
+                label: 'Show in NDS.Live Blob',
+                command: () => {
+                }
+            },
+            {
+                label: 'Open NDS.Live Docs',
+                command: () => {
+                }
+            }
+        ];
     }
 
-    async highlightFeature(rowData: any) {
+    onValueClick(rowData: any) {
+        this.copyToClipboard(rowData["value"]);
+        if (rowData["type"] == InspectionValueType.FeatureId) {
+            this.jumpToFeature(rowData["hoverId"]);
+        }
+    }
+
+    jumpToFeature(featureId: string) {
+        console.log(`Jumping to ${featureId}!`)
+    }
+
+    highlightFeature(rowData: any) {
         if (rowData["type"] == InspectionValueType.FeatureId) {
             console.log(rowData)
             if (rowData.hasOwnProperty("hoverId")) {
-                await this.jumpService.highlightFeature("https-api-nds-live-island6", rowData["hoverId"]);
+                this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["hoverId"]).then();
             }
         }
     }

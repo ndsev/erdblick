@@ -542,39 +542,9 @@ body {
     }
 }
 
-/* Tooltip container */
-.css-tooltip {
-    position: relative;
-    display: inline-block;
-    border-bottom: 1px dotted black;
-
-    .tooltiptext {
-        visibility: hidden;
-        width: 120px;
-        background-color: black;
-        color: #fff;
-        text-align: center;
-        padding: 5px 0;
-        border-radius: 6px;
-        position: absolute;
-        z-index: 10;
-        top: -5px;
-        right: 105%;
-    }
-
-    .tooltiptext::after {
-        content: " ";
-        position: absolute;
-        top: 50%;
-        right: 100%; /* To the left of the tooltip */
-        margin-top: -5px;
-        border-width: 5px;
-        border-style: solid;
-        border-color: transparent black transparent transparent;
-    }
-
-    &:hover .tooltiptext {
-        visibility: visible;
+.filter-panel {
+    .p-overlaypanel-content {
+        padding: 0.75em;
     }
 }
 

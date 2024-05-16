@@ -225,8 +225,6 @@ export class MapPanelComponent {
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
     isToggleMenuVisible: boolean = false;
-    selectedItem: any;
-    toggleMenuPosition: { top: string, left: string } = { top: '0px', left: '0px' };
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
