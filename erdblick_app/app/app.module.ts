@@ -39,6 +39,7 @@ import {initializeLibrary} from "./wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {SidePanelService} from "./panel.service";
+import {MenuModule} from "primeng/menu";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -81,7 +82,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         SliderModule,
         FileUploadModule,
         CheckboxModule,
-        InputTextModule
+        InputTextModule,
+        MenuModule
     ],
     providers: [
         {

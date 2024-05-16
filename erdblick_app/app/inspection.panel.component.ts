@@ -3,6 +3,7 @@ import {InfoMessageService} from "./info.service";
 import {TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService, InspectionValueType} from "./inspection.service";
 import {DomSanitizer, SafeHtml} from "@angular/platform-browser";
+import {JumpTargetService} from "./jump.service";
 
 interface Column {
     field: string;
@@ -129,7 +130,8 @@ export class InspectionPanelComponent implements OnInit  {
 
     constructor(private sanitizer: DomSanitizer,
                 private messageService: InfoMessageService,
-                public inspectionService: InspectionService) {
+                public inspectionService: InspectionService,
+                public jumpService: JumpTargetService) {
         this.inspectionService.featureTree.subscribe((tree: string) => {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
@@ -223,10 +225,12 @@ export class InspectionPanelComponent implements OnInit  {
         console.log("Jumping!")
     }
 
-    highlightFeature(rowData: any) {
+    async highlightFeature(rowData: any) {
         if (rowData["type"] == InspectionValueType.FeatureId) {
             console.log(rowData)
-            this.inspectionService.hooveredFeatureIdToHighlight.next(rowData["value"]);
+            if (rowData.hasOwnProperty("hoverId")) {
+                await this.jumpService.highlightFeature("https-api-nds-live-island6", rowData["hoverId"]);
+            }
         }
     }
 

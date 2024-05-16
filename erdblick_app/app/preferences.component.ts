@@ -66,6 +66,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             font-size: medium;
             text-align: center;
             width: 17em;
+            padding: 0.5em;
         }
         
         @media only screen and (max-width: 56em) {

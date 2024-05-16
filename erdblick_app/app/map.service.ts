@@ -295,8 +295,6 @@ export class MapService {
         if (layerId) {
             const layer = mapItem.layers.get(layerId);
             if (layer !== undefined) {
-                // visible = visible !== undefined ? visible : !mapItem.layers.get(layerId)!.visible;
-                // mapItem.layers.get(layerId)!.visible = visible;
                 this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
             }
         } else {

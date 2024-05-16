@@ -232,6 +232,10 @@ body {
             }
         }
 
+        .p-divider {
+            margin: 0.9em 0;
+        }
+
         .search-option {
             text-align: left;
             font-size: 0.9em;
@@ -303,6 +307,7 @@ body {
         .slider-input {
             width: 14em;
             font-size: 0.9em;
+            padding: 0.5em 0.75em;
         }
     }
 
@@ -415,11 +420,22 @@ body {
             font-size: 0.9em;
         }
 
+        &:hover {
+            .layer-controls {
+                visibility: visible;
+                opacity: 1;
+                transition: opacity 0.25s, visibility 0.25s;
+            }
+        }
+
         .layer-controls {
             display: flex;
             gap: 0.5em;
-            width: 12em;
+            width: 8em;
             justify-content: flex-end;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0s, visibility 0s;
 
             button {
                 width: 2em;
@@ -449,6 +465,20 @@ body {
 
         .style-controls {
             justify-content: flex-end;
+        }
+    }
+
+    .styles-import {
+        justify-content: center;
+        align-items: center;
+        display: flex;
+
+        .p-fileupload {
+            span {
+                box-shadow: none;
+                min-width: 6.4em;
+                font-size: 0.9em;
+            }
         }
     }
 }

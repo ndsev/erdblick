@@ -18,6 +18,8 @@ interface InspectionModelData {
     key: string;
     type: InspectionValueType;
     value: any;
+    info?: string;
+    hoverId?: string;
     children: Array<InspectionModelData>;
 }
 
@@ -39,6 +41,7 @@ export class InspectionService {
             }
 
             selectedFeature.peek((feature: Feature) => {
+                this.selectedFeatureInspectionModel = feature.inspectionModel();
                 this.selectedFeatureGeoJsonText = feature.geojson() as string;
                 this.selectedFeatureIdText = feature.id() as string;
                 this.isInspectionPanelVisible = true;
@@ -126,6 +129,12 @@ export class InspectionService {
                     value: data.type == InspectionValueType.Null && data.children === undefined ? "NULL" : data.value,
                     type: data.type
                 };
+                if (data.hasOwnProperty("info")) {
+                    node.data["info"] = data.info;
+                }
+                if (data.hasOwnProperty("hoverId")) {
+                    node.data["hoverId"] = data.hoverId;
+                }
                 node.children = data.children !== undefined ? convertToTreeTableNodes(data.children) : [];
                 treeNodes.push(node);
             }
@@ -137,6 +146,9 @@ export class InspectionService {
             for (const section of this.selectedFeatureInspectionModel) {
                 const node: TreeTableNode = {};
                 node.data = {key: section.key, value: section.value, type: section.type};
+                if (section.hasOwnProperty("info")) {
+                    node.data["info"] = section.info;
+                }
                 node.children = convertToTreeTableNodes(section.children);
                 treeNodes.push(node);
             }
