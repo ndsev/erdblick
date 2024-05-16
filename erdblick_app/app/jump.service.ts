@@ -95,18 +95,31 @@ export class JumpTargetService {
         if (!featureJumpTargets.length) {
             console.error(`Error highlighting ${featureId}!`);
         }
-        await this.jumpToFeature(featureJumpTargets[0], false);
+        await this.jumpToFeature(featureJumpTargets[0], false, mapId);
     }
 
-    async jumpToFeature(action: FeatureJumpAction, moveCamera: boolean=true) {
+    async jumpToFeature(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null) {
         // Select the map.
-        let selectedMap = action.maps[0];
-        // TODO: Interactive selection if there is more than 1 map.
+        if (!mapId) {
+            if (action.maps.length > 1) {
+                let selectedMapPromise = new Promise<string | null>((resolve, _) => {
+                    this.setSelectedMap = resolve;
+                })
+                this.mapSelectionSubject.next(action.maps);
+                mapId = await selectedMapPromise;
+            }
+            else {
+                mapId = action.maps[0];
+            }
+        }
+        if (!mapId) {
+            return;
+        }
 
         // Locate the feature.
         let resolveMe = {requests: [{
             typeId: action.name,
-            mapId: action.maps[0],
+            mapId: mapId,
             featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
         }]};
         let response = await fetch("/locate", {

@@ -26,6 +26,13 @@ import {SidePanelService} from "./panel.service";
                    [ngClass]="{'item-disabled': !item.enabled }"><span class="search-option-name">{{ item.name }}</span><br><span [innerHTML]="item.label"></span></p>
             </div>
         </p-dialog>
+        <p-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
+                  [resizable]="false" [modal]="true" class="map-selection-dialog">
+            <div *ngFor="let map of mapSelection; let i = index" style="width: 100%">
+                <p-button [label]="map" type="button" (click)="setSelectedMap(map)"/>
+            </div>
+            <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
+        </p-dialog>
     `,
     styles: [`
         .item-disabled {
@@ -39,6 +46,9 @@ export class SearchPanelComponent {
     searchItems: Array<JumpTarget> = [];
     value: string = "";
     searchMenuVisible: boolean = false;
+
+    mapSelectionVisible: boolean = false;
+    mapSelection: Array<string> = [];
 
     constructor(public mapService: MapService,
                 public parametersService: ParametersService,
@@ -98,6 +108,11 @@ export class SearchPanelComponent {
                 ]
             ];
         });
+
+        jumpToTargetService.mapSelectionSubject.subscribe(maps => {
+            this.mapSelection = maps;
+            this.mapSelectionVisible = true;
+        })
     }
 
     parseMapgetTileId(value: string): number[] | undefined {
@@ -262,5 +277,10 @@ export class SearchPanelComponent {
     setSearchValue(value: string) {
         this.value = value;
         this.jumpToTargetService.targetValueSubject.next(value);
+    }
+
+    setSelectedMap(value: string|null) {
+        this.jumpToTargetService.setSelectedMap!(value);
+        this.mapSelectionVisible = false;
     }
 }

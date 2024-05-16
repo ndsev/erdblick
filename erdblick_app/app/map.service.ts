@@ -606,17 +606,20 @@ export class MapService {
             remoteRequest: {
                 mapId: mapId,
                 layerId: layerId,
-                tileIds: [tileId],
+                tileIds: [Number(tileId)],
             },
             tileKey: tileKey,
             resolve: null,
             reject: null,
         }
 
-        return new Promise<FeatureTile>((resolve, reject)=>{
+        let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
             this.selectionTileRequest!.resolve = resolve;
             this.selectionTileRequest!.reject = reject;
         })
+
+        this.update();
+        return selectionTilePromise;
     }
 
     async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, zoom: boolean=false) {
@@ -625,7 +628,10 @@ export class MapService {
             tile.peek(layer => layer.findFeatureIndex(typeId, idParts)),
             tile);
         if (feature.index < 0) {
-            // TODO: Show error if feature.index < 0.
+            let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
+            this.messageService.showError(
+                `The feature ${typeId+idParts.map((val, n)=>((n%2)==1?val:".")).join("")}`+
+                `does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
             return;
         }
         this.selectionTopic.next(feature);
