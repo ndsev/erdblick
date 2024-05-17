@@ -122,6 +122,10 @@ export class FeatureTile {
             return await FeatureTile.peekMany(tiles, cb, parsedTiles);
         });
     }
+
+    level() {
+        return Number(this.tileId & BigInt(0xffff));
+    }
 }
 
 /**
@@ -130,7 +134,7 @@ export class FeatureTile {
  * possible to access the WASM feature view in a memory-safe way.
  */
 export class FeatureWrapper {
-    private readonly index: number;
+    public readonly index: number;
     public featureTile: FeatureTile;
 
     /**

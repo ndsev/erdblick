@@ -1,9 +1,9 @@
 #pragma once
 
-#include "mapget/model/featurelayer.h"
 #include <iostream>
+#include "mapget/model/featurelayer.h"
+#include "parser.h"
 #include "style.h"
-#include "stream.h"
 
 namespace erdblick
 {

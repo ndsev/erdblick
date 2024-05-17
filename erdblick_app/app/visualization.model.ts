@@ -11,11 +11,13 @@ import {
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 
-interface LocateResolution {
+export interface LocateResolution {
     tileId: string,
+    typeId: string,
+    featureId: Array<string|number>
 }
 
-interface LocateResponse {
+export interface LocateResponse {
     responses: Array<Array<LocateResolution>>
 }
 
@@ -32,26 +34,24 @@ class TileBoxVisualization {
     static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
 
     static get(tile: FeatureTile, featureCount: number, viewer: Viewer): TileBoxVisualization {
-        if (TileBoxVisualization.visualizations.has(tile.tileId)) {
-            let result = this.visualizations.get(tile.tileId)!;
-            ++result.refCount;
-            result.featureCount += featureCount;
-            return result;
+        if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
+            TileBoxVisualization.visualizations.set(
+                tile.tileId, new TileBoxVisualization(viewer, tile));
         }
-
-        return new TileBoxVisualization(viewer, tile, featureCount);
+        let result = this.visualizations.get(tile.tileId)!;
+        ++result.refCount;
+        result.featureCount += featureCount;
+        return result;
     }
 
     // Keep track of how many TileVisualizations are using this low-detail one.
     // We can delete this instance, as soon as refCount is 0.
-    refCount: number = 1;
+    refCount: number = 0;
     featureCount: number = 0;
     private readonly entity: Entity;
     private readonly id: bigint;
 
-    constructor(viewer: Viewer,
-                tile: FeatureTile,
-                featureCount: number) {
+    constructor(viewer: Viewer, tile: FeatureTile) {
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         this.entity = viewer.entities.add({
             rectangle: {
@@ -70,8 +70,6 @@ class TileBoxVisualization {
             }
         });
         this.id = tile.tileId;
-        this.featureCount = featureCount;
-        TileBoxVisualization.visualizations.set(tile.tileId, this);
     }
 
     delete(viewer: Viewer, featureCount: number) {

@@ -3,10 +3,11 @@
 #include "aabb.h"
 #include "buffer.h"
 #include "visualization.h"
-#include "stream.h"
+#include "parser.h"
 #include "style.h"
 #include "testdataprovider.h"
 #include "inspection.h"
+#include "geometry.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -89,7 +90,7 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
-/** Get the center position for a mapget tile id in WGS84. */
+/** Get the bounding box for a mapget tile id in WGS84. */
 em::val getTileBox(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
     return *JsValue::List({
@@ -114,6 +115,12 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     tileKey.layerId_ = layerId;
     tileKey.tileId_ = tileId;
     return tileKey.toString();
+}
+
+/** Get mapId, layerId and tileId of a MapTileKey. */
+NativeJsValue parseTileFeatureLayerKey(std::string const& key) {
+    auto tileKey = mapget::MapTileKey(key);
+    return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
 }
 
 /** Create a test tile over New York. */
@@ -183,7 +190,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "inspectionModel",
             std::function<em::val(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return *InspectionConverter().convert(self); }));
+                    return *InspectionConverter().convert(self); }))
+        .function(
+            "center",
+            std::function<mapget::Point(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return geometryCenter(self->firstGeometry());
+                }));
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
@@ -218,6 +231,17 @@ EMSCRIPTEN_BINDINGS(erdblick)
                         mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
                     }
                     return self.at(i);
+                }))
+        .function(
+            "findFeatureIndex",
+            std::function<
+                int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
+                [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
+                {
+                    auto idPartsKvp = JsValue(idParts).toKeyValuePairs();
+                    if (auto result = self.find(type, idPartsKvp))
+                        return result->addr().index();
+                    return -1;
                 }));
     em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
@@ -246,6 +270,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function(
+            "filterFeatureJumpTargets",
+            std::function<
+                NativeJsValue(TileLayerParser const&, std::string)>(
+                [](TileLayerParser const& self, std::string input)
+                {
+                    auto result = self.filterFeatureJumpTargets(input);
+                    auto convertedResult = JsValue::List();
+                    for (auto const& r : result)
+                        convertedResult.push(r.toJsValue());
+                    return *convertedResult;
+                }))
         .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation
@@ -255,8 +291,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);
 
-    ////////// Get full id of a TileFeatureLayer
+    ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
+    em::function("parseTileFeatureLayerKey", &parseTileFeatureLayerKey);
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);

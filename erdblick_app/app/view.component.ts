@@ -20,7 +20,6 @@ import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
-import {InspectionService} from "./inspection.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
 
@@ -48,31 +47,21 @@ export class ErdblickViewComponent implements AfterViewInit {
     private hoveredFeature: any = null;
     private hoveredFeatureOrigColor: Color | null = null;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
-    selectionTopic: BehaviorSubject<FeatureWrapper | null>;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private tilesGridLayer: ImageryLayer | null = null;
     private tilesGridSubLayer: ImageryLayer | null = null;
     private tilesGridSuperLayer: ImageryLayer | null = null;
-    private selectionVisualizations: TileVisualization[];
 
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
      * @param styleService
-     * @param inspectionService
      * @param parameterService The parameter service, used to update
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
-                public inspectionService: InspectionService,
                 public parameterService: ParametersService) {
-
-        // Holds the currently selected feature.
-        this.selectionTopic = new BehaviorSubject<FeatureWrapper | null>(null); // {FeatureWrapper}
-
-        // Holds visualizations for the current selection for all present styles.
-        this.selectionVisualizations = [];
 
         this.tileVisForPrimitive = new Map();
 
@@ -101,29 +90,19 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.zoomToWgs84PositionTopic.subscribe((pos: Cartesian2) => {
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number}) => {
             this.parameterService.cameraViewData.next({
-                destination: Cartesian3.fromDegrees(pos.x, pos.y, 15000), // Converts lon/lat to Cartesian3.
+                // Convert lon/lat to Cartesian3 using current camera altitude.
+                destination: Cartesian3.fromDegrees(
+                    pos.x,
+                    pos.y,
+                    Cartographic.fromCartesian(this.viewer.camera.position).height),
                 orientation: {
                     heading: CesiumMath.toRadians(0), // East, in radians.
                     pitch: CesiumMath.toRadians(-90), // Directly looking down.
-                    roll: 0 // No rotation
+                    roll: 0 // No rotation.
                 }
             });
-        });
-
-        this.selectionTopic.subscribe(selectedFeatureWrapper => {
-            if (!selectedFeatureWrapper) {
-                this.inspectionService.isInspectionPanelVisible = false;
-                return;
-            }
-
-            selectedFeatureWrapper.peek((feature: Feature) => {
-                this.inspectionService.selectedFeatureGeoJsonText = feature.geojson() as string;
-                this.inspectionService.selectedFeatureIdText = feature.id() as string;
-                this.inspectionService.isInspectionPanelVisible = true;
-                this.inspectionService.loadFeatureData();
-            })
         });
     }
 
@@ -239,7 +218,7 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the picked feature.
      */
     private setPickedCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
+        if (this.pickedFeature && this.cesiumFeaturesAreEqual(feature, this.pickedFeature))
             return;
 
         // Restore the previously picked feature to its original color.
@@ -247,13 +226,11 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
         }
         this.pickedFeature = null;
-        this.selectionVisualizations.forEach(visu => this.mapService.tileVisualizationDestructionTopic.next(visu));
-        this.selectionVisualizations = [];
 
         // Get the actual mapget feature for the picked Cesium feature.
         let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
         if (!resolvedFeature) {
-            this.selectionTopic.next(null);
+            this.mapService.selectionTopic.next(null);
             return;
         }
 
@@ -267,21 +244,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         if (this.pickedFeatureOrigColor) {
             this.setFeatureColor(feature, Color.YELLOW);
             this.pickedFeature = feature;
-            this.selectionTopic.next(resolvedFeature);
-        }
-
-        // Apply additional highlight styles.
-        for (let [_, styleData] of this.styleService.styleData) {
-            if (styleData.featureLayerStyle && styleData.enabled) {
-                let visu = new TileVisualization(
-                    resolvedFeature!.featureTile,
-                    (tileKey: string)=>this.mapService.getFeatureTile(tileKey),
-                    styleData.featureLayerStyle,
-                    true,
-                    resolvedFeature.peek((f: Feature) => f.id()));
-                this.mapService.tileVisualizationTopic.next(visu);
-                this.selectionVisualizations.push(visu);
-            }
+            this.mapService.selectionTopic.next(resolvedFeature);
         }
     }
 

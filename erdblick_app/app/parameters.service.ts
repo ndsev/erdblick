@@ -178,11 +178,7 @@ export class ParametersService {
     }
 
     setCameraState(camera: Camera) {
-        const currentPositionCartographic = Cartographic.fromCartesian(
-            Cartesian3.fromElements(
-                camera.position.x, camera.position.y, camera.position.z
-            )
-        );
+        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
         this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
         this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
         this.p().alt = currentPositionCartographic.height;

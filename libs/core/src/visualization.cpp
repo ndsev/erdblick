@@ -143,23 +143,11 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
         auto firstResolution = resolutionList.at(0);
         auto typeId = firstResolution["typeId"].as<std::string>();
         auto featureIdParts = firstResolution["featureId"];
-        auto numFeatureIdParts = featureIdParts.size();
-        mapget::KeyValuePairs featureIdPartsVec;
-        for (auto kvIndex = 0; kvIndex < numFeatureIdParts; kvIndex += 2) {
-            auto key = featureIdParts.at(kvIndex).as<std::string>();
-            auto value = featureIdParts.at(kvIndex + 1);
-            if (value.type() == JsValue::Type::Number) {
-                featureIdPartsVec.emplace_back(key, value.as<int64_t>());
-            }
-            else if (value.type() == JsValue::Type::String) {
-                featureIdPartsVec.emplace_back(key, value.as<std::string>());
-            }
-        }
 
         // Find the target feature in any of the available tiles.
         mapget::model_ptr<mapget::Feature> targetFeature;
         for (auto const& tile : allTiles_) {
-            targetFeature = tile->find(typeId, featureIdPartsVec);
+            targetFeature = tile->find(typeId, featureIdParts.toKeyValuePairs());
             if (targetFeature)
                 break;
         }
@@ -579,9 +567,6 @@ void RecursiveRelationVisualizationState::populateAndRender(bool onlyUpdateTwowa
     }
 }
 
-template<typename T>
-struct always_false : std::false_type {};
-
 void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& sourceFeature, const model_ptr<Relation>& relation, bool onlyUpdateTwowayFlags)
 {
     // Check if the relation type name is accepted for the rule.
@@ -642,15 +627,7 @@ void RecursiveRelationVisualizationState::addRelation(const model_ptr<Feature>& 
         JsValue featureIdParts = JsValue::List();
         for (auto const& [key, value] : relation->target()->keyValuePairs()) {
             featureIdParts.push(JsValue(std::string(key)));
-            std::visit([&featureIdParts](auto&& v){
-                if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string_view>) {
-                    featureIdParts.push(JsValue(std::string(v)));
-                } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
-                    featureIdParts.push(JsValue(v));
-                } else {
-                    static_assert(always_false<decltype(v)>::value, "Type of 'v' is neither std::string_view nor int64_t");
-                }
-            }, value);
+            featureIdParts.push(JsValue::fromVariant(value));
         }
 
         JsValue newExtReferenceToResolve = JsValue::Dict();

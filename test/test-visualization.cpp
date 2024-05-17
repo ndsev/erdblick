@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "erdblick/inspection.h"
+#include "erdblick/parser.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
-#include "erdblick/stream.h"
-#include "erdblick/inspection.h"
 
 #include <iostream>
 
