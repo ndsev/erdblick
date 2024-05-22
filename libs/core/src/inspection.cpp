@@ -127,6 +127,7 @@ void InspectionConverter::convertAttributeLayer(
         }
         else if (numValues == 0) {
             current_->value_ = JsValue(true);
+            current_->type_ = ValueType::Boolean;
         }
 
         if (attr->hasValidity()) {
@@ -260,8 +261,10 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
         ++index;
     }
 
-    if (numValues == 1)
+    if (numValues == 1) {
+        std::tie(fieldScope->value_, fieldScope->type_) = *singleValue;
         return singleValue;
+    }
     return {};
 }
 
