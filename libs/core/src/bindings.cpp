@@ -148,6 +148,16 @@ EMSCRIPTEN_BINDINGS(erdblick)
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
 
+    ////////// ValueType
+    em::enum_<InspectionConverter::ValueType>("ValueType")
+        .value("NULL", InspectionConverter::ValueType::Null)
+        .value("NUMBER", InspectionConverter::ValueType::Number)
+        .value("STRING", InspectionConverter::ValueType::String)
+        .value("BOOLEAN", InspectionConverter::ValueType::Boolean)
+        .value("FEATUREID", InspectionConverter::ValueType::FeatureId)
+        .value("SECTION", InspectionConverter::ValueType::Section)
+        .value("ARRAYBIT", InspectionConverter::ValueType::ArrayBit);
+
     ////////// SharedUint8Array
     em::class_<SharedUint8Array>("SharedUint8Array")
         .constructor()
