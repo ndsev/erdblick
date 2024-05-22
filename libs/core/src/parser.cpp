@@ -26,6 +26,10 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     // For each composition, allow a version with and without optional params.
     for (auto const& node : srcInfoParsed) {
         auto dsInfo = DataSourceInfo::fromJson(node);
+        if (dsInfo.isAddOn_) {
+            // Do not expose add-on datasources in the frontend.
+            continue;
+        }
         for (auto const& [_, l] : dsInfo.layers_) {
             for (auto const& tp : l->featureTypes_) {
                 for (auto const& composition : tp.uniqueIdCompositions_) {

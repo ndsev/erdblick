@@ -31,6 +31,7 @@ export interface MapInfoItem extends Object {
     maxParallelJobs: number;
     nodeId: string;
     protocolVersion: {major: number, minor: number, patch: number};
+    addOn: boolean;
     visible: boolean;
 }
 
@@ -249,7 +250,7 @@ export class MapService {
                 })
                 .withJsonCallback((result: Array<MapInfoItem>) => {
                     let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
-                    let maps = new Map<string, MapInfoItem>(result.map(mapInfo => {
+                    let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
                         let defCoverage = [0n];
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
