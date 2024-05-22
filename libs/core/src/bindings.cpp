@@ -156,7 +156,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("BOOLEAN", InspectionConverter::ValueType::Boolean)
         .value("FEATUREID", InspectionConverter::ValueType::FeatureId)
         .value("SECTION", InspectionConverter::ValueType::Section)
-        .value("ARRAYBIT", InspectionConverter::ValueType::ArrayBit);
+        .value("ARRAY", InspectionConverter::ValueType::ArrayBit);
 
     ////////// SharedUint8Array
     em::class_<SharedUint8Array>("SharedUint8Array")

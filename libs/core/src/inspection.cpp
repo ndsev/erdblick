@@ -215,7 +215,7 @@ void InspectionConverter::convertGeometry(
     g->forEachPoint([this, &geomScope, &index](auto&& pt){
         auto ptScope = push(
             JsValue(geomScope->children_.size()),
-            index,
+            index++,
             ValueType::Number | ValueType::ArrayBit);
         ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
         return true;
