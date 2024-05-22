@@ -148,7 +148,7 @@ struct JsValue
     [[nodiscard]] Type type() const;
 
     template <typename T>
-    T as() {
+    T as() const {
     #ifdef EMSCRIPTEN
         return value_.as<T>();
     #else

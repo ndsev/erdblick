@@ -10,7 +10,8 @@ namespace erdblick
 
 class InspectionConverter
 {
-    enum ValueType {
+public:
+    enum class ValueType: uint8_t {
         Null = 0,
         Number = 1,
         String = 2,
@@ -24,14 +25,15 @@ class InspectionConverter
     {
         JsValue key_;
         JsValue value_;
-        ValueType type_ = Null;
+        ValueType type_ = ValueType::Null;
         std::string hoverId_;
         std::string info_;
         std::vector<InspectionNode> children_;
         JsValue direction_;
+        std::string geoJsonPath_;
 
-        JsValue toJsValue() const;
-        JsValue childrenToJsValue() const;
+        [[nodiscard]] JsValue toJsValue() const;
+        [[nodiscard]] JsValue childrenToJsValue() const;
     };
 
     struct InspectionNodeScope
@@ -41,7 +43,7 @@ class InspectionConverter
 
         ~InspectionNodeScope();
         InspectionNodeScope(InspectionNodeScope const&) = delete;
-        InspectionNodeScope(InspectionNodeScope&&);
+        InspectionNodeScope(InspectionNodeScope&&) noexcept;
         InspectionNodeScope(InspectionNode* n, InspectionConverter* c);
 
         InspectionNode* node_ = nullptr;
@@ -49,13 +51,13 @@ class InspectionConverter
     };
 
     using OptionalValueAndType = std::optional<std::pair<JsValue, ValueType>>;
+    using FieldOrIndex = std::variant<uint32_t, std::string_view>;
 
-public:
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
 
     InspectionNodeScope push(InspectionNode* node);
-    InspectionNodeScope push(std::string_view const& key, ValueType type=Null);
-    InspectionNodeScope push(JsValue const& key, ValueType type=Null);
+    InspectionNodeScope push(std::string_view const& key, FieldOrIndex const& path, ValueType type=ValueType::Null);
+    InspectionNodeScope push(JsValue const& key, FieldOrIndex const& path, ValueType type=ValueType::Null);
     void pop();
 
     void convertAttributeLayer(std::string_view const& name, mapget::model_ptr<mapget::AttributeLayer> const& l);
@@ -81,3 +83,6 @@ public:
 };
 
 }  // namespace erdblick
+
+erdblick::InspectionConverter::ValueType
+operator|(erdblick::InspectionConverter::ValueType a, erdblick::InspectionConverter::ValueType b);

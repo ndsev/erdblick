@@ -11,8 +11,8 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
 
     // Identifiers section.
     {
-        auto scope = push(convertStringView("Identifiers"), Section);
-        push("type", String)->value_ = convertStringView(featurePtr->typeId());
+        auto scope = push(convertStringView("Identifiers"), "", ValueType::Section);
+        push("type", "typeId", ValueType::String)->value_ = convertStringView(featurePtr->typeId());
         if (auto prefix = featurePtr->model().getIdPrefix()) {
             for (auto const& [k, v] : prefix->fields()) {
                 convertField(k, v);
@@ -26,7 +26,7 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     // Basic attributes section.
     if (auto attrs = featurePtr->attributes())
     {
-        auto scope = push(convertStringView("Basic Attributes"), Section);
+        auto scope = push(convertStringView("Basic Attributes"), "properties", ValueType::Section);
         for (auto const& [k, v] : attrs->fields()) {
             convertField(k, v);
         }
@@ -35,7 +35,7 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     // Flexible attributes section.
     if (auto layers = featurePtr->attributeLayers())
     {
-        auto scope = push(convertStringView("Attribute Layers"), Section);
+        auto scope = push(convertStringView("Attribute Layers"), "properties.layer", ValueType::Section);
         layers->forEachLayer([this](auto&& layerName, auto&& layer) -> bool {
             convertAttributeLayer(layerName, layer);
             return true;
@@ -46,7 +46,7 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     using namespace mapget;
     if (featurePtr->numRelations())
     {
-        auto scope = push(convertStringView("Relations"), Section);
+        auto scope = push(convertStringView("Relations"), "relations", ValueType::Section);
         std::unordered_map<std::string_view, std::vector<model_ptr<Relation>>> relsByName;
         featurePtr->forEachRelation([this](model_ptr<Relation> const& relation) -> bool {
             convertRelation(relation);
@@ -57,7 +57,7 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     // Geometry section.
     if (auto geomCollection = featurePtr->geom())
     {
-        auto scope = push(convertStringView("Geometry"), Section);
+        auto scope = push(convertStringView("Geometry"), "geometry", ValueType::Section);
         uint32_t geomIndex = 0;
         geomCollection->forEachGeometry([this, &geomIndex](model_ptr<Geometry> const& geom) -> bool {
             convertGeometry(JsValue(geomIndex++), geom);
@@ -69,19 +69,33 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
-    JsValue const& key, ValueType type)
+    JsValue const& key, FieldOrIndex const& path, ValueType type)
 {
+    auto prevTop = stack_.back();
     auto result = push(&current_->children_.emplace_back());
     result->key_ = key;
     result->type_ = type;
+
+    if (std::holds_alternative<uint32_t>(path)) {
+        current_->geoJsonPath_ = fmt::format("{}[{}]", prevTop->geoJsonPath_, std::get<uint32_t>(path));
+    }
+    else {
+        std::string_view field = std::get<std::string_view>(path);
+        if (prevTop->geoJsonPath_.empty())
+            current_->geoJsonPath_ = field;
+        else
+            current_->geoJsonPath_ = fmt::format("{}.{}", prevTop->geoJsonPath_, field);
+    }
+
     return result;
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
     const std::string_view& key,
+    FieldOrIndex const& path,
     InspectionConverter::ValueType type)
 {
-    return push(convertStringView(key), type);
+    return push(convertStringView(key), path, type);
 }
 
 InspectionConverter::InspectionNodeScope
@@ -106,10 +120,10 @@ void InspectionConverter::convertAttributeLayer(
     const std::string_view& name,
     const mapget::model_ptr<mapget::AttributeLayer>& l)
 {
-    auto layerScope = push(convertStringView(name));
+    auto layerScope = push(convertStringView(name), name);
     l->forEachAttribute([this](mapget::model_ptr<mapget::Attribute> const& attr)
     {
-        auto attrScope = push(convertStringView(attr->name()), Null);
+        auto attrScope = push(convertStringView(attr->name()), attr->name(), ValueType::Null);
 
         auto numValues = 0;
         OptionalValueAndType singleValue;
@@ -135,7 +149,7 @@ void InspectionConverter::convertAttributeLayer(
         }
 
         if (auto direction = attr->direction()) {
-            auto dirScope = push("direction", String);
+            auto dirScope = push("direction", "direction", ValueType::String);
             switch (direction) {
             case mapget::Attribute::Positive:
                 dirScope->value_ = convertStringView("POSITIVE");
@@ -164,10 +178,11 @@ void InspectionConverter::convertRelation(const mapget::model_ptr<mapget::Relati
 {
     auto& relGroup = relationsByType_[r->name()];
     if (!relGroup) {
-        relGroup = push(r->name()).node_;
+        relGroup = push(r->name(), "").node_;
+        relGroup->geoJsonPath_ += fmt::format("{{name='{}'}}", r->name());
     }
     auto relGroupScope = push(relGroup);
-    auto relScope = push(JsValue(relGroup->children_.size()), FeatureId);
+    auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
     relScope->value_ = JsValue(r->target()->toString());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     if (r->hasSourceValidity()) {
@@ -183,7 +198,12 @@ void InspectionConverter::convertGeometry(
     JsValue const& key,
     const mapget::model_ptr<mapget::Geometry>& g)
 {
-    auto geomScope = push(key, String);
+    auto geomScope = push(
+        key,
+        key.type() == JsValue::Type::Number ?
+            FieldOrIndex(key.as<uint32_t>()) :
+            FieldOrIndex(key.as<std::string>()),
+        ValueType::String);
     switch (g->geomType()) {
     case simfil::Geometry::GeomType::Points: geomScope->value_ = convertStringView("Points"); break;
     case simfil::Geometry::GeomType::Line: geomScope->value_ = convertStringView("Polyline"); break;
@@ -191,10 +211,12 @@ void InspectionConverter::convertGeometry(
     case simfil::Geometry::GeomType::Mesh: geomScope->value_ = convertStringView("Mesh"); break;
     }
 
-    g->forEachPoint([this, &geomScope](auto&& pt){
+    uint32_t index = 0;
+    g->forEachPoint([this, &geomScope, &index](auto&& pt){
         auto ptScope = push(
             JsValue(geomScope->children_.size()),
-            static_cast<ValueType>(Number | ArrayBit));
+            index,
+            ValueType::Number | ValueType::ArrayBit);
         ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
         return true;
     });
@@ -217,23 +239,23 @@ InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
 InspectionConverter::OptionalValueAndType
 InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelNode::Ptr& value)
 {
-    auto fieldScope = push(fieldName);
+    auto fieldScope = push(fieldName, fieldName.as<std::string>());
     bool isArray = false;
     OptionalValueAndType singleValue;
 
     switch (value->type()) {
     case simfil::ValueType::Undef: return {};
     case simfil::ValueType::TransientObject: break;
-    case simfil::ValueType::Null: singleValue = {JsValue(), Null}; break;
-    case simfil::ValueType::Bool: singleValue = {JsValue(std::get<bool>(value->value())), Boolean}; break;
-    case simfil::ValueType::Int: singleValue = {JsValue(std::get<int64_t>(value->value())), Number}; break;
-    case simfil::ValueType::Float: singleValue = {JsValue(std::get<double>(value->value())), Number}; break;
+    case simfil::ValueType::Null: singleValue = {JsValue(), ValueType::Null}; break;
+    case simfil::ValueType::Bool: singleValue = {JsValue(std::get<bool>(value->value())), ValueType::Boolean}; break;
+    case simfil::ValueType::Int: singleValue = {JsValue(std::get<int64_t>(value->value())), ValueType::Number}; break;
+    case simfil::ValueType::Float: singleValue = {JsValue(std::get<double>(value->value())), ValueType::Number}; break;
     case simfil::ValueType::String: {
         auto vv = value->value();
         if (std::holds_alternative<std::string_view>(vv))
-            singleValue = {convertStringView(std::get<std::string_view>(vv)), String};
+            singleValue = {convertStringView(std::get<std::string_view>(vv)), ValueType::String};
         else
-            singleValue = {JsValue(std::get<std::string>(vv)), String};
+            singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
         break;
     }
     case simfil::ValueType::Object: break;
@@ -298,6 +320,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
         newDict.set("info", JsValue(info_));
     if (!children_.empty())
         newDict.set("children", childrenToJsValue());
+    if (!geoJsonPath_.empty())
+        newDict.set("geoJsonPath", JsValue(geoJsonPath_));
     return newDict;
 }
 
@@ -334,9 +358,16 @@ InspectionConverter::InspectionNodeScope::InspectionNodeScope(
 }
 
 InspectionConverter::InspectionNodeScope::InspectionNodeScope(
-    InspectionConverter::InspectionNodeScope&& other)
+    InspectionConverter::InspectionNodeScope&& other) noexcept
 {
     converter_ = other.converter_;
     other.converter_ = nullptr;
     node_ = other.node_;
+}
+
+InspectionConverter::ValueType
+operator|(InspectionConverter::ValueType a, InspectionConverter::ValueType b)
+{
+    return static_cast<InspectionConverter::ValueType>(
+        static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
 }
