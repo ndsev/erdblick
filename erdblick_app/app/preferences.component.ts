@@ -93,7 +93,8 @@ export class PreferencesComponent {
     }
 
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) || this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
+        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) ||
+            this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }

@@ -182,7 +182,9 @@ export class Fetch
                     // Try to process any complete chunks.
                     processAccumulatedData();
                 }
-                if (done) break;
+                if (done) {
+                    break;
+                }
             }
         }
     }
@@ -230,8 +232,9 @@ export class Fetch
      */
     runBufferCallback(uint8Array: Uint8Array, messageType: number = 0)
     {
-        if (!this.bufferCallback || this.aborted)
+        if (!this.bufferCallback || this.aborted) {
             return;
+        }
         if (this.bufferCallback) {
             this.bufferCallback(uint8Array, messageType);
         }
@@ -241,13 +244,13 @@ export class Fetch
      * Signal that the request should be aborted.
      */
     abort() {
-        if (this.aborted)
-            return
+        if (this.aborted) {
+            return;
+        }
         try {
             // For some reason, abort always throws an exception by design.
             this.abortController.abort("User abort.");
-        }
-        catch (e) {
+        } catch (e) {
             // Nothing to do.
         }
         this.aborted = true;
@@ -257,8 +260,9 @@ export class Fetch
      * Log an error if it does not relate to an intentional abort-call.
      */
     handleError(e: any) {
-        if (e === "User abort." || (e && e.name === "AbortError"))
+        if (e === "User abort." || (e && e.name === "AbortError")) {
             return;
+        }
         console.error(e);
     }
 }

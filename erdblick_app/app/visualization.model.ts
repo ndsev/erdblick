@@ -237,8 +237,9 @@ export class TileVisualization {
      */
     destroy(viewer: Viewer) {
         this.deleted = true;
-        if (this.renderingInProgress)
+        if (this.renderingInProgress) {
             return;
+        }
 
         if (this.primitiveCollection) {
             viewer.scene.primitives.remove(this.primitiveCollection);
@@ -258,9 +259,11 @@ export class TileVisualization {
      * Iterate over all Cesium primitives of this visualization.
      */
     forEachPrimitive(callback: any) {
-        if (this.primitiveCollection)
-            for (let i = 0; i < this.primitiveCollection.length; ++i)
+        if (this.primitiveCollection) {
+            for (let i = 0; i < this.primitiveCollection.length; ++i) {
                 callback(this.primitiveCollection.get(i));
+            }
+        }
     }
 
     /**
