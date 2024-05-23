@@ -149,8 +149,11 @@ export class ParametersService {
     }
 
     setSelectedFeature(mapId: string, featureId: string) {
-        this.p().selected = [mapId, featureId];
-        this.parameters.next(this.p());
+        const currentSelection = this.p().selected;
+        if (currentSelection && (currentSelection[0] != mapId || currentSelection[1] != featureId)) {
+            this.p().selected = [mapId, featureId];
+            this.parameters.next(this.p());
+        }
     }
 
     unsetSelectedFeature() {

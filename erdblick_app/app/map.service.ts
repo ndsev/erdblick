@@ -641,8 +641,12 @@ export class MapService {
         }
         this.selectionTopic.next(feature);
         if (focus) {
-            const position = feature.peek((parsedFeature: Feature)=>parsedFeature.center());
-            this.moveToWgs84PositionTopic.next(position);
+            this.focusOnFeature(feature);
         }
+    }
+
+    focusOnFeature(feature: FeatureWrapper) {
+        const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
+        this.moveToWgs84PositionTopic.next(position);
     }
 }

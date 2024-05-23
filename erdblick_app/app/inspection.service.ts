@@ -1,25 +1,20 @@
 import {Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged} from "rxjs";
 import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
+import {FeatureWrapper} from "./features.model";
+import {ParametersService} from "./parameters.service";
+import {coreLib} from "./wasm";
 
-export enum InspectionValueType {
-    Null = 0,
-    Number = 1,
-    String = 2,
-    Boolean = 3,
-    FeatureId = 4,
-    Section = 5,
-    ArrayBit = 128,
-}
 
 interface InspectionModelData {
     key: string;
-    type: InspectionValueType;
+    type: number;
     value: any;
     info?: string;
-    hoverId?: string;
+    hoverId?: string
+    geoJsonPath?: string;
     children: Array<InspectionModelData>;
 }
 
@@ -32,12 +27,14 @@ export class InspectionService {
     selectedFeatureInspectionModel: Array<InspectionModelData> | null = null;
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
-    hooveredFeatureIdToHighlight: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    selectedFeature: FeatureWrapper | null = null;
 
-    constructor(mapService: MapService) {
-        mapService.selectionTopic.subscribe((selectedFeature) => {
+    constructor(private mapService: MapService,
+                public parametersService: ParametersService) {
+        this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
             if (!selectedFeature) {
                 this.isInspectionPanelVisible = false;
+                this.parametersService.unsetSelectedFeature();
                 return;
             }
             this.selectedMapIdName = selectedFeature.featureTile.mapName;
@@ -47,7 +44,9 @@ export class InspectionService {
                 this.selectedFeatureIdName = feature.id() as string;
                 this.isInspectionPanelVisible = true;
                 this.loadFeatureData();
-            })
+            });
+            this.selectedFeature = selectedFeature;
+            this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
         });
     }
 
@@ -58,7 +57,7 @@ export class InspectionService {
                 const node: TreeTableNode = {};
                 node.data = {
                     key: data.key,
-                    value: data.type == InspectionValueType.Null && data.children === undefined ? "NULL" : data.value,
+                    value: data.type == this.InspectionValueType.NULL.value && data.children === undefined ? "NULL" : data.value,
                     type: data.type
                 };
                 if (data.hasOwnProperty("info")) {
@@ -66,6 +65,9 @@ export class InspectionService {
                 }
                 if (data.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
+                }
+                if (data.hasOwnProperty("geoJsonPath")) {
+                    node.data["geoJsonPath"] = data.geoJsonPath;
                 }
                 node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children) : [];
                 treeNodes.push(node);
@@ -103,4 +105,6 @@ export class InspectionService {
             this.featureTree.next('[]');
         }
     }
+
+    protected readonly InspectionValueType = coreLib.ValueType;
 }

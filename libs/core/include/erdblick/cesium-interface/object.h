@@ -133,6 +133,11 @@ struct JsValue
      */
     [[nodiscard]] uint32_t size() const;
 
+    /**
+     * Convert this JsValue to string representation.
+     */
+    std::string toString() const;
+
     enum class Type {
         Undefined,
         Null,

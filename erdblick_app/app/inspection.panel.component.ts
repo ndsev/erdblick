@@ -1,12 +1,13 @@
 import {Component, OnInit, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
-import {InspectionService, InspectionValueType} from "./inspection.service";
-import {DomSanitizer, SafeHtml} from "@angular/platform-browser";
+import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
+import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
-import {Geometry} from "cesium";
+import {distinctUntilChanged, filter} from "rxjs";
+import {coreLib} from "./wasm";
 
 interface Column {
     field: string;
@@ -32,11 +33,11 @@ interface Column {
                             <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                             <input class="filter-input" type="text" pInputText
                                    placeholder="Filter data for selected feature"
-                                   (input)="filter($event)"/>
+                                   (input)="filterEvent($event)"/>
                         </div>
                         <div>
-                            <p-button (click)="jumpToFeature(inspectionService.selectedFeatureIdName)"
-                                      label="" pTooltip="Focus on layer" tooltipPosition="bottom"
+                            <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
+                                      label="" pTooltip="Focus on feature" tooltipPosition="bottom"
                                       [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                             </p-button>
@@ -58,7 +59,7 @@ interface Column {
                                      class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
                             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                                 <tr [ttRow]="rowNode"
-                                    [ngClass]="{'section-style': rowData['type']==InspectionValueType.Section}"
+                                    [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}"
                                     (click)="onRowClick(rowNode)">
                                     <td>
                                         <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
@@ -112,11 +113,11 @@ interface Column {
                 </span>
                 <span>
                     <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree(filterQuery)"
-                                label="Filter by FeatureIDs" [binary]="true"/>
+                                label="Filter only FeatureIDs" [binary]="true"/>
                 </span>
                 <span>
                     <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree(filterQuery)"
-                                label="Filter Geometry Entries" [binary]="true"/>
+                                label="Include Geometry Entries" [binary]="true"/>
                 </span>
             </div>
         </p-overlayPanel>
@@ -160,14 +161,26 @@ export class InspectionPanelComponent implements OnInit  {
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
 
-    constructor(private sanitizer: DomSanitizer,
-                private messageService: InfoMessageService,
+    constructor(private messageService: InfoMessageService,
                 public inspectionService: InspectionService,
-                public jumpService: JumpTargetService) {
-        this.inspectionService.featureTree.subscribe((tree: string) => {
+                public jumpService: JumpTargetService,
+                public mapService: MapService,
+                public parametersService: ParametersService) {
+        this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
             this.expandTreeNodes(this.filteredTree);
+        });
+
+        this.parametersService.parameters.pipe(filter(
+            parameters => parameters.selected.length == 2)).subscribe(parameters => {
+            const [mapId, featureId] = parameters.selected;
+            if (mapId != this.inspectionService.selectedMapIdName || featureId != this.inspectionService.selectedFeatureIdName) {
+                this.jumpService.highlightFeature(mapId, featureId);
+                if (this.inspectionService.selectedFeature != null) {
+                    this.mapService.focusOnFeature(this.inspectionService.selectedFeature);
+                }
+            }
         });
     }
 
@@ -201,7 +214,7 @@ export class InspectionPanelComponent implements OnInit  {
         });
     }
 
-    filter(event: any) {
+    filterEvent(event: any) {
         this.filterQuery = event.target.value.toLowerCase();
         this.filterTree(this.filterQuery);
     }
@@ -213,6 +226,12 @@ export class InspectionPanelComponent implements OnInit  {
             return;
         }
 
+        if (this.filterOnlyFeatureIds) {
+            this.filterByKeys = false;
+            this.filterByValues = false;
+            this.filterGeometryEntries = false;
+        }
+
         const filterNodes = (nodes: TreeTableNode[]): TreeTableNode[] => {
             return nodes.reduce<TreeTableNode[]>((filtered, node) => {
                 let matches = false;
@@ -221,7 +240,7 @@ export class InspectionPanelComponent implements OnInit  {
                 }
 
                 if (this.filterOnlyFeatureIds) {
-                    if (node.data.type == InspectionValueType.FeatureId) {
+                    if (node.data.type == this.InspectionValueType.FEATUREID.value) {
                         matches = String(node.data.value).toLowerCase().includes(query) || String(node.data.hoverId).toLowerCase().includes(query);
                     }
                 } else {
@@ -273,11 +292,6 @@ export class InspectionPanelComponent implements OnInit  {
             //     }
             // },
             {
-                label: 'Copy Path to this Node',
-                command: () => {
-                }
-            },
-            {
                 label: 'Copy Key/Value',
                 command: () => {
                     this.copyToClipboard(`{${key}: ${value}}`);
@@ -295,19 +309,21 @@ export class InspectionPanelComponent implements OnInit  {
                 }
             }
         ];
+        if (rowData.hasOwnProperty("geoJsonPath")) {
+            const path = rowData["geoJsonPath"];
+            this.inspectionMenuItems.push({
+                label: 'Copy GeoJson Path',
+                command: () => {
+                    this.copyToClipboard(path);
+                }
+            });
+        }
     }
 
     onValueClick(rowData: any) {
         this.copyToClipboard(rowData["value"]);
-        if (rowData["type"] == InspectionValueType.FeatureId) {
-            this.jumpToFeature(rowData);
-        }
-    }
-
-    jumpToFeature(rowData: any) {
-        if (rowData.hasOwnProperty("hoverId")) {
-            console.log(rowData["hoverId"]);
-            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["hoverId"]).then();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
         }
     }
 
@@ -319,16 +335,16 @@ export class InspectionPanelComponent implements OnInit  {
         return;
     }
 
-    getStyleClassByType(valueType: InspectionValueType): string {
+    getStyleClassByType(valueType: number): string {
         switch (valueType) {
-            case InspectionValueType.Section:
+            case this.InspectionValueType.SECTION.value:
                 return "section-style"
-            case InspectionValueType.FeatureId:
+            case this.InspectionValueType.FEATUREID.value:
                 return "feature-id-style"
             default:
                 return "standard-style"
         }
     }
 
-    protected readonly InspectionValueType = InspectionValueType;
+    protected readonly InspectionValueType = coreLib.ValueType;
 }
