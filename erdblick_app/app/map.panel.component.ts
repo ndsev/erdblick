@@ -165,7 +165,7 @@ import {Menu} from "primeng/menu";
                 </div>
                 <div class="styles-container">
                     <div class="styles-import">
-                        <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import"
+                        <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import Style"
                                       [customUpload]="true" [fileLimit]="1" [multiple]="false"
                                       accept=".yaml" [maxFileSize]="1048576"
                                       (uploadHandler)="importStyle($event)"

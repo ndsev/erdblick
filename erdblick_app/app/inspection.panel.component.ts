@@ -6,6 +6,7 @@ import {DomSanitizer, SafeHtml} from "@angular/platform-browser";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
 import {ParametersService} from "./parameters.service";
+import {Geometry} from "cesium";
 
 interface Column {
     field: string;
@@ -99,15 +100,23 @@ interface Column {
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-overlayPanel #filterPanel class="filter-panel">
-            <div class="font-bold white-space-nowrap" style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
+            <div class="font-bold white-space-nowrap"
+                 style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
                 <span>
-                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree(filterQuery)" label="Filter by Keys" [binary]="true"/>
+                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree(filterQuery)"
+                                label="Filter by Keys" [binary]="true"/>
                 </span>
                 <span>
-                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree(filterQuery)" label="Filter by Values" [binary]="true"/>
+                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree(filterQuery)"
+                                label="Filter by Values" [binary]="true"/>
                 </span>
                 <span>
-                    <p-checkbox [(ngModel)]="filterOnlyRelations" (ngModelChange)="filterTree(filterQuery)" label="Filter by Features" [binary]="true"/>
+                    <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree(filterQuery)"
+                                label="Filter by FeatureIDs" [binary]="true"/>
+                </span>
+                <span>
+                    <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree(filterQuery)"
+                                label="Filter Geometry Entries" [binary]="true"/>
                 </span>
             </div>
         </p-overlayPanel>
@@ -144,7 +153,8 @@ export class InspectionPanelComponent implements OnInit  {
     filterQuery = "";
     filterByKeys = true;
     filterByValues = true;
-    filterOnlyRelations = false;
+    filterOnlyFeatureIds = false;
+    filterGeometryEntries = false;
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
@@ -179,10 +189,6 @@ export class InspectionPanelComponent implements OnInit  {
         );
     }
 
-    getFilterValue(event: Event) {
-        return (event.target as HTMLInputElement).value;
-    }
-
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
@@ -193,14 +199,6 @@ export class InspectionPanelComponent implements OnInit  {
                 this.expandTreeNodes(node.children, node);
             }
         });
-    }
-
-    typeToBackground(type: string) {
-        if (type == "string") {
-            return "#4а4";
-        } else {
-            return "#ad8";
-        }
     }
 
     filter(event: any) {
@@ -218,12 +216,22 @@ export class InspectionPanelComponent implements OnInit  {
         const filterNodes = (nodes: TreeTableNode[]): TreeTableNode[] => {
             return nodes.reduce<TreeTableNode[]>((filtered, node) => {
                 let matches = false;
-                if (this.filterByKeys && this.filterByValues) {
-                    matches = String(node.data.key).toLowerCase().includes(query) || String(node.data.value).toLowerCase().includes(query);
-                } else if (this.filterByKeys) {
-                    matches = String(node.data.key).toLowerCase().includes(query);
-                } else if (this.filterByValues) {
-                    matches = String(node.data.value).toLowerCase().includes(query);
+                if (!this.filterGeometryEntries && node.data.key == "Geometry") {
+                    return filtered;
+                }
+
+                if (this.filterOnlyFeatureIds) {
+                    if (node.data.type == InspectionValueType.FeatureId) {
+                        matches = String(node.data.value).toLowerCase().includes(query) || String(node.data.hoverId).toLowerCase().includes(query);
+                    }
+                } else {
+                    if (this.filterByKeys && this.filterByValues) {
+                        matches = String(node.data.key).toLowerCase().includes(query) || String(node.data.value).toLowerCase().includes(query);
+                    } else if (this.filterByKeys) {
+                        matches = String(node.data.key).toLowerCase().includes(query);
+                    } else if (this.filterByValues) {
+                        matches = String(node.data.value).toLowerCase().includes(query);
+                    }
                 }
 
                 if (node.children) {
@@ -254,13 +262,16 @@ export class InspectionPanelComponent implements OnInit  {
 
     onKeyClick(event: MouseEvent, rowData: any) {
         this.inspectionMenu.toggle(event);
-        event.stopPropagation()
+        event.stopPropagation();
+        const key = rowData["key"];
+        const value = rowData["value"];
         this.inspectionMenuItems = [
-            {
-                label: 'Find Features with this Value',
-                command: () => {
-                }
-            },
+            // {
+            //     label: 'Find Features with this Value',
+            //     command: () => {
+            //
+            //     }
+            // },
             {
                 label: 'Copy Path to this Node',
                 command: () => {
@@ -269,16 +280,18 @@ export class InspectionPanelComponent implements OnInit  {
             {
                 label: 'Copy Key/Value',
                 command: () => {
+                    this.copyToClipboard(`{${key}: ${value}}`);
                 }
             },
-            {
-                label: 'Show in NDS.Live Blob',
-                command: () => {
-                }
-            },
+            // {
+            //     label: 'Show in NDS.Live Blob',
+            //     command: () => {
+            //     }
+            // },
             {
                 label: 'Open NDS.Live Docs',
                 command: () => {
+                    window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
                 }
             }
         ];
@@ -287,39 +300,24 @@ export class InspectionPanelComponent implements OnInit  {
     onValueClick(rowData: any) {
         this.copyToClipboard(rowData["value"]);
         if (rowData["type"] == InspectionValueType.FeatureId) {
-            this.jumpToFeature(rowData["hoverId"]);
+            this.jumpToFeature(rowData);
         }
     }
 
-    jumpToFeature(featureId: string) {
-        console.log(`Jumping to ${featureId}!`)
+    jumpToFeature(rowData: any) {
+        if (rowData.hasOwnProperty("hoverId")) {
+            console.log(rowData["hoverId"]);
+            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["hoverId"]).then();
+        }
     }
 
     highlightFeature(rowData: any) {
-        if (rowData["type"] == InspectionValueType.FeatureId) {
-            console.log(rowData)
-            if (rowData.hasOwnProperty("hoverId")) {
-                this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["hoverId"]).then();
-            }
-        }
+        return;
     }
 
     stopHighlight(rowData: any) {
-        if (rowData.type == InspectionValueType.FeatureId) {
-            console.log("Stop")
-        }
+        return;
     }
-
-    // getInnerInspectionHtml(rowData: any): SafeHtml {
-    //     let htmlString = '<div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;" class="css-tooltip"';
-    //     htmlString += `<span (click)="$event.stopPropagation()">${rowData['value']}</span>`;
-    //     htmlString += `<span class="tooltiptext">${rowData['value'].toString()}</span>`;
-    //     if (rowData["type"] == InspectionValueType.Section && rowData.hasOwnProperty("info")) {
-    //         htmlString += `<span><i class="pi pi-info-circle css-tooltip"><span class="tooltiptext">${rowData["info"].toString()}</span></i></span>`;
-    //     }
-    //     htmlString += "</div>"
-    //     return this.sanitizer.bypassSecurityTrustHtml(htmlString);
-    // }
 
     getStyleClassByType(valueType: InspectionValueType): string {
         switch (valueType) {

@@ -78,7 +78,6 @@ export class MapService {
     tileVisualizationDestructionTopic: Subject<any>;
     moveToWgs84PositionTopic: Subject<{x: number, y: number}>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
-    selectionMap: BehaviorSubject<string> = new BehaviorSubject<string>("");
     selectionTopic: BehaviorSubject<FeatureWrapper|null> = new BehaviorSubject<FeatureWrapper|null>(null);
     selectionTileRequest: {
         remoteRequest: {
@@ -640,7 +639,6 @@ export class MapService {
                 `does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
             return;
         }
-        this.selectionMap.next(tile.mapName);
         this.selectionTopic.next(feature);
         if (focus) {
             const position = feature.peek((parsedFeature: Feature)=>parsedFeature.center());

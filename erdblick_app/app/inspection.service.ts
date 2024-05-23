@@ -35,12 +35,12 @@ export class InspectionService {
     hooveredFeatureIdToHighlight: BehaviorSubject<string> = new BehaviorSubject<string>("");
 
     constructor(mapService: MapService) {
-        mapService.selectionTopic.subscribe(selectedFeature => {
+        mapService.selectionTopic.subscribe((selectedFeature) => {
             if (!selectedFeature) {
                 this.isInspectionPanelVisible = false;
                 return;
             }
-
+            this.selectedMapIdName = selectedFeature.featureTile.mapName;
             selectedFeature.peek((feature: Feature) => {
                 this.selectedFeatureInspectionModel = feature.inspectionModel();
                 this.selectedFeatureGeoJsonText = feature.geojson() as string;
@@ -49,7 +49,6 @@ export class InspectionService {
                 this.loadFeatureData();
             })
         });
-        mapService.selectionMap.subscribe(mapName => this.selectedMapIdName = mapName);
     }
 
     getFeatureTreeDataFromModel() {
