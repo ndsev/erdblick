@@ -40,6 +40,9 @@ import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {SidePanelService} from "./panel.service";
 import {MenuModule} from "primeng/menu";
+import {FeatureSearchComponent} from "./feature.search.component";
+import {ColorPickerModule} from "primeng/colorpicker";
+import {ListboxModule} from "primeng/listbox";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -57,7 +60,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         InspectionPanelComponent,
         PreferencesComponent,
         EditorComponent,
-        ErdblickViewComponent
+        ErdblickViewComponent,
+        FeatureSearchComponent
     ],
     imports: [
         BrowserModule,
@@ -83,7 +87,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FileUploadModule,
         CheckboxModule,
         InputTextModule,
-        MenuModule
+        MenuModule,
+        ColorPickerModule,
+        ListboxModule
     ],
     providers: [
         {

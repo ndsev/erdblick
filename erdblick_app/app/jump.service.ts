@@ -4,12 +4,14 @@ import {HttpClient} from "@angular/common/http";
 import {MapService} from "./map.service";
 import {LocateResponse} from "./visualization.model";
 import {InfoMessageService} from "./info.service";
+import {coreLib} from "./wasm";
 
-export interface JumpTarget {
+export interface SearchTarget {
     name: string;
     label: string;
     enabled: boolean;
-    jump: (value: string) => number[] | undefined;
+    jump?: (value: string) => number[] | undefined;
+    execute?: (value: string) => void;
     validate: (value: string) => boolean;
 }
 
@@ -24,8 +26,8 @@ interface FeatureJumpAction {
 export class JumpTargetService {
 
     targetValueSubject = new BehaviorSubject<string>("");
-    jumpTargets = new BehaviorSubject<Array<JumpTarget>>([]);
-    extJumpTargets: Array<JumpTarget> = [];
+    jumpTargets = new BehaviorSubject<Array<SearchTarget>>([]);
+    extJumpTargets: Array<SearchTarget> = [];
 
     // Communication channels with the map selection dialog (in SearchPanelComponent).
     // The mapSelectionSubject triggers the display of the dialog, and
@@ -46,8 +48,8 @@ export class JumpTargetService {
                             if (jumpTargetsConfig !== undefined) {
                                 // Using string interpolation so webpack can trace imports from the location
                                 import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
-                                    return plugin.default() as Array<JumpTarget>;
-                                }).then((jumpTargets: Array<JumpTarget>) => {
+                                    return plugin.default() as Array<SearchTarget>;
+                                }).then((jumpTargets: Array<SearchTarget>) => {
                                     this.extJumpTargets = jumpTargets;
                                     this.update();
                                 }).catch((error) => {
@@ -71,6 +73,32 @@ export class JumpTargetService {
         })
     }
 
+    getFeatureMatchTarget(): SearchTarget {
+        let simfilError = '';
+        try {
+            coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
+        } catch (e: any) {
+            const parsingError = e.message.split(':', 2);
+            console.log(parsingError)
+            simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
+        }
+        let label = "Match with a SIMFIL expression";
+        if (simfilError) {
+            label += `<br><span class="search-option-warning">${simfilError}</span>`;
+        }
+        return {
+            name: "Match Features",
+            label: label,
+            enabled: false,
+            execute: (value: string) => {
+                return;
+            },
+            validate: (value: string) => {
+                return !simfilError;
+            }
+        }
+    }
+
     update() {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
@@ -84,12 +112,17 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    jump: (value: string) => { this.jumpToFeature(fjt).then(); return null; },
+                    execute: (value: string) => { this.jumpToFeature(fjt).then(); },
                     validate: (value: string) => { return !fjt.error; },
                 }
             });
         }
-        this.jumpTargets.next([...this.extJumpTargets, ...featureJumpTargetsConverted]);
+
+        this.jumpTargets.next([
+            this.getFeatureMatchTarget(),
+            ...this.extJumpTargets,
+            ...featureJumpTargetsConverted
+        ]);
     }
 
     async highlightFeature(mapId: string, featureId: string) {

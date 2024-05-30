@@ -548,6 +548,32 @@ body {
     }
 }
 
+.p-progressbar {
+    height: 1.5em;
+    font-size: 0.9em;
+}
+
+.p-colorpicker {
+    input {
+        height: 1em;
+        width: 1em;
+        margin: 0;
+    }
+}
+
+.trace-entries {
+    font-size: 0.9em;
+
+    .p-accordion-header .p-accordion-header-link {
+        padding: 0.8em;
+        font-size: 0.9em;
+    }
+
+    .p-accordion-content {
+        font-size: 0.9em;
+    }
+}
+
 @media only screen and (max-width: 56em) {
     .help-button {
         width: 3em;

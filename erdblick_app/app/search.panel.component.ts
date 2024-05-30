@@ -1,29 +1,28 @@
 import {Component} from "@angular/core";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
-import {JumpTarget, JumpTargetService} from "./jump.service";
+import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
-import {setSearchQuery} from "@codemirror/search";
 import {SidePanelService} from "./panel.service";
-
 
 @Component({
     selector: 'search-panel',
     template: `
         <span class="p-input-icon-left search-input">
             <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="value"
+            <input type="text" pInputText [(ngModel)]="searchInputValue"
                    (click)="showSearchOverlay($event)"
-                   (ngModelChange)="setSearchValue(value)"/>
+                   (ngModelChange)="setSearchValue(searchInputValue)"/>
         </span>
         <p-dialog class="search-menu-dialog" header="" [(visible)]="searchMenuVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" header="Search Options">
             <div class="search-menu" *ngFor="let item of searchItems">
                 <p-divider></p-divider>
-                <p (click)="jumpToWGS84(item.jump(value))" class="search-option"
-                   [ngClass]="{'item-disabled': !item.enabled }"><span class="search-option-name">{{ item.name }}</span><br><span [innerHTML]="item.label"></span></p>
+                <p (click)="runTarget(item)" class="search-option" [ngClass]="{'item-disabled': !item.enabled }">
+                    <span class="search-option-name">{{ item.name }}</span><br><span [innerHTML]="item.label"></span>
+                </p>
             </div>
         </p-dialog>
         <p-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
@@ -33,6 +32,7 @@ import {SidePanelService} from "./panel.service";
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </p-dialog>
+        <feature-search></feature-search>
     `,
     styles: [`
         .item-disabled {
@@ -43,8 +43,8 @@ import {SidePanelService} from "./panel.service";
 })
 export class SearchPanelComponent {
 
-    searchItems: Array<JumpTarget> = [];
-    value: string = "";
+    searchItems: Array<SearchTarget> = [];
+    searchInputValue: string = "";
     searchMenuVisible: boolean = false;
 
     mapSelectionVisible: boolean = false;
@@ -66,7 +66,7 @@ export class SearchPanelComponent {
             }
         });
 
-        this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<JumpTarget>) => {
+        this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
             this.searchItems = [
                 ...jumpTargets,
                 ...[
@@ -255,7 +255,7 @@ export class SearchPanelComponent {
 
     validateMenuItems() {
         this.searchItems.forEach(item =>
-            item.enabled = this.value != "" && item.validate(this.value)
+            item.enabled = this.searchInputValue != "" && item.validate(this.searchInputValue)
         );
     }
 
@@ -275,12 +275,24 @@ export class SearchPanelComponent {
     }
 
     setSearchValue(value: string) {
-        this.value = value;
+        this.searchInputValue = value;
         this.jumpToTargetService.targetValueSubject.next(value);
     }
 
     setSelectedMap(value: string|null) {
         this.jumpToTargetService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
+    }
+
+    runTarget(item: SearchTarget) {
+        if (item.jump !== undefined) {
+            this.jumpToWGS84(item.jump(this.searchInputValue));
+            return;
+        }
+
+        if (item.execute !== undefined) {
+            item.execute(this.searchInputValue);
+            return;
+        }
     }
 }

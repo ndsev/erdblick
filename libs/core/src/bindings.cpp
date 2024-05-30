@@ -143,6 +143,12 @@ void setExceptionHandler(em::val handler) {
     });
 }
 
+/**  Validate provided SIMFIL query */
+void validateSimfil(const std::string &query) {
+    auto simfilEnv = std::make_shared<simfil::Environment>(simfil::Environment::WithNewStringCache);
+    simfil::compile(*simfilEnv, query, false);
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
@@ -314,4 +320,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Set an exception handler
     em::function("setExceptionHandler", &setExceptionHandler);
+
+    ////////// Validate SIMFIL query
+    em::function("validateSimfilQuery", &validateSimfil);
 }
