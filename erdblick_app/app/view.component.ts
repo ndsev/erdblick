@@ -22,6 +22,7 @@ import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
+import {SearchService} from "./search.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -58,7 +59,8 @@ export class ErdblickViewComponent implements AfterViewInit {
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
-                public parameterService: ParametersService) {
+                public parameterService: ParametersService,
+                public searchService: SearchService) {
 
         this.tileVisForPrimitive = new Map();
 
@@ -175,6 +177,11 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
+
+        this.viewer.scene.primitives.add(this.searchService.visualization);
+        this.searchService.visualizationChanged.subscribe(_ => {
+            this.viewer.scene.requestRender();
+        });
     }
 
     /**

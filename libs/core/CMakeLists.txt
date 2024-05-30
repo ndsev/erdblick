@@ -12,6 +12,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/parser.h
   include/erdblick/geometry.h
   include/erdblick/inspection.h
+  include/erdblick/search.h
 
   include/erdblick/cesium-interface/object.h
   include/erdblick/cesium-interface/primitive.h
@@ -29,6 +30,7 @@ set(ERDBLICK_SOURCE_FILES
   src/parser.cpp
   src/geometry.cpp
   src/inspection.cpp
+  src/search.cpp
 
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp

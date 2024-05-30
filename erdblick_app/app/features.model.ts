@@ -10,15 +10,15 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
  * WASM TileFeatureLayer, use the peek()-function.
  */
 export class FeatureTile {
-    // public:
     id: string;
+    nodeId: string;
     mapName: string;
     layerName: string;
     tileId: bigint;
     numFeatures: number;
     private parser: TileLayerParser;
     preventCulling: boolean;
-    private readonly tileFeatureLayerBlob: any;
+    public readonly tileFeatureLayerBlob: any;
     disposed: boolean;
 
     /**
@@ -32,6 +32,7 @@ export class FeatureTile {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
         this.id = mapTileMetadata.id;
+        this.nodeId = mapTileMetadata.nodeId;
         this.mapName = mapTileMetadata.mapName;
         this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;

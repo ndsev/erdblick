@@ -5,6 +5,7 @@ import {MapService} from "./map.service";
 import {LocateResponse} from "./visualization.model";
 import {InfoMessageService} from "./info.service";
 import {coreLib} from "./wasm";
+import {SearchService} from "./search.service";
 
 export interface SearchTarget {
     name: string;
@@ -38,7 +39,8 @@ export class JumpTargetService {
 
     constructor(private httpClient: HttpClient,
                 private mapService: MapService,
-                private messageService: InfoMessageService) {
+                private messageService: InfoMessageService,
+                private searchService: SearchService) {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
@@ -68,7 +70,7 @@ export class JumpTargetService {
             });
 
         // Filter out feature jump targets based on search value.
-        this.targetValueSubject.subscribe(value => {
+        this.targetValueSubject.subscribe(_ => {
             this.update();
         })
     }
@@ -82,7 +84,7 @@ export class JumpTargetService {
             console.log(parsingError)
             simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
         }
-        let label = "Match with a SIMFIL expression";
+        let label = "Match features with a filter expression";
         if (simfilError) {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
@@ -91,9 +93,10 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string) => {
-                return;
+                this.searchService.setFilterString(value);
+
             },
-            validate: (value: string) => {
+            validate: (_: string) => {
                 return !simfilError;
             }
         }
@@ -112,8 +115,8 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    execute: (value: string) => { this.jumpToFeature(fjt).then(); },
-                    validate: (value: string) => { return !fjt.error; },
+                    execute: (_: string) => { this.jumpToFeature(fjt).then(); },
+                    validate: (_: string) => { return !fjt.error; },
                 }
             });
         }

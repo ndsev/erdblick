@@ -1,26 +1,27 @@
 import {Component, Input} from "@angular/core";
+import {SearchService} from "./search.service";
 
 @Component({
     selector: "feature-search",
     template: `
         <p-dialog class="search-menu-dialog" header="Match Features" [(visible)]="visibility"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false">
-            <p-progressBar [value]="currentTilesProccessed">
+                  [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
+            <p-progressBar [value]="searchService.percentDone()">
                 <ng-template pTemplate="content" let-currentTilesProccessed>
-                    <span>{{currentTilesProccessed}} / {{tilesTotal}}</span>
+                    <span>{{searchService.doneTiles}}</span>/<span>{{searchService.totalTiles}}</span>
                 </ng-template>
             </p-progressBar>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Elapsed time:</span><span>{{elapsedTime}}</span>
+                <span>Elapsed time:</span><span>{{searchService.timeElapsed}}</span>
             </div>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Features:</span><span>{{featuresTotal}}</span>
+                <span>Features:</span><span>{{searchService.totalFeatureCount}}</span>
             </div>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                 <span>Matched:</span><span>{{results.length}}</span>
             </div>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Highlight colour:</span><span><p-colorPicker [(ngModel)]="color" /></span>
+                <span>Highlight colour:</span><span><p-colorPicker [(ngModel)]="searchService.pointColor" (ngModelChange)="searchService.updatePointColor()" /></span>
             </div>
             <p-accordion *ngIf="traceResults.length" class="trace-entries" [multiple]="true">
                 <p-accordionTab [header]="trace.name" *ngFor="let trace of traceResults">
@@ -43,36 +44,25 @@ import {Component, Input} from "@angular/core";
     `]
 })
 export class FeatureSearchComponent {
-    @Input() visibility: boolean = true;
-
-    color: string = "#00f2ff";
-    currentTilesProccessed: number = 50;
-    tilesTotal: number = 100;
-    elapsedTime: number = 0;
-    featuresTotal: number = 9000;
-    results: Array<any> = [
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" },
-        { label: "Road.54556565.0" }
-    ];
-    traceResults: Array<any> = [
-        { name: "Trace Result 0", content: "Trace result" },
-        { name: "Trace Result 1", content: "Trace result" },
-        { name: "Trace Result 2", content: "Trace result" },
-        { name: "Trace Result 3", content: "Trace result" }
-    ];
+    visibility: boolean = false;
+    results: Array<any> = [];
+    traceResults: Array<any> = [];
     selectedResult: any;
 
-    constructor() {
-
+    constructor(public searchService: SearchService) {
+        this.searchService.searchActive.subscribe(value => {
+            this.visibility = value;
+            this.results = [];
+        });
+        this.searchService.searchUpdates.subscribe(tileResult => {
+            for (const [mapTileKey, featureId, _] of tileResult.matches) {
+                // TODO: Also show info from the mapTileKey
+                this.results.push({label: featureId})
+            }
+        });
     }
 
     selectResult(event: any) {
-
+        // TODO: Jump to feature on selection.
     }
 }

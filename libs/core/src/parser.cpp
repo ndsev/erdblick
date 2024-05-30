@@ -130,6 +130,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     }
     return {
         tileLayer.id().toString(),
+        tileLayer.nodeId(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
@@ -211,6 +212,32 @@ TileLayerParser::filterFeatureJumpTargets(const std::string& queryString) const
     }
 
     return results;
+}
+
+void TileLayerParser::getDataSourceInfo(SharedUint8Array& out, std::string const& mapId)
+{
+    auto const& infoIt = info_.find(mapId);
+    if (infoIt == info_.end()) {
+        std::cout << "Could not find mapId!" << std::endl;
+        return;
+    }
+    out.writeToArray("[" + infoIt->second.toJson().dump() + "]");
+}
+
+void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nodeId)
+{
+    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
+    std::stringstream outStream;
+    fieldDict->write(outStream, 0);
+    out.writeToArray(outStream.str());
+}
+
+void TileLayerParser::addFieldDict(const SharedUint8Array& buffer, std::string const& nodeId)
+{
+    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
+    std::stringstream bufferStream;
+    bufferStream << buffer.toString();
+    fieldDict->read(bufferStream);
 }
 
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const
