@@ -232,11 +232,12 @@ void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nod
     out.writeToArray(outStream.str());
 }
 
-void TileLayerParser::addFieldDict(const SharedUint8Array& buffer, std::string const& nodeId)
+void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
-    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
     std::stringstream bufferStream;
     bufferStream << buffer.toString();
+    auto nodeId = mapget::Fields::readDataSourceNodeId(bufferStream);
+    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
     fieldDict->read(bufferStream);
 }
 

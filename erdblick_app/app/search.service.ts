@@ -1,10 +1,11 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
+import {Subject} from "rxjs";
 import {MapService} from "./map.service";
-import {SearchWorkerTask, SearchResultForTile} from "./search.worker";
+import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
 import {Color, PointPrimitiveCollection} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
+
 
 @Injectable({providedIn: 'root'})
 export class SearchService {
@@ -25,9 +26,9 @@ export class SearchService {
 
     constructor(private mapService: MapService) {
         // Instantiate workers.
-        const maxWorkers = navigator.hardwareConcurrency || 4;
+        const maxWorkers = 1; // navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker("./search.worker.js");
+            const worker = new Worker(new URL('./featurefilter.worker', import.meta.url));
             this.workers.push(worker);
             worker.onmessage = (ev: MessageEvent<SearchResultForTile>) => {
                 this.addSearchResult(ev.data);
@@ -39,8 +40,8 @@ export class SearchService {
         }
     }
 
-    setFilterString(q: string) {
-        if (q == this.currentQuery) {
+    run(query: string) {
+        if (query == this.currentQuery) {
             return;
         }
 
@@ -48,6 +49,7 @@ export class SearchService {
         //  an update-like function which is invoked when the user
         //  moves the viewport to run differential search on newly visible tiles.
         this.clear();
+        this.currentQuery = query;
 
         // Fill up work queue and start processing.
         for (const [_, tile] of this.mapService.loadedTileLayers) {
@@ -117,15 +119,16 @@ export class SearchService {
 
     private scheduleTileForWorker(worker: Worker, tileToProcess: FeatureTile) {
         worker.postMessage({
-            tileBlob: tileToProcess.tileFeatureLayerBlob,
+            tileBlob: tileToProcess.tileFeatureLayerBlob as Uint8Array,
             fieldDictBlob: uint8ArrayFromWasm((buf) => {
                 this.mapService.tileParser?.getFieldDict(buf, tileToProcess.nodeId)
-            }),
+            })!,
             query: this.currentQuery,
             dataSourceInfo: uint8ArrayFromWasm((buf) => {
                 this.mapService.tileParser?.getDataSourceInfo(buf, tileToProcess.mapName)
-            })
-        });
+            })!,
+            nodeId: tileToProcess.nodeId
+        } as SearchWorkerTask);
     }
 
     percentDone() {

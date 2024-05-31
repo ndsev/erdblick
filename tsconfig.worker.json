@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/worker",
+    // "lib": [
+    //   "ES2023",
+    //   "webworker"  // Ensuring web worker specific globals are included
+    // ],
+    "types": [],
+    "sourceMap": true,  // Enable source maps for easier debugging
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "declaration": false,
+    "importHelpers": true
+  },
+  "include": [
+    "erdblick_app/**/*.worker.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
+}

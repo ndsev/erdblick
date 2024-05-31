@@ -69,7 +69,7 @@ public:
     /**
      * Add a serialized field dictionary that is not wrapped in a message frame.
      */
-    void addFieldDict(SharedUint8Array const& buffer, std::string const& nodeId);
+    void addFieldDict(SharedUint8Array const& buffer);
 
     /**
      * Set layer info which will be used if the external doesn't fit.

@@ -93,8 +93,7 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string) => {
-                this.searchService.setFilterString(value);
-
+                this.searchService.run(value);
             },
             validate: (_: string) => {
                 return !simfilError;

@@ -18,7 +18,7 @@ npm run lint
 if [[ -z "$NG_DEVELOP" ]]; then
   npm run build -- -c production
 else
-  npm run build
+  npm run build --watch
 fi
 
 exit 0

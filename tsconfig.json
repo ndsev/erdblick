@@ -18,11 +18,11 @@
         "experimentalDecorators": true,
         "moduleResolution": "bundler",
         "importHelpers": true,
-        "target": "ES2022",
-        "module": "ES2022",
+        "target": "ESNext",
+        "module": "ESNext",
         "useDefineForClassFields": false,
         "lib": [
-            "ES2022",
+            "ESNext",
             "dom",
             "dom.iterable"
         ],
@@ -33,5 +33,8 @@
         "strictInjectionParameters": true,
         "strictInputAccessModifiers": true,
         "strictTemplates": true
-    }
+    },
+    "exclude": [
+        "erdblick_app/**/*.worker.ts"
+    ]
 }
