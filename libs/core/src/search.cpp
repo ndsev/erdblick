@@ -7,7 +7,7 @@ erdblick::FeatureLayerSearch::FeatureLayerSearch(mapget::TileFeatureLayer& tfl) 
 
 erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& q)
 {
-    auto const& expr = tfl_.compiledExpression(q);
+    auto const& expr = tfl_.compiledExpression(anyWrap(q));
     auto results = JsValue::List();
     auto mapTileKey = tfl_.id().toString();
 
@@ -37,4 +37,9 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::traceResults()
 {
     // TODO: Implement
     return {};
+}
+
+std::string erdblick::anyWrap(const std::string_view& q)
+{
+    return fmt::format("any({})", q);
 }
