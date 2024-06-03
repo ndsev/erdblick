@@ -6,6 +6,7 @@ import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService} from "./panel.service";
+import {FeatureSearchService} from "./feature.search.service";
 
 @Component({
     selector: 'search-panel',
@@ -112,7 +113,7 @@ export class SearchPanelComponent {
         jumpToTargetService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
-        })
+        });
     }
 
     parseMapgetTileId(value: string): number[] | undefined {
@@ -269,9 +270,9 @@ export class SearchPanelComponent {
     }
 
     showSearchOverlay(event: Event) {
+        event.stopPropagation();
         this.searchMenuVisible = true;
         this.sidePanelService.activeSidePanel.next(SidePanelService.SEARCH);
-        event.stopPropagation();
     }
 
     setSearchValue(value: string) {

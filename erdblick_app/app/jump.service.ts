@@ -5,7 +5,7 @@ import {MapService} from "./map.service";
 import {LocateResponse} from "./visualization.model";
 import {InfoMessageService} from "./info.service";
 import {coreLib} from "./wasm";
-import {SearchService} from "./search.service";
+import {FeatureSearchService} from "./feature.search.service";
 
 export interface SearchTarget {
     name: string;
@@ -40,7 +40,7 @@ export class JumpTargetService {
     constructor(private httpClient: HttpClient,
                 private mapService: MapService,
                 private messageService: InfoMessageService,
-                private searchService: SearchService) {
+                private searchService: FeatureSearchService) {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {

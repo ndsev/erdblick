@@ -22,7 +22,7 @@ import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
-import {SearchService} from "./search.service";
+import {FeatureSearchService} from "./feature.search.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -60,7 +60,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     constructor(public mapService: MapService,
                 public styleService: StyleService,
                 public parameterService: ParametersService,
-                public searchService: SearchService) {
+                public searchService: FeatureSearchService) {
 
         this.tileVisForPrimitive = new Map();
 

@@ -43,6 +43,7 @@ import {MenuModule} from "primeng/menu";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {ListboxModule} from "primeng/listbox";
+import {FeatureSearchService} from "./feature.search.service";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -104,7 +105,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         JumpTargetService,
         InspectionService,
         ParametersService,
-        SidePanelService
+        SidePanelService,
+        FeatureSearchService
     ],
     bootstrap: [AppComponent]
 })

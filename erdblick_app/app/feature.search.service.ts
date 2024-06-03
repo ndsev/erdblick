@@ -2,29 +2,42 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
 import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
-import {Color, PointPrimitiveCollection} from "./cesium";
+import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
+import {SidePanelService} from "./panel.service";
 
 
 @Injectable({providedIn: 'root'})
-export class SearchService {
+export class FeatureSearchService {
 
     currentQuery: string = ""
     workers: Array<Worker> = []
-    visualization: PointPrimitiveCollection = new PointPrimitiveCollection();
+    visualization: BillboardCollection = new BillboardCollection();
     visualizationChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
     workQueue: Array<FeatureTile> = [];
     totalTiles: number = 0;
     doneTiles: number = 0;
     searchUpdates: Subject<SearchResultForTile> = new Subject<SearchResultForTile>();
-    searchActive: Subject<boolean> = new Subject<boolean>();
+    isFeatureSearchActive: Subject<boolean> = new Subject<boolean>();
     pointColor: string = "#ff69b4";
-    timeElapsed: number = 0;  // TODO: Set
+    timeElapsed: string = this.formatTime(0);  // TODO: Set
     totalFeatureCount: number = 0;
 
-    constructor(private mapService: MapService) {
+    private startTime: number = 0;
+    private endTime: number = 0;
+
+    marker = () => {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
+           <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" 
+            fill="white"/>
+        </svg>`
+        return `data:image/svg+xml;base64,${btoa(svg)}`;
+    };
+
+    constructor(private mapService: MapService,
+                private sidePanelService: SidePanelService) {
         // Instantiate workers.
         const maxWorkers = 1; // navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
@@ -50,6 +63,7 @@ export class SearchService {
         //  moves the viewport to run differential search on newly visible tiles.
         this.clear();
         this.currentQuery = query;
+        this.startTime = Date.now();
 
         // Fill up work queue and start processing.
         for (const [_, tile] of this.mapService.loadedTileLayers) {
@@ -67,11 +81,14 @@ export class SearchService {
             }
         }
 
-        this.searchActive.next(true);
+        this.isFeatureSearchActive.next(true);
+        this.sidePanelService.activeSidePanel.next(SidePanelService.FEATURESEARCH);
     }
 
     stop() {
         this.workQueue = [];
+        this.endTime = Date.now();
+        this.timeElapsed = this.formatTime(this.endTime - this.startTime);
     }
 
     clear() {
@@ -81,9 +98,11 @@ export class SearchService {
         this.resultsPerTile.clear();
         this.totalTiles = 0;
         this.doneTiles = 0;
-        this.searchActive.next(false);
+        this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
-        this.timeElapsed = 0;
+        this.startTime = 0;
+        this.endTime = 0;
+        this.timeElapsed = this.formatTime(0);
         this.visualizationChanged.next();
     }
 
@@ -99,21 +118,27 @@ export class SearchService {
             this.resultsPerTile.set(mapTileKey, tileResult);
 
             tileResult.pointPrimitiveIndices = [];
-            const color = Color.fromCssColorString(this.pointColor);
             for (const [_, __, position] of tileResult.matches) {
                 tileResult.pointPrimitiveIndices.push(this.visualization.length);
                 this.visualization.add({
                     position: position,
-                    color: color,
-                    outlineColor: Color.GHOSTWHITE
+                    image: this.marker(),
+                    width: 32,
+                    height: 32,
+                    pixelOffset: new Cartesian2(0, -10),
+                    eyeOffset: new Cartesian3(0, 0, -100)
                 });
             }
         }
 
         // Broadcast the search progress.
         ++this.doneTiles;
+        this.endTime = Date.now();
+        console.log(this.startTime, this.endTime);
+        this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.totalFeatureCount += tileResult.numFeatures;
         this.searchUpdates.next(tileResult);
+        this.updatePointColor();
         this.visualizationChanged.next();
     }
 
@@ -133,6 +158,7 @@ export class SearchService {
 
     percentDone() {
         if (this.totalTiles == 0) {
+            this.endTime = this.startTime;
             return 100;
         }
         return this.doneTiles/this.totalTiles * 100;
@@ -144,5 +170,17 @@ export class SearchService {
             this.visualization.get(i).color = color;
         }
         this.visualizationChanged.next();
+    }
+
+    private formatTime(milliseconds: number): string {
+        const mseconds = Math.floor(milliseconds % 1000);
+        const seconds = Math.floor((milliseconds / 1000) % 60);
+        const minutes = Math.floor((milliseconds / 60000) % 60);
+        const hours = Math.floor((milliseconds / 3600000) % 24);
+
+        return `${hours ? `${hours}h ` : ''}
+                ${minutes ? `${minutes}m ` : ''}
+                ${seconds ? `${seconds}s ` : ''}
+                ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
 }

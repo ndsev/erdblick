@@ -161,7 +161,9 @@ export class MapService {
             this.selectionVisualizations.forEach(visu => this.tileVisualizationDestructionTopic.next(visu));
             this.selectionVisualizations = [];
 
-            this.sidePanelService.activeSidePanel.next(SidePanelService.NONE);
+            if (this.sidePanelService.activeSidePanel.getValue() != SidePanelService.FEATURESEARCH) {
+                this.sidePanelService.activeSidePanel.next(SidePanelService.NONE);
+            }
             if (!selectedFeatureWrapper)
                 return;
 
