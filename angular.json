@@ -32,7 +32,7 @@
                             },
                             {
                                 "glob": "**/*",
-                                "input": "styles",
+                                "input": "config/styles",
                                 "output": "/bundle/styles"
                             },
                             {
@@ -71,7 +71,7 @@
                                 {
                                     "type": "initial",
                                     "maximumWarning": "500kb",
-                                    "maximumError": "60mb"
+                                    "maximumError": "100mb"
                                 },
                                 {
                                     "type": "anyComponentStyle",

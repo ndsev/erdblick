@@ -113,6 +113,23 @@ uint32_t JsValue::size() const {
 #endif
 }
 
+std::string JsValue::toString() const {
+    switch(type()) {
+        case Type::Null:
+            return "Null";
+        case Type::Bool:
+            return fmt::format("{}", as<bool>());
+        case Type::Number:
+            return fmt::format("{}", as<double>());
+        case Type::String:
+            return fmt::format("{}", as<std::string>());
+        case Type::ObjectOrList:
+            return "Object";
+        default:
+            return "Undefined";
+    }
+}
+
 JsValue::Type JsValue::type() const
 {
 #ifdef EMSCRIPTEN

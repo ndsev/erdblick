@@ -34,8 +34,10 @@ export class JumpTargetService {
     mapSelectionSubject = new Subject<Array<string>>();
     setSelectedMap: ((choice: string|null)=>void)|null = null;
 
-    constructor(private httpClient: HttpClient, private mapService: MapService, private messageService: InfoMessageService) {
-        httpClient.get("/config.json", {responseType: 'json'}).subscribe(
+    constructor(private httpClient: HttpClient,
+                private mapService: MapService,
+                private messageService: InfoMessageService) {
+        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe(
             {
                 next: (data: any) => {
                     try {
@@ -91,11 +93,13 @@ export class JumpTargetService {
     }
 
     async highlightFeature(mapId: string, featureId: string) {
-        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId);
-        if (!featureJumpTargets.length) {
+        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
+        const validIndex = featureJumpTargets.findIndex(action => !action.error);
+        if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
+            return;
         }
-        await this.jumpToFeature(featureJumpTargets[0], false, mapId);
+        await this.jumpToFeature(featureJumpTargets[validIndex], false, mapId);
     }
 
     async jumpToFeature(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null) {

@@ -1,7 +1,7 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {MapInfoItem, MapService} from "./map.service";
-import {StyleService} from "./style.service";
+import {ErdblickStyle, StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
@@ -9,6 +9,8 @@ import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {coreLib} from "./wasm";
 import {SidePanelService} from "./panel.service";
+import {MenuItem} from "primeng/api";
+import {Menu} from "primeng/menu";
 
 
 @Component({
@@ -36,22 +38,28 @@ import {SidePanelService} from "./panel.service";
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
 <!--                            <p-checkbox [(ngModel)]="mapItem.value.visible"-->
-<!--                                        (ngModelChange)="toggleLayer(mapItem.key, '')"-->
-<!--                                        [label]="mapItem.key" [binary]="true"/>-->
+                            <!--                                        (ngModelChange)="toggleLayer(mapItem.key, '')"-->
+                            <!--                                        [label]="mapItem.key" [binary]="true"/>-->
                             {{ mapItem.key }}
                         </span>
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
-                            <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                                <p-checkbox [(ngModel)]="mapLayer.value.visible"
-                                            (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
-                                            [label]="mapLayer.key" [binary]="true"/>
-                            </span>
+                            <div class="font-bold white-space-nowrap"
+                                 style="margin-left: 0.5em; display: flex; align-items: center;">
+                                <span class="material-icons" style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                      (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">arrow_drop_down</span>
+                                <span>
+                                    <p-checkbox [(ngModel)]="mapLayer.value.visible" 
+                                                (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
+                                                [label]="mapLayer.key" [binary]="true"/>
+                                </span>
+                            </div>
                             <div class="layer-controls">
                                 <!--                                <p-checkbox [(ngModel)]="gridEnabled" (ngModelChange)="updateGrid()" label="Grid" [value]="true" />-->
                                 <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
                                           label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
                                           [style]="{'padding-left': '0', 'padding-right': '0'}">
-                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
+                                    <span class="material-icons"
+                                          style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
                                 </p-button>
                                 <p-button *ngIf="mapLayer.value.coverage[0]"
                                           (click)="focus(mapLayer.value.coverage[0], $event)"
@@ -81,18 +89,21 @@ import {SidePanelService} from "./panel.service";
                     <div *ngIf="styleService.builtinStylesCount">
                         <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
                             <div *ngIf="!style.value.imported" class="flex-container">
-                            <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                                {{ style.key }}
-                            </span>
+                                <div class="font-bold white-space-nowrap"
+                                     style="margin-left: 0.5em; display: flex; align-items: center;">
+                                    <span class="material-icons"
+                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                          (click)="showStylesToggleMenu($event, style.key)">arrow_drop_down</span>
+                                    <span>
+                                        <p-checkbox [(ngModel)]="style.value.enabled"
+                                                    (ngModelChange)="toggleStyle(style.key)"
+                                                    [label]="style.key" [binary]="true"/>
+                                    </span>
+                                </div>
                                 <div class="layer-controls style-controls">
                                     <p-button (click)="showStyleEditor(style.key)"
                                               icon="pi pi-file-edit"
                                               label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="toggleStyle(style.key)"
-                                              icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                              label="" pTooltip="Toggle style"
                                               tooltipPosition="bottom">
                                     </p-button>
                                     <p-button (click)="resetStyle(style.key)"
@@ -112,18 +123,21 @@ import {SidePanelService} from "./panel.service";
                     <div *ngIf="styleService.importedStylesCount">
                         <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
                             <div *ngIf="style.value.imported" class="flex-container">
-                            <span class="font-bold white-space-nowrap" style="margin-left: 0.5em">
-                                {{ style.key }}
-                            </span>
+                                <div class="font-bold white-space-nowrap"
+                                     style="margin-left: 0.5em; display: flex; align-items: center;">
+                                    <span class="material-icons"
+                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                          (click)="showStylesToggleMenu($event, style.key)">arrow_drop_down</span>
+                                    <span>
+                                        <p-checkbox [(ngModel)]="style.value.enabled"
+                                                    (ngModelChange)="toggleStyle(style.key)"
+                                                    [label]="style.key" [binary]="true"/>
+                                    </span>
+                                </div>
                                 <div class="layer-controls style-controls">
                                     <p-button (click)="showStyleEditor(style.key)"
                                               icon="pi pi-file-edit"
                                               label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="toggleStyle(style.key)"
-                                              icon="{{style.value.enabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                                              label="" pTooltip="Toggle style"
                                               tooltipPosition="bottom">
                                     </p-button>
                                     <p-button (click)="removeStyle(style.key)"
@@ -150,21 +164,20 @@ import {SidePanelService} from "./panel.service";
                     </div>
                 </div>
                 <div class="styles-container">
-                    <div class="flex-container">
-                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em"></span>
-                        <div class="layer-controls style-controls">
-                            <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import"
-                                          [customUpload]="true" [fileLimit]="1" [multiple]="false"
-                                          accept=".yaml" [maxFileSize]="1048576"
-                                          (uploadHandler)="importStyle($event)"
-                                          pTooltip="Import style" tooltipPosition="bottom"
-                                          class="import-dialog" #styleUploader>
-                            </p-fileUpload>
-                        </div>
+                    <div class="styles-import">
+                        <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import Style"
+                                      [customUpload]="true" [fileLimit]="1" [multiple]="false"
+                                      accept=".yaml" [maxFileSize]="1048576"
+                                      (uploadHandler)="importStyle($event)"
+                                      pTooltip="Import style" tooltipPosition="bottom"
+                                      class="import-dialog" #styleUploader>
+                        </p-fileUpload>
                     </div>
                 </div>
             </p-fieldset>
         </p-dialog>
+        <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
+                [style]="{'font-size': '0.9em'}"></p-menu>
         <p-button (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
@@ -209,6 +222,10 @@ export class MapPanelComponent {
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
 
+    @ViewChild('menu') toggleMenu!: Menu;
+    toggleMenuItems: MenuItem[] | undefined;
+    isToggleMenuVisible: boolean = false;
+
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
 
@@ -230,6 +247,106 @@ export class MapPanelComponent {
                 this.layerDialogVisible = false;
             }
         })
+    }
+
+    showStylesToggleMenu(event: MouseEvent, styleId: string) {
+        this.toggleMenu.toggle(event);
+        this.toggleMenuItems = [
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = styleId == id;
+                        this.parameterService.setStyleConfig(id, styleId == id);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = styleId != id;
+                        this.parameterService.setStyleConfig(id, styleId != id);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = false;
+                        this.parameterService.setStyleConfig(id, false);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    for (const id of this.styleService.styleData.keys()) {
+                        this.styleService.styleData.get(id)!.enabled = true;
+                        this.parameterService.setStyleConfig(id, true);
+                    }
+                    this.styleService.reapplyAllStyles();
+                    this.mapService.update();
+                }
+            }
+        ];
+    }
+
+    showLayersToggleMenu(event: MouseEvent, mapName: string, layerName: string) {
+        this.toggleMenu.toggle(event);
+        this.toggleMenuItems = [
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    if (this.mapItems.has(mapName)) {
+                        for (const id of this.mapItems.get(mapName)!.layers.keys()!) {
+                            this.mapItems.get(mapName)!.layers.get(id)!.visible = id == layerName;
+                            this.toggleLayer(mapName, layerName);
+                        }
+                    }
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    if (this.mapItems.has(mapName)) {
+                        for (const id of this.mapItems.get(mapName)!.layers.keys()!) {
+                            this.mapItems.get(mapName)!.layers.get(id)!.visible = id != layerName;
+                            this.toggleLayer(mapName, layerName);
+                        }
+                    }
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    if (this.mapItems.has(mapName)) {
+                        for (const id of this.mapItems.get(mapName)!.layers.keys()!) {
+                            this.mapItems.get(mapName)!.layers.get(id)!.visible = false;
+                            this.toggleLayer(mapName, layerName);
+                        }
+                    }
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    if (this.mapItems.has(mapName)) {
+                        for (const id of this.mapItems.get(mapName)!.layers.keys()!) {
+                            this.mapItems.get(mapName)!.layers.get(id)!.visible = true;
+                            this.toggleLayer(mapName, layerName);
+                        }
+                    }
+                }
+            }
+        ];
     }
 
     showLayerDialog() {
@@ -262,7 +379,6 @@ export class MapPanelComponent {
             parameters.osmOpacity = this.osmOpacityValue;
             this.parameterService.parameters.next(parameters);
         }
-        this.parameterService.osmEnabled.next(this.osmEnabled);
     }
 
     toggleTileBorders(mapName: string, layerName: string) {

@@ -90,7 +90,10 @@ export class MapService {
         reject: null|((why: any)=>void),
     }|null = null;
 
-    constructor(public styleService: StyleService, public parameterService: ParametersService, private sidePanelService: SidePanelService, private messageService: InfoMessageService) {
+    constructor(public styleService: StyleService,
+                public parameterService: ParametersService,
+                private sidePanelService: SidePanelService,
+                private messageService: InfoMessageService) {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -295,8 +298,6 @@ export class MapService {
         if (layerId) {
             const layer = mapItem.layers.get(layerId);
             if (layer !== undefined) {
-                // visible = visible !== undefined ? visible : !mapItem.layers.get(layerId)!.visible;
-                // mapItem.layers.get(layerId)!.visible = visible;
                 this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
             }
         } else {
@@ -581,7 +582,7 @@ export class MapService {
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
-            undefined,
+            "",
             this.getMapLayerBorderState(mapName, layerName));
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
@@ -640,8 +641,12 @@ export class MapService {
         }
         this.selectionTopic.next(feature);
         if (focus) {
-            const position = feature.peek((parsedFeature: Feature)=>parsedFeature.center());
-            this.moveToWgs84PositionTopic.next(position);
+            this.focusOnFeature(feature);
         }
+    }
+
+    focusOnFeature(feature: FeatureWrapper) {
+        const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
+        this.moveToWgs84PositionTopic.next(position);
     }
 }

@@ -49,9 +49,6 @@ export class ErdblickViewComponent implements AfterViewInit {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
-    private tilesGridLayer: ImageryLayer | null = null;
-    private tilesGridSubLayer: ImageryLayer | null = null;
-    private tilesGridSuperLayer: ImageryLayer | null = null;
 
     /**
      * Construct a Cesium View with a Model.
@@ -351,8 +348,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         return new UrlTemplateImageryProvider({
             url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
             maximumLevel: 19,
-            tileWidth: 100,
-            tileHeight: 100
         });
     }
 

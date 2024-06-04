@@ -151,6 +151,19 @@ body {
         padding: 0;
     }
 
+    .filter-container {
+        width: 100%;
+    }
+
+    .filter-input {
+        height: 2.5em;
+        width: 100%;
+        padding-left: 2.5em;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+        direction: ltr;
+    }
+
     .resizable-container {
         width: 30em;
         min-width: 30em;
@@ -159,7 +172,7 @@ body {
         overflow: auto;
         direction: rtl;
         max-width: calc(100vw - 27em);
-        max-height: calc(100vh - 4.5em);
+        max-height: calc(100vh - 8.5em);
 
         .resize-handle {
             display: none;
@@ -168,19 +181,6 @@ body {
         .p-tree {
             border: none;
             padding: 0;
-            direction: ltr;
-        }
-
-        .filter-container {
-            width: 100%;
-        }
-
-        .filter-input {
-            height: 2.5em;
-            width: 100%;
-            padding-left: 2.5em;
-            border-radius: 6px;
-            border: solid 1px lightgray;
             direction: ltr;
         }
 
@@ -230,6 +230,10 @@ body {
             .p-divider {
                 display: none;
             }
+        }
+
+        .p-divider {
+            margin: 0.9em 0;
         }
 
         .search-option {
@@ -303,6 +307,7 @@ body {
         .slider-input {
             width: 14em;
             font-size: 0.9em;
+            padding: 0.5em 0.75em;
         }
     }
 
@@ -415,11 +420,22 @@ body {
             font-size: 0.9em;
         }
 
+        &:hover {
+            .layer-controls {
+                visibility: visible;
+                opacity: 1;
+                transition: opacity 0.25s, visibility 0.25s;
+            }
+        }
+
         .layer-controls {
             display: flex;
             gap: 0.5em;
-            width: 12em;
+            width: 8em;
             justify-content: flex-end;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0s, visibility 0s;
 
             button {
                 width: 2em;
@@ -441,14 +457,29 @@ body {
             .p-inputnumber-buttons-horizontal .p-inputnumber-input {
                 order: 2;
                 border-radius: 0;
-                width: 3em;
+                width: 2.5em;
                 text-align: center;
                 height: 2em;
+                padding: 0;
             }
         }
 
         .style-controls {
             justify-content: flex-end;
+        }
+    }
+
+    .styles-import {
+        justify-content: center;
+        align-items: center;
+        display: flex;
+
+        .p-fileupload {
+            span {
+                box-shadow: none;
+                min-width: 6.4em;
+                font-size: 0.9em;
+            }
         }
     }
 }
@@ -508,6 +539,12 @@ body {
     .cm-editor {
         width: 0;
         flex-grow: 1;
+    }
+}
+
+.filter-panel {
+    .p-overlaypanel-content {
+        padding: 0.75em;
     }
 }
 

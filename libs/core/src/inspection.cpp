@@ -13,13 +13,22 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     {
         auto scope = push(convertStringView("Identifiers"), "", ValueType::Section);
         push("type", "typeId", ValueType::String)->value_ = convertStringView(featurePtr->typeId());
-        if (auto prefix = featurePtr->model().getIdPrefix()) {
-            for (auto const& [k, v] : prefix->fields()) {
-                convertField(k, v);
-            }
-        }
-        for (auto const& [k, v] : featurePtr->id()->fields()) {
-            convertField(k, v);
+        // TODO: Investigate and fix the issue for "index out of bounds" error.
+        //  Affects boundaries and lane connectors
+//        if (auto prefix = featurePtr->model().getIdPrefix()) {
+//            for (auto const& [k, v] : prefix->fields()) {
+//                convertField(k, v);
+//            }
+//        }
+//        for (auto const& [k, v] : featurePtr->id()->fields()) {
+//            convertField(k, v);
+//        }
+        for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
+            auto &field = current_->children_.emplace_back();
+            field.key_ = convertStringView(key);
+            field.value_ = JsValue::fromVariant(value);
+            field.type_ = ValueType::String;
+            field.geoJsonPath_ = convertStringView(key).toString();
         }
     }
 
@@ -239,7 +248,7 @@ InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
 InspectionConverter::OptionalValueAndType
 InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelNode::Ptr& value)
 {
-    auto fieldScope = push(fieldName, fieldName.as<std::string>());
+    auto fieldScope = push(fieldName, fieldName.toString());
     bool isArray = false;
     OptionalValueAndType singleValue;
 
