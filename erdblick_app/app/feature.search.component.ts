@@ -70,7 +70,7 @@ export class FeatureSearchComponent {
             for (const [mapTileKey, featureId, _] of tileResult.matches) {
                 // TODO: Also show info from the mapTileKey
                 const mapId = mapTileKey.split(':')[1]
-                this.results = [...this.results, {label: `${featureId} (${mapId})`, mapId: mapId, featureId: featureId}]
+                this.results = [...this.results, {label: `${featureId}`, mapId: mapId, featureId: featureId}]
             }
         });
     }

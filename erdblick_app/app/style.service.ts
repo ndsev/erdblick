@@ -358,7 +358,6 @@ export class StyleService {
             return;
         }
         let style = this.styleData.get(styleId)!;
-        style.enabled = enabled !== undefined ? enabled : !style.enabled;
         this.reapplyStyle(styleId);
         this.parameterService.setStyleConfig(styleId, style.enabled);
     }
