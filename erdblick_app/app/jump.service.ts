@@ -4,12 +4,15 @@ import {HttpClient} from "@angular/common/http";
 import {MapService} from "./map.service";
 import {LocateResponse} from "./visualization.model";
 import {InfoMessageService} from "./info.service";
+import {coreLib} from "./wasm";
+import {FeatureSearchService} from "./feature.search.service";
 
-export interface JumpTarget {
+export interface SearchTarget {
     name: string;
     label: string;
     enabled: boolean;
-    jump: (value: string) => number[] | undefined;
+    jump?: (value: string) => number[] | undefined;
+    execute?: (value: string) => void;
     validate: (value: string) => boolean;
 }
 
@@ -23,9 +26,10 @@ interface FeatureJumpAction {
 @Injectable({providedIn: 'root'})
 export class JumpTargetService {
 
+    markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
     targetValueSubject = new BehaviorSubject<string>("");
-    jumpTargets = new BehaviorSubject<Array<JumpTarget>>([]);
-    extJumpTargets: Array<JumpTarget> = [];
+    jumpTargets = new BehaviorSubject<Array<SearchTarget>>([]);
+    extJumpTargets: Array<SearchTarget> = [];
 
     // Communication channels with the map selection dialog (in SearchPanelComponent).
     // The mapSelectionSubject triggers the display of the dialog, and
@@ -36,39 +40,65 @@ export class JumpTargetService {
 
     constructor(private httpClient: HttpClient,
                 private mapService: MapService,
-                private messageService: InfoMessageService) {
-        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe(
-            {
-                next: (data: any) => {
-                    try {
-                        if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
-                            let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
-                            if (jumpTargetsConfig !== undefined) {
-                                // Using string interpolation so webpack can trace imports from the location
-                                import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
-                                    return plugin.default() as Array<JumpTarget>;
-                                }).then((jumpTargets: Array<JumpTarget>) => {
-                                    this.extJumpTargets = jumpTargets;
-                                    this.update();
-                                }).catch((error) => {
-                                    console.log(error);
-                                });
-                                return;
-                            }
+                private messageService: InfoMessageService,
+                private searchService: FeatureSearchService) {
+        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
+            next: (data: any) => {
+                try {
+                    if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
+                        let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
+                        if (jumpTargetsConfig !== undefined) {
+                            // Using string interpolation so webpack can trace imports from the location
+                            import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
+                                return plugin.default() as Array<SearchTarget>;
+                            }).then((jumpTargets: Array<SearchTarget>) => {
+                                this.extJumpTargets = jumpTargets;
+                                this.update();
+                            }).catch((error) => {
+                                console.log(error);
+                            });
+                            return;
                         }
-                    } catch (error) {
-                        console.log(error);
                     }
-                },
-                error: error => {
+                } catch (error) {
                     console.log(error);
                 }
-            });
+            },
+            error: error => {
+                console.log(error);
+            }
+        });
 
         // Filter out feature jump targets based on search value.
-        this.targetValueSubject.subscribe(value => {
+        this.targetValueSubject.subscribe(_ => {
             this.update();
         })
+    }
+
+    getFeatureMatchTarget(): SearchTarget {
+        let simfilError = '';
+        try {
+            coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
+        } catch (e: any) {
+            const parsingError = e.message.split(':', 2);
+            console.log(parsingError)
+            simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
+        }
+        let label = "Match features with a filter expression";
+        if (simfilError) {
+            label += `<br><span class="search-option-warning">${simfilError}</span>`;
+        }
+        return {
+            name: "Match Features",
+            label: label,
+            enabled: false,
+            execute: (value: string) => {
+                this.searchService.run(value);
+            },
+            validate: (_: string) => {
+                return !simfilError;
+            }
+        }
     }
 
     update() {
@@ -84,12 +114,17 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    jump: (value: string) => { this.jumpToFeature(fjt).then(); return null; },
-                    validate: (value: string) => { return !fjt.error; },
+                    execute: (_: string) => { this.jumpToFeature(fjt).then(); },
+                    validate: (_: string) => { return !fjt.error; },
                 }
             });
         }
-        this.jumpTargets.next([...this.extJumpTargets, ...featureJumpTargetsConverted]);
+
+        this.jumpTargets.next([
+            this.getFeatureMatchTarget(),
+            ...featureJumpTargetsConverted,
+            ...this.extJumpTargets
+        ]);
     }
 
     async highlightFeature(mapId: string, featureId: string) {

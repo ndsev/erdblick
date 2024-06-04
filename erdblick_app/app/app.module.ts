@@ -35,11 +35,18 @@ import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
+import {CoordinatesPanelComponent} from "./coordinates.panel.component";
 import {initializeLibrary} from "./wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {SidePanelService} from "./panel.service";
 import {MenuModule} from "primeng/menu";
+import {CardModule} from "primeng/card";
+import {CoordinatesService} from "./coordinates.service";
+import {FeatureSearchComponent} from "./feature.search.component";
+import {ColorPickerModule} from "primeng/colorpicker";
+import {ListboxModule} from "primeng/listbox";
+import {FeatureSearchService} from "./feature.search.service";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -57,7 +64,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         InspectionPanelComponent,
         PreferencesComponent,
         EditorComponent,
-        ErdblickViewComponent
+        ErdblickViewComponent,
+        CoordinatesPanelComponent,
+        FeatureSearchComponent
     ],
     imports: [
         BrowserModule,
@@ -83,7 +92,10 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FileUploadModule,
         CheckboxModule,
         InputTextModule,
-        MenuModule
+        MenuModule,
+        CardModule,
+        ColorPickerModule,
+        ListboxModule
     ],
     providers: [
         {
@@ -98,7 +110,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         JumpTargetService,
         InspectionService,
         ParametersService,
-        SidePanelService
+        SidePanelService,
+        CoordinatesService,
+        FeatureSearchService
     ],
     bootstrap: [AppComponent]
 })

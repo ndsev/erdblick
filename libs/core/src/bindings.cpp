@@ -8,6 +8,7 @@
 #include "testdataprovider.h"
 #include "inspection.h"
 #include "geometry.h"
+#include "search.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -143,6 +144,12 @@ void setExceptionHandler(em::val handler) {
     });
 }
 
+/**  Validate provided SIMFIL query */
+void validateSimfil(const std::string &query) {
+    auto simfilEnv = std::make_shared<simfil::Environment>(simfil::Environment::WithNewStringCache);
+    simfil::compile(*simfilEnv, query, false);
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
@@ -221,6 +228,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
             std::function<uint64_t(mapget::TileFeatureLayer const&)>(
                 [](mapget::TileFeatureLayer const& self) { return self.tileId().value_; }))
         .function(
+            "numFeatures",
+            std::function<uint32_t(mapget::TileFeatureLayer const&)>(
+                [](mapget::TileFeatureLayer const& self) { return self.numRoots(); }))
+        .function(
             "center",
             std::function<em::val(mapget::TileFeatureLayer const&)>(
                 [](mapget::TileFeatureLayer const& self)
@@ -264,9 +275,16 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
+    ////////// FeatureLayerSearch
+    em::class_<FeatureLayerSearch>("FeatureLayerSearch")
+        .constructor<mapget::TileFeatureLayer&>()
+        .function("filter", &FeatureLayerSearch::filter)
+        .function("traceResults", &FeatureLayerSearch::traceResults);
+
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
+        .field("nodeId", &TileLayerParser::TileLayerMetadata::nodeId)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
@@ -276,7 +294,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
+        .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
+        .function("getFieldDict", &TileLayerParser::getFieldDict)
+        .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
@@ -314,4 +335,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Set an exception handler
     em::function("setExceptionHandler", &setExceptionHandler);
+
+    ////////// Validate SIMFIL query
+    em::function("validateSimfilQuery", &validateSimfil);
 }

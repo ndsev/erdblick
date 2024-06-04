@@ -1,6 +1,7 @@
 #include "rule.h"
 #include <iostream>
 #include "simfil/value.h"
+#include "search.h"
 
 namespace erdblick
 {
@@ -115,7 +116,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["filter"].IsDefined()) {
         // Parse a simfil filter expression, e.g. `properties.functionalRoadClass == 4`
-        filter_ = yaml["filter"].as<std::string>();
+        filter_ = anyWrap(yaml["filter"].as<std::string>());
     }
     if (yaml["selectable"].IsDefined()) {
         // Parse the selectable flag.

@@ -156,7 +156,7 @@ body {
     }
 
     .filter-input {
-        height: 2.5em;
+        height: 2em;
         width: 100%;
         padding-left: 2.5em;
         border-radius: 6px;
@@ -547,6 +547,74 @@ body {
         padding: 0.75em;
     }
 }
+
+.p-progressbar {
+    height: 1.5em;
+    font-size: 0.9em;
+}
+
+.p-colorpicker {
+    input {
+        height: 1em;
+        width: 1em;
+        margin: 0;
+    }
+}
+
+.trace-entries {
+    font-size: 0.9em;
+
+    .p-accordion-header .p-accordion-header-link {
+        padding: 0.8em;
+        font-size: 0.9em;
+    }
+
+    .p-accordion-content {
+        font-size: 0.9em;
+    }
+}
+
+.coordinates-container {
+    z-index: 100;
+    position: absolute;
+    bottom: 1em;
+    left: calc(50vw - 14em);
+    margin: 0 auto;
+    width: 24em;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+
+    .coordinates-panel {
+        width: 20em;
+
+        .p-card {
+            background: #ffffff88;
+        }
+
+        .p-card:hover {
+            background: #ffffffff;
+        }
+
+        .p-card-body {
+            padding: 0.5em 1em;
+        }
+
+        .p-card-content {
+            padding: 0;
+        }
+
+        .coordinates-entry {
+            display: flex;
+            align-items: center;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            justify-content: space-between;
+        }
+    }
+}
+
 
 @media only screen and (max-width: 56em) {
     .help-button {

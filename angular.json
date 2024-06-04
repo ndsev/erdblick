@@ -63,7 +63,8 @@
                         ],
                         "customWebpackConfig": {
                             "path": "./webpack.config.js"
-                        }
+                        },
+                        "webWorkerTsConfig": "tsconfig.worker.json"
                     },
                     "configurations": {
                         "production": {
@@ -127,7 +128,8 @@
                         "styles": [
                             "erdblick_app/styles.scss"
                         ],
-                        "scripts": []
+                        "scripts": [],
+                        "webWorkerTsConfig": "tsconfig.worker.json"
                     }
                 }
             }

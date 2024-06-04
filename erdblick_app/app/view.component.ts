@@ -2,26 +2,31 @@
 
 import {FeatureWrapper} from "./features.model";
 import {TileVisualization} from "./visualization.model"
-import {BehaviorSubject} from "rxjs"
 import {
     Cartesian2,
     Cartesian3,
     Cartographic,
+    CesiumMath,
     Color,
     ColorGeometryInstanceAttribute,
+    Entity,
     ImageryLayer,
-    CesiumMath,
+    LabelStyle,
     ScreenSpaceEventHandler,
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
-    Viewer
+    VerticalOrigin,
+    Viewer,
+    HeightReference
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
-import {Feature} from "../../build/libs/core/erdblick-core";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
+import {FeatureSearchService} from "./feature.search.service";
+import {CoordinatesService} from "./coordinates.service";
+import {JumpTargetService} from "./jump.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -49,16 +54,24 @@ export class ErdblickViewComponent implements AfterViewInit {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
+    private marker: Entity | null = null;
+    private markerIcon: string = `
+    <svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
+      <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="ghostwhite"/>
+    </svg>`;
 
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
-     * @param styleService
      * @param parameterService The parameter service, used to update
+     * @param coordinatesService Necessary to pass mouse events to the coordinates panel
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
-                public parameterService: ParametersService) {
+                public searchService: FeatureSearchService,
+                public parameterService: ParametersService,
+                public jumpService: JumpTargetService,
+                public coordinatesService: CoordinatesService) {
 
         this.tileVisForPrimitive = new Map();
 
@@ -129,7 +142,12 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
-            let feature = this.viewer.scene.pick(movement.position);
+            const position = movement.position;
+            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            if (coordinates !== undefined) {
+                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
+            }
+            let feature = this.viewer.scene.pick(position);
             if (this.isKnownCesiumFeature(feature)) {
                 this.setPickedCesiumFeature(feature);
             } else {
@@ -139,7 +157,12 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
-            let feature = this.viewer.scene.pick(movement.endPosition); // Notice that for MOUSE_MOVE, it's endPosition
+            const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
+            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            if (coordinates !== undefined) {
+                this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+            }
+            let feature = this.viewer.scene.pick(position);
             if (this.isKnownCesiumFeature(feature)) {
                 this.setHoveredCesiumFeature(feature);
             } else {
@@ -171,10 +194,31 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.openStreetMapLayer.show = parameters.osm;
                 this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
             }
+            if (parameters.marker && parameters.marked_position.length == 2) {
+                this.addMarker(Cartesian3.fromDegrees(
+                    Number(parameters.marked_position[0]),
+                    Number(parameters.marked_position[1]))
+                );
+            } else {
+                if (this.marker) {
+                    this.viewer.entities.remove(this.marker);
+                }
+            }
         });
 
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
+
+        this.viewer.scene.primitives.add(this.searchService.visualization);
+        this.searchService.visualizationChanged.subscribe(_ => {
+            this.viewer.scene.requestRender();
+        });
+
+        this.jumpService.markedPosition.subscribe(position => {
+            if (position.length >= 2) {
+                this.addMarker(Cartesian3.fromDegrees(position[1], position[0]));
+            }
+        });
     }
 
     /**
@@ -356,5 +400,25 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.openStreetMapLayer.alpha = opacity;
             this.viewer.scene.requestRender();
         }
+    }
+
+
+    addMarker(cartesian: Cartesian3) {
+        const markerIcon = `data:image/svg+xml;base64,${btoa(this.markerIcon)}`
+
+        if (this.marker) {
+            this.viewer.entities.remove(this.marker);
+        }
+
+        this.marker = this.viewer.entities.add({
+            position: cartesian,
+            billboard: {
+                image: markerIcon,
+                width: 32,
+                height: 32,
+                heightReference: HeightReference.CLAMP_TO_GROUND,
+                pixelOffset: new Cartesian2(0, -12),
+            }
+        });
     }
 }
