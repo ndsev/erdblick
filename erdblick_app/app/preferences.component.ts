@@ -41,7 +41,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             </div>
             <div class="button-container">
                 <label>Storage for imported styles:</label>
-                <p-button (click)="clearImportedStyles()" label="Delete" icon="pi pi-trash"></p-button>
+                <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
                 <label>Storage for modified built-in styles:</label>

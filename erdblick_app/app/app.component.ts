@@ -12,10 +12,11 @@ import {filter} from "rxjs";
     template: `
         <erdblick-view></erdblick-view>
         <map-panel></map-panel>
-        <p-toast position="bottom-center" key="tc"></p-toast>
+        <p-toast position="top-center" key="tc"></p-toast>
         <search-panel #searchoverlay></search-panel>
         <pref-components></pref-components>
         <inspection-panel></inspection-panel>
+        <coordinates-panel></coordinates-panel>
         <div id="info">
             {{ title }} {{ version }}
         </div>

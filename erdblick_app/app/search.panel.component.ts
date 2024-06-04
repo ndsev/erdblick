@@ -287,7 +287,11 @@ export class SearchPanelComponent {
 
     runTarget(item: SearchTarget) {
         if (item.jump !== undefined) {
-            this.jumpToWGS84(item.jump(this.searchInputValue));
+            const coord = item.jump(this.searchInputValue);
+            this.jumpToWGS84(coord);
+            if (coord !== undefined) {
+                this.jumpToTargetService.markedPosition.next(coord);
+            }
             return;
         }
 

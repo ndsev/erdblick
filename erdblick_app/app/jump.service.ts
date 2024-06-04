@@ -26,6 +26,7 @@ interface FeatureJumpAction {
 @Injectable({providedIn: 'root'})
 export class JumpTargetService {
 
+    markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
     targetValueSubject = new BehaviorSubject<string>("");
     jumpTargets = new BehaviorSubject<Array<SearchTarget>>([]);
     extJumpTargets: Array<SearchTarget> = [];
@@ -41,33 +42,32 @@ export class JumpTargetService {
                 private mapService: MapService,
                 private messageService: InfoMessageService,
                 private searchService: FeatureSearchService) {
-        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe(
-            {
-                next: (data: any) => {
-                    try {
-                        if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
-                            let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
-                            if (jumpTargetsConfig !== undefined) {
-                                // Using string interpolation so webpack can trace imports from the location
-                                import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
-                                    return plugin.default() as Array<SearchTarget>;
-                                }).then((jumpTargets: Array<SearchTarget>) => {
-                                    this.extJumpTargets = jumpTargets;
-                                    this.update();
-                                }).catch((error) => {
-                                    console.log(error);
-                                });
-                                return;
-                            }
+        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
+            next: (data: any) => {
+                try {
+                    if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
+                        let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
+                        if (jumpTargetsConfig !== undefined) {
+                            // Using string interpolation so webpack can trace imports from the location
+                            import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
+                                return plugin.default() as Array<SearchTarget>;
+                            }).then((jumpTargets: Array<SearchTarget>) => {
+                                this.extJumpTargets = jumpTargets;
+                                this.update();
+                            }).catch((error) => {
+                                console.log(error);
+                            });
+                            return;
                         }
-                    } catch (error) {
-                        console.log(error);
                     }
-                },
-                error: error => {
+                } catch (error) {
                     console.log(error);
                 }
-            });
+            },
+            error: error => {
+                console.log(error);
+            }
+        });
 
         // Filter out feature jump targets based on search value.
         this.targetValueSubject.subscribe(_ => {
@@ -122,8 +122,8 @@ export class JumpTargetService {
 
         this.jumpTargets.next([
             this.getFeatureMatchTarget(),
-            ...this.extJumpTargets,
-            ...featureJumpTargetsConverted
+            ...featureJumpTargetsConverted,
+            ...this.extJumpTargets
         ]);
     }
 

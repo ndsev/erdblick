@@ -35,11 +35,14 @@ import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
+import {CoordinatesPanelComponent} from "./coordinates.panel.component";
 import {initializeLibrary} from "./wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {SidePanelService} from "./panel.service";
 import {MenuModule} from "primeng/menu";
+import {CardModule} from "primeng/card";
+import {CoordinatesService} from "./coordinates.service";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {ListboxModule} from "primeng/listbox";
@@ -62,6 +65,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         PreferencesComponent,
         EditorComponent,
         ErdblickViewComponent,
+        CoordinatesPanelComponent,
         FeatureSearchComponent
     ],
     imports: [
@@ -89,6 +93,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         CheckboxModule,
         InputTextModule,
         MenuModule,
+        CardModule,
         ColorPickerModule,
         ListboxModule
     ],
@@ -106,6 +111,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         InspectionService,
         ParametersService,
         SidePanelService,
+        CoordinatesService,
         FeatureSearchService
     ],
     bootstrap: [AppComponent]

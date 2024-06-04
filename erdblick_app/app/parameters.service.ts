@@ -7,6 +7,8 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 interface ErdblickParameters extends Record<string, any> {
+    marker: boolean,
+    marked_position: Array<number>,
     selected: Array<string>,
     heading: number,
     pitch: number,
@@ -32,6 +34,16 @@ interface ParameterDescriptor {
 }
 
 const erdblickParameters: Record<string, ParameterDescriptor> = {
+    marker: {
+        converter: val => val === 'true',
+        validator: val => typeof val === 'boolean',
+        default: false
+    },
+    marked_position: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+        default: []
+    },
     selected: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
@@ -131,7 +143,8 @@ export class ParametersService {
     }
 
     setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
-        // Only set map layers, if there are no configured values yet.
+        // Only set map layers, if
+        // there are no configured values yet.
         if (this.p().layers.length) {
             return;
         }
@@ -158,6 +171,32 @@ export class ParametersService {
 
     unsetSelectedFeature() {
         this.p().selected = [];
+        this.parameters.next(this.p());
+    }
+
+    setMarkerState(enabled: boolean) {
+        this.p().marker = enabled;
+        if (enabled) {
+            this.parameters.next(this.p());
+        } else {
+            this.setMarkerPosition(null);
+        }
+    }
+
+    setMarkerPosition(position: Cartographic | null) {
+        if (!this.p().marker) {
+            this.p().marked_position = [];
+            this.parameters.next(this.p());
+            return;
+        }
+
+        if (position) {
+            const longitude = CesiumMath.toDegrees(position.longitude);
+            const latitude = CesiumMath.toDegrees(position.latitude);
+            this.p().marked_position = [longitude, latitude];
+        } else {
+            this.p().marked_position = [];
+        }
         this.parameters.next(this.p());
     }
 
