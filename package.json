@@ -38,7 +38,7 @@
         "tslib": "^2.3.0",
         "url": "^0.11.3",
         "util": "^0.12.5",
-        "zone.js": "~0.13.0"
+        "zone.js": "~0.14.0"
     },
     "devDependencies": {
         "@angular-builders/custom-webpack": "^16.0.0",
@@ -55,7 +55,6 @@
         "karma-chrome-launcher": "~3.2.0",
         "karma-coverage": "~2.2.0",
         "karma-jasmine": "~5.1.0",
-        "karma-jasmine-html-reporter": "~2.0.0",
-        "typescript": "~5.0.2"
+        "karma-jasmine-html-reporter": "~2.0.0"
     }
 }

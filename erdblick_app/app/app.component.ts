@@ -70,15 +70,15 @@ export class AppComponent {
             }
             const entries = [...Object.entries(parameters)];
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
-            this.updateQueryParams(Object.fromEntries(entries));
+            this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
         });
     }
 
-    updateQueryParams(params: Params): void {
+    updateQueryParams(params: Params, replaceUrl: boolean): void {
         this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: 'merge',
-            replaceUrl: true
+            replaceUrl: replaceUrl
         });
     }
 }

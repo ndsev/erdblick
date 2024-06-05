@@ -6,6 +6,7 @@ import {LocateResponse} from "./visualization.model";
 import {InfoMessageService} from "./info.service";
 import {coreLib} from "./wasm";
 import {FeatureSearchService} from "./feature.search.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 
 export interface SearchTarget {
     name: string;
@@ -41,6 +42,7 @@ export class JumpTargetService {
     constructor(private httpClient: HttpClient,
                 private mapService: MapService,
                 private messageService: InfoMessageService,
+                private sidePanelService: SidePanelService,
                 private searchService: FeatureSearchService) {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -93,6 +95,7 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string) => {
+                this.sidePanelService.panel = SidePanelState.FEATURESEARCH;
                 this.searchService.run(value);
             },
             validate: (_: string) => {

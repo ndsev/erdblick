@@ -39,7 +39,7 @@ import {CoordinatesPanelComponent} from "./coordinates.panel.component";
 import {initializeLibrary} from "./wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService} from "./sidepanel.service";
 import {MenuModule} from "primeng/menu";
 import {CardModule} from "primeng/card";
 import {CoordinatesService} from "./coordinates.service";

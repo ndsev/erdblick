@@ -8,7 +8,7 @@ import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {coreLib} from "./wasm";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 
@@ -242,8 +242,8 @@ export class MapPanelComponent {
         this.mapService.maps.subscribe(
             mapItems => this.mapItems = mapItems
         );
-        this.sidePanelService.activeSidePanel.subscribe(activePanel => {
-            if (activePanel != SidePanelService.MAPS) {
+        this.sidePanelService.observable().subscribe(activePanel => {
+            if (activePanel != SidePanelState.MAPS) {
                 this.layerDialogVisible = false;
             }
         })
@@ -352,7 +352,7 @@ export class MapPanelComponent {
     showLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
         if (this.layerDialogVisible) {
-            this.sidePanelService.activeSidePanel.next(SidePanelService.MAPS);
+            this.sidePanelService.panel = SidePanelState.MAPS;
         }
     }
 

@@ -90,7 +90,7 @@ interface Column {
                             </ng-template>
                             <ng-template pTemplate="emptymessage">
                                 <tr>
-                                    <td [attr.colspan]="cols.length">No data found.</td>
+                                    <td [attr.colspan]="cols.length">No entries found.</td>
                                 </tr>
                             </ng-template>
                         </p-treeTable>
@@ -170,6 +170,9 @@ export class InspectionPanelComponent implements OnInit  {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
             this.expandTreeNodes(this.filteredTree);
+            if (this.filterQuery) {
+                this.filterTree(this.filterQuery);
+            }
         });
 
         this.parametersService.parameters.pipe(filter(

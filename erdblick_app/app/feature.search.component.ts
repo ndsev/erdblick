@@ -3,7 +3,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
 import {MapService} from "./map.service";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 
 @Component({
     selector: "feature-search",
@@ -34,20 +34,15 @@ import {SidePanelService} from "./panel.service";
                     <span>{{ trace.content }}</span>
                 </p-accordionTab>
             </p-accordion>
-            <p-listbox class="results-listbox"
-                       [options]="results"
-                       [(ngModel)]="selectedResult"
-                       optionLabel="label"
-                       [virtualScroll]="true"
-                       [virtualScrollItemSize]="38"
-                       [multiple]="false"
-                       [metaKeySelection]="false"
-                       (onChange)="selectResult($event)"
-                       scrollHeight="37em"/>
+            <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
+                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="38"
+                       [multiple]="false" [metaKeySelection]="false"
+                       (onChange)="selectResult($event)" emptyMessage="No features matched."
+                       scrollHeight="37em"
+            />
         </p-dialog>
     `,
-    styles: [`
-    `]
+    styles: [``]
 })
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
@@ -60,8 +55,9 @@ export class FeatureSearchComponent {
                 public mapService: MapService,
                 public inspectionService: InspectionService,
                 public sidePanelService: SidePanelService) {
-        this.sidePanelService.activeSidePanel.subscribe(panel=> {
-            this.isPanelVisible = panel == SidePanelService.FEATURESEARCH;
+        this.sidePanelService.observable().subscribe(panel=> {
+            this.isPanelVisible = panel == SidePanelState.FEATURESEARCH ||
+                (panel == SidePanelState.SEARCH && this.sidePanelService.previousState == SidePanelState.FEATURESEARCH);
         });
         this.searchService.isFeatureSearchActive.subscribe(value => {
             this.results = [];
@@ -76,8 +72,9 @@ export class FeatureSearchComponent {
     }
 
     selectResult(event: any) {
-        // TODO: Jump to feature on selection.
-        this.jumpService.highlightFeature(event.value.mapId, event.value.featureId).then();
-        this.mapService.focusOnFeature(this.inspectionService.selectedFeature!)
+        if (event.value.mapId && event.value.featureId) {
+            this.jumpService.highlightFeature(event.value.mapId, event.value.featureId).then();
+            this.mapService.focusOnFeature(this.inspectionService.selectedFeature!)
+        }
     }
 }

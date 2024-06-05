@@ -7,7 +7,7 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 
 export interface LayerInfoItem extends Object {
@@ -161,8 +161,8 @@ export class MapService {
             this.selectionVisualizations.forEach(visu => this.tileVisualizationDestructionTopic.next(visu));
             this.selectionVisualizations = [];
 
-            if (this.sidePanelService.activeSidePanel.getValue() != SidePanelService.FEATURESEARCH) {
-                this.sidePanelService.activeSidePanel.next(SidePanelService.NONE);
+            if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
+                this.sidePanelService.panel = SidePanelState.NONE;
             }
             if (!selectedFeatureWrapper)
                 return;

@@ -5,7 +5,7 @@ import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {FeatureSearchService} from "./feature.search.service";
 
 @Component({
@@ -61,10 +61,8 @@ export class SearchPanelComponent {
             this.validateMenuItems();
         });
 
-        this.sidePanelService.activeSidePanel.subscribe((panel)=>{
-            if (panel != SidePanelService.SEARCH) {
-                this.searchMenuVisible = false;
-            }
+        this.sidePanelService.observable().subscribe((panel)=>{
+            this.searchMenuVisible = panel == SidePanelState.SEARCH;
         });
 
         this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
@@ -203,7 +201,7 @@ export class SearchPanelComponent {
     }
 
     jumpToWGS84(coordinates: number[] | undefined) {
-        this.searchMenuVisible = false;
+        this.sidePanelService.panel = SidePanelState.NONE;
         if (coordinates === null) {
             return;
         }
@@ -271,8 +269,7 @@ export class SearchPanelComponent {
 
     showSearchOverlay(event: Event) {
         event.stopPropagation();
-        this.searchMenuVisible = true;
-        this.sidePanelService.activeSidePanel.next(SidePanelService.SEARCH);
+        this.sidePanelService.panel = SidePanelState.SEARCH;
     }
 
     setSearchValue(value: string) {

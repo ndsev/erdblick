@@ -5,7 +5,7 @@ import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
 import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
-import {SidePanelService} from "./panel.service";
+import {SidePanelService, SidePanelState} from "./sidepanel.service";
 
 
 @Injectable({providedIn: 'root'})
@@ -36,8 +36,7 @@ export class FeatureSearchService {
         return `data:image/svg+xml;base64,${btoa(svg)}`;
     };
 
-    constructor(private mapService: MapService,
-                private sidePanelService: SidePanelService) {
+    constructor(private mapService: MapService) {
         // Instantiate workers.
         const maxWorkers = 1; // navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
@@ -82,7 +81,6 @@ export class FeatureSearchService {
         }
 
         this.isFeatureSearchActive.next(true);
-        this.sidePanelService.activeSidePanel.next(SidePanelService.FEATURESEARCH);
     }
 
     stop() {

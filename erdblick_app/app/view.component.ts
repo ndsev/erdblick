@@ -216,7 +216,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.jumpService.markedPosition.subscribe(position => {
             if (position.length >= 2) {
-                this.addMarker(Cartesian3.fromDegrees(position[1], position[0]));
+                this.parameterService.setMarkerState(true);
+                this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
             }
         });
     }

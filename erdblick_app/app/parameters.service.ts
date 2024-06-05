@@ -114,6 +114,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
+    private _replaceUrl: boolean = false;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
 
@@ -136,6 +137,12 @@ export class ParametersService {
                 this.saveParameters();
             }
         });
+    }
+
+    get replaceUrl() {
+        const currentValue = this._replaceUrl;
+        this._replaceUrl = true;
+        return currentValue;
     }
 
     p() {
@@ -165,6 +172,7 @@ export class ParametersService {
         const currentSelection = this.p().selected;
         if (currentSelection && (currentSelection[0] != mapId || currentSelection[1] != featureId)) {
             this.p().selected = [mapId, featureId];
+            this._replaceUrl = false;
             this.parameters.next(this.p());
         }
     }
