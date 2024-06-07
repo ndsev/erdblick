@@ -1,4 +1,4 @@
-import {Component, Input} from "@angular/core";
+import {ChangeDetectorRef, Component, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
@@ -10,9 +10,9 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
     template: `
         <p-dialog class="search-menu-dialog" header="Match Features" [(visible)]="isPanelVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
-            <p-progressBar [value]="searchService.percentDone()">
-                <ng-template pTemplate="content" let-currentTilesProccessed>
-                    <span>{{ searchService.doneTiles }}</span>/<span>{{ searchService.totalTiles }}</span>
+            <p-progressBar [value]="percentDone">
+                <ng-template pTemplate="content" let-percentDone>
+                    <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
                 </ng-template>
             </p-progressBar>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
@@ -35,7 +35,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
                 </p-accordionTab>
             </p-accordion>
             <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
-                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="38"
+                       optionLabel="label" [virtualScroll]="false" [virtualScrollItemSize]="38"
                        [multiple]="false" [metaKeySelection]="false"
                        (onChange)="selectResult($event)" emptyMessage="No features matched."
                        scrollHeight="37em"
@@ -49,6 +49,7 @@ export class FeatureSearchComponent {
     results: Array<any> = [];
     traceResults: Array<any> = [];
     selectedResult: any;
+    percentDone: number = 0;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
@@ -56,8 +57,7 @@ export class FeatureSearchComponent {
                 public inspectionService: InspectionService,
                 public sidePanelService: SidePanelService) {
         this.sidePanelService.observable().subscribe(panel=> {
-            this.isPanelVisible = panel == SidePanelState.FEATURESEARCH ||
-                (panel == SidePanelState.SEARCH && this.sidePanelService.previousState == SidePanelState.FEATURESEARCH);
+            this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
         });
         this.searchService.isFeatureSearchActive.subscribe(value => {
             this.results = [];
@@ -68,6 +68,9 @@ export class FeatureSearchComponent {
                 const mapId = mapTileKey.split(':')[1]
                 this.results = [...this.results, {label: `${featureId}`, mapId: mapId, featureId: featureId}]
             }
+        });
+        this.searchService.progress.subscribe(value => {
+            this.percentDone = value;
         });
     }
 

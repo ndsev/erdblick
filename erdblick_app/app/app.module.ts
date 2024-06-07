@@ -47,6 +47,7 @@ import {FeatureSearchComponent} from "./feature.search.component";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./feature.search.service";
+import {ClipboardService} from "./clipboard.service";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -112,7 +113,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ParametersService,
         SidePanelService,
         CoordinatesService,
-        FeatureSearchService
+        FeatureSearchService,
+        ClipboardService
     ],
     bootstrap: [AppComponent]
 })

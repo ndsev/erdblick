@@ -137,6 +137,10 @@ body {
     max-width: none;
 }
 
+.clear-icon {
+    right: 0.75rem;
+}
+
 .inspect-panel {
     position: absolute;
     top: 0.5em;
@@ -159,6 +163,7 @@ body {
         height: 2em;
         width: 100%;
         padding-left: 2.5em;
+        padding-right: 2.5em;
         border-radius: 6px;
         border: solid 1px lightgray;
         direction: ltr;
@@ -426,6 +431,20 @@ body {
                 opacity: 1;
                 transition: opacity 0.25s, visibility 0.25s;
             }
+
+            .level-indicator {
+                display: none;
+            }
+        }
+
+        .level-indicator {
+            display: block;
+            margin: 0;
+            order: 2;
+            width: 2.5em;
+            text-align: center;
+            height: 2em;
+            padding: 0;
         }
 
         .layer-controls {
@@ -578,16 +597,37 @@ body {
     z-index: 100;
     position: absolute;
     bottom: 1em;
-    left: calc(50vw - 14em);
+    left: 0;
     margin: 0 auto;
-    width: 24em;
+    width: 100%;
     display: flex;
     flex-direction: row;
     justify-content: center;
     align-items: center;
 
     .coordinates-panel {
-        width: 20em;
+        .coordinates-entries {
+            display: flex;
+            flex-direction: row;
+            padding-bottom: 0.5em;
+            gap: 1em;
+            overflow-y: auto;
+            margin: 0 auto;
+            max-width: calc(100vw - 25em);
+        }
+
+        .coordinates-button {
+            button {
+                padding-left: 0;
+                padding-right: 0;
+                width: 2em;
+                height: 2em;
+                box-shadow: none;
+                background: none;
+                border: none;
+                color: var(--text-color);
+            }
+        }
 
         .p-card {
             background: #ffffff88;
@@ -598,7 +638,7 @@ body {
         }
 
         .p-card-body {
-            padding: 0.5em 1em;
+            padding: 0.5em 1em 0 1em;
         }
 
         .p-card-content {
@@ -610,7 +650,7 @@ body {
             align-items: center;
             flex-direction: row;
             flex-wrap: nowrap;
-            justify-content: space-between;
+            gap: 0.5em;
         }
     }
 }

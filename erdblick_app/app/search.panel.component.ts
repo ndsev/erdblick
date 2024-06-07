@@ -15,7 +15,9 @@ import {FeatureSearchService} from "./feature.search.service";
             <i class="pi pi-search"></i>
             <input type="text" pInputText [(ngModel)]="searchInputValue"
                    (click)="showSearchOverlay($event)"
-                   (ngModelChange)="setSearchValue(searchInputValue)"/>
+                   (ngModelChange)="setSearchValue(searchInputValue)"
+                   (keydown)="onKeydown($event)"
+            />
         </span>
         <p-dialog class="search-menu-dialog" header="" [(visible)]="searchMenuVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" header="Search Options">
@@ -295,6 +297,14 @@ export class SearchPanelComponent {
         if (item.execute !== undefined) {
             item.execute(this.searchInputValue);
             return;
+        }
+    }
+
+    onKeydown(event: KeyboardEvent) {
+        if (event.key === 'Enter') {
+            this.runTarget(this.searchItems[0]);
+        } else if (event.key === 'Escape') {
+            this.searchInputValue = "";
         }
     }
 }

@@ -68,7 +68,7 @@ export class ErdblickViewComponent implements AfterViewInit {
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
-                public searchService: FeatureSearchService,
+                public featureSearchService: FeatureSearchService,
                 public parameterService: ParametersService,
                 public jumpService: JumpTargetService,
                 public coordinatesService: CoordinatesService) {
@@ -209,8 +209,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
 
-        this.viewer.scene.primitives.add(this.searchService.visualization);
-        this.searchService.visualizationChanged.subscribe(_ => {
+        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+        this.featureSearchService.visualizationChanged.subscribe(_ => {
             this.viewer.scene.requestRender();
         });
 
@@ -405,8 +405,6 @@ export class ErdblickViewComponent implements AfterViewInit {
 
 
     addMarker(cartesian: Cartesian3) {
-        const markerIcon = `data:image/svg+xml;base64,${btoa(this.markerIcon)}`
-
         if (this.marker) {
             this.viewer.entities.remove(this.marker);
         }
@@ -414,7 +412,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.marker = this.viewer.entities.add({
             position: cartesian,
             billboard: {
-                image: markerIcon,
+                image: this.featureSearchService.markerGraphics(),
                 width: 32,
                 height: 32,
                 heightReference: HeightReference.CLAMP_TO_GROUND,

@@ -24,11 +24,12 @@ export class FeatureSearchService {
     pointColor: string = "#ff69b4";
     timeElapsed: string = this.formatTime(0);  // TODO: Set
     totalFeatureCount: number = 0;
+    progress: Subject<number> = new Subject<number>();
 
     private startTime: number = 0;
     private endTime: number = 0;
 
-    marker = () => {
+    markerGraphics = () => {
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
            <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" 
             fill="white"/>
@@ -53,9 +54,9 @@ export class FeatureSearchService {
     }
 
     run(query: string) {
-        if (query == this.currentQuery) {
-            return;
-        }
+        // if (query == this.currentQuery) {
+        //     return;
+        // }
 
         // Clear current work queue/visualizations. TODO: Move towards
         //  an update-like function which is invoked when the user
@@ -69,6 +70,7 @@ export class FeatureSearchService {
             this.workQueue.push(tile);
         }
         this.totalTiles = this.workQueue.length;
+        this.isFeatureSearchActive.next(true);
 
         // Send a task to each worker to start processing.
         // Further tasks will be picked up in the worker's
@@ -79,8 +81,6 @@ export class FeatureSearchService {
                 this.scheduleTileForWorker(worker, tile);
             }
         }
-
-        this.isFeatureSearchActive.next(true);
     }
 
     stop() {
@@ -96,6 +96,7 @@ export class FeatureSearchService {
         this.resultsPerTile.clear();
         this.totalTiles = 0;
         this.doneTiles = 0;
+        this.progress.next(0);
         this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -119,8 +120,8 @@ export class FeatureSearchService {
             for (const [_, __, position] of tileResult.matches) {
                 tileResult.pointPrimitiveIndices.push(this.visualization.length);
                 this.visualization.add({
-                    position: position,
-                    image: this.marker(),
+                    position: new Cartesian3(position[0], position[1], position[2]),
+                    image: this.markerGraphics(),
                     width: 32,
                     height: 32,
                     pixelOffset: new Cartesian2(0, -10),
@@ -131,6 +132,7 @@ export class FeatureSearchService {
 
         // Broadcast the search progress.
         ++this.doneTiles;
+        this.progress.next(this.doneTiles/this.totalTiles * 100 | 0);
         this.endTime = Date.now();
         console.log(this.startTime, this.endTime);
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
@@ -152,14 +154,6 @@ export class FeatureSearchService {
             })!,
             nodeId: tileToProcess.nodeId
         } as SearchWorkerTask);
-    }
-
-    percentDone() {
-        if (this.totalTiles == 0) {
-            this.endTime = this.startTime;
-            return 100;
-        }
-        return this.doneTiles/this.totalTiles * 100;
     }
 
     updatePointColor() {

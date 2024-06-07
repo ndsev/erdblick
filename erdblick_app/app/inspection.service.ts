@@ -22,6 +22,7 @@ interface InspectionModelData {
 export class InspectionService {
 
     featureTree: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    featureTreeFilterValue: string = "";
     isInspectionPanelVisible: boolean = false;
     selectedFeatureGeoJsonText: string = "";
     selectedFeatureInspectionModel: Array<InspectionModelData> | null = null;
@@ -34,6 +35,7 @@ export class InspectionService {
         this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
             if (!selectedFeature) {
                 this.isInspectionPanelVisible = false;
+                this.featureTreeFilterValue = "";
                 this.parametersService.unsetSelectedFeature();
                 return;
             }
@@ -75,7 +77,10 @@ export class InspectionService {
             return treeNodes;
         }
 
-        let treeNodes: Array<TreeTableNode> = [];
+        let treeNodes: Array<TreeTableNode> = [{
+            data: {key: "mapId", value: this.selectedMapIdName, type: this.InspectionValueType.STRING},
+            children: []
+        }];
         if (this.selectedFeatureInspectionModel) {
             for (const section of this.selectedFeatureInspectionModel) {
                 const node: TreeTableNode = {};

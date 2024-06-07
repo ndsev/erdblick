@@ -1,5 +1,4 @@
 import {Component, OnInit, ViewChild} from "@angular/core";
-import {InfoMessageService} from "./info.service";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
@@ -8,6 +7,7 @@ import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
 import {distinctUntilChanged, filter} from "rxjs";
 import {coreLib} from "./wasm";
+import {ClipboardService} from "./clipboard.service";
 
 interface Column {
     field: string;
@@ -31,9 +31,12 @@ interface Column {
                          style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
                         <div class="p-input-icon-left filter-container">
                             <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
-                            <input class="filter-input" type="text" pInputText
-                                   placeholder="Filter data for selected feature"
-                                   (input)="filterEvent($event)"/>
+                            <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
+                                   [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
+                                   (keydown)="onKeydown($event)"
+                            />
+                            <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()" 
+                               class="pi pi-times clear-icon" style="cursor: pointer"></i>
                         </div>
                         <div>
                             <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
@@ -104,19 +107,19 @@ interface Column {
             <div class="font-bold white-space-nowrap"
                  style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
                 <span>
-                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree(filterQuery)"
+                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree()"
                                 label="Filter by Keys" [binary]="true"/>
                 </span>
                 <span>
-                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree(filterQuery)"
+                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree()"
                                 label="Filter by Values" [binary]="true"/>
                 </span>
                 <span>
-                    <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree(filterQuery)"
+                    <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree()"
                                 label="Filter only FeatureIDs" [binary]="true"/>
                 </span>
                 <span>
-                    <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree(filterQuery)"
+                    <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree()"
                                 label="Include Geometry Entries" [binary]="true"/>
                 </span>
             </div>
@@ -151,7 +154,6 @@ export class InspectionPanelComponent implements OnInit  {
         showDelay: 1000,
         autoHide: false
     };
-    filterQuery = "";
     filterByKeys = true;
     filterByValues = true;
     filterOnlyFeatureIds = false;
@@ -161,7 +163,7 @@ export class InspectionPanelComponent implements OnInit  {
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
 
-    constructor(private messageService: InfoMessageService,
+    constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
                 public mapService: MapService,
@@ -170,8 +172,8 @@ export class InspectionPanelComponent implements OnInit  {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
             this.expandTreeNodes(this.filteredTree);
-            if (this.filterQuery) {
-                this.filterTree(this.filterQuery);
+            if (this.inspectionService.featureTreeFilterValue) {
+                this.filterTree();
             }
         });
 
@@ -195,14 +197,7 @@ export class InspectionPanelComponent implements OnInit  {
     }
 
     copyToClipboard(text: string) {
-        navigator.clipboard.writeText(text).then(
-            () => {
-                this.messageService.showSuccess("Copied content to clipboard!");
-            },
-            () => {
-                this.messageService.showError("Could not copy content to clipboard.");
-            },
-        );
+        this.clipboardService.copyToClipboard(text);
     }
 
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
@@ -217,12 +212,8 @@ export class InspectionPanelComponent implements OnInit  {
         });
     }
 
-    filterEvent(event: any) {
-        this.filterQuery = event.target.value.toLowerCase();
-        this.filterTree(this.filterQuery);
-    }
-
-    filterTree(query: string) {
+    filterTree() {
+        const query = this.inspectionService.featureTreeFilterValue.toLowerCase();
         if (!query) {
             this.filteredTree = JSON.parse(this.jsonTree);
             this.expandTreeNodes(this.filteredTree);
@@ -350,4 +341,15 @@ export class InspectionPanelComponent implements OnInit  {
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
+
+    clearFilter() {
+        this.inspectionService.featureTreeFilterValue = "";
+        this.filterTree();
+    }
+
+    onKeydown(event: KeyboardEvent) {
+        if (event.key === 'Escape') {
+            this.clearFilter();
+        }
+    }
 }

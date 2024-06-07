@@ -26,10 +26,10 @@ import {Menu} from "primeng/menu";
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
                     </p-button>
                     <div *ngIf="osmEnabled" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="'Opacity: ' + osmOpacityValue"
+                        <input type="text" pInputText [(ngModel)]="osmOpacityString"
                                class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                                  class="w-full"></p-slider>
+                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()" class="w-full">
+                        </p-slider>
                     </div>
                 </div>
                 <p-divider></p-divider>
@@ -46,7 +46,7 @@ import {Menu} from "primeng/menu";
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
                                 <span class="material-icons" style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                      (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">arrow_drop_down</span>
+                                      (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
                                 <span>
                                     <p-checkbox [(ngModel)]="mapLayer.value.visible" 
                                                 (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
@@ -54,7 +54,6 @@ import {Menu} from "primeng/menu";
                                 </span>
                             </div>
                             <div class="layer-controls">
-                                <!--                                <p-checkbox [(ngModel)]="gridEnabled" (ngModelChange)="updateGrid()" label="Grid" [value]="true" />-->
                                 <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
                                           label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
                                           [style]="{'padding-left': '0', 'padding-right': '0'}">
@@ -77,6 +76,7 @@ import {Menu} from "primeng/menu";
                                                pTooltip="Change zoom level" tooltipPosition="bottom">
                                 </p-inputNumber>
                             </div>
+                            <input class="level-indicator" type="text" pInputText [disabled]="true" [(ngModel)]="mapLayer.value.level" />
                         </div>
                     </div>
                 </div>
@@ -93,7 +93,7 @@ import {Menu} from "primeng/menu";
                                      style="margin-left: 0.5em; display: flex; align-items: center;">
                                     <span class="material-icons"
                                           style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">arrow_drop_down</span>
+                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
                                     <span>
                                         <p-checkbox [(ngModel)]="style.value.enabled"
                                                     (ngModelChange)="toggleStyle(style.key)"
@@ -101,19 +101,14 @@ import {Menu} from "primeng/menu";
                                     </span>
                                 </div>
                                 <div class="layer-controls style-controls">
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
                                     <p-button (click)="resetStyle(style.key)"
                                               icon="pi pi-refresh"
                                               label="" pTooltip="Reload style from disk"
                                               tooltipPosition="bottom">
                                     </p-button>
-                                    <p-button (click)="exportStyle(style.key)"
-                                              icon="pi pi-file-export"
-                                              label="" pTooltip="Export style"
+                                    <p-button (click)="showStyleEditor(style.key)"
+                                              icon="pi pi-file-edit"
+                                              label="" pTooltip="Edit style"
                                               tooltipPosition="bottom">
                                     </p-button>
                                 </div>
@@ -127,7 +122,7 @@ import {Menu} from "primeng/menu";
                                      style="margin-left: 0.5em; display: flex; align-items: center;">
                                     <span class="material-icons"
                                           style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">arrow_drop_down</span>
+                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
                                     <span>
                                         <p-checkbox [(ngModel)]="style.value.enabled"
                                                     (ngModelChange)="toggleStyle(style.key)"
@@ -135,19 +130,14 @@ import {Menu} from "primeng/menu";
                                     </span>
                                 </div>
                                 <div class="layer-controls style-controls">
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
                                     <p-button (click)="removeStyle(style.key)"
                                               icon="pi pi-trash"
                                               label="" pTooltip="Remove style"
                                               tooltipPosition="bottom">
                                     </p-button>
-                                    <p-button (click)="exportStyle(style.key)"
-                                              icon="pi pi-file-export"
-                                              label="" pTooltip="Export style"
+                                    <p-button (click)="showStyleEditor(style.key)"
+                                              icon="pi pi-file-edit"
+                                              label="" pTooltip="Edit style"
                                               tooltipPosition="bottom">
                                     </p-button>
                                 </div>
@@ -196,6 +186,10 @@ import {Menu} from "primeng/menu";
                         <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
                     </div>
                 </div>
+                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())" 
+                          [disabled]="dataWasModified" label="Export" icon="pi pi-file-export" 
+                          [style]="{margin: '0 0.5em'}">
+                </p-button>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
             </div>
         </p-dialog>
@@ -224,7 +218,6 @@ export class MapPanelComponent {
 
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
-    isToggleMenuVisible: boolean = false;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
@@ -247,6 +240,10 @@ export class MapPanelComponent {
                 this.layerDialogVisible = false;
             }
         })
+    }
+
+    get osmOpacityString(): string {
+        return 'Opacity: ' + this.osmOpacityValue;
     }
 
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
