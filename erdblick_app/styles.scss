@@ -146,6 +146,7 @@ body {
     top: 0.5em;
     right: 1em;
     min-width: 30em;
+    z-index: 110;
 
     .p-accordion-header .p-accordion-header-link {
         padding: 0.8em;
@@ -533,6 +534,7 @@ body {
     padding-bottom: 0.5em;
     display: flex;
     flex-direction: row;
+    z-index: 110;
 }
 
 .editor-dialog {
