@@ -4,6 +4,7 @@ import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
 import {CesiumMath} from "./cesium";
 import {ClipboardService} from "./clipboard.service";
+import {coreLib} from "./wasm";
 
 interface PanelOption {
     name: string,
@@ -34,10 +35,16 @@ interface PanelOption {
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileIds of auxillaryTileIds | keyvalue" >
-                        <div *ngIf="isSelectedOption(tileIds.key)" class="coordinates-entry">
-                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileIds.value.toString())">{{ tileIds.key }}:</span>
-                            <span class="coord-span">{{ tileIds.value }}</span>
+                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue" >
+                        <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
+                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}:</span>
+                            <span class="coord-span">{{ tileId.value }}</span>
+                        </div>
+                    </ng-container>
+                    <ng-container *ngFor="let tileId of auxillaryTileIds | keyvalue" >
+                        <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
+                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}:</span>
+                            <span class="coord-span">{{ tileId.value }}</span>
                         </div>
                     </ng-container>
                 </div>
@@ -54,7 +61,6 @@ interface PanelOption {
             cursor: pointer;
             text-decoration: underline dotted;
             text-wrap: nowrap;
-            max-width: 10em;
         }
         
         .coord-span {
@@ -70,6 +76,7 @@ export class CoordinatesPanelComponent {
     isMarkerEnabled: boolean = false;
     markerPosition: {x: number, y: number} | null = null;
     auxillaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
+    mapgetTileIds: Map<string, bigint> = new Map<string, bigint>();
     auxillaryTileIds: Map<string, bigint> = new Map<string, bigint>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
@@ -80,6 +87,9 @@ export class CoordinatesPanelComponent {
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public parametersService: ParametersService) {
+        for (let level = 0; level < 15; level++) {
+            this.displayOptions.push({name: `Mapget TileId (level ${level})`});
+        }
         this.parametersService.parameters.subscribe(parameters => {
             this.isMarkerEnabled = parameters.marker;
             if (this.isMarkerEnabled && parameters.marked_position.length == 2) {
@@ -96,8 +106,12 @@ export class CoordinatesPanelComponent {
                                 return map;
                             }, new Map<string, Array<number>>());
                 }
+                for (let level = 0; level < 15; level++) {
+                    this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
+                        coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
+                }
                 if (this.coordinatesService.auxillaryTileIdsFun) {
-                    for (let level = 0; level <= 15; level++) {
+                    for (let level = 0; level < 15; level++) {
                         const levelData: Map<string, bigint> =
                             this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
                                 (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
@@ -106,9 +120,6 @@ export class CoordinatesPanelComponent {
                                 }, new Map<string, bigint>());
 
                         levelData.forEach((value, key) => {
-                            // If the key already exists, you might want to decide how to handle it.
-                            // For now, let's just set the value from the latest level.
-                            // If you want to sum or handle differently, adjust the following line accordingly.
                             this.auxillaryTileIds.set(`${key} (level ${level})`, value);
                         });
                     }
@@ -136,12 +147,16 @@ export class CoordinatesPanelComponent {
                             }, new Map<string, Array<number>>());
                     for (const key of this.auxillaryCoordinates.keys()) {
                         if (!this.displayOptions.some(val => val.name == key)) {
-                            this.displayOptions.push({name: key});
+                            this.displayOptions.push({name: `${key}`});
                         }
                     }
                 }
+                for (let level = 0; level < 15; level++) {
+                    this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
+                        coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
+                }
                 if (this.coordinatesService.auxillaryTileIdsFun) {
-                    for (let level = 0; level <= 15; level++) {
+                    for (let level = 0; level < 15; level++) {
                         const levelData: Map<string, bigint> =
                             this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
                                 (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
@@ -150,9 +165,6 @@ export class CoordinatesPanelComponent {
                                 }, new Map<string, bigint>());
 
                         levelData.forEach((value, key) => {
-                            // If the key already exists, you might want to decide how to handle it.
-                            // For now, let's just set the value from the latest level.
-                            // If you want to sum or handle differently, adjust the following line accordingly.
                             this.auxillaryTileIds.set(`${key} (level ${level})`, value);
                         });
                     }

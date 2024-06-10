@@ -22,18 +22,17 @@ export class CoordinatesService {
                         if (jumpTargetsConfig !== undefined) {
                             // Using string interpolation so webpack can trace imports from the location
                             import(`../../config/${jumpTargetsConfig}.js`).then((plugin) => {
-                                const { getAuxCoordinates } = plugin;
-                                // const { getAuxCoordinates, getAuxTileIds } = plugin;
+                                const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
                                     this.auxillaryCoordinatesFun = getAuxCoordinates;
                                 } else {
                                     console.error('Function getAuxCoordinates not found in the plugin.');
                                 }
-                                // if (getAuxTileIds) {
-                                //     this.auxillaryTileIdsFun = getAuxTileIds;
-                                // } else {
-                                //     console.error('Function getAuxTileIds not found in the plugin.');
-                                // }
+                                if (getAuxTileIds) {
+                                    this.auxillaryTileIdsFun = getAuxTileIds;
+                                } else {
+                                    console.error('Function getAuxTileIds not found in the plugin.');
+                                }
                             }).catch((error) => {
                                 console.error(error);
                             });
