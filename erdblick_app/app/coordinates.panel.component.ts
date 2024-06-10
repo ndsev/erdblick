@@ -31,6 +31,12 @@ import {ClipboardService} from "./clipboard.service";
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
+                    <ng-container *ngFor="let tileIds of auxillaryTileIds | keyvalue" >
+                        <div *ngIf="displayOptions.get(tileIds.key)" class="coordinates-entry">
+                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileIds.value.toString())">{{ tileIds.key }}:</span>
+                            <span class="coord-span">{{ tileIds.value }}</span>
+                        </div>
+                    </ng-container>
                 </div>
             </p-card>
             <p-button *ngIf="isMarkerEnabled && markerPosition" (click)="mapService.moveToWgs84PositionTopic.next(markerPosition)"
@@ -68,6 +74,7 @@ export class CoordinatesPanelComponent {
     isMarkerEnabled: boolean = false;
     markerPosition: {x: number, y: number} | null = null;
     auxillaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
+    auxillaryTileIds: Map<string, bigint> = new Map<string, bigint>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
     displayOptions: Map<string, boolean>;
@@ -94,6 +101,14 @@ export class CoordinatesPanelComponent {
                                 return map;
                             }, new Map<string, Array<number>>());
                 }
+                if (this.coordinatesService.auxillaryTileIdsFun) {
+                    this.auxillaryTileIds =
+                        this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, 13).reduce(
+                            (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
+                                map.set(key, value);
+                                return map;
+                            }, new Map<string, bigint>());
+                }
             } else {
                 if (this.isMarkerEnabled) {
                     this.markerButtonIcon = "location_on";
@@ -116,6 +131,19 @@ export class CoordinatesPanelComponent {
                                 return map;
                             }, new Map<string, Array<number>>());
                     for (const key of this.auxillaryCoordinates.keys()) {
+                        if (!this.displayOptions.has(key)) {
+                            this.displayOptions.set(key, true);
+                        }
+                    }
+                }
+                if (this.coordinatesService.auxillaryTileIdsFun) {
+                    this.auxillaryTileIds =
+                        this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, 13).reduce(
+                            (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
+                                map.set(key, value);
+                                return map;
+                            }, new Map<string, bigint>());
+                    for (const key of this.auxillaryTileIds.keys()) {
                         if (!this.displayOptions.has(key)) {
                             this.displayOptions.set(key, true);
                         }

@@ -8,7 +8,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="search-menu-dialog" header="Match Features" [(visible)]="isPanelVisible"
+        <p-dialog class="search-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
             <p-progressBar [value]="percentDone">
                 <ng-template pTemplate="content" let-percentDone>
@@ -36,9 +36,8 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
             </p-accordion>
             <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
                        optionLabel="label" [virtualScroll]="false" [virtualScrollItemSize]="38"
-                       [multiple]="false" [metaKeySelection]="false"
-                       (onChange)="selectResult($event)" emptyMessage="No features matched."
-                       scrollHeight="37em"
+                       [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
+                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 22em)'"
             />
         </p-dialog>
     `,

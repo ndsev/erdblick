@@ -91,7 +91,7 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
-            name: "Match Features",
+            name: "Search Loaded Features",
             label: label,
             enabled: false,
             execute: (value: string) => {

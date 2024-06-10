@@ -3,6 +3,7 @@ import {ParametersService} from "./parameters.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartographic} from "./cesium";
 import {HttpClient} from "@angular/common/http";
+import {getAuxTileIds} from "../../config/nds_jump_plugin";
 
 
 @Injectable()
@@ -10,6 +11,7 @@ export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxillaryCoordinatesFun: Function | null = null;
+    auxillaryTileIdsFun: Function | null = null;
 
     constructor(private httpClient: HttpClient,
                 public parametersService: ParametersService) {
@@ -21,12 +23,16 @@ export class CoordinatesService {
                         if (jumpTargetsConfig !== undefined) {
                             // Using string interpolation so webpack can trace imports from the location
                             import(`../../config/${jumpTargetsConfig}.js`).then((plugin) => {
-                                const { getAuxCoordinates } = plugin;
-                                console.log(getAuxCoordinates)
+                                const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
                                     this.auxillaryCoordinatesFun = getAuxCoordinates;
                                 } else {
                                     console.error('Function getAuxCoordinates not found in the plugin.');
+                                }
+                                if (getAuxTileIds) {
+                                    this.auxillaryTileIdsFun = getAuxTileIds;
+                                } else {
+                                    console.error('Function getAuxTileIds not found in the plugin.');
                                 }
                             }).catch((error) => {
                                 console.error(error);

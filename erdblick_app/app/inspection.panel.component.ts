@@ -78,15 +78,17 @@ interface Column {
                                         <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                                              [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
                                              [tooltipOptions]="tooltipOptions">
-                                            <span (click)="onValueClick(rowData)"
+                                            <div (click)="onValueClick($event, rowData)"
                                                   (mouseover)="highlightFeature(rowData)"
-                                                  (mouseout)="stopHighlight(rowData)">{{ rowData['value'] }}</span>
-                                            <span *ngIf="rowData.hasOwnProperty('info')">
-                                                <i class="pi pi-info-circle"
-                                                   [pTooltip]="rowData['info'].toString()"
-                                                   tooltipPosition="left">
-                                                </i>
-                                            </span>
+                                                  (mouseout)="stopHighlight(rowData)">
+                                                {{ rowData['value'] }}
+                                                <span *ngIf="rowData.hasOwnProperty('info')">
+                                                    <i class="pi pi-info-circle"
+                                                       [pTooltip]="rowData['info'].toString()"
+                                                       tooltipPosition="left">
+                                                    </i>
+                                                </span>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -314,7 +316,13 @@ export class InspectionPanelComponent implements OnInit  {
         }
     }
 
-    onValueClick(rowData: any) {
+    onValueClick(event: any, rowData: any) {
+        event.stopPropagation();
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+            return;
+        }
+
         this.copyToClipboard(rowData["value"]);
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();

@@ -77,10 +77,7 @@ export class InspectionService {
             return treeNodes;
         }
 
-        let treeNodes: Array<TreeTableNode> = [{
-            data: {key: "mapId", value: this.selectedMapIdName, type: this.InspectionValueType.STRING},
-            children: []
-        }];
+        let treeNodes: Array<TreeTableNode> = [];
         if (this.selectedFeatureInspectionModel) {
             for (const section of this.selectedFeatureInspectionModel) {
                 const node: TreeTableNode = {};

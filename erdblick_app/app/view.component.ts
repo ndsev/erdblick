@@ -417,6 +417,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 height: 32,
                 heightReference: HeightReference.CLAMP_TO_GROUND,
                 pixelOffset: new Cartesian2(0, -12),
+                eyeOffset: new Cartesian3(0, 0, -100)
             }
         });
     }
