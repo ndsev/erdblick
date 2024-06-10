@@ -6,7 +6,7 @@ import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {PointPrimitiveCollection} from "cesium";
+import {PointPrimitiveCollection} from "./cesium";
 
 
 @Injectable({providedIn: 'root'})
