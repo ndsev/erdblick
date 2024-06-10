@@ -91,6 +91,10 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
+uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
+    return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
+}
+
 /** Get the bounding box for a mapget tile id in WGS84. */
 em::val getTileBox(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
@@ -318,6 +322,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getTilePosition", &getTilePosition);
+    em::function("getTileIdFromPosition", &getTileIdFromPosition);
 
     ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);

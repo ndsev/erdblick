@@ -5,6 +5,11 @@ import {ParametersService} from "./parameters.service";
 import {CesiumMath} from "./cesium";
 import {ClipboardService} from "./clipboard.service";
 
+interface PanelOption {
+    name: string,
+    level?: number
+}
+
 @Component({
     selector: "coordinates-panel",
     template: `
@@ -16,23 +21,21 @@ import {ClipboardService} from "./clipboard.service";
             <p-card *ngIf="longitude && latitude" xmlns="http://www.w3.org/1999/html"
                     class="coordinates-panel">
                 <div class="coordinates-entries">
-                    <p-button (click)="optionsPanel.toggle($event)" label="" class="coordinates-button"
-                              pTooltip="Select coordinates entries to display" tooltipPosition="bottom">
-                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">list</span>
-                    </p-button>
-                    <div class="coordinates-entry" *ngIf="displayOptions.get('WGS84')">
+                    <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions" 
+                                   optionLabel="name" placeholder="" class="coordinates-select" appendTo="body"/>
+                    <div class="coordinates-entry" *ngIf="isSelectedOption('WGS84')">
                         <span class="name-span" (click)="copyToClipboard([longitude, latitude])">WGS84:</span>
                         <span class="coord-span">{{ longitude.toFixed(8) }}</span>
                         <span class="coord-span">{{ latitude.toFixed(8) }}</span>
                     </div>
                     <ng-container *ngFor="let coords of auxillaryCoordinates | keyvalue" >
-                        <div *ngIf="displayOptions.get(coords.key)" class="coordinates-entry">
+                        <div *ngIf="isSelectedOption(coords.key)" class="coordinates-entry">
                             <span class="name-span" (click)="copyToClipboard(coords.value)">{{ coords.key }}:</span>
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
                     <ng-container *ngFor="let tileIds of auxillaryTileIds | keyvalue" >
-                        <div *ngIf="displayOptions.get(tileIds.key)" class="coordinates-entry">
+                        <div *ngIf="isSelectedOption(tileIds.key)" class="coordinates-entry">
                             <span class="name-span" (click)="clipboardService.copyToClipboard(tileIds.value.toString())">{{ tileIds.key }}:</span>
                             <span class="coord-span">{{ tileIds.value }}</span>
                         </div>
@@ -45,25 +48,18 @@ import {ClipboardService} from "./clipboard.service";
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
         </div>
-        <p-overlayPanel #optionsPanel class="options-panel">
-            <div class="font-bold white-space-nowrap"
-                 style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
-                <span *ngFor="let option of displayOptions | keyvalue">
-                    <p-checkbox [(ngModel)]="option.value" (ngModelChange)="updateDisplayedOptions(option.key, option.value)" 
-                                [label]="option.key" [binary]="true"/>
-                </span>
-            </div>
-        </p-overlayPanel>
     `,
     styles: [`
         .name-span {
             cursor: pointer;
             text-decoration: underline dotted;
+            text-wrap: nowrap;
+            max-width: 10em;
         }
         
         .coord-span {
-            width: 6.5em;
             text-align: right;
+            font-family: "monospace";
         }
     `]
 })
@@ -77,14 +73,13 @@ export class CoordinatesPanelComponent {
     auxillaryTileIds: Map<string, bigint> = new Map<string, bigint>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
-    displayOptions: Map<string, boolean>;
+    displayOptions: Array<PanelOption> = [{name: "WGS84"}];
+    selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
 
     constructor(public mapService: MapService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public parametersService: ParametersService) {
-        this.displayOptions = new Map<string, boolean>();
-        this.displayOptions.set("WGS84", true);
         this.parametersService.parameters.subscribe(parameters => {
             this.isMarkerEnabled = parameters.marker;
             if (this.isMarkerEnabled && parameters.marked_position.length == 2) {
@@ -102,12 +97,21 @@ export class CoordinatesPanelComponent {
                             }, new Map<string, Array<number>>());
                 }
                 if (this.coordinatesService.auxillaryTileIdsFun) {
-                    this.auxillaryTileIds =
-                        this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, 13).reduce(
-                            (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
-                                map.set(key, value);
-                                return map;
-                            }, new Map<string, bigint>());
+                    for (let level = 0; level <= 15; level++) {
+                        const levelData: Map<string, bigint> =
+                            this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
+                                (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
+                                    map.set(key, value);
+                                    return map;
+                                }, new Map<string, bigint>());
+
+                        levelData.forEach((value, key) => {
+                            // If the key already exists, you might want to decide how to handle it.
+                            // For now, let's just set the value from the latest level.
+                            // If you want to sum or handle differently, adjust the following line accordingly.
+                            this.auxillaryTileIds.set(`${key} (level ${level})`, value);
+                        });
+                    }
                 }
             } else {
                 if (this.isMarkerEnabled) {
@@ -131,21 +135,30 @@ export class CoordinatesPanelComponent {
                                 return map;
                             }, new Map<string, Array<number>>());
                     for (const key of this.auxillaryCoordinates.keys()) {
-                        if (!this.displayOptions.has(key)) {
-                            this.displayOptions.set(key, true);
+                        if (!this.displayOptions.some(val => val.name == key)) {
+                            this.displayOptions.push({name: key});
                         }
                     }
                 }
                 if (this.coordinatesService.auxillaryTileIdsFun) {
-                    this.auxillaryTileIds =
-                        this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, 13).reduce(
-                            (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
-                                map.set(key, value);
-                                return map;
-                            }, new Map<string, bigint>());
+                    for (let level = 0; level <= 15; level++) {
+                        const levelData: Map<string, bigint> =
+                            this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
+                                (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
+                                    map.set(key, value);
+                                    return map;
+                                }, new Map<string, bigint>());
+
+                        levelData.forEach((value, key) => {
+                            // If the key already exists, you might want to decide how to handle it.
+                            // For now, let's just set the value from the latest level.
+                            // If you want to sum or handle differently, adjust the following line accordingly.
+                            this.auxillaryTileIds.set(`${key} (level ${level})`, value);
+                        });
+                    }
                     for (const key of this.auxillaryTileIds.keys()) {
-                        if (!this.displayOptions.has(key)) {
-                            this.displayOptions.set(key, true);
+                        if (!this.displayOptions.some(val => val.name == key)) {
+                            this.displayOptions.push({name: key});
                         }
                     }
                 }
@@ -183,7 +196,11 @@ export class CoordinatesPanelComponent {
         this.clipboardService.copyToClipboard(coordArray.join(" "));
     }
 
-    updateDisplayedOptions(key: string, value: boolean) {
-        this.displayOptions.set(key, value);
+    // updateDisplayedOptions(key: string, value: boolean) {
+    //     this.displayOptions.set(key, value);
+    // }
+
+    isSelectedOption(name: string) {
+        return this.selectedOptions.some(val => val.name == name);
     }
 }

@@ -13,6 +13,11 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
     {
         auto scope = push(convertStringView("Identifiers"), "", ValueType::Section);
         push("type", "typeId", ValueType::String)->value_ = convertStringView(featurePtr->typeId());
+
+        // Add map and layer names to the Identifiers section.
+        push("mapId", "mapId", ValueType::String)->value_ = convertStringView(featurePtr->model().mapId());
+        push("layerId", "layerId", ValueType::String)->value_ = convertStringView(featurePtr->model().layerInfo()->layerId_);
+
         // TODO: Investigate and fix the issue for "index out of bounds" error.
         //  Affects boundaries and lane connectors
 //        if (auto prefix = featurePtr->model().getIdPrefix()) {
@@ -23,6 +28,7 @@ JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& f
 //        for (auto const& [k, v] : featurePtr->id()->fields()) {
 //            convertField(k, v);
 //        }
+
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
             field.key_ = convertStringView(key);

@@ -1,11 +1,12 @@
 import {Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, filter} from "rxjs";
 import {MapService} from "./map.service";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
 import {coreLib} from "./wasm";
+import {JumpTargetService} from "./jump.service";
 
 
 interface InspectionModelData {
@@ -31,6 +32,7 @@ export class InspectionService {
     selectedFeature: FeatureWrapper | null = null;
 
     constructor(private mapService: MapService,
+                private jumpService: JumpTargetService,
                 public parametersService: ParametersService) {
         this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
             if (!selectedFeature) {
@@ -49,6 +51,17 @@ export class InspectionService {
             });
             this.selectedFeature = selectedFeature;
             this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
+        });
+
+        this.parametersService.parameters.pipe(filter(
+            parameters => parameters.selected.length == 2)).subscribe(parameters => {
+            const [mapId, featureId] = parameters.selected;
+            if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
+                this.jumpService.highlightFeature(mapId, featureId);
+                if (this.selectedFeature != null) {
+                    this.mapService.focusOnFeature(this.selectedFeature);
+                }
+            }
         });
     }
 

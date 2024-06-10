@@ -48,6 +48,7 @@ import {ColorPickerModule} from "primeng/colorpicker";
 import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
+import {MultiSelectModule} from "primeng/multiselect";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -96,7 +97,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         MenuModule,
         CardModule,
         ColorPickerModule,
-        ListboxModule
+        ListboxModule,
+        MultiSelectModule
     ],
     providers: [
         {

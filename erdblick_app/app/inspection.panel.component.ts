@@ -4,7 +4,6 @@ import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
 import {MapService} from "./map.service";
-import {ParametersService} from "./parameters.service";
 import {distinctUntilChanged, filter} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
@@ -168,25 +167,13 @@ export class InspectionPanelComponent implements OnInit  {
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
-                public mapService: MapService,
-                public parametersService: ParametersService) {
+                public mapService: MapService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
             this.expandTreeNodes(this.filteredTree);
             if (this.inspectionService.featureTreeFilterValue) {
                 this.filterTree();
-            }
-        });
-
-        this.parametersService.parameters.pipe(filter(
-            parameters => parameters.selected.length == 2)).subscribe(parameters => {
-            const [mapId, featureId] = parameters.selected;
-            if (mapId != this.inspectionService.selectedMapIdName || featureId != this.inspectionService.selectedFeatureIdName) {
-                this.jumpService.highlightFeature(mapId, featureId);
-                if (this.inspectionService.selectedFeature != null) {
-                    this.mapService.focusOnFeature(this.inspectionService.selectedFeature);
-                }
             }
         });
     }

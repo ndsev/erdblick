@@ -114,7 +114,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
-    private _replaceUrl: boolean = false;
+    private _replaceUrl: boolean = true;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
 

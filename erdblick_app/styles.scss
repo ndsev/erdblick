@@ -614,6 +614,28 @@ body {
             overflow-y: auto;
             margin: 0 auto;
             max-width: calc(100vw - 25em);
+            align-items: center;
+
+            .p-multiselect-label {
+                display: none;
+            }
+
+            .p-multiselect-header {
+                padding: 0.5em 0.75em;
+            }
+
+            p-multiselectitem {
+                font-size: 0.9em;
+
+                li {
+                    padding: 0.5em 0.75em;
+                }
+            }
+
+            .p-multiselect-trigger {
+                width: 2.5em;
+                height: 2em;
+            }
         }
 
         .coordinates-button {
@@ -655,6 +677,12 @@ body {
     }
 }
 
+.results-listbox {
+    li {
+        padding: 0.5em 0.75em;
+        font-size: 0.9em;
+    }
+}
 
 @media only screen and (max-width: 56em) {
     .help-button {
