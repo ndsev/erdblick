@@ -155,7 +155,7 @@ export class TileVisualization {
                     visualization.run();
                 }
                 catch (e) {
-                    console.log(`Exception while rendering: ${e}`);
+                    console.error(`Exception while rendering: ${e}`);
                     return false;
                 }
 
@@ -205,7 +205,7 @@ export class TileVisualization {
                             visualization.processResolvedExternalReferences(extRefsResolved.responses);
                         }
                         catch (e) {
-                            console.log(`Exception while rendering: ${e}`);
+                            console.error(`Exception while rendering: ${e}`);
                         }
                     });
                 }

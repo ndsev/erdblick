@@ -6,6 +6,7 @@ import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
+import {PointPrimitiveCollection} from "cesium";
 
 
 @Injectable({providedIn: 'root'})
@@ -116,11 +117,11 @@ export class FeatureSearchService {
             let mapTileKey = tileResult.matches[0][0];
             this.resultsPerTile.set(mapTileKey, tileResult);
 
-            tileResult.pointPrimitiveIndices = [];
+            tileResult.billboardPrimitiveIndices = [];
             for (const [_, __, position] of tileResult.matches) {
-                tileResult.pointPrimitiveIndices.push(this.visualization.length);
+                tileResult.billboardPrimitiveIndices.push(this.visualization.length);
                 this.visualization.add({
-                    position: new Cartesian3(position[0], position[1], position[2]),
+                    position: position,
                     image: this.markerGraphics(),
                     width: 32,
                     height: 32,
@@ -134,7 +135,6 @@ export class FeatureSearchService {
         ++this.doneTiles;
         this.progress.next(this.doneTiles/this.totalTiles * 100 | 0);
         this.endTime = Date.now();
-        console.log(this.startTime, this.endTime);
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.totalFeatureCount += tileResult.numFeatures;
         this.searchUpdates.next(tileResult);

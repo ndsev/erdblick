@@ -92,12 +92,15 @@ export class CoordinatesPanelComponent {
         }
         this.parametersService.parameters.subscribe(parameters => {
             this.isMarkerEnabled = parameters.marker;
-            if (this.isMarkerEnabled && parameters.marked_position.length == 2) {
-                this.markerButtonIcon = "wrong_location";
-                this.markerButtonTooltip = "Reset marker";
+            if (parameters.marked_position.length == 2) {
                 this.longitude = parameters.marked_position[0];
                 this.latitude = parameters.marked_position[1];
-                this.markerPosition = {x: this.longitude, y: this.latitude};
+                if (this.isMarkerEnabled) {
+                    this.markerPosition = {x: this.longitude, y: this.latitude};
+                    this.markerButtonIcon = "wrong_location";
+                    this.markerButtonTooltip = "Reset marker";
+                }
+
                 if (this.coordinatesService.auxillaryCoordinatesFun) {
                     this.auxillaryCoordinates =
                         this.coordinatesService.auxillaryCoordinatesFun(this.longitude, this.latitude).reduce(
@@ -129,8 +132,6 @@ export class CoordinatesPanelComponent {
                     this.markerButtonIcon = "location_on";
                     this.markerButtonTooltip = "Disable marker placement";
                 }
-                this.longitude = 0;
-                this.latitude = 0;
                 this.markerPosition = null;
             }
         });
@@ -182,6 +183,7 @@ export class CoordinatesPanelComponent {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
             this.parametersService.setMarkerState(true);
+            this.parametersService.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
@@ -197,6 +199,7 @@ export class CoordinatesPanelComponent {
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
+            this.markerPosition = null;
             this.parametersService.setMarkerState(true);
             this.parametersService.setMarkerPosition(null);
             this.markerButtonIcon = "wrong_location";

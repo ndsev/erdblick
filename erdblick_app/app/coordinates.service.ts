@@ -39,11 +39,11 @@ export class CoordinatesService {
                         }
                     }
                 } catch (error) {
-                    console.log(error);
+                    console.error(error);
                 }
             },
             error: error => {
-                console.log(error);
+                console.error(error);
             }
         });
 

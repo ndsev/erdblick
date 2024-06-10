@@ -192,12 +192,6 @@ export class ParametersService {
     }
 
     setMarkerPosition(position: Cartographic | null) {
-        if (!this.p().marker) {
-            this.p().marked_position = [];
-            this.parameters.next(this.p());
-            return;
-        }
-
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);

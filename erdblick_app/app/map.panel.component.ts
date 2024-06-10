@@ -419,7 +419,7 @@ export class MapPanelComponent {
                 })
                 .catch((error) => {
                     this.messageService.showError(`Error occurred while trying to import style: ${styleId}`);
-                    console.log(error);
+                    console.error(error);
                 });
         }
     }

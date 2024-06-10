@@ -57,17 +57,17 @@ export class JumpTargetService {
                                 this.extJumpTargets = jumpTargets;
                                 this.update();
                             }).catch((error) => {
-                                console.log(error);
+                                console.error(error);
                             });
                             return;
                         }
                     }
                 } catch (error) {
-                    console.log(error);
+                    console.error(error);
                 }
             },
             error: error => {
-                console.log(error);
+                console.error(error);
             }
         });
 
@@ -83,7 +83,6 @@ export class JumpTargetService {
             coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
         } catch (e: any) {
             const parsingError = e.message.split(':', 2);
-            console.log(parsingError)
             simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
         }
         let label = "Match features with a filter expression";

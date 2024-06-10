@@ -181,7 +181,7 @@ export class StyleService {
             // Revoke the blob URL to free up resources
             window.URL.revokeObjectURL(url);
         } catch (e) {
-            console.log(e);
+            console.error(e);
             return false;
         }
 
