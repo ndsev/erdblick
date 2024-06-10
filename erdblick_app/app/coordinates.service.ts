@@ -3,7 +3,6 @@ import {ParametersService} from "./parameters.service";
 import {BehaviorSubject} from "rxjs";
 import {Cartographic} from "./cesium";
 import {HttpClient} from "@angular/common/http";
-import {getAuxTileIds} from "../../config/nds_jump_plugin";
 
 
 @Injectable()
