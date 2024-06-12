@@ -5,8 +5,6 @@ import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
 import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {uint8ArrayFromWasm} from "./wasm";
-import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {PointPrimitiveCollection} from "./cesium";
 
 
 @Injectable({providedIn: 'root'})
@@ -40,7 +38,7 @@ export class FeatureSearchService {
 
     constructor(private mapService: MapService) {
         // Instantiate workers.
-        const maxWorkers = 1; // navigator.hardwareConcurrency || 4;
+        const maxWorkers = navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
             const worker = new Worker(new URL('./featurefilter.worker', import.meta.url));
             this.workers.push(worker);
@@ -95,6 +93,7 @@ export class FeatureSearchService {
         this.currentQuery = "";
         this.visualization.removeAll();
         this.resultsPerTile.clear();
+        this.workQueue = [];
         this.totalTiles = 0;
         this.doneTiles = 0;
         this.progress.next(0);

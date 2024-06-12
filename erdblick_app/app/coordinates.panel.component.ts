@@ -21,9 +21,9 @@ interface PanelOption {
             </p-button>
             <p-card *ngIf="longitude && latitude" xmlns="http://www.w3.org/1999/html"
                     class="coordinates-panel">
+                <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
+                               optionLabel="name" placeholder="" class="coordinates-select" appendTo="body"/>
                 <div class="coordinates-entries">
-                    <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions" 
-                                   optionLabel="name" placeholder="" class="coordinates-select" appendTo="body"/>
                     <div class="coordinates-entry" *ngIf="isSelectedOption('WGS84')">
                         <span class="name-span" (click)="copyToClipboard([longitude, latitude])">WGS84:</span>
                         <span class="coord-span">{{ longitude.toFixed(8) }}</span>
@@ -65,7 +65,7 @@ interface PanelOption {
         
         .coord-span {
             text-align: right;
-            font-family: "monospace";
+            font-family: monospace;
         }
     `]
 })

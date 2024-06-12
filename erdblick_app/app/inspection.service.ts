@@ -70,9 +70,28 @@ export class InspectionService {
             let treeNodes: Array<TreeTableNode> = [];
             for (const data of dataNodes) {
                 const node: TreeTableNode = {};
+                let value = data.value;
+                if (data.type == this.InspectionValueType.NULL.value && data.children === undefined) {
+                    value = "NULL";
+                } else if ((data.type & 128) == 128 && (data.type - 128) == 1) {
+                    for (let i = 0; i < value.length; i++) {
+                        if (!Number.isInteger(value[i])) {
+                            const strValue = String(value[i])
+                            const index = strValue.indexOf('.');
+                            if (index !== -1 && strValue.length - index - 1 > 8) {
+                                value[i] = value[i].toFixed(8);
+                            }
+                        }
+                    }
+                }
+
+                if ((data.type & 128) == 128) {
+                    value = value.join(", ");
+                }
+
                 node.data = {
                     key: data.key,
-                    value: data.type == this.InspectionValueType.NULL.value && data.children === undefined ? "NULL" : data.value,
+                    value: value,
                     type: data.type
                 };
                 if (data.hasOwnProperty("info")) {

@@ -168,4 +168,11 @@ export class FeatureWrapper {
             return result;
         });
     }
+
+    equals(other: FeatureWrapper | null): boolean {
+        if (!other) {
+            return false;
+        }
+        return this.featureTile.id == other.featureTile.id && this.index == other.index;
+    }
 }

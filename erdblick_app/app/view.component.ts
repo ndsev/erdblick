@@ -11,11 +11,9 @@ import {
     ColorGeometryInstanceAttribute,
     Entity,
     ImageryLayer,
-    LabelStyle,
     ScreenSpaceEventHandler,
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
-    VerticalOrigin,
     Viewer,
     HeightReference
 } from "./cesium";
@@ -47,23 +45,20 @@ declare let window: DebugWindow;
 })
 export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;
-    private pickedFeature: any = null;
-    private pickedFeatureOrigColor: Color | null = null;
     private hoveredFeature: any = null;
     private hoveredFeatureOrigColor: Color | null = null;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
-    private markerIcon: string = `
-    <svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
-      <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="ghostwhite"/>
-    </svg>`;
 
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
+     * @param styleService
+     * @param featureSearchService
      * @param parameterService The parameter service, used to update
+     * @param jumpService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
      */
     constructor(public mapService: MapService,
@@ -87,9 +82,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-            if (this.pickedFeature && this.tileVisForPrimitive.get(this.pickedFeature.primitive) === tileVis) {
-                this.setPickedCesiumFeature(null);
-            }
             if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
                 this.setHoveredCesiumFeature(null);
             }
@@ -249,7 +241,8 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
         }
         this.hoveredFeature = null;
-        if (feature && !this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
+        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
+        if (resolvedFeature && !resolvedFeature?.equals(this.mapService.selectionTopic.getValue())) {
             // Highlight the new hovered feature and remember its original color.
             this.hoveredFeatureOrigColor = this.getFeatureColor(feature);
             this.setFeatureColor(feature, Color.YELLOW);
@@ -261,16 +254,6 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the picked feature.
      */
     private setPickedCesiumFeature(feature: any) {
-        if (this.pickedFeature && this.cesiumFeaturesAreEqual(feature, this.pickedFeature)) {
-            return;
-        }
-
-        // Restore the previously picked feature to its original color.
-        if (this.pickedFeature && this.pickedFeatureOrigColor) {
-            this.setFeatureColor(this.pickedFeature, this.pickedFeatureOrigColor);
-        }
-        this.pickedFeature = null;
-
         // Get the actual mapget feature for the picked Cesium feature.
         let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
         if (!resolvedFeature) {
@@ -278,18 +261,16 @@ export class ErdblickViewComponent implements AfterViewInit {
             return;
         }
 
-        // Highlight the new picked feature and remember its original color.
+        if (resolvedFeature.equals(this.mapService.selectionTopic.getValue())) {
+            return;
+        }
+
         // Make sure that if the hovered feature is picked, we don't
         // remember the hover color as the original color.
         if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
             this.setHoveredCesiumFeature(null);
         }
-        this.pickedFeatureOrigColor = this.getFeatureColor(feature);
-        if (this.pickedFeatureOrigColor) {
-            this.setFeatureColor(feature, Color.YELLOW);
-            this.pickedFeature = feature;
-            this.mapService.selectionTopic.next(resolvedFeature);
-        }
+        this.mapService.selectionTopic.next(resolvedFeature);
     }
 
     /** Set the color of a cesium feature through its associated primitive. */

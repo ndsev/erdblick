@@ -144,7 +144,7 @@ void InspectionConverter::convertAttributeLayer(
         OptionalValueAndType singleValue;
         attr->forEachField([this, &numValues, &singleValue](auto const& fieldName, auto const& val){
             auto singleValueForField = convertField(fieldName, val);
-            if (singleValueForField && fieldName != "origValidity") {
+            if (singleValueForField && fieldName != "schemaValidity" && fieldName != "origValidity") {
                 ++numValues;
                 singleValue = singleValueForField;
             }

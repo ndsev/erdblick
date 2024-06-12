@@ -8,13 +8,17 @@ export class ClipboardService {
     constructor(private messageService: InfoMessageService) {}
 
     copyToClipboard(text: string) {
-        navigator.clipboard.writeText(text).then(
-            () => {
-                this.messageService.showSuccess("Copied content to clipboard!");
-            },
-            () => {
-                this.messageService.showError("Could not copy content to clipboard.");
-            },
-        );
+        try {
+            navigator.clipboard.writeText(text).then(
+                () => {
+                    this.messageService.showSuccess("Copied content to clipboard!");
+                },
+                () => {
+                    this.messageService.showError("Could not copy content to clipboard.");
+                }
+            );
+        } catch (error) {
+            console.error(error);
+        }
     }
 }
