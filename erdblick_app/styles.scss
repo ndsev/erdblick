@@ -530,9 +530,11 @@ body {
 .pref-dialog {
     margin: 0;
 
-    .p-button {
-        margin: 0.5em 0.5em 0.5em 0;
-        width: 8em;
+    .p-dialog-content {
+        .p-button {
+            margin: 0.5em 0.5em 0.5em 0;
+            width: 8em;
+        }
     }
 
     .button-container {
@@ -641,7 +643,7 @@ body {
                 margin-left: 0.5em;
             }
 
-            &:last-child {
+            & > .coordinates-entry:last-child {
                 margin-right: 0.5em;
             }
         }
@@ -660,7 +662,7 @@ body {
         }
 
         .p-card {
-            background: #ffffff88;
+            background: #ffffffdd;
         }
 
         .p-card:hover {
@@ -819,7 +821,7 @@ body {
         min-width: 100vw;
         width: 100vw;
         transform: rotate(180deg);
-        z-index: 1;
+        z-index: 120;
 
         .resizable-container {
             min-width: 100vw;

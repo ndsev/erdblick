@@ -8,7 +8,8 @@ export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 interface ErdblickParameters extends Record<string, any> {
     marker: boolean,
-    marked_position: Array<number>,
+    markedPosition: Array<number>,
+    markedPositionLabels: Array<string>,
     selected: Array<string>,
     heading: number,
     pitch: number,
@@ -39,9 +40,14 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => typeof val === 'boolean',
         default: false
     },
-    marked_position: {
+    markedPosition: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+        default: []
+    },
+    markedPositionLabels: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
         default: []
     },
     selected: {
@@ -150,8 +156,7 @@ export class ParametersService {
     }
 
     setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
-        // Only set map layers, if
-        // there are no configured values yet.
+        // Only set map layers, if there are no configured values yet.
         if (this.p().layers.length) {
             return;
         }
@@ -195,9 +200,9 @@ export class ParametersService {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
-            this.p().marked_position = [longitude, latitude];
+            this.p().markedPosition = [longitude, latitude];
         } else {
-            this.p().marked_position = [];
+            this.p().markedPosition = [];
         }
         this.parameters.next(this.p());
     }

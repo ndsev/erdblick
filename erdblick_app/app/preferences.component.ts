@@ -100,8 +100,8 @@ export class PreferencesComponent {
             return;
         }
         let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = this.tilesToLoadInput;
-        parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
+        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
+        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.parametersService.parameters.next(parameters);
         this.mapService.update();
         this.messageService.showSuccess("Successfully updated tile limits!");

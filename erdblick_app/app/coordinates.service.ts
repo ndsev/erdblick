@@ -9,7 +9,7 @@ import {HttpClient} from "@angular/common/http";
 export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
-    auxillaryCoordinatesFun: Function | null = null;
+    auxiliaryCoordinatesFun: Function | null = null;
     auxillaryTileIdsFun: Function | null = null;
 
     constructor(private httpClient: HttpClient,
@@ -24,7 +24,7 @@ export class CoordinatesService {
                             import(`../../config/${jumpTargetsConfig}.js`).then((plugin) => {
                                 const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
-                                    this.auxillaryCoordinatesFun = getAuxCoordinates;
+                                    this.auxiliaryCoordinatesFun = getAuxCoordinates;
                                 } else {
                                     console.error('Function getAuxCoordinates not found in the plugin.');
                                 }
