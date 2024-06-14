@@ -26,7 +26,7 @@ FetchContent_MakeAvailable(glm)
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "addon-datasources"
+  GIT_TAG        "v2024.3"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
