@@ -4,7 +4,6 @@ import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
-import {OverlayPanel} from "primeng/overlaypanel";
 import {StyleService} from "./style.service";
 import {filter} from "rxjs";
 
@@ -13,18 +12,11 @@ import {filter} from "rxjs";
     template: `
         <erdblick-view></erdblick-view>
         <map-panel></map-panel>
-        <p-toast position="bottom-center" key="tc"></p-toast>
-        <p-overlayPanel #searchoverlay>
-            <search-menu-items></search-menu-items>
-        </p-overlayPanel>
-        <span class="p-input-icon-left search-input">
-            <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchValue"
-                   (click)="toggleSearchOverlay(searchValue, searchoverlay, $event)"
-                   (ngModelChange)="setSearchTargetValue(searchValue)"/>
-        </span>
+        <p-toast position="top-center" key="tc"></p-toast>
+        <search-panel #searchoverlay></search-panel>
         <pref-components></pref-components>
         <inspection-panel></inspection-panel>
+        <coordinates-panel></coordinates-panel>
         <div id="info">
             {{ title }} {{ version }}
         </div>
@@ -78,27 +70,15 @@ export class AppComponent {
             }
             const entries = [...Object.entries(parameters)];
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
-            this.updateQueryParams(Object.fromEntries(entries));
+            this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
         });
     }
 
-    toggleSearchOverlay(value: string, searchOverlay: OverlayPanel, event: any) {
-        if (value) {
-            searchOverlay.show(event);
-            return;
-        }
-        searchOverlay.toggle(event);
-    }
-
-    setSearchTargetValue(value: string) {
-        this.jumpToTargetService.targetValueSubject.next(value);
-    }
-
-    updateQueryParams(params: Params): void {
+    updateQueryParams(params: Params, replaceUrl: boolean): void {
         this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: 'merge',
-            replaceUrl: true
+            replaceUrl: replaceUrl
         });
     }
 }

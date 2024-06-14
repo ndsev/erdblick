@@ -113,6 +113,23 @@ uint32_t JsValue::size() const {
 #endif
 }
 
+std::string JsValue::toString() const {
+    switch(type()) {
+        case Type::Null:
+            return "Null";
+        case Type::Bool:
+            return fmt::format("{}", as<bool>());
+        case Type::Number:
+            return fmt::format("{}", as<double>());
+        case Type::String:
+            return fmt::format("{}", as<std::string>());
+        case Type::ObjectOrList:
+            return "Object";
+        default:
+            return "Undefined";
+    }
+}
+
 JsValue::Type JsValue::type() const
 {
 #ifdef EMSCRIPTEN
@@ -131,6 +148,23 @@ JsValue::Type JsValue::type() const
     else if (value_.is_array() || value_.is_object()) return Type::ObjectOrList;
     else return Type::Undefined; // Catch-all for any types not covered
 #endif
+}
+
+mapget::KeyValuePairs JsValue::toKeyValuePairs() const
+{
+    auto numFeatureIdParts = size();
+    mapget::KeyValuePairs result;
+    for (auto kvIndex = 0; kvIndex < numFeatureIdParts; kvIndex += 2) {
+        auto key = at(kvIndex).as<std::string>();
+        auto value = at(kvIndex + 1);
+        if (value.type() == JsValue::Type::Number) {
+            result.emplace_back(key, value.as<int64_t>());
+        }
+        else if (value.type() == JsValue::Type::String) {
+            result.emplace_back(key, value.as<std::string>());
+        }
+    }
+    return result;
 }
 
 CesiumClass::CesiumClass(const std::string& className)

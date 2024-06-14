@@ -181,7 +181,7 @@ export class StyleService {
             // Revoke the blob URL to free up resources
             window.URL.revokeObjectURL(url);
         } catch (e) {
-            console.log(e);
+            console.error(e);
             return false;
         }
 
@@ -358,7 +358,6 @@ export class StyleService {
             return;
         }
         let style = this.styleData.get(styleId)!;
-        style.enabled = enabled !== undefined ? enabled : !style.enabled;
         this.reapplyStyle(styleId);
         this.parameterService.setStyleConfig(styleId, style.enabled);
     }

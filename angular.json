@@ -32,7 +32,7 @@
                             },
                             {
                                 "glob": "**/*",
-                                "input": "styles",
+                                "input": "config/styles",
                                 "output": "/bundle/styles"
                             },
                             {
@@ -55,6 +55,7 @@
                             "node_modules/primeng/resources/themes/lara-light-blue/theme.css",
                             "node_modules/primeng/resources/primeng.min.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
+                            "node_modules/material-icons/iconfont/material-icons.css",
                             "erdblick_app/styles.scss"
                         ],
                         "scripts": [
@@ -62,7 +63,8 @@
                         ],
                         "customWebpackConfig": {
                             "path": "./webpack.config.js"
-                        }
+                        },
+                        "webWorkerTsConfig": "tsconfig.worker.json"
                     },
                     "configurations": {
                         "production": {
@@ -70,7 +72,7 @@
                                 {
                                     "type": "initial",
                                     "maximumWarning": "500kb",
-                                    "maximumError": "60mb"
+                                    "maximumError": "100mb"
                                 },
                                 {
                                     "type": "anyComponentStyle",
@@ -126,7 +128,8 @@
                         "styles": [
                             "erdblick_app/styles.scss"
                         ],
-                        "scripts": []
+                        "scripts": [],
+                        "webWorkerTsConfig": "tsconfig.worker.json"
                     }
                 }
             }

@@ -4,6 +4,22 @@ body {
     overflow: hidden;
     height: 100vh !important;
     width: 100vw !important;
+
+    .p-multiselect-header {
+        padding: 0.5em 0.75em;
+
+        .p-inputtext {
+            padding: 0.5em;
+        }
+    }
+
+    .p-multiselectitem {
+        font-size: 0.9em;
+
+        li {
+            padding: 0.5em 0.75em;
+        }
+    }
 }
 
 .mapviewer-renderlayer {
@@ -137,11 +153,16 @@ body {
     max-width: none;
 }
 
+.clear-icon {
+    right: 0.75rem;
+}
+
 .inspect-panel {
     position: absolute;
     top: 0.5em;
     right: 1em;
     min-width: 30em;
+    z-index: 110;
 
     .p-accordion-header .p-accordion-header-link {
         padding: 0.8em;
@@ -149,6 +170,20 @@ body {
 
     .p-accordion-content {
         padding: 0;
+    }
+
+    .filter-container {
+        width: 100%;
+    }
+
+    .filter-input {
+        height: 2em;
+        width: 100%;
+        padding-left: 2.5em;
+        padding-right: 2.5em;
+        border-radius: 6px;
+        border: solid 1px lightgray;
+        direction: ltr;
     }
 
     .resizable-container {
@@ -159,7 +194,7 @@ body {
         overflow: auto;
         direction: rtl;
         max-width: calc(100vw - 27em);
-        max-height: calc(100vh - 4.5em);
+        max-height: calc(100vh - 8.5em);
 
         .resize-handle {
             display: none;
@@ -171,19 +206,6 @@ body {
             direction: ltr;
         }
 
-        .filter-container {
-            width: 100%;
-        }
-
-        .filter-input {
-            height: 2.5em;
-            width: 100%;
-            padding-left: 2.5em;
-            border-radius: 6px;
-            border: solid 1px lightgray;
-            direction: ltr;
-        }
-
         .p-treetable-header {
             padding: 0.5em;
             direction: ltr;
@@ -192,6 +214,7 @@ body {
         table {
             direction: ltr;
             font-size: smaller;
+            border-collapse: collapse;
 
             td {
                 padding: 0;
@@ -223,28 +246,38 @@ body {
     }
 }
 
-.search-menu {
-    &:first-child {
-        .p-divider {
-            display: none;
+.search-menu-dialog {
+    .search-menu {
+        &:first-child {
+            .p-divider {
+                display: none;
+            }
         }
-    }
 
-    .search-option {
-        text-align: left;
-        font-size: small;
-        margin: 0;
-        background: none;
-        border: none;
-        cursor: pointer;
+        .p-divider {
+            margin: 0.9em 0;
+        }
 
-        span {
-            font-weight: bold;
+        .search-option {
+            text-align: left;
+            font-size: 0.9em;
+            margin: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+
+            .search-option-name {
+                font-weight: bold;
+            }
+
+            .search-option-warning {
+                color: burlywood;
+            }
         }
     }
 }
 
-.map-layer-dialog {
+.map-layer-dialog, .search-menu-dialog {
     .p-dialog {
         width: 25em;
         min-width: 25em;
@@ -256,12 +289,25 @@ body {
         max-height: calc(100vh - 9em);
     }
 
+    .p-dialog-content {
+        padding: 0.5em;
+    }
+
+    .p-dialog-header {
+        padding: 0.5em;
+
+        .p-dialog-title {
+            font-size: medium;
+        }
+    }
+}
+
+.map-layer-dialog {
     .p-dialog-header {
         display: none;
     }
 
     .p-dialog-content {
-        padding: 0.5em 0.5em 0 0.5em;
         border-top-right-radius: 6px;
         border-top-left-radius: 6px;
     }
@@ -282,6 +328,59 @@ body {
 
         .slider-input {
             width: 14em;
+            font-size: 0.9em;
+            padding: 0.5em 0.75em;
+        }
+    }
+
+    .grid-controls {
+        display: flex;
+        align-items: flex-start;
+        gap: 1em;
+        margin-top: 0.25em;
+        flex-direction: column;
+        justify-content: flex-start;
+
+        & > div {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            margin-top: 0.25em;
+            flex-direction: row;
+        }
+
+        button {
+            width: 2em;
+            height: 2em;
+            box-shadow: none;
+        }
+
+        .slider-input {
+            width: 14em;
+        }
+
+        .grid-level {
+            display: flex;
+            gap: 0.5em;
+            justify-content: flex-end;
+
+            button {
+                width: 2em;
+                height: 2em;
+                box-shadow: none;
+            }
+
+            input {
+                margin: 0;
+            }
+
+            .p-inputnumber-buttons-horizontal .p-inputnumber-input {
+                order: 2;
+                border-radius: 0;
+                width: 3em;
+                text-align: center;
+                height: 2em;
+            }
         }
     }
 
@@ -343,11 +442,36 @@ body {
             font-size: 0.9em;
         }
 
+        &:hover {
+            .layer-controls {
+                visibility: visible;
+                opacity: 1;
+                transition: opacity 0.25s, visibility 0.25s;
+            }
+
+            .level-indicator {
+                display: none;
+            }
+        }
+
+        .level-indicator {
+            display: block;
+            margin: 0;
+            order: 2;
+            width: 2.5em;
+            text-align: center;
+            height: 2em;
+            padding: 0;
+        }
+
         .layer-controls {
             display: flex;
             gap: 0.5em;
-            width: 12em;
+            width: 8em;
             justify-content: flex-end;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0s, visibility 0s;
 
             button {
                 width: 2em;
@@ -362,12 +486,17 @@ body {
                 }
             }
 
+            input {
+                margin: 0;
+            }
+
             .p-inputnumber-buttons-horizontal .p-inputnumber-input {
                 order: 2;
                 border-radius: 0;
-                width: 3em;
+                width: 2.5em;
                 text-align: center;
                 height: 2em;
+                padding: 0;
             }
         }
 
@@ -375,14 +504,37 @@ body {
             justify-content: flex-end;
         }
     }
+
+    .styles-import {
+        justify-content: center;
+        align-items: center;
+        display: flex;
+
+        .p-fileupload {
+            span {
+                box-shadow: none;
+                min-width: 6.4em;
+                font-size: 0.9em;
+            }
+        }
+    }
+}
+
+.map-selection-dialog {
+    .p-button {
+        width: 100%;
+        margin: 0.5em 0.5em 0.5em 0;
+    }
 }
 
 .pref-dialog {
     margin: 0;
 
-    .p-button {
-        margin: 0.5em 0.5em 0.5em 0;
-        width: 8em;
+    .p-dialog-content {
+        .p-button {
+            margin: 0.5em 0.5em 0.5em 0;
+            width: 8em;
+        }
     }
 
     .button-container {
@@ -400,6 +552,7 @@ body {
     padding-bottom: 0.5em;
     display: flex;
     flex-direction: row;
+    z-index: 110;
 }
 
 .editor-dialog {
@@ -425,6 +578,139 @@ body {
     .cm-editor {
         width: 0;
         flex-grow: 1;
+    }
+}
+
+.filter-panel {
+    .p-overlaypanel-content {
+        padding: 0.75em;
+    }
+}
+
+.p-progressbar {
+    height: 1.5em;
+    font-size: 0.9em;
+
+    .p-progressbar-value-animate {
+        transition: none !important;
+    }
+}
+
+.p-colorpicker {
+    input {
+        height: 1em;
+        width: 1em;
+        margin: 0;
+    }
+}
+
+.trace-entries {
+    font-size: 0.9em;
+
+    .p-accordion-header .p-accordion-header-link {
+        padding: 0.8em;
+        font-size: 0.9em;
+    }
+
+    .p-accordion-content {
+        font-size: 0.9em;
+    }
+}
+
+.coordinates-container {
+    z-index: 100;
+    position: absolute;
+    bottom: 1em;
+    left: 0;
+    margin: 0 auto;
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+
+    .coordinates-panel {
+        .coordinates-entries {
+            display: flex;
+            flex-direction: row;
+            padding-bottom: 0;
+            gap: 0.5em;
+            overflow-y: auto;
+            max-width: calc(100vw - 25em);
+            align-items: center;
+
+            & > .coordinates-entry:nth-child(1) {
+                margin-left: 0.5em;
+            }
+
+            & > .coordinates-entry:last-child {
+                margin-right: 0.5em;
+            }
+        }
+
+        .coordinates-button {
+            button {
+                padding-left: 0;
+                padding-right: 0;
+                width: 2em;
+                height: 2em;
+                box-shadow: none;
+                background: none;
+                border: none;
+                color: var(--text-color);
+            }
+        }
+
+        .p-card {
+            background: #ffffffdd;
+        }
+
+        .p-card:hover {
+            background: #ffffffff;
+        }
+
+        .p-card-body {
+            padding: 0;
+        }
+
+        .p-card-content {
+            padding: 0;
+            display: flex;
+            flex-direction: row;
+
+            p-multiselect {
+                margin-bottom: -0.2em;
+            }
+
+            .p-multiselect {
+                box-shadow: none;
+                border: none;
+            }
+
+            .p-multiselect-label {
+                display: none;
+            }
+
+            .p-multiselect-trigger {
+                width: 2.25em;
+                height: 2em;
+            }
+        }
+
+        .coordinates-entry {
+            display: flex;
+            align-items: center;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            gap: 0.5em;
+        }
+    }
+}
+
+.results-listbox {
+    li {
+        padding: 0.5em 0.75em;
+        font-size: 0.9em;
     }
 }
 
@@ -495,7 +781,7 @@ body {
         }
     }
 
-    .map-layer-dialog {
+    .map-layer-dialog, .search-menu-dialog {
         .p-dialog {
             width: 100vw !important;
             height: calc(100vh - 3em) !important;
@@ -526,19 +812,6 @@ body {
         right: 1.25rem !important;
     }
 
-    .search-menu-wrapper {
-        width: calc(100vw - 2.5rem);
-        max-height: 55vh;
-        overflow: auto;
-        margin: 0;
-
-        .search-menu {
-            .search-option {
-                font-size: medium;
-            }
-        }
-    }
-
     .inspect-panel {
         position: absolute;
         top: inherit;
@@ -548,7 +821,7 @@ body {
         min-width: 100vw;
         width: 100vw;
         transform: rotate(180deg);
-        z-index: 1;
+        z-index: 120;
 
         .resizable-container {
             min-width: 100vw;

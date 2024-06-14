@@ -41,7 +41,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             </div>
             <div class="button-container">
                 <label>Storage for imported styles:</label>
-                <p-button (click)="clearImportedStyles()" label="Delete" icon="pi pi-trash"></p-button>
+                <p-button (click)="clearImportedStyles()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">
                 <label>Storage for modified built-in styles:</label>
@@ -66,6 +66,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             font-size: medium;
             text-align: center;
             width: 17em;
+            padding: 0.5em;
         }
         
         @media only screen and (max-width: 56em) {
@@ -99,8 +100,8 @@ export class PreferencesComponent {
             return;
         }
         let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = this.tilesToLoadInput;
-        parameters.tilesVisualizeLimit = this.tilesToVisualizeInput;
+        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
+        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.parametersService.parameters.next(parameters);
         this.mapService.update();
         this.messageService.showSuccess("Successfully updated tile limits!");

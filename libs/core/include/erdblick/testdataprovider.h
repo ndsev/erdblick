@@ -1,9 +1,9 @@
 #pragma once
 
-#include "mapget/model/featurelayer.h"
 #include <iostream>
+#include "mapget/model/featurelayer.h"
+#include "parser.h"
 #include "style.h"
-#include "stream.h"
 
 namespace erdblick
 {
@@ -108,7 +108,7 @@ public:
         // Get a field dictionary which the parser can later pick up again,
         // and also inform the parser about the layer info used by features
         // in the test data.
-        fieldNames_ = tileLayerParser.cachedFieldDicts_->operator()("TestDataNode");
+        fieldNames_ = tileLayerParser.cachedFieldDicts_->getFieldDict("TestDataNode");
         tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
@@ -129,7 +129,7 @@ public:
             "TestMap",
             layerInfo_,
             fieldNames_);
-        result->setPrefix({{"areaId", "TheBestArea"}});
+        result->setIdPrefix({{"areaId", "TheBestArea"}});
 
         // Create a function to generate a random coordinate between two given points
         auto randomPointBetween = [&](const auto& point1, const auto& point2, double baseHeight) {

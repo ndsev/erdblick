@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {InfoMessageService} from "./info.service";
-import {SearchMenuComponent} from "./search-menu.component";
+import {SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
@@ -35,7 +35,20 @@ import {PreferencesComponent} from "./preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./editor.component";
 import {ErdblickViewComponent} from "./view.component";
+import {CoordinatesPanelComponent} from "./coordinates.panel.component";
 import {initializeLibrary} from "./wasm";
+import {CheckboxModule} from "primeng/checkbox";
+import {InputTextModule} from "primeng/inputtext";
+import {SidePanelService} from "./sidepanel.service";
+import {MenuModule} from "primeng/menu";
+import {CardModule} from "primeng/card";
+import {CoordinatesService} from "./coordinates.service";
+import {FeatureSearchComponent} from "./feature.search.component";
+import {ColorPickerModule} from "primeng/colorpicker";
+import {ListboxModule} from "primeng/listbox";
+import {FeatureSearchService} from "./feature.search.service";
+import {ClipboardService} from "./clipboard.service";
+import {MultiSelectModule} from "primeng/multiselect";
 
 export function initializeServices(styleService: StyleService, mapService: MapService) {
     return async () => {
@@ -48,12 +61,14 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
 @NgModule({
     declarations: [
         AppComponent,
-        SearchMenuComponent,
+        SearchPanelComponent,
         MapPanelComponent,
         InspectionPanelComponent,
         PreferencesComponent,
         EditorComponent,
-        ErdblickViewComponent
+        ErdblickViewComponent,
+        CoordinatesPanelComponent,
+        FeatureSearchComponent
     ],
     imports: [
         BrowserModule,
@@ -76,7 +91,14 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FieldsetModule,
         InputSwitchModule,
         SliderModule,
-        FileUploadModule
+        FileUploadModule,
+        CheckboxModule,
+        InputTextModule,
+        MenuModule,
+        CardModule,
+        ColorPickerModule,
+        ListboxModule,
+        MultiSelectModule
     ],
     providers: [
         {
@@ -91,6 +113,10 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         JumpTargetService,
         InspectionService,
         ParametersService,
+        SidePanelService,
+        CoordinatesService,
+        FeatureSearchService,
+        ClipboardService
     ],
     bootstrap: [AppComponent]
 })

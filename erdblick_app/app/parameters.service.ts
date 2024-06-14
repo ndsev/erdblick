@@ -1,21 +1,25 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
-import {Cartesian3, Cartographic, Math, Camera} from "./cesium";
+import {BehaviorSubject, Subject} from "rxjs";
+import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 interface ErdblickParameters extends Record<string, any> {
+    marker: boolean,
+    markedPosition: Array<number>,
+    markedPositionLabels: Array<string>,
+    selected: Array<string>,
     heading: number,
     pitch: number,
     roll: number,
     lon: number,
     lat: number,
     alt: number,
+    osm: boolean,
     osmOpacity: number,
-    osmEnabled: boolean,
-    layers: Array<[string, number]>,
+    layers: Array<[string, number, boolean, boolean]>,
     styles: Array<string>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number
@@ -31,6 +35,26 @@ interface ParameterDescriptor {
 }
 
 const erdblickParameters: Record<string, ParameterDescriptor> = {
+    marker: {
+        converter: val => val === 'true',
+        validator: val => typeof val === 'boolean',
+        default: false
+    },
+    markedPosition: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+        default: []
+    },
+    markedPositionLabels: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        default: []
+    },
+    selected: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        default: []
+    },
     heading: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
@@ -66,14 +90,14 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
         default: 30
     },
-    osmEnabled: {
+    osm: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
         default: true
     },
     layers: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'number'),
+        validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 4 && typeof item[0] === 'string' && typeof item[1] === 'number' && typeof item[2] === 'boolean' && typeof item[3] === 'boolean'),
         default: []
     },
     styles: {
@@ -96,11 +120,10 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
+    private _replaceUrl: boolean = true;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
 
-    osmEnabled: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(true);
-    osmOpacityValue: BehaviorSubject<number> = new BehaviorSubject<number>(30);
     cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
         new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
             destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),
@@ -122,11 +145,17 @@ export class ParametersService {
         });
     }
 
+    get replaceUrl() {
+        const currentValue = this._replaceUrl;
+        this._replaceUrl = true;
+        return currentValue;
+    }
+
     p() {
         return this.parameters.getValue();
     }
 
-    setInitialMapLayers(layers: Array<[string, number]>) {
+    setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
         // Only set map layers, if there are no configured values yet.
         if (this.p().layers.length) {
             return;
@@ -144,25 +173,57 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number] {
-        const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
-        if (conf) {
-            return [true, conf[1]];
+    setSelectedFeature(mapId: string, featureId: string) {
+        const currentSelection = this.p().selected;
+        if (currentSelection && (currentSelection[0] != mapId || currentSelection[1] != featureId)) {
+            this.p().selected = [mapId, featureId];
+            this._replaceUrl = false;
+            this.parameters.next(this.p());
         }
-        return [!this.p().layers.length, fallbackLevel];
     }
 
-    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean) {
-        let mapLayer = mapId+"/"+layerId;
-        let conf = this.p().layers.find(val => val[0] == mapLayer);
-        if (conf && visible) {
+    unsetSelectedFeature() {
+        this.p().selected = [];
+        this.parameters.next(this.p());
+    }
+
+    setMarkerState(enabled: boolean) {
+        this.p().marker = enabled;
+        if (enabled) {
+            this.parameters.next(this.p());
+        } else {
+            this.setMarkerPosition(null);
+        }
+    }
+
+    setMarkerPosition(position: Cartographic | null) {
+        if (position) {
+            const longitude = CesiumMath.toDegrees(position.longitude);
+            const latitude = CesiumMath.toDegrees(position.latitude);
+            this.p().markedPosition = [longitude, latitude];
+        } else {
+            this.p().markedPosition = [];
+        }
+        this.parameters.next(this.p());
+    }
+
+    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
+        const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
+        if (conf !== undefined && conf[2]) {
+            return [true, conf[1], conf[3]];
+        }
+        return [!this.p().layers.length, fallbackLevel, false];
+    }
+
+    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
+        let mapLayerName = mapId+"/"+layerId;
+        let conf = this.p().layers.find(val => val[0] == mapLayerName);
+        if (conf !== undefined) {
             conf[1] = level;
-        }
-        else if (conf) {
-            this.p().layers = this.p().layers.filter(val => val[0] !== mapLayer);
-        }
-        else if (visible) {
-            this.p().layers.push([mapLayer, level]);
+            conf[2] = visible;
+            conf[3] = tileBorders;
+        } else if (visible) {
+            this.p().layers.push([mapLayerName, level, visible, tileBorders]);
         }
         this.parameters.next(this.p());
     }
@@ -181,13 +242,9 @@ export class ParametersService {
     }
 
     setCameraState(camera: Camera) {
-        const currentPositionCartographic = Cartographic.fromCartesian(
-            Cartesian3.fromElements(
-                camera.position.x, camera.position.y, camera.position.z
-            )
-        );
-        this.p().lon = Math.toDegrees(currentPositionCartographic.longitude);
-        this.p().lat = Math.toDegrees(currentPositionCartographic.latitude);
+        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
+        this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
+        this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
         this.p().alt = currentPositionCartographic.height;
         this.p().heading = camera.heading;
         this.p().pitch = camera.pitch;
@@ -224,8 +281,7 @@ export class ParametersService {
                         console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
                         updatedParameters[key] = descriptor.default;
                     }
-                }
-                catch (e) {
+                } catch (e) {
                     console.warn(`Invalid query param  ${params[key]} for ${key}, using default.`);
                     updatedParameters[key] = descriptor.default;
                 }

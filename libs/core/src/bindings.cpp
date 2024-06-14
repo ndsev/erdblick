@@ -3,9 +3,12 @@
 #include "aabb.h"
 #include "buffer.h"
 #include "visualization.h"
-#include "stream.h"
+#include "parser.h"
 #include "style.h"
 #include "testdataprovider.h"
+#include "inspection.h"
+#include "geometry.h"
+#include "search.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -88,6 +91,21 @@ mapget::Point getTilePosition(uint64_t tileIdValue) {
     return tid.center();
 }
 
+uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
+    return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
+}
+
+/** Get the bounding box for a mapget tile id in WGS84. */
+em::val getTileBox(uint64_t tileIdValue) {
+    mapget::TileId tid(tileIdValue);
+    return *JsValue::List({
+        JsValue(tid.sw().x),
+        JsValue(tid.sw().y),
+        JsValue(tid.ne().x),
+        JsValue(tid.ne().y)
+    });
+}
+
 /** Get the neighbor for a mapget tile id. */
 uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
     mapget::TileId tid(tileIdValue);
@@ -102,6 +120,12 @@ std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& 
     tileKey.layerId_ = layerId;
     tileKey.tileId_ = tileId;
     return tileKey.toString();
+}
+
+/** Get mapId, layerId and tileId of a MapTileKey. */
+NativeJsValue parseTileFeatureLayerKey(std::string const& key) {
+    auto tileKey = mapget::MapTileKey(key);
+    return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
 }
 
 /** Create a test tile over New York. */
@@ -124,10 +148,26 @@ void setExceptionHandler(em::val handler) {
     });
 }
 
+/**  Validate provided SIMFIL query */
+void validateSimfil(const std::string &query) {
+    auto simfilEnv = std::make_shared<simfil::Environment>(simfil::Environment::WithNewStringCache);
+    simfil::compile(*simfilEnv, query, false);
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
+
+    ////////// ValueType
+    em::enum_<InspectionConverter::ValueType>("ValueType")
+        .value("NULL", InspectionConverter::ValueType::Null)
+        .value("NUMBER", InspectionConverter::ValueType::Number)
+        .value("STRING", InspectionConverter::ValueType::String)
+        .value("BOOLEAN", InspectionConverter::ValueType::Boolean)
+        .value("FEATUREID", InspectionConverter::ValueType::FeatureId)
+        .value("SECTION", InspectionConverter::ValueType::Section)
+        .value("ARRAY", InspectionConverter::ValueType::ArrayBit);
 
     ////////// SharedUint8Array
     em::class_<SharedUint8Array>("SharedUint8Array")
@@ -166,7 +206,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "geojson",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return self->toGeoJson().dump(4); }));
+                    return self->toGeoJson().dump(4); }))
+        .function(
+            "inspectionModel",
+            std::function<em::val(FeaturePtr&)>(
+                [](FeaturePtr& self) {
+                    return *InspectionConverter().convert(self); }))
+        .function(
+            "center",
+            std::function<mapget::Point(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return geometryCenter(self->firstGeometry());
+                }));
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
@@ -180,6 +231,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "tileId",
             std::function<uint64_t(mapget::TileFeatureLayer const&)>(
                 [](mapget::TileFeatureLayer const& self) { return self.tileId().value_; }))
+        .function(
+            "numFeatures",
+            std::function<uint32_t(mapget::TileFeatureLayer const&)>(
+                [](mapget::TileFeatureLayer const& self) { return self.numRoots(); }))
         .function(
             "center",
             std::function<em::val(mapget::TileFeatureLayer const&)>(
@@ -201,21 +256,39 @@ EMSCRIPTEN_BINDINGS(erdblick)
                         mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
                     }
                     return self.at(i);
+                }))
+        .function(
+            "findFeatureIndex",
+            std::function<
+                int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
+                [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
+                {
+                    auto idPartsKvp = JsValue(idParts).toKeyValuePairs();
+                    if (auto result = self.find(type, idPartsKvp))
+                        return result->addr().index();
+                    return -1;
                 }));
     em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, uint32_t>()
+        .constructor<FeatureLayerStyle const&, std::string>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
+    ////////// FeatureLayerSearch
+    em::class_<FeatureLayerSearch>("FeatureLayerSearch")
+        .constructor<mapget::TileFeatureLayer&>()
+        .function("filter", &FeatureLayerSearch::filter)
+        .function("traceResults", &FeatureLayerSearch::traceResults);
+
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
+        .field("nodeId", &TileLayerParser::TileLayerMetadata::nodeId)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
@@ -225,18 +298,38 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
+        .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
+        .function("getFieldDict", &TileLayerParser::getFieldDict)
+        .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function(
+            "filterFeatureJumpTargets",
+            std::function<
+                NativeJsValue(TileLayerParser const&, std::string)>(
+                [](TileLayerParser const& self, std::string input)
+                {
+                    auto result = self.filterFeatureJumpTargets(input);
+                    auto convertedResult = JsValue::List();
+                    for (auto const& r : result)
+                        convertedResult.push(r.toJsValue());
+                    return *convertedResult;
+                }))
         .function("reset", &TileLayerParser::reset);
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getTilePosition", &getTilePosition);
+    em::function("getTileIdFromPosition", &getTileIdFromPosition);
 
-    ////////// Get full id of a TileFeatureLayer
+    ////////// Return coordinates for a rectangle representing the bounding box of the tile
+    em::function("getTileBox", &getTileBox);
+
+    ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
+    em::function("parseTileFeatureLayerKey", &parseTileFeatureLayerKey);
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);
@@ -247,4 +340,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Set an exception handler
     em::function("setExceptionHandler", &setExceptionHandler);
+
+    ////////// Validate SIMFIL query
+    em::function("validateSimfilQuery", &validateSimfil);
 }

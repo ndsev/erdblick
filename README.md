@@ -36,7 +36,7 @@ rule that matches it.
 ### Custom Style Declarations
 
 It is possible to apply own custom styles easily. 
-On build, Erdblick automatically picks up `.yaml` style files from `styles` directory (where you can drop your custom files) 
+On build, Erdblick automatically picks up `.yaml` style files from `config/styles` directory (where you can drop your custom files) 
 and bundles them in `static/bundle/styles` (in case you are using a pre-built Erdblick distribution, 
 you can directly put your styles in `static/bundle/styles`).
 
@@ -50,7 +50,7 @@ For Erdblick to apply custom styles, it expects the following declarations for t
    ]
 }
 ```
-where `url` field must be a path relative to `static/bundle/styles` and `id` is used to identify the particular style in GUI.
+where `url` field must be a path relative to `config/styles` and `id` is used to identify the particular style in GUI.
 
 It is also possible to export and import styles in GUI. Styles imported this way will persist in the local storage of the browser.
 

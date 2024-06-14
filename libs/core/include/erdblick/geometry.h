@@ -1,4 +1,5 @@
 #include "mapget/model/featurelayer.h"
+#include "glm/glm.hpp"
 
 #include <iostream>
 

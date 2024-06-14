@@ -4,6 +4,7 @@ ci/emsdk/
 .idea
 cmake-build-debug-wsl
 clion-build-*
+cmake-build-*
 static
 .angular
 node_modules

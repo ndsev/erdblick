@@ -1,5 +1,8 @@
 #pragma once
 
+#include <variant>
+#include "mapget/model/info.h"
+
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
 #else
@@ -14,6 +17,9 @@ using NativeJsValue = emscripten::val;
 #else
 using NativeJsValue = nlohmann::json;
 #endif
+
+template<typename T>
+struct always_false : std::false_type {};
 
 /**
  * Class representing an emscripten JavaScript object,
@@ -49,6 +55,24 @@ struct JsValue
      * @param coordinates Float64 buffer to fill the typed array.
      */
     static JsValue Float64Array(std::vector<double> const& coordinates);
+
+    /** Construct a JsValue from a variant with specific alternatives. */
+    template<typename T>
+    static JsValue fromVariant(T const& variant) {
+        JsValue result;
+        std::visit([&result](auto&& v){
+            if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string_view>) {
+                result = JsValue(std::string(v));
+            } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string>) {
+                result = JsValue(v);
+            } else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int64_t>) {
+                result = JsValue(static_cast<double>(v));
+            } else {
+                static_assert(always_false<decltype(v)>::value, "Type of 'v' is not supported.");
+            }
+        }, variant);
+        return result;
+    }
 
     /**
      * Constructs a JavaScript or JSON null value.
@@ -88,7 +112,7 @@ struct JsValue
      * is a list. For both EMSCRIPTEN and the mock version,
      * it will return value_[i].
      */
-    JsValue at(uint32_t index) const;
+    [[nodiscard]] JsValue at(uint32_t index) const;
 
     /**
      * Set an object field or dictionary entry to a given value.
@@ -109,6 +133,11 @@ struct JsValue
      */
     [[nodiscard]] uint32_t size() const;
 
+    /**
+     * Convert this JsValue to string representation.
+     */
+    std::string toString() const;
+
     enum class Type {
         Undefined,
         Null,
@@ -124,7 +153,7 @@ struct JsValue
     [[nodiscard]] Type type() const;
 
     template <typename T>
-    T as() {
+    T as() const {
     #ifdef EMSCRIPTEN
         return value_.as<T>();
     #else
@@ -137,6 +166,9 @@ struct JsValue
      */
     inline NativeJsValue& operator*() {return value_;};
     inline const NativeJsValue& operator*() const {return value_;};
+
+    /** Turn a [key, value, keyN, valueN, ...] list into KeyValuePairs. */
+    [[nodiscard]] mapget::KeyValuePairs toKeyValuePairs() const;
 
     /**
      * Actual JS or JSON object.
@@ -162,14 +194,14 @@ ReturnType JsValue::call(std::string const& methodName, Args... args)
 struct CesiumClass : public JsValue
 {
 public:
-    CesiumClass(std::string const& className);
+    explicit CesiumClass(std::string const& className);
 
     /**
      * Create a new instance of the represented class using the provided arguments.
      * For EMSCRIPTEN, it utilizes value_.new_(Args...).
      * For the mock version, it will return an empty nlohmann JSON object.
      */
-    JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
+    [[nodiscard]] JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
     template<typename... Args>
     JsValue New(Args... args) const;
 

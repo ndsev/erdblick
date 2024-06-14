@@ -82,7 +82,7 @@ public:
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
-        uint32_t highlightFeatureIndex = UnselectableId);
+        std::string highlightFeatureIndex = "");
 
     /**
      * Add a tile which is considered for visualization. All tiles added after
@@ -231,7 +231,7 @@ private:
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
-    uint32_t highlightFeatureIndex_ = 0;
+    std::string highlightFeatureId_;
     std::shared_ptr<simfil::Fields> internalFieldsDictCopy_;
 
     /// ===== Relation Processing Members =====

@@ -1,8 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "erdblick/inspection.h"
+#include "erdblick/parser.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
-#include "erdblick/stream.h"
 
 #include <iostream>
 
@@ -19,4 +20,13 @@ TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
     auto result = visualization.primitiveCollection();
     std::cout << result << std::endl;
     REQUIRE(!result.empty());
+}
+
+TEST_CASE("FeatureInspection", "[erdblick.inspection]")
+{
+    TileLayerParser tlp;
+    auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
+    for (auto const& f : *testLayer) {
+        std::cout << InspectionConverter().convert(f).value_.dump(4) << std::endl;
+    }
 }
