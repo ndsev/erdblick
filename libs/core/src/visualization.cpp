@@ -247,7 +247,7 @@ void FeatureLayerVisualization::addGeometry(
         });
 
     switch (geom->geomType()) {
-    case Geometry::GeomType::Polygon:
+    case GeomType::Polygon:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsList(vertsCartesian);
             if (rule.flat())
@@ -256,16 +256,16 @@ void FeatureLayerVisualization::addGeometry(
                 coloredNontrivialMeshes_.addPolygon(jsVerts, rule, id, evalFun);
         }
         break;
-    case Geometry::GeomType::Line:
+    case GeomType::Line:
         addPolyLine(vertsCartesian, rule, id, evalFun);
         break;
-    case Geometry::GeomType::Mesh:
+    case GeomType::Mesh:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsFloat64Array(vertsCartesian);
             coloredTrivialMeshes_.addTriangles(jsVerts, rule, id, evalFun);
         }
         break;
-    case Geometry::GeomType::Points:
+    case GeomType::Points:
         for (auto const& pt : vertsCartesian) {
             coloredPoints_.addPoint(JsValue(pt), rule, id, evalFun);
         }
