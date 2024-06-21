@@ -44,7 +44,7 @@ public:
     [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] Mode mode() const;
     [[nodiscard]] bool selectable() const;
-    [[nodiscard]] bool supports(mapget::Geometry::GeomType const& g) const;
+    [[nodiscard]] bool supports(mapget::GeomType const& g) const;
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
     [[nodiscard]] float width() const;
@@ -95,8 +95,8 @@ public:
 private:
     void parse(YAML::Node const& yaml);
 
-    static inline uint32_t geomTypeBit(mapget::Geometry::GeomType const& g) {
-        return 1 << static_cast<std::underlying_type_t<mapget::Geometry::GeomType>>(g);
+    static inline uint32_t geomTypeBit(mapget::GeomType const& g) {
+        return 1 << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
     }
 
     Aspect aspect_ = Feature;

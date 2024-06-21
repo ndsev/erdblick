@@ -63,7 +63,7 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
         });
 
     // For lines, return the shape-point closest to the average.
-    if (g->geomType() == Geometry::GeomType::Line) {
+    if (g->geomType() == GeomType::Line) {
         if (totalPoints % 2 == 1) {
             // Odd number of points: Return closest point.
             return pointsSorted.front();
@@ -175,7 +175,7 @@ glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>&
         {.0, 1./latMetersPerDegree, .0},
         {.0, .0, 1.}};
 
-    if (!g || g->geomType() != simfil::Geometry::GeomType::Line || g->numPoints() < 2) {
+    if (!g || g->geomType() != GeomType::Line || g->numPoints() < 2) {
         return defaultResult;
     }
 
