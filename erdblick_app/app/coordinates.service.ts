@@ -5,7 +5,7 @@ import {Cartographic} from "./cesium";
 import {HttpClient} from "@angular/common/http";
 
 
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
@@ -14,6 +14,12 @@ export class CoordinatesService {
 
     constructor(private httpClient: HttpClient,
                 public parametersService: ParametersService) {
+        this.mouseClickCoordinates.subscribe(position => {
+            this.parametersService.setMarkerPosition(position);
+        });
+    }
+
+    initialize() {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
@@ -46,11 +52,5 @@ export class CoordinatesService {
                 console.error(error);
             }
         });
-
-        this.mouseClickCoordinates.subscribe(position => {
-            this.parametersService.setMarkerPosition(position);
-        });
     }
-
-
 }
