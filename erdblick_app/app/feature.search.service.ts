@@ -13,6 +13,7 @@ export class FeatureSearchService {
     currentQuery: string = ""
     workers: Array<Worker> = []
     visualization: BillboardCollection = new BillboardCollection();
+    visualizationPositions: Array<Cartesian3> = [];
     visualizationChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
     workQueue: Array<FeatureTile> = [];
@@ -65,9 +66,21 @@ export class FeatureSearchService {
         this.startTime = Date.now();
 
         // Fill up work queue and start processing.
+        // TODO: What if we move / change the viewport during the search?
+        let priorityTiles = new Array<FeatureTile>();
+        let nonPriorityTiles = new Array<FeatureTile>();
         for (const [_, tile] of this.mapService.loadedTileLayers) {
-            this.workQueue.push(tile);
+            if ([...this.mapService.visualizedTileLayers.values()].some(tileVisializations => {
+                return tileVisializations.some(tileVisialization => {
+                    return tileVisialization.tile.tileId == tile.tileId && tileVisialization.tile.mapName == tile.mapName;
+                });
+            })) {
+                priorityTiles.push(tile);
+            } else {
+                nonPriorityTiles.push(tile);
+            }
         }
+        this.workQueue = [...nonPriorityTiles, ...priorityTiles];
         this.totalTiles = this.workQueue.length;
         this.isFeatureSearchActive.next(true);
 
@@ -92,6 +105,7 @@ export class FeatureSearchService {
         this.stop();
         this.currentQuery = "";
         this.visualization.removeAll();
+        this.visualizationPositions = [];
         this.resultsPerTile.clear();
         this.workQueue = [];
         this.totalTiles = 0;
@@ -118,15 +132,16 @@ export class FeatureSearchService {
 
             tileResult.billboardPrimitiveIndices = [];
             for (const [_, __, position] of tileResult.matches) {
-                tileResult.billboardPrimitiveIndices.push(this.visualization.length);
-                this.visualization.add({
-                    position: position,
-                    image: this.markerGraphics(),
-                    width: 32,
-                    height: 32,
-                    pixelOffset: new Cartesian2(0, -10),
-                    eyeOffset: new Cartesian3(0, 0, -100)
-                });
+                this.visualizationPositions.push(new Cartesian3(position.x, position.y, position.z));
+                tileResult.billboardPrimitiveIndices.push(this.visualizationPositions.length);
+                // this.visualization.add({
+                //     position: position,
+                //     image: this.markerGraphics(),
+                //     width: 32,
+                //     height: 32,
+                //     pixelOffset: new Cartesian2(0, -10),
+                //     eyeOffset: new Cartesian3(0, 0, -100)
+                // });
             }
         }
 

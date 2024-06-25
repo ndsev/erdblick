@@ -64,7 +64,7 @@ export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
     public loadedTileLayers: Map<string, FeatureTile>;
-    private visualizedTileLayers: Map<string, TileVisualization[]>;
+    public visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: any;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
