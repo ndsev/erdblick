@@ -93,9 +93,9 @@ export class CoordinatesPanelComponent {
         }
         this.parametersService.parameters.subscribe(parameters => {
             this.isMarkerEnabled = parameters.marker;
-            if (parameters.marked_position.length == 2) {
-                this.longitude = parameters.marked_position[0];
-                this.latitude = parameters.marked_position[1];
+            if (parameters.markedPosition.length == 2) {
+                this.longitude = parameters.markedPosition[0];
+                this.latitude = parameters.markedPosition[1];
                 if (this.isMarkerEnabled) {
                     this.markerPosition = {x: this.longitude, y: this.latitude};
                     this.markerButtonIcon = "wrong_location";
@@ -126,9 +126,9 @@ export class CoordinatesPanelComponent {
     }
 
     private updateValues() {
-        if (this.coordinatesService.auxillaryCoordinatesFun) {
+        if (this.coordinatesService.auxiliaryCoordinatesFun) {
             this.auxillaryCoordinates =
-                this.coordinatesService.auxillaryCoordinatesFun(this.longitude, this.latitude).reduce(
+                this.coordinatesService.auxiliaryCoordinatesFun(this.longitude, this.latitude).reduce(
                     (map: Map<string, Array<number>>, [key, value]: [string, Array<number>]) => {
                         map.set(key, value);
                         return map;

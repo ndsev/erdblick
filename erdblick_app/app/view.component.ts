@@ -186,10 +186,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.openStreetMapLayer.show = parameters.osm;
                 this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
             }
-            if (parameters.marker && parameters.marked_position.length == 2) {
+            if (parameters.marker && parameters.markedPosition.length == 2) {
                 this.addMarker(Cartesian3.fromDegrees(
-                    Number(parameters.marked_position[0]),
-                    Number(parameters.marked_position[1]))
+                    Number(parameters.markedPosition[0]),
+                    Number(parameters.markedPosition[1]))
                 );
             } else {
                 if (this.marker) {

@@ -3,8 +3,9 @@
 #include <iostream>
 
 using namespace erdblick;
+using namespace mapget;
 
-JsValue InspectionConverter::convert(mapget::model_ptr<mapget::Feature> const& featurePtr)
+JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
     fieldDict_ = featurePtr->model().fieldNames();
     featureId_ = featurePtr->id()->toString();
@@ -133,10 +134,10 @@ void InspectionConverter::pop()
 
 void InspectionConverter::convertAttributeLayer(
     const std::string_view& name,
-    const mapget::model_ptr<mapget::AttributeLayer>& l)
+    const model_ptr<AttributeLayer>& l)
 {
     auto layerScope = push(convertStringView(name), name);
-    l->forEachAttribute([this](mapget::model_ptr<mapget::Attribute> const& attr)
+    l->forEachAttribute([this](model_ptr<Attribute> const& attr)
     {
         auto attrScope = push(convertStringView(attr->name()), attr->name(), ValueType::Null);
 
@@ -166,16 +167,16 @@ void InspectionConverter::convertAttributeLayer(
         if (auto direction = attr->direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
             switch (direction) {
-            case mapget::Attribute::Positive:
+            case Attribute::Positive:
                 dirScope->value_ = convertStringView("POSITIVE");
                 break;
-            case mapget::Attribute::Negative:
+            case Attribute::Negative:
                 dirScope->value_ = convertStringView("NEGATIVE");
                 break;
-            case mapget::Attribute::Both:
+            case Attribute::Both:
                 dirScope->value_ = convertStringView("BOTH");
                 break;
-            case mapget::Attribute::None:
+            case Attribute::None:
                 dirScope->value_ = convertStringView("NONE");
                 break;
             default: break;
@@ -189,7 +190,7 @@ void InspectionConverter::convertAttributeLayer(
     });
 }
 
-void InspectionConverter::convertRelation(const mapget::model_ptr<mapget::Relation>& r)
+void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 {
     auto& relGroup = relationsByType_[r->name()];
     if (!relGroup) {
@@ -211,7 +212,7 @@ void InspectionConverter::convertRelation(const mapget::model_ptr<mapget::Relati
 
 void InspectionConverter::convertGeometry(
     JsValue const& key,
-    const mapget::model_ptr<mapget::Geometry>& g)
+    const model_ptr<Geometry>& g)
 {
     auto geomScope = push(
         key,
@@ -220,10 +221,10 @@ void InspectionConverter::convertGeometry(
             FieldOrIndex(key.as<std::string>()),
         ValueType::String);
     switch (g->geomType()) {
-    case simfil::Geometry::GeomType::Points: geomScope->value_ = convertStringView("Points"); break;
-    case simfil::Geometry::GeomType::Line: geomScope->value_ = convertStringView("Polyline"); break;
-    case simfil::Geometry::GeomType::Polygon: geomScope->value_ = convertStringView("Polygon"); break;
-    case simfil::Geometry::GeomType::Mesh: geomScope->value_ = convertStringView("Mesh"); break;
+    case GeomType::Points: geomScope->value_ = convertStringView("Points"); break;
+    case GeomType::Line: geomScope->value_ = convertStringView("Polyline"); break;
+    case GeomType::Polygon: geomScope->value_ = convertStringView("Polygon"); break;
+    case GeomType::Mesh: geomScope->value_ = convertStringView("Mesh"); break;
     }
 
     uint32_t index = 0;

@@ -26,18 +26,18 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     return {};
 }
 
-std::optional<mapget::Geometry::GeomType> parseGeometryEnum(std::string const& enumStr) {
+std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
-        return mapget::Geometry::GeomType::Points;
+        return mapget::GeomType::Points;
     }
     else if (enumStr == "mesh") {
-        return mapget::Geometry::GeomType::Mesh;
+        return mapget::GeomType::Mesh;
     }
     else if (enumStr == "line") {
-        return mapget::Geometry::GeomType::Line;
+        return mapget::GeomType::Line;
     }
     else if (enumStr == "polygon") {
-        return mapget::Geometry::GeomType::Polygon;
+        return mapget::GeomType::Polygon;
     }
 
     std::cout << "Unsupported geometry type: " << enumStr << std::endl;
