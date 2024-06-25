@@ -143,10 +143,10 @@ export class CoordinatesPanelComponent {
             this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
                 coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
         }
-        if (this.coordinatesService.auxillaryTileIdsFun) {
+        if (this.coordinatesService.auxilaryTileIdsFun) {
             for (let level = 0; level < 15; level++) {
                 const levelData: Map<string, bigint> =
-                    this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
+                    this.coordinatesService.auxilaryTileIdsFun(this.longitude, this.latitude, level).reduce(
                         (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
                             map.set(key, value);
                             return map;

@@ -9,7 +9,6 @@ export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 interface ErdblickParameters extends Record<string, any> {
     marker: boolean,
     markedPosition: Array<number>,
-    markedPositionLabels: Array<string>,
     selected: Array<string>,
     heading: number,
     pitch: number,
@@ -49,11 +48,6 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
         default: [],
         urlParam: true
-    },
-    markedPositionLabels: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: []
     },
     selected: {
         converter: val => JSON.parse(val),

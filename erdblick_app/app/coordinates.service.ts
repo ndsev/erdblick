@@ -10,7 +10,7 @@ export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxiliaryCoordinatesFun: Function | null = null;
-    auxillaryTileIdsFun: Function | null = null;
+    auxilaryTileIdsFun: Function | null = null;
 
     constructor(private httpClient: HttpClient,
                 public parametersService: ParametersService) {
@@ -35,7 +35,7 @@ export class CoordinatesService {
                                     console.error('Function getAuxCoordinates not found in the plugin.');
                                 }
                                 if (getAuxTileIds) {
-                                    this.auxillaryTileIdsFun = getAuxTileIds;
+                                    this.auxilaryTileIdsFun = getAuxTileIds;
                                 } else {
                                     console.error('Function getAuxTileIds not found in the plugin.');
                                 }
