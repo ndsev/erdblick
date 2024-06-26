@@ -604,7 +604,7 @@ export class MapService {
         for (const [_, tile] of this.loadedTileLayers) {
             tiles.push([coreLib.getTilePriorityById(this.currentViewport, tile.tileId), tile]);
         }
-        tiles.sort((a, b) => a[0] - b[0]);
+        tiles.sort((a, b) => b[0] - a[0]);
         return tiles.map(val => val[1]);
     }
 
