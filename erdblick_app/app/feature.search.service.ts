@@ -67,20 +67,7 @@ export class FeatureSearchService {
 
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
-        let priorityTiles = new Array<FeatureTile>();
-        let nonPriorityTiles = new Array<FeatureTile>();
-        for (const [_, tile] of this.mapService.loadedTileLayers) {
-            if ([...this.mapService.visualizedTileLayers.values()].some(tileVisializations => {
-                return tileVisializations.some(tileVisialization => {
-                    return tileVisialization.tile.tileId == tile.tileId && tileVisialization.tile.mapName == tile.mapName;
-                });
-            })) {
-                priorityTiles.push(tile);
-            } else {
-                nonPriorityTiles.push(tile);
-            }
-        }
-        this.workQueue = [...nonPriorityTiles, ...priorityTiles];
+        this.workQueue = this.mapService.getPrioritisedTiles();
         this.totalTiles = this.workQueue.length;
         this.isFeatureSearchActive.next(true);
 

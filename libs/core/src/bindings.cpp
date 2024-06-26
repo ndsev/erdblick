@@ -85,6 +85,10 @@ em::val getTileIds(Viewport const& vp, int level, int limit)
     return resultArray;
 }
 
+double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
+    return Wgs84AABB::radialDistancePrioFn({vp.camPosLon, vp.camPosLat}, vp.orientation)(tileId);
+}
+
 /** Get the center position for a mapget tile id in WGS84. */
 mapget::Point getTilePosition(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
@@ -321,6 +325,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
+    em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
 
