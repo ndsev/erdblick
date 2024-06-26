@@ -599,6 +599,15 @@ export class MapService {
         this.update();
     }
 
+    getPrioritisedTiles() {
+        let tiles  = new Array<[number, FeatureTile]>();
+        for (const [_, tile] of this.loadedTileLayers) {
+            tiles.push([coreLib.getTilePriorityById(this.currentViewport, tile.tileId), tile]);
+        }
+        tiles.sort((a, b) => a[0] - b[0]);
+        return tiles.map(val => val[1]);
+    }
+
     getFeatureTile(tileKey: string): FeatureTile|null {
         return this.loadedTileLayers.get(tileKey) || null;
     }
