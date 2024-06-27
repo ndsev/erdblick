@@ -108,18 +108,24 @@ export class CoordinatesPanelComponent {
                     this.markerButtonTooltip = "Disable marker placement";
                 }
                 this.markerPosition = null;
+                this.updateValues();
             }
+            this.restoreSelectedOptions();
         });
+
         this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
             if (!this.markerPosition && coordinates) {
                 this.longitude = CesiumMath.toDegrees(coordinates.longitude);
                 this.latitude = CesiumMath.toDegrees(coordinates.latitude);
                 this.updateValues();
             }
+            this.restoreSelectedOptions();
         });
+    }
 
+    private restoreSelectedOptions() {
         for (const option of this.parametersService.getCoordinatesAndTileIds()) {
-            if (this.displayOptions.some(val => val.name == option) && !this.isSelectedOption(option)) {
+            if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
                 this.selectedOptions.push({name: option});
             }
         }
