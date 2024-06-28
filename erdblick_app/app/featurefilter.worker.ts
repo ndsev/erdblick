@@ -10,10 +10,10 @@ export interface SearchWorkerTask {
 }
 
 export interface SearchResultForTile {
-    query: string;
-    numFeatures: number;
-    matches: Array<[string, string, [number, number, number]]>;  // Array of (MapTileKey, FeatureId, (x, y, z))
-    billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
+  query: string;
+  numFeatures: number;
+  matches: Array<[string, string, {x: number, y: number, z: number}]>;  // Array of (MapTileKey, FeatureId, (x, y, z))
+  billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
 }
 
 addEventListener('message', async ({data}) => {

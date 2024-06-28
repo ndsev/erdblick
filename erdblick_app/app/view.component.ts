@@ -15,7 +15,10 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
-    HeightReference
+    HeightReference,
+    PinBuilder,
+    BillboardCollection,
+    SceneTransforms
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
@@ -51,6 +54,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+    private pinBuilder: PinBuilder | null = null;
 
     /**
      * Construct a Cesium View with a Model.
@@ -126,6 +130,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                 baseLayer: false
             }
         );
+
+        this.pinBuilder = new PinBuilder();
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
@@ -203,8 +209,11 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.viewer.scene.primitives.add(this.featureSearchService.visualization);
         this.featureSearchService.visualizationChanged.subscribe(_ => {
+            this.addBillboards();
             this.viewer.scene.requestRender();
         });
+        // Set up camera event handlers for clustering
+        this.setupCameraHandlers();
 
         this.jumpService.markedPosition.subscribe(position => {
             if (position.length >= 2) {
@@ -384,7 +393,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
     }
 
-
     addMarker(cartesian: Cartesian3) {
         if (this.marker) {
             this.viewer.entities.remove(this.marker);
@@ -401,5 +409,113 @@ export class ErdblickViewComponent implements AfterViewInit {
                 eyeOffset: new Cartesian3(0, 0, -100)
             }
         });
+    }
+
+    addBillboards() {
+        this.featureSearchService.visualization.removeAll();
+
+        this.featureSearchService.visualizationPositions.forEach((position) => {
+            this.featureSearchService.visualization.add({
+                position: position,
+                image: this.featureSearchService.markerGraphics(),
+                width: 32,
+                height: 32,
+                pixelOffset: new Cartesian2(0, -10),
+                eyeOffset: new Cartesian3(0, 0, -100),
+                color: Color.fromCssColorString(this.featureSearchService.pointColor)
+            });
+        });
+    }
+
+    performClustering(pixelRange: number, minimumClusterSize: number) {
+        // Calculate screen positions
+        const screenPositions = this.featureSearchService.visualizationPositions.map(pos =>
+            SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, pos)
+        );
+
+        // Clustering logic
+        const clusters: { [key: string]: Cartesian3[] } = {};
+
+        screenPositions.forEach((screenPosition: Cartesian2, index: number) => {
+            let addedToCluster = false;
+
+            for (const clusterKey in clusters) {
+                const cluster = clusters[clusterKey];
+                const clusterScreenPosition = SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, cluster[0]);
+
+                if (Cartesian2.distance(screenPosition, clusterScreenPosition) < pixelRange) {
+                    cluster.push(this.featureSearchService.visualizationPositions[index]);
+                    addedToCluster = true;
+                    break;
+                }
+            }
+
+            if (!addedToCluster) {
+                clusters[index] = [this.featureSearchService.visualizationPositions[index]];
+            }
+        });
+
+        // Clear the current billboards and add clustered billboards
+        this.featureSearchService.visualization.removeAll();
+
+        Object.values(clusters).forEach(cluster => {
+            if (cluster.length >= minimumClusterSize) {
+                const averagePosition = this.calculateAveragePosition(cluster);
+                const clusterImage = this.pinBuilder?.fromText(
+                    cluster.length.toString(),
+                    Color.fromCssColorString(this.featureSearchService.pointColor),
+                    48
+                ).toDataURL();
+                this.featureSearchService.visualization.add({
+                    position: averagePosition,
+                    image: clusterImage,
+                    width: 48,
+                    height: 48,
+                    eyeOffset: new Cartesian3(0, 0, -100)
+                });
+            } else {
+                cluster.forEach(position => {
+                    this.featureSearchService.visualization.add({
+                        position: position,
+                        image: this.featureSearchService.markerGraphics(),
+                        width: 32,
+                        height: 32,
+                        pixelOffset: new Cartesian2(0, -10),
+                        eyeOffset: new Cartesian3(0, 0, -100),
+                        color: Color.fromCssColorString(this.featureSearchService.pointColor)
+                    });
+                });
+            }
+        });
+    }
+
+    calculateAveragePosition(cluster: Cartesian3[]): Cartesian3 {
+        const sum = cluster.reduce((acc, pos) => {
+            acc.x += pos.x;
+            acc.y += pos.y;
+            acc.z += pos.z;
+            return acc;
+        }, new Cartesian3(0, 0, 0));
+
+        return new Cartesian3(
+            sum.x / cluster.length,
+            sum.y / cluster.length,
+            sum.z / cluster.length
+        );
+    }
+
+    setupCameraHandlers() {
+        const pixelRange = 40;
+        const minimumClusterSize = 5;
+
+        this.viewer.scene.camera.moveEnd.addEventListener(() => {
+            this.performClustering(pixelRange, minimumClusterSize);
+        });
+
+        this.viewer.scene.camera.changed.addEventListener(() => {
+            this.performClustering(pixelRange, minimumClusterSize);
+        });
+        
+        this.performClustering(pixelRange, minimumClusterSize);
     }
 }

@@ -13,6 +13,7 @@ export class FeatureSearchService {
     currentQuery: string = ""
     workers: Array<Worker> = []
     visualization: BillboardCollection = new BillboardCollection();
+    visualizationPositions: Array<Cartesian3> = [];
     visualizationChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
     workQueue: Array<FeatureTile> = [];
@@ -91,6 +92,7 @@ export class FeatureSearchService {
         this.stop();
         this.currentQuery = "";
         this.visualization.removeAll();
+        this.visualizationPositions = [];
         this.resultsPerTile.clear();
         this.workQueue = [];
         this.totalTiles = 0;
@@ -117,15 +119,16 @@ export class FeatureSearchService {
 
             tileResult.billboardPrimitiveIndices = [];
             for (const [_, __, position] of tileResult.matches) {
-                tileResult.billboardPrimitiveIndices.push(this.visualization.length);
-                this.visualization.add({
-                    position: position,
-                    image: this.markerGraphics(),
-                    width: 32,
-                    height: 32,
-                    pixelOffset: new Cartesian2(0, -10),
-                    eyeOffset: new Cartesian3(0, 0, -100)
-                });
+                this.visualizationPositions.push(new Cartesian3(position.x, position.y, position.z));
+                tileResult.billboardPrimitiveIndices.push(this.visualizationPositions.length);
+                // this.visualization.add({
+                //     position: position,
+                //     image: this.markerGraphics(),
+                //     width: 32,
+                //     height: 32,
+                //     pixelOffset: new Cartesian2(0, -10),
+                //     eyeOffset: new Cartesian3(0, 0, -100)
+                // });
             }
         }
 
