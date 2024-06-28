@@ -65,9 +65,8 @@ export class FeatureSearchService {
         this.startTime = Date.now();
 
         // Fill up work queue and start processing.
-        for (const [_, tile] of this.mapService.loadedTileLayers) {
-            this.workQueue.push(tile);
-        }
+        // TODO: What if we move / change the viewport during the search?
+        this.workQueue = this.mapService.getPrioritisedTiles();
         this.totalTiles = this.workQueue.length;
         this.isFeatureSearchActive.next(true);
 
