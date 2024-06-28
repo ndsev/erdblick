@@ -353,11 +353,22 @@ export class MapPanelComponent {
         }
     }
 
-    focus(tileId: bigint, event: any) {
-        event.stopPropagation();
-        this.mapService.moveToWgs84PositionTopic.next(
-            coreLib.getTilePosition(BigInt(tileId))
-        );
+    focus(coverage: bigint|{min: bigint, max: bigint}, event?: any) {
+        event?.stopPropagation();
+        if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
+            let coverageStruct = coverage as {min: bigint, max: bigint};
+            let minPos = coreLib.getTilePosition(BigInt(coverageStruct.min));
+            let maxPos = coreLib.getTilePosition(BigInt(coverageStruct.max));
+            this.mapService.moveToWgs84PositionTopic.next(
+                {x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
+            );
+        }
+        else {
+            let coverageTileId = BigInt(coverage as bigint);
+            this.mapService.moveToWgs84PositionTopic.next(
+                coreLib.getTilePosition(BigInt(coverageTileId))
+            );
+        }
     }
 
     onLayerLevelChanged(event: Event, mapName: string, layerName: string) {

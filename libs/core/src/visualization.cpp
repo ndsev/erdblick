@@ -214,7 +214,7 @@ void FeatureLayerVisualization::addFeature(
                     feature,
                     layerName,
                     attr,
-                    id, // TODO: Rethink, how an attribute may be encoded in the id.
+                    id, // TODO: Rethink, how an attribute link may be encoded in the id.
                     rule,
                     offsetFactor,
                     offset);
