@@ -17,12 +17,12 @@ interface PanelOption {
         <div class="coordinates-container">
             <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
                       [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{markerButtonIcon}}</span>
+                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
             <p-card *ngIf="longitude && latitude" xmlns="http://www.w3.org/1999/html"
                     class="coordinates-panel">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
-                               (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder="" 
+                               (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder=""
                                class="coordinates-select" appendTo="body"/>
                 <div class="coordinates-entries">
                     <div class="coordinates-entry" *ngIf="isSelectedOption('WGS84')">
@@ -30,27 +30,32 @@ interface PanelOption {
                         <span class="coord-span">{{ longitude.toFixed(8) }}</span>
                         <span class="coord-span">{{ latitude.toFixed(8) }}</span>
                     </div>
-                    <ng-container *ngFor="let coords of auxillaryCoordinates | keyvalue" >
+                    <ng-container *ngFor="let coords of auxiliaryCoordinates | keyvalue">
                         <div *ngIf="isSelectedOption(coords.key)" class="coordinates-entry">
                             <span class="name-span" (click)="copyToClipboard(coords.value)">{{ coords.key }}:</span>
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue" >
+                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue">
                         <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
-                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}:</span>
+                            <span class="name-span"
+                                  (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}
+                                :</span>
                             <span class="coord-span">{{ tileId.value }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileId of auxillaryTileIds | keyvalue" >
+                    <ng-container *ngFor="let tileId of auxiliaryTileIds | keyvalue">
                         <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
-                            <span class="name-span" (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}:</span>
+                            <span class="name-span"
+                                  (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}
+                                :</span>
                             <span class="coord-span">{{ tileId.value }}</span>
                         </div>
                     </ng-container>
                 </div>
             </p-card>
-            <p-button *ngIf="isMarkerEnabled && markerPosition" (click)="mapService.moveToWgs84PositionTopic.next(markerPosition)"
+            <p-button *ngIf="isMarkerEnabled && markerPosition"
+                      (click)="mapService.moveToWgs84PositionTopic.next(markerPosition)"
                       label="" pTooltip="Focus on marker" tooltipPosition="bottom"
                       [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
@@ -76,9 +81,9 @@ export class CoordinatesPanelComponent {
     latitude: number = 0;
     isMarkerEnabled: boolean = false;
     markerPosition: {x: number, y: number} | null = null;
-    auxillaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
+    auxiliaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
     mapgetTileIds: Map<string, bigint> = new Map<string, bigint>();
-    auxillaryTileIds: Map<string, bigint> = new Map<string, bigint>();
+    auxiliaryTileIds: Map<string, bigint> = new Map<string, bigint>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
     displayOptions: Array<PanelOption> = [{name: "WGS84"}];
@@ -133,13 +138,13 @@ export class CoordinatesPanelComponent {
 
     private updateValues() {
         if (this.coordinatesService.auxiliaryCoordinatesFun) {
-            this.auxillaryCoordinates =
+            this.auxiliaryCoordinates =
                 this.coordinatesService.auxiliaryCoordinatesFun(this.longitude, this.latitude).reduce(
                     (map: Map<string, Array<number>>, [key, value]: [string, Array<number>]) => {
                         map.set(key, value);
                         return map;
                     }, new Map<string, Array<number>>());
-            for (const key of this.auxillaryCoordinates.keys()) {
+            for (const key of this.auxiliaryCoordinates.keys()) {
                 if (!this.displayOptions.some(val => val.name == key)) {
                     this.displayOptions.push({name: `${key}`});
                 }
@@ -159,10 +164,10 @@ export class CoordinatesPanelComponent {
                         }, new Map<string, bigint>());
 
                 levelData.forEach((value, key) => {
-                    this.auxillaryTileIds.set(`${key} (level ${level})`, value);
+                    this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
                 });
             }
-            for (const key of this.auxillaryTileIds.keys()) {
+            for (const key of this.auxiliaryTileIds.keys()) {
                 if (!this.displayOptions.some(val => val.name == key)) {
                     this.displayOptions.push({name: key});
                 }
