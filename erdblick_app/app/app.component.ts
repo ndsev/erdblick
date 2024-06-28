@@ -68,7 +68,9 @@ export class AppComponent {
             if (!this.parametersService.initialQueryParamsSet) {
                 return;
             }
-            const entries = [...Object.entries(parameters)];
+            const entries = [...Object.entries(parameters)].filter(value =>
+                this.parametersService.isUrlParameter(value[0])
+            );
             entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
         });

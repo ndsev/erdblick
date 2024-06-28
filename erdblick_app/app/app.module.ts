@@ -50,9 +50,10 @@ import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
 
-export function initializeServices(styleService: StyleService, mapService: MapService) {
+export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
         await initializeLibrary();
+        coordService.initialize();
         await styleService.initializeStyles();
         await mapService.initialize();
     }
@@ -104,7 +105,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         {
             provide: APP_INITIALIZER,
             useFactory: initializeServices,
-            deps: [StyleService, MapService],
+            deps: [StyleService, MapService, CoordinatesService],
             multi: true
         },
         MapService,
@@ -114,7 +115,6 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         InspectionService,
         ParametersService,
         SidePanelService,
-        CoordinatesService,
         FeatureSearchService,
         ClipboardService
     ],

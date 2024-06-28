@@ -22,9 +22,8 @@ interface PanelOption {
             <p-card *ngIf="longitude && latitude" xmlns="http://www.w3.org/1999/html"
                     class="coordinates-panel">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
-                               optionLabel="name" placeholder="" class="coordinates-select" appendTo="body"
-                               (ngModelChange)="selectedOptionsChanged()"
-                />
+                               (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder=""
+                               class="coordinates-select" appendTo="body"/>
                 <div class="coordinates-entries">
                     <div class="coordinates-entry" *ngIf="isSelectedOption('WGS84')">
                         <span class="name-span" (click)="copyToClipboard([longitude, latitude])">WGS84:</span>
@@ -107,83 +106,73 @@ export class CoordinatesPanelComponent {
                     this.markerButtonIcon = "wrong_location";
                     this.markerButtonTooltip = "Reset marker";
                 }
-
-                if (this.coordinatesService.auxiliaryCoordinatesFun) {
-                    this.auxiliaryCoordinates =
-                        this.coordinatesService.auxiliaryCoordinatesFun(this.longitude, this.latitude).reduce(
-                            (map: Map<string, Array<number>>, [key, value]: [string, Array<number>]) => {
-                                map.set(key, value);
-                                return map;
-                            }, new Map<string, Array<number>>());
-                }
-                for (let level = 0; level < 15; level++) {
-                    this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
-                        coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
-                }
-                if (this.coordinatesService.auxillaryTileIdsFun) {
-                    for (let level = 0; level < 15; level++) {
-                        const levelData: Map<string, bigint> =
-                            this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
-                                (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
-                                    map.set(key, value);
-                                    return map;
-                                }, new Map<string, bigint>());
-
-                        levelData.forEach((value, key) => {
-                            this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
-                        });
-                    }
-                }
+                this.updateValues();
             } else {
                 if (this.isMarkerEnabled) {
                     this.markerButtonIcon = "location_on";
                     this.markerButtonTooltip = "Disable marker placement";
                 }
                 this.markerPosition = null;
+                this.updateValues();
             }
+            this.restoreSelectedOptions();
         });
+
         this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
             if (!this.markerPosition && coordinates) {
                 this.longitude = CesiumMath.toDegrees(coordinates.longitude);
                 this.latitude = CesiumMath.toDegrees(coordinates.latitude);
-                if (this.coordinatesService.auxiliaryCoordinatesFun) {
-                    this.auxiliaryCoordinates =
-                        this.coordinatesService.auxiliaryCoordinatesFun(this.longitude, this.latitude).reduce(
-                            (map: Map<string, Array<number>>, [key, value]: [string, Array<number>]) => {
-                                map.set(key, value);
-                                return map;
-                            }, new Map<string, Array<number>>());
-                    for (const key of this.auxiliaryCoordinates.keys()) {
-                        if (!this.displayOptions.some(val => val.name == key)) {
-                            this.displayOptions.push({name: `${key}`});
-                        }
-                    }
-                }
-                for (let level = 0; level < 15; level++) {
-                    this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
-                        coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
-                }
-                if (this.coordinatesService.auxillaryTileIdsFun) {
-                    for (let level = 0; level < 15; level++) {
-                        const levelData: Map<string, bigint> =
-                            this.coordinatesService.auxillaryTileIdsFun(this.longitude, this.latitude, level).reduce(
-                                (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
-                                    map.set(key, value);
-                                    return map;
-                                }, new Map<string, bigint>());
+                this.updateValues();
+            }
+            this.restoreSelectedOptions();
+        });
+    }
 
-                        levelData.forEach((value, key) => {
-                            this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
-                        });
-                    }
-                    for (const key of this.auxiliaryTileIds.keys()) {
-                        if (!this.displayOptions.some(val => val.name == key)) {
-                            this.displayOptions.push({name: key});
-                        }
-                    }
+    private restoreSelectedOptions() {
+        for (const option of this.parametersService.getCoordinatesAndTileIds()) {
+            if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
+                this.selectedOptions.push({name: option});
+            }
+        }
+    }
+
+    private updateValues() {
+        if (this.coordinatesService.auxiliaryCoordinatesFun) {
+            this.auxiliaryCoordinates =
+                this.coordinatesService.auxiliaryCoordinatesFun(this.longitude, this.latitude).reduce(
+                    (map: Map<string, Array<number>>, [key, value]: [string, Array<number>]) => {
+                        map.set(key, value);
+                        return map;
+                    }, new Map<string, Array<number>>());
+            for (const key of this.auxiliaryCoordinates.keys()) {
+                if (!this.displayOptions.some(val => val.name == key)) {
+                    this.displayOptions.push({name: `${key}`});
                 }
             }
-        });
+        }
+        for (let level = 0; level < 15; level++) {
+            this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
+                coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
+        }
+        if (this.coordinatesService.auxiliaryTileIdsFun) {
+            for (let level = 0; level < 15; level++) {
+                const levelData: Map<string, bigint> =
+                    this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
+                        (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
+                            map.set(key, value);
+                            return map;
+                        }, new Map<string, bigint>());
+
+                levelData.forEach((value, key) => {
+                    this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
+                });
+            }
+            for (const key of this.auxiliaryTileIds.keys()) {
+                if (!this.displayOptions.some(val => val.name == key)) {
+                    this.displayOptions.push({name: key});
+                }
+            }
+        }
     }
 
     toggleMarker() {
@@ -218,15 +207,15 @@ export class CoordinatesPanelComponent {
         this.clipboardService.copyToClipboard(coordArray.join(" "));
     }
 
-    // updateDisplayedOptions(key: string, value: boolean) {
-    //     this.displayOptions.set(key, value);
-    // }
-
     isSelectedOption(name: string) {
         return this.selectedOptions.some(val => val.name == name);
     }
 
-    selectedOptionsChanged() {
-        // TODO: Save selected label options to parameterService.p().markedPositionLabels
+    updateSelectedOptions() {
+        this.parametersService.setCoordinatesAndTileIds(this.selectedOptions.reduce(
+            (array: Array<string>, option) => {
+            array.push(option.name);
+            return array;
+        }, new Array<string>()));
     }
 }

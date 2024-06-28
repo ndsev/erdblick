@@ -9,7 +9,6 @@ export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 interface ErdblickParameters extends Record<string, any> {
     marker: boolean,
     markedPosition: Array<number>,
-    markedPositionLabels: Array<string>,
     selected: Array<string>,
     heading: number,
     pitch: number,
@@ -22,7 +21,8 @@ interface ErdblickParameters extends Record<string, any> {
     layers: Array<[string, number, boolean, boolean]>,
     styles: Array<string>,
     tilesLoadLimit: number,
-    tilesVisualizeLimit: number
+    tilesVisualizeLimit: number,
+    enabledCoordsTileIds: Array<string>
 }
 
 interface ParameterDescriptor {
@@ -31,89 +31,107 @@ interface ParameterDescriptor {
     // Check if the converted value is good, or the default must be used.
     validator: (val: any)=>boolean,
     // Default value.
-    default: any
+    default: any,
+    // Include in the url
+    urlParam: boolean
 }
 
 const erdblickParameters: Record<string, ParameterDescriptor> = {
     marker: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
-        default: false
+        default: false,
+        urlParam: true
     },
     markedPosition: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
-        default: []
-    },
-    markedPositionLabels: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: []
+        default: [],
+        urlParam: true
     },
     selected: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: []
+        default: [],
+        urlParam: true
     },
     heading: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: 6.0
+        default: 6.0,
+        urlParam: true
     },
     pitch: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: -1.55
+        default: -1.55,
+        urlParam: true
     },
     roll: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: 0.25
+        default: 0.25,
+        urlParam: true
     },
     lon: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: 22.837473
+        default: 22.837473,
+        urlParam: true
     },
     lat: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: 38.490817
+        default: 38.490817,
+        urlParam: true
     },
     alt: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
-        default: 16000000
+        default: 16000000,
+        urlParam: true
     },
     osmOpacity: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
-        default: 30
+        default: 30,
+        urlParam: true
     },
     osm: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
-        default: true
+        default: true,
+        urlParam: true
     },
     layers: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 4 && typeof item[0] === 'string' && typeof item[1] === 'number' && typeof item[2] === 'boolean' && typeof item[3] === 'boolean'),
-        default: []
+        default: [],
+        urlParam: true
     },
     styles: {
         converter: val => JSON.parse(val),
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: []
+        default: [],
+        urlParam: true
     },
     tilesLoadLimit: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_LOAD
+        default: MAX_NUM_TILES_TO_LOAD,
+        urlParam: true
     },
     tilesVisualizeLimit: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_VISUALIZE
+        default: MAX_NUM_TILES_TO_VISUALIZE,
+        urlParam: true
+    },
+    enabledCoordsTileIds: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        default: ["WGS84"],
+        urlParam: false
     }
 };
 
@@ -323,5 +341,21 @@ export class ParametersService {
 
     getCameraPosition() {
         return this.cameraViewData.getValue().destination;
+    }
+
+    setCoordinatesAndTileIds(selectedOptions: Array<string>) {
+        this.p().enabledCoordsTileIds = selectedOptions;
+        this.parameters.next(this.p());
+    }
+
+    getCoordinatesAndTileIds() {
+        return this.p().enabledCoordsTileIds;
+    }
+
+    isUrlParameter(name: string) {
+        if (erdblickParameters.hasOwnProperty(name)) {
+            return erdblickParameters[name].urlParam;
+        }
+        return false;
     }
 }
