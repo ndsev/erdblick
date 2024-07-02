@@ -8,12 +8,17 @@ import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {InfoMessageService} from "./info.service";
+import {InfoMessageService} from "./info.service"
+
+export interface CoverageRectItem extends Object {
+    min: number,
+    max: number
+}
 
 export interface LayerInfoItem extends Object {
     canRead: boolean;
     canWrite: boolean;
-    coverage: Array<bigint>;
+    coverage: Array<number|CoverageRectItem>;
     featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
     layerId: string;
     type: string;
@@ -257,11 +262,7 @@ export class MapService {
                     let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
-                        let defCoverage = [0n];
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
-                            if (layerInfo.coverage.length == 0) {
-                                layerInfo.coverage = defCoverage;
-                            }
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
                                 mapInfo.mapId + '/' + layerId,
