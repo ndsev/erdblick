@@ -1,6 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {MapInfoItem, MapService} from "./map.service";
+import {CoverageRectItem, MapInfoItem, MapService} from "./map.service";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {ParametersService} from "./parameters.service";
 import {FileUpload} from "primeng/fileupload";
@@ -60,7 +60,7 @@ import {Menu} from "primeng/menu";
                                     <span class="material-icons"
                                           style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
                                 </p-button>
-                                <p-button *ngIf="mapLayer.value.coverage[0]"
+                                <p-button *ngIf="mapLayer.value.coverage.length"
                                           (click)="focus(mapLayer.value.coverage[0], $event)"
                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                           [style]="{'padding-left': '0', 'padding-right': '0'}">
@@ -353,10 +353,10 @@ export class MapPanelComponent {
         }
     }
 
-    focus(coverage: bigint|{min: bigint, max: bigint}, event?: any) {
+    focus(coverage: number|CoverageRectItem, event?: any) {
         event?.stopPropagation();
         if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
-            let coverageStruct = coverage as {min: bigint, max: bigint};
+            let coverageStruct = coverage as CoverageRectItem;
             let minPos = coreLib.getTilePosition(BigInt(coverageStruct.min));
             let maxPos = coreLib.getTilePosition(BigInt(coverageStruct.max));
             this.mapService.moveToWgs84PositionTopic.next(
@@ -364,9 +364,8 @@ export class MapPanelComponent {
             );
         }
         else {
-            let coverageTileId = BigInt(coverage as bigint);
             this.mapService.moveToWgs84PositionTopic.next(
-                coreLib.getTilePosition(BigInt(coverageTileId))
+                coreLib.getTilePosition(BigInt(coverage as number))
             );
         }
     }
