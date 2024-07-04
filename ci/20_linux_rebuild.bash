@@ -9,4 +9,4 @@ export EMSCRIPTEN="$ci_dir/emsdk/upstream/emscripten"
 export PATH=$PATH:"$ci_dir/../node_modules/.bin/"
 
 cd "$ci_dir/../build"
-cmake --build . -- -j
+cmake --build . -- -j"$(nproc)"

@@ -70,6 +70,7 @@ target_include_directories(erdblick-core
 
 target_link_libraries(erdblick-core
   PUBLIC
+    CesiumUtility
     Cesium3DTilesWriter
     CesiumGeospatial
     CesiumGltf
