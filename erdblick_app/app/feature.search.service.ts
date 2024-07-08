@@ -2,16 +2,210 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
 import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
-import {Color, BillboardCollection, Cartesian2, Cartesian3} from "./cesium";
+import {Color, BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
 import {FeatureTile} from "./features.model";
-import {uint8ArrayFromWasm} from "./wasm";
+import {coreLib, uint8ArrayFromWasm} from "./wasm";
 
+export const MAX_ZOOM_LEVEL = 15;
+
+function generateChildrenIds(parentTileId: bigint) {
+    if (parentTileId == -1n) {
+        return [0n, 4294967296n];
+    }
+
+    let level = parentTileId & 0xFFFFn;
+    let y = (parentTileId >> 16n) & 0xFFFFn;
+    let x = parentTileId >> 32n;
+
+    level += 1n;
+
+    return [
+        (x*2n << 32n)|(y*2n << 16n)|level,
+        (x*2n + 1n << 32n)|(y*2n << 16n)|level,
+        (x*2n << 32n)|(y*2n + 1n << 16n)|level,
+        (x*2n + 1n << 32n)|(y*2n + 1n << 16n)|level
+    ]
+}
+
+class FSRQuadTreeNode {
+    tileId: bigint;
+    parentId: bigint | null;
+    level: number;
+    children: Array<FSRQuadTreeNode>;
+    count: number;
+    markers: Array<Cartesian3> = [];
+    rectangle: Rectangle;
+    center: Cartesian3;
+
+    constructor(tileId: bigint,
+                parentTileId: bigint | null,
+                level: number,
+                count: number,
+                children: Array<FSRQuadTreeNode> = [],
+                markers: Array<Cartesian3> = []) {
+        this.tileId = tileId;
+        this.parentId = parentTileId;
+        this.level = level;
+        this.children = children;
+        this.count = count;
+        this.markers = markers;
+
+        const tileBox = coreLib.getTileBox(tileId);
+        this.rectangle = Rectangle.fromDegrees(...tileBox);
+        const position = coreLib.getTilePosition(tileId)
+        this.center = Cartesian3.fromDegrees(position.x, position.y, position.z);
+    }
+
+    contains(point: Cartesian3) {
+       return Rectangle.contains(this.rectangle, Cartographic.fromCartesian(point));
+    }
+}
+
+class FSRQuadTree {
+    root: FSRQuadTreeNode;
+    private maxDepth: number = MAX_ZOOM_LEVEL;
+
+    constructor() {
+        this.root = new FSRQuadTreeNode(-1n, null, -1, 0);
+    }
+
+    getMaxLevel() {
+        return this.maxDepth;
+    }
+
+    makeChildren(node: FSRQuadTreeNode, markers: Array<Cartesian3>) {
+        for (const id of generateChildrenIds(node.tileId)) {
+            const child = new FSRQuadTreeNode(id, node.tileId, node.level + 1, 0);
+            if (markers.some(marker => child.contains(marker))) {
+                node.children.push(child);
+            }
+        }
+    }
+
+    calculateAveragePosition(markers: Cartesian3[]): Cartesian3 {
+        const sum = markers.reduce((acc, pos) => {
+            acc.x += pos.x;
+            acc.y += pos.y;
+            acc.z += pos.z;
+            return acc;
+        }, new Cartesian3(0, 0, 0));
+
+        return new Cartesian3(
+            sum.x / markers.length,
+            sum.y / markers.length,
+            sum.z / markers.length
+        );
+    }
+
+    insert(tileId: bigint, markers: Array<Cartesian3>) {
+        let currentLevel = 0;
+        if (!this.root.children.length) {
+            this.makeChildren(this.root, markers);
+        }
+        let targetNode: FSRQuadTreeNode | null = this.root;
+        let nodes = this.root.children;
+
+        mainLoop: while (nodes.length > 0) {
+            let next: Array<FSRQuadTreeNode> = [];
+            for (let node of nodes) {
+                if (node.tileId == tileId) {
+                    targetNode = node;
+                    break mainLoop;
+                }
+                if (!node.children.length) {
+                    this.makeChildren(node, markers);
+                }
+                next.push(...node.children);
+            }
+
+            nodes = next;
+            currentLevel++;
+            if (currentLevel > this.maxDepth) {
+                targetNode = null;
+                break;
+            }
+        }
+
+        if (targetNode) {
+            const markersCenter = this.calculateAveragePosition(markers);
+            targetNode.count += markers.length;
+            targetNode.center = markersCenter;
+            if (targetNode.parentId) {
+                let parentId: bigint | null = targetNode.parentId;
+                let level = targetNode.level - 1;
+                while (parentId && level > -1) {
+                    for (let node of this.getNodesAtLevel(level)) {
+                        if (node.tileId == parentId) {
+                            node.count += markers.length;
+                            node.center = markersCenter;
+                            parentId = node.parentId;
+                        }
+                    }
+                    level--;
+                }
+            }
+            if (!targetNode.children.length) {
+                this.makeChildren(targetNode, markers);
+            }
+            nodes = targetNode.children;
+            while(currentLevel <= this.maxDepth) {
+                let next: Array<FSRQuadTreeNode> = [];
+                for (let i = 0; i < nodes.length; i++) {
+                    const containedMarkers = markers.filter(marker => nodes[i].contains(marker));
+                    if (containedMarkers) {
+                        const subMarkersCenter = this.calculateAveragePosition(containedMarkers);
+                        nodes[i].count += containedMarkers.length;
+                        nodes[i].center = subMarkersCenter;
+                        if (nodes[i].level == this.maxDepth) {
+                            nodes[i].markers.push(...containedMarkers);
+                        } else {
+                            if (!nodes[i].children.length) {
+                                this.makeChildren(nodes[i], markers);
+                            }
+                            next.push(...nodes[i].children);
+                        }
+                    }
+                }
+                nodes = next;
+                currentLevel++;
+            }
+        }
+    }
+
+    getNodesAtLevel(level: number): Array<FSRQuadTreeNode> {
+        if (level < 0 || !this.root.children.length) {
+            return [];
+        }
+
+        console.log("Level", level)
+
+        let currentLevel = 0;
+        let result = this.root.children;
+
+        while (result.length > 0) {
+            if (currentLevel == level) {
+                return result;
+            }
+
+            let next = [];
+            for (let node of result) {
+                next.push(...node.children);
+            }
+
+            result = next;
+            currentLevel++;
+        }
+
+        return [];
+    }
+}
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
 
     currentQuery: string = ""
     workers: Array<Worker> = []
+    resultTree: FSRQuadTree = new FSRQuadTree();
     visualization: BillboardCollection = new BillboardCollection();
     visualizationPositions: Array<Cartesian3> = [];
     visualizationChanged: Subject<void> = new Subject<void>();
@@ -91,6 +285,7 @@ export class FeatureSearchService {
     clear() {
         this.stop();
         this.currentQuery = "";
+        this.resultTree = new FSRQuadTree();
         this.visualization.removeAll();
         this.visualizationPositions = [];
         this.resultsPerTile.clear();
@@ -117,10 +312,12 @@ export class FeatureSearchService {
             let mapTileKey = tileResult.matches[0][0];
             this.resultsPerTile.set(mapTileKey, tileResult);
 
-            tileResult.billboardPrimitiveIndices = [];
+            // tileResult.billboardPrimitiveIndices = [];
+            let markerPositions: Array<Cartesian3> = [];
             for (const [_, __, position] of tileResult.matches) {
-                this.visualizationPositions.push(new Cartesian3(position.x, position.y, position.z));
-                tileResult.billboardPrimitiveIndices.push(this.visualizationPositions.length);
+                markerPositions.push(new Cartesian3(position.x, position.y, position.z));
+                // this.visualizationPositions.push(new Cartesian3(position.x, position.y, position.z));
+                // tileResult.billboardPrimitiveIndices.push(this.visualizationPositions.length);
                 // this.visualization.add({
                 //     position: position,
                 //     image: this.markerGraphics(),
@@ -130,6 +327,7 @@ export class FeatureSearchService {
                 //     eyeOffset: new Cartesian3(0, 0, -100)
                 // });
             }
+            this.resultTree.insert(tileResult.tileId, markerPositions);
         }
 
         // Broadcast the search progress.

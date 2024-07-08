@@ -10,10 +10,11 @@ export interface SearchWorkerTask {
 }
 
 export interface SearchResultForTile {
-  query: string;
-  numFeatures: number;
-  matches: Array<[string, string, {x: number, y: number, z: number}]>;  // Array of (MapTileKey, FeatureId, (x, y, z))
-  billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
+    tileId: bigint;
+    query: string;
+    numFeatures: number;
+    matches: Array<[string, string, {x: number, y: number, z: number}]>;  // Array of (MapTileKey, FeatureId, (x, y, z))
+    billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
 }
 
 addEventListener('message', async ({data}) => {
@@ -26,16 +27,18 @@ addEventListener('message', async ({data}) => {
     uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
     uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
     let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.tileBlob);
-    let numFeatures = tile.numFeatures();
+    const numFeatures = tile.numFeatures();
+    const tileId = tile.tileId();
 
     // Get the query results from the tile.
     let search = new coreLib.FeatureLayerSearch(tile);
-    let matchingFeatures = search.filter(task.query);
+    const matchingFeatures = search.filter(task.query);
     search.delete();
     tile.delete();
 
     // Post result back to the main thread.
     let result: SearchResultForTile = {
+        tileId: tileId,
         query: task.query,
         numFeatures: numFeatures,
         matches: matchingFeatures

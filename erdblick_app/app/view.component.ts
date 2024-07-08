@@ -25,7 +25,7 @@ import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
-import {FeatureSearchService} from "./feature.search.service";
+import {FeatureSearchService, MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 
@@ -209,7 +209,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.viewer.scene.primitives.add(this.featureSearchService.visualization);
         this.featureSearchService.visualizationChanged.subscribe(_ => {
-            this.addBillboards();
+            const level = this.mapService.getTileLevelForViewport();
+            this.renderFeatureSearchResultTree(level);
             this.viewer.scene.requestRender();
         });
         // Set up camera event handlers for clustering
@@ -411,10 +412,9 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    addBillboards() {
+    addBillboards(positions: Array<Cartesian3>) {
         this.featureSearchService.visualization.removeAll();
-
-        this.featureSearchService.visualizationPositions.forEach((position) => {
+        positions.forEach(position => {
             this.featureSearchService.visualization.add({
                 position: position,
                 image: this.featureSearchService.markerGraphics(),
@@ -427,95 +427,131 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    performClustering(pixelRange: number, minimumClusterSize: number) {
-        // Calculate screen positions
-        const screenPositions = this.featureSearchService.visualizationPositions.map(pos =>
-            SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, pos)
-        );
+    // clearBillboards() {
+    //     this.featureSearchService.visualization.removeAll();
+    // }
 
-        // Clustering logic
-        const clusters: { [key: string]: Cartesian3[] } = {};
-
-        screenPositions.forEach((screenPosition: Cartesian2, index: number) => {
-            let addedToCluster = false;
-
-            for (const clusterKey in clusters) {
-                const cluster = clusters[clusterKey];
-                const clusterScreenPosition = SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, cluster[0]);
-
-                if (Cartesian2.distance(screenPosition, clusterScreenPosition) < pixelRange) {
-                    cluster.push(this.featureSearchService.visualizationPositions[index]);
-                    addedToCluster = true;
-                    break;
-                }
-            }
-
-            if (!addedToCluster) {
-                clusters[index] = [this.featureSearchService.visualizationPositions[index]];
-            }
-        });
-
-        // Clear the current billboards and add clustered billboards
-        this.featureSearchService.visualization.removeAll();
-
-        Object.values(clusters).forEach(cluster => {
-            if (cluster.length >= minimumClusterSize) {
-                const averagePosition = this.calculateAveragePosition(cluster);
-                const clusterImage = this.pinBuilder?.fromText(
-                    cluster.length.toString(),
-                    Color.fromCssColorString(this.featureSearchService.pointColor),
-                    48
-                ).toDataURL();
-                this.featureSearchService.visualization.add({
-                    position: averagePosition,
-                    image: clusterImage,
-                    width: 48,
-                    height: 48,
-                    eyeOffset: new Cartesian3(0, 0, -100)
-                });
-            } else {
-                cluster.forEach(position => {
-                    this.featureSearchService.visualization.add({
-                        position: position,
-                        image: this.featureSearchService.markerGraphics(),
-                        width: 32,
-                        height: 32,
-                        pixelOffset: new Cartesian2(0, -10),
-                        eyeOffset: new Cartesian3(0, 0, -100),
-                        color: Color.fromCssColorString(this.featureSearchService.pointColor)
-                    });
-                });
-            }
-        });
-    }
-
-    calculateAveragePosition(cluster: Cartesian3[]): Cartesian3 {
-        const sum = cluster.reduce((acc, pos) => {
-            acc.x += pos.x;
-            acc.y += pos.y;
-            acc.z += pos.z;
-            return acc;
-        }, new Cartesian3(0, 0, 0));
-
-        return new Cartesian3(
-            sum.x / cluster.length,
-            sum.y / cluster.length,
-            sum.z / cluster.length
-        );
-    }
+    // performClustering(pixelRange: number, minimumClusterSize: number) {
+    //     // Calculate screen positions
+    //     const screenPositions = this.featureSearchService.visualizationPositions.map(pos =>
+    //         SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, pos)
+    //     );
+    //
+    //     // Clustering logic
+    //     const clusters: { [key: string]: Cartesian3[] } = {};
+    //
+    //     screenPositions.forEach((screenPosition: Cartesian2, index: number) => {
+    //         let addedToCluster = false;
+    //
+    //         for (const clusterKey in clusters) {
+    //             const cluster = clusters[clusterKey];
+    //             const clusterScreenPosition = SceneTransforms.wgs84ToWindowCoordinates(this.viewer.scene, cluster[0]);
+    //
+    //             if (Cartesian2.distance(screenPosition, clusterScreenPosition) < pixelRange) {
+    //                 cluster.push(this.featureSearchService.visualizationPositions[index]);
+    //                 addedToCluster = true;
+    //                 break;
+    //             }
+    //         }
+    //
+    //         if (!addedToCluster) {
+    //             clusters[index] = [this.featureSearchService.visualizationPositions[index]];
+    //         }
+    //     });
+    //
+    //     // Clear the current billboards and add clustered billboards
+    //     this.featureSearchService.visualization.removeAll();
+    //
+    //     Object.values(clusters).forEach(cluster => {
+    //         if (cluster.length >= minimumClusterSize) {
+    //             const averagePosition = this.calculateAveragePosition(cluster);
+    //             const clusterImage = this.pinBuilder?.fromText(
+    //                 cluster.length.toString(),
+    //                 Color.fromCssColorString(this.featureSearchService.pointColor),
+    //                 48
+    //             ).toDataURL();
+    //             this.featureSearchService.visualization.add({
+    //                 position: averagePosition,
+    //                 image: clusterImage,
+    //                 width: 48,
+    //                 height: 48,
+    //                 eyeOffset: new Cartesian3(0, 0, -100)
+    //             });
+    //         } else {
+    //             cluster.forEach(position => {
+    //                 this.featureSearchService.visualization.add({
+    //                     position: position,
+    //                     image: this.featureSearchService.markerGraphics(),
+    //                     width: 32,
+    //                     height: 32,
+    //                     pixelOffset: new Cartesian2(0, -10),
+    //                     eyeOffset: new Cartesian3(0, 0, -100),
+    //                     color: Color.fromCssColorString(this.featureSearchService.pointColor)
+    //                 });
+    //             });
+    //         }
+    //     });
+    // }
+    //
+    // calculateAveragePosition(cluster: Cartesian3[]): Cartesian3 {
+    //     const sum = cluster.reduce((acc, pos) => {
+    //         acc.x += pos.x;
+    //         acc.y += pos.y;
+    //         acc.z += pos.z;
+    //         return acc;
+    //     }, new Cartesian3(0, 0, 0));
+    //
+    //     return new Cartesian3(
+    //         sum.x / cluster.length,
+    //         sum.y / cluster.length,
+    //         sum.z / cluster.length
+    //     );
+    // }
 
     setupCameraHandlers() {
         const pixelRange = 40;
         const minimumClusterSize = 5;
 
         this.viewer.scene.camera.moveEnd.addEventListener(() => {
-            this.performClustering(pixelRange, minimumClusterSize);
+            // this.performClustering(pixelRange, minimumClusterSize);
+            const level = this.mapService.getTileLevelForViewport();
+            this.renderFeatureSearchResultTree(level);
         });
 
         this.viewer.scene.camera.changed.addEventListener(() => {
-            this.performClustering(pixelRange, minimumClusterSize);
+            // this.performClustering(pixelRange, minimumClusterSize);
+            const level = this.mapService.getTileLevelForViewport();
+            this.renderFeatureSearchResultTree(level);
         });
-        
-        this.performClustering(pixelRange, minimumClusterSize);
+
+        // this.performClustering(pixelRange, minimumClusterSize);
+    }
+
+    renderFeatureSearchResultTree(level: number) {
+        this.featureSearchService.visualization.removeAll();
+        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+        console.log(nodes)
+        let markers: Array<Cartesian3> = [];
+        for (const node of nodes) {
+            if (node.markers.length) {
+                markers.push(...node.markers);
+            } else if (node.count > 0) {
+                const clusterImage = this.pinBuilder?.fromText(
+                    node.count.toString(),
+                    Color.fromCssColorString(this.featureSearchService.pointColor),
+                    48
+                ).toDataURL();
+                this.featureSearchService.visualization.add({
+                    position: node.center,
+                    image: clusterImage,
+                    width: 48,
+                    height: 48,
+                    // eyeOffset: new Cartesian3(0, 0, -100)
+                });
+            }
+        }
+        if (markers.length) {
+            this.addBillboards(markers);
+        }
     }
 }

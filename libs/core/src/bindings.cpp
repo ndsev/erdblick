@@ -85,6 +85,11 @@ em::val getTileIds(Viewport const& vp, int level, int limit)
     return resultArray;
 }
 
+uint32_t getNumTileIds(Viewport const& vp, int level) {
+    Wgs84AABB aabb(Wgs84Point{vp.west, vp.south, .0}, {vp.width, vp.height});
+    return aabb.numTileIds(level);
+}
+
 double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
     return Wgs84AABB::radialDistancePrioFn({vp.camPosLon, vp.camPosLat}, vp.orientation)(tileId);
 }
@@ -325,6 +330,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
+    em::function("getNumTileIds", &getNumTileIds);
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
