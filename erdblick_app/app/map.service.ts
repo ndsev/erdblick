@@ -95,7 +95,7 @@ export class MapService {
         resolve: null|((tile: FeatureTile)=>void),
         reject: null|((why: any)=>void),
     } | null = null;
-    zoomLevel: Subject<number> = new Subject<number>();
+    zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
 
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
@@ -599,6 +599,7 @@ export class MapService {
 
     setViewport(viewport: any) {
         this.currentViewport = viewport;
+        this.setTileLevelForViewport();
         this.update();
     }
 
@@ -664,14 +665,13 @@ export class MapService {
         this.moveToWgs84PositionTopic.next(position);
     }
 
-    getTileLevelForViewport() {
+    setTileLevelForViewport() {
         for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
             if (coreLib.getNumTileIds(this.currentViewport, level) >= 10) {
                 this.zoomLevel.next(level);
-                return level;
+                return;
             }
         }
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
-        return MAX_ZOOM_LEVEL;
     }
 }
