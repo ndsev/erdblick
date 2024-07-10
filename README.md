@@ -9,7 +9,7 @@
 * 🗺️ View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.
 * 🎨 Define visual styles for map layers through style-sheets, translating specific features into visual elements in both 2D and 3D.
 * 🏔️ Experience 3D features and terrains with a flexible 3D camera powered by [CesiumJS](https://github.com/CesiumGS/cesium/).
-* ✍️ Edit map layer style sheets in real-time directly from the front-end **(Planned)**.
+* ✍️ Edit map layer style sheets in real-time directly from the front-end.
 * 🔍 Select multiple features at once using filter or lasso selection tools **(Planned)**.
 * 🖼️ Utilize split-screen panes for optional overlay or synchronized navigation with an adjustable splitter **(Planned)**.
 * 🔎 View multiple map layer tile zoom levels all at once **(Planned)**.
