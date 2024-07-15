@@ -16,9 +16,7 @@ import {
     UrlTemplateImageryProvider,
     Viewer,
     HeightReference,
-    PinBuilder,
-    BillboardCollection,
-    SceneTransforms
+    PinBuilder
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
@@ -215,7 +213,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.renderFeatureSearchResultTree(level);
+            this.renderFeatureSearchResultTree(level, true);
         });
 
         this.jumpService.markedPosition.subscribe(position => {
@@ -415,7 +413,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     addBillboards(positions: Array<Cartesian3>) {
-        this.featureSearchService.visualization.removeAll();
+        // this.featureSearchService.visualization.removeAll();
         positions.forEach(position => {
             this.featureSearchService.visualization.add({
                 position: position,
@@ -429,11 +427,13 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    renderFeatureSearchResultTree(level: number) {
-        this.featureSearchService.visualization.removeAll();
-        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+    renderFeatureSearchResultTree(level: number, complete: boolean = false) {
+        if (level > MAX_ZOOM_LEVEL || complete) {
+            this.featureSearchService.visualization.removeAll();
+        }
+
         let markers: Array<Cartesian3> = [];
-        for (const node of nodes) {
+        for (const node of this.featureSearchService.resultTree.getNodesAtLevel(level)) {
             if (node.markers.length) {
                 markers.push(...node.markers);
             } else if (node.count > 0) {

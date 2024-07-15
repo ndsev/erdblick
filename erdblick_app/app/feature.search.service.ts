@@ -27,11 +27,11 @@ function generateChildrenIds(parentTileId: bigint) {
     ]
 }
 
-class FSRQuadTreeNode {
+class FeatureSearchQuadTreeNode {
     tileId: bigint;
     parentId: bigint | null;
     level: number;
-    children: Array<FSRQuadTreeNode>;
+    children: Array<FeatureSearchQuadTreeNode>;
     count: number;
     markers: Array<Cartesian3> = [];
     rectangle: Rectangle;
@@ -41,7 +41,7 @@ class FSRQuadTreeNode {
                 parentTileId: bigint | null,
                 level: number,
                 count: number,
-                children: Array<FSRQuadTreeNode> = [],
+                children: Array<FeatureSearchQuadTreeNode> = [],
                 markers: Array<Cartesian3> = []) {
         this.tileId = tileId;
         this.parentId = parentTileId;
@@ -56,66 +56,72 @@ class FSRQuadTreeNode {
         this.center = Cartesian3.fromDegrees(position.x, position.y, position.z);
     }
 
-    contains(point: Cartesian3) {
+    private containsPoint(point: Cartesian3) {
        return Rectangle.contains(this.rectangle, Cartographic.fromCartesian(point));
     }
-}
 
-class FSRQuadTree {
-    root: FSRQuadTreeNode;
-    private maxDepth: number = MAX_ZOOM_LEVEL;
-
-    constructor() {
-        this.root = new FSRQuadTreeNode(-1n, null, -1, 0);
+    contains(points: Array<Cartesian3>) {
+        return points.some(point => this.containsPoint(point));
     }
 
-    getMaxLevel() {
-        return this.maxDepth;
+    filterPointsForNode(points: Array<Cartesian3>) {
+        return points.filter(point => this.containsPoint(point));
     }
 
-    makeChildren(node: FSRQuadTreeNode, markers: Array<Cartesian3>) {
-        for (const id of generateChildrenIds(node.tileId)) {
-            const child = new FSRQuadTreeNode(id, node.tileId, node.level + 1, 0);
-            if (markers.some(marker => child.contains(marker))) {
-                node.children.push(child);
+    addChildren(markers: Array<Cartesian3>) {
+        const existingIds = this.children.map(child => child.tileId);
+        const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
+        for (const id of missingIds) {
+            const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, 0);
+            if (child.contains(markers)) {
+                this.children.push(child);
             }
         }
     }
+}
 
-    calculateAveragePosition(markers: Cartesian3[]): Cartesian3 {
-        const sum = markers.reduce((acc, pos) => {
-            acc.x += pos.x;
-            acc.y += pos.y;
-            acc.z += pos.z;
-            return acc;
-        }, new Cartesian3(0, 0, 0));
+class FeatureSearchQuadTree {
+    root: FeatureSearchQuadTreeNode;
+    private maxDepth: number = MAX_ZOOM_LEVEL;
 
-        return new Cartesian3(
-            sum.x / markers.length,
-            sum.y / markers.length,
-            sum.z / markers.length
+    constructor() {
+        this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, 0);
+    }
+
+    private calculateAveragePosition(markers: Cartesian3[]): Cartesian3 {
+        const sum = markers.reduce(
+            (acc, pos) => {
+                acc.x += pos.x;
+                acc.y += pos.y;
+                acc.z += pos.z;
+                return acc;
+            },
+            { x: 0, y: 0, z: 0 }
         );
+
+        return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
     insert(tileId: bigint, markers: Array<Cartesian3>) {
+        const markersCenter = this.calculateAveragePosition(markers);
         let currentLevel = 0;
-        if (!this.root.children.length) {
-            this.makeChildren(this.root, markers);
-        }
-        let targetNode: FSRQuadTreeNode | null = this.root;
+        this.root.addChildren(markers);
+        let targetNode: FeatureSearchQuadTreeNode | null = this.root;
         let nodes = this.root.children;
 
         mainLoop: while (nodes.length > 0) {
-            let next: Array<FSRQuadTreeNode> = [];
+            const next: Array<FeatureSearchQuadTreeNode> = [];
             for (let node of nodes) {
                 if (node.tileId == tileId) {
                     targetNode = node;
                     break mainLoop;
                 }
-                if (!node.children.length) {
-                    this.makeChildren(node, markers);
+                if (node.contains(markers)) {
+                    node.count += markers.length;
+                    node.center = markersCenter;
+                    node.addChildren(markers);
+                    next.push(...node.children);
                 }
-                next.push(...node.children);
             }
 
             nodes = next;
@@ -127,42 +133,23 @@ class FSRQuadTree {
         }
 
         if (targetNode) {
-            const markersCenter = this.calculateAveragePosition(markers);
             targetNode.count += markers.length;
             targetNode.center = markersCenter;
-            if (targetNode.parentId) {
-                let parentId: bigint | null = targetNode.parentId;
-                let level = targetNode.level - 1;
-                while (parentId && level > -1) {
-                    for (let node of this.getNodesAtLevel(level)) {
-                        if (node.tileId == parentId) {
-                            node.count += markers.length;
-                            node.center = markersCenter;
-                            parentId = node.parentId;
-                        }
-                    }
-                    level--;
-                }
-            }
-            if (!targetNode.children.length) {
-                this.makeChildren(targetNode, markers);
-            }
+            targetNode.addChildren(markers);
             nodes = targetNode.children;
             while(currentLevel <= this.maxDepth) {
-                let next: Array<FSRQuadTreeNode> = [];
-                for (let i = 0; i < nodes.length; i++) {
-                    const containedMarkers = markers.filter(marker => nodes[i].contains(marker));
-                    if (containedMarkers) {
+                const next: Array<FeatureSearchQuadTreeNode> = [];
+                for (const node of nodes) {
+                    const containedMarkers = node.filterPointsForNode(markers);
+                    if (containedMarkers.length) {
                         const subMarkersCenter = this.calculateAveragePosition(containedMarkers);
-                        nodes[i].count += containedMarkers.length;
-                        nodes[i].center = subMarkersCenter;
-                        if (nodes[i].level == this.maxDepth) {
-                            nodes[i].markers.push(...containedMarkers);
+                        node.count += containedMarkers.length;
+                        node.center = subMarkersCenter;
+                        if (node.level == this.maxDepth) {
+                            node.markers.push(...containedMarkers);
                         } else {
-                            if (!nodes[i].children.length) {
-                                this.makeChildren(nodes[i], markers);
-                            }
-                            next.push(...nodes[i].children);
+                            node.addChildren(markers);
+                            next.push(...node.children);
                         }
                     }
                 }
@@ -172,31 +159,30 @@ class FSRQuadTree {
         }
     }
 
-    getNodesAtLevel(level: number): Array<FSRQuadTreeNode> {
+    *getNodesAtLevel(level: number): IterableIterator<FeatureSearchQuadTreeNode> {
         if (level < 0 || !this.root.children.length) {
-            return [];
+            return;
         }
 
-        console.log("Level", level)
-
         let currentLevel = 0;
-        let result = this.root.children;
+        let nodes = this.root.children;
 
-        while (result.length > 0) {
+        while (nodes.length > 0) {
             if (currentLevel == level) {
-                return result;
+                for (const node of nodes) {
+                    yield node;
+                }
+                return;
             }
 
-            let next = [];
-            for (let node of result) {
+            const next: Array<FeatureSearchQuadTreeNode> = [];
+            for (const node of nodes) {
                 next.push(...node.children);
             }
 
-            result = next;
+            nodes = next;
             currentLevel++;
         }
-
-        return [];
     }
 }
 
@@ -205,7 +191,7 @@ export class FeatureSearchService {
 
     currentQuery: string = ""
     workers: Array<Worker> = []
-    resultTree: FSRQuadTree = new FSRQuadTree();
+    resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     visualization: BillboardCollection = new BillboardCollection();
     visualizationPositions: Array<Cartesian3> = [];
     visualizationChanged: Subject<void> = new Subject<void>();
@@ -285,7 +271,7 @@ export class FeatureSearchService {
     clear() {
         this.stop();
         this.currentQuery = "";
-        this.resultTree = new FSRQuadTree();
+        this.resultTree = new FeatureSearchQuadTree();
         this.visualization.removeAll();
         this.visualizationPositions = [];
         this.resultsPerTile.clear();
