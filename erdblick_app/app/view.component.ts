@@ -27,6 +27,7 @@ import {FeatureSearchService, MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 import {distinctUntilChanged} from "rxjs";
+import {SearchResultPosition} from "./featurefilter.worker";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -412,47 +413,38 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    addBillboards(positions: Array<Cartesian3>) {
-        // this.featureSearchService.visualization.removeAll();
-        positions.forEach(position => {
-            this.featureSearchService.visualization.add({
-                position: position,
-                image: this.featureSearchService.markerGraphics(),
-                width: 32,
-                height: 32,
-                pixelOffset: new Cartesian2(0, -10),
-                eyeOffset: new Cartesian3(0, 0, -100),
-                color: Color.fromCssColorString(this.featureSearchService.pointColor)
-            });
-        });
-    }
-
     renderFeatureSearchResultTree(level: number, complete: boolean = false) {
         if (level > MAX_ZOOM_LEVEL || complete) {
             this.featureSearchService.visualization.removeAll();
         }
 
-        let markers: Array<Cartesian3> = [];
+        let markers: Array<SearchResultPosition> = [];
         for (const node of this.featureSearchService.resultTree.getNodesAtLevel(level)) {
             if (node.markers.length) {
                 markers.push(...node.markers);
             } else if (node.count > 0) {
-                const clusterImage = this.pinBuilder?.fromText(
-                    node.count.toString(),
-                    Color.fromCssColorString(this.featureSearchService.pointColor),
-                    48
-                ).toDataURL();
                 this.featureSearchService.visualization.add({
                     position: node.center,
-                    image: clusterImage,
+                    image: this.featureSearchService.getPinGraphics(node.count),
                     width: 48,
                     height: 48,
                     eyeOffset: new Cartesian3(0, 0, -100)
                 });
             }
         }
+
         if (markers.length) {
-            this.addBillboards(markers);
+            markers.forEach(position => {
+                this.featureSearchService.visualization.add({
+                    position: position.cartesian as Cartesian3,
+                    image: this.featureSearchService.markerGraphics(),
+                    width: 32,
+                    height: 32,
+                    pixelOffset: new Cartesian2(0, -10),
+                    eyeOffset: new Cartesian3(0, 0, -100),
+                    color: Color.fromCssColorString(this.featureSearchService.pointColor)
+                });
+            });
         }
     }
 }

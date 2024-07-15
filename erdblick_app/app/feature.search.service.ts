@@ -1,12 +1,12 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
-import {SearchResultForTile, SearchWorkerTask} from "./featurefilter.worker";
-import {Color, BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
+import {SearchResultForTile, SearchResultPosition, SearchWorkerTask} from "./featurefilter.worker";
+import {Color, BillboardCollection, Cartographic, Cartesian3, Rectangle, PinBuilder} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
 
-export const MAX_ZOOM_LEVEL = 15;
+export const MAX_ZOOM_LEVEL = 16;
 
 function generateChildrenIds(parentTileId: bigint) {
     if (parentTileId == -1n) {
@@ -33,7 +33,7 @@ class FeatureSearchQuadTreeNode {
     level: number;
     children: Array<FeatureSearchQuadTreeNode>;
     count: number;
-    markers: Array<Cartesian3> = [];
+    markers: Array<SearchResultPosition> = [];
     rectangle: Rectangle;
     center: Cartesian3;
 
@@ -42,7 +42,7 @@ class FeatureSearchQuadTreeNode {
                 level: number,
                 count: number,
                 children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<Cartesian3> = []) {
+                markers: Array<SearchResultPosition> = []) {
         this.tileId = tileId;
         this.parentId = parentTileId;
         this.level = level;
@@ -56,25 +56,35 @@ class FeatureSearchQuadTreeNode {
         this.center = Cartesian3.fromDegrees(position.x, position.y, position.z);
     }
 
-    private containsPoint(point: Cartesian3) {
-       return Rectangle.contains(this.rectangle, Cartographic.fromCartesian(point));
+    containsPoint(point: Cartographic) {
+       return Rectangle.contains(this.rectangle, point);
     }
 
-    contains(points: Array<Cartesian3>) {
-        return points.some(point => this.containsPoint(point));
+    contains(points: Array<SearchResultPosition>) {
+        return points.some(point =>
+            this.containsPoint(point.cartographicRad as Cartographic)
+        );
     }
 
-    filterPointsForNode(points: Array<Cartesian3>) {
-        return points.filter(point => this.containsPoint(point));
+    filterPointsForNode(points: Array<SearchResultPosition>) {
+        return points.filter(point =>
+            this.containsPoint(point.cartographicRad as Cartographic)
+        );
     }
 
-    addChildren(markers: Array<Cartesian3>) {
+    addChildren(markers: Array<SearchResultPosition> | Cartographic) {
         const existingIds = this.children.map(child => child.tileId);
         const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
         for (const id of missingIds) {
             const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, 0);
-            if (child.contains(markers)) {
-                this.children.push(child);
+            if (Array.isArray(markers)) {
+                if (child.contains(markers)) {
+                    this.children.push(child);
+                }
+            } else {
+                if (child.containsPoint(markers)) {
+                    this.children.push(child);
+                }
             }
         }
     }
@@ -88,12 +98,12 @@ class FeatureSearchQuadTree {
         this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, 0);
     }
 
-    private calculateAveragePosition(markers: Cartesian3[]): Cartesian3 {
+    private calculateAveragePosition(markers: Array<SearchResultPosition>): Cartesian3 {
         const sum = markers.reduce(
             (acc, pos) => {
-                acc.x += pos.x;
-                acc.y += pos.y;
-                acc.z += pos.z;
+                acc.x += pos.cartesian.x;
+                acc.y += pos.cartesian.y;
+                acc.z += pos.cartesian.z;
                 return acc;
             },
             { x: 0, y: 0, z: 0 }
@@ -102,8 +112,9 @@ class FeatureSearchQuadTree {
         return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
-    insert(tileId: bigint, markers: Array<Cartesian3>) {
+    insert(tileId: bigint, markers: Array<SearchResultPosition>) {
         const markersCenter = this.calculateAveragePosition(markers);
+        const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
         let currentLevel = 0;
         this.root.addChildren(markers);
         let targetNode: FeatureSearchQuadTreeNode | null = this.root;
@@ -116,10 +127,10 @@ class FeatureSearchQuadTree {
                     targetNode = node;
                     break mainLoop;
                 }
-                if (node.contains(markers)) {
+                if (node.containsPoint(markersCenterCartographic)) {
                     node.count += markers.length;
                     node.center = markersCenter;
-                    node.addChildren(markers);
+                    node.addChildren(markersCenterCartographic);
                     next.push(...node.children);
                 }
             }
@@ -137,8 +148,9 @@ class FeatureSearchQuadTree {
             targetNode.center = markersCenter;
             targetNode.addChildren(markers);
             nodes = targetNode.children;
-            while(currentLevel <= this.maxDepth) {
-                const next: Array<FeatureSearchQuadTreeNode> = [];
+            let next: Array<FeatureSearchQuadTreeNode> = [];
+            while (currentLevel <= this.maxDepth) {
+                next = [];
                 for (const node of nodes) {
                     const containedMarkers = node.filterPointsForNode(markers);
                     if (containedMarkers.length) {
@@ -205,6 +217,14 @@ export class FeatureSearchService {
     timeElapsed: string = this.formatTime(0);  // TODO: Set
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
+    pinBuilder: PinBuilder;
+    pinGraphicsByTier: Map<number, string> = new Map<number, string>;
+    pinTiers = [
+        1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90,
+        100, 200, 300, 400, 500, 600, 700, 800, 900,
+        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
+        10000
+    ];
 
     private startTime: number = 0;
     private endTime: number = 0;
@@ -218,6 +238,18 @@ export class FeatureSearchService {
     };
 
     constructor(private mapService: MapService) {
+        // Instantiate pin graphics
+        this.pinBuilder = new PinBuilder();
+        for (const n of this.pinTiers) {
+            this.pinGraphicsByTier.set(n,
+                this.pinBuilder.fromText(
+                    n.toString().concat('+'),
+                    Color.fromCssColorString(this.pointColor),
+                    64
+                ).toDataURL()
+            );
+        }
+
         // Instantiate workers.
         const maxWorkers = navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
@@ -297,23 +329,14 @@ export class FeatureSearchService {
         if (tileResult.matches.length) {
             let mapTileKey = tileResult.matches[0][0];
             this.resultsPerTile.set(mapTileKey, tileResult);
-
-            // tileResult.billboardPrimitiveIndices = [];
-            let markerPositions: Array<Cartesian3> = [];
-            for (const [_, __, position] of tileResult.matches) {
-                markerPositions.push(new Cartesian3(position.x, position.y, position.z));
-                // this.visualizationPositions.push(new Cartesian3(position.x, position.y, position.z));
-                // tileResult.billboardPrimitiveIndices.push(this.visualizationPositions.length);
-                // this.visualization.add({
-                //     position: position,
-                //     image: this.markerGraphics(),
-                //     width: 32,
-                //     height: 32,
-                //     pixelOffset: new Cartesian2(0, -10),
-                //     eyeOffset: new Cartesian3(0, 0, -100)
-                // });
-            }
-            this.resultTree.insert(tileResult.tileId, markerPositions);
+            this.resultTree.insert(tileResult.tileId, tileResult.matches.map(result => {
+                result[2].cartographicRad = Cartographic.fromDegrees(
+                    result[2].cartographic.x,
+                    result[2].cartographic.y,
+                    result[2].cartographic.z
+                );
+                return result[2];
+            }));
         }
 
         // Broadcast the search progress.
@@ -323,7 +346,6 @@ export class FeatureSearchService {
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.totalFeatureCount += tileResult.numFeatures;
         this.searchUpdates.next(tileResult);
-        this.updatePointColor();
         this.visualizationChanged.next();
     }
 
@@ -359,5 +381,11 @@ export class FeatureSearchService {
                 ${minutes ? `${minutes}m ` : ''}
                 ${seconds ? `${seconds}s ` : ''}
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
+    }
+
+    getPinGraphics(count: number) {
+        // Find the appropriate tier for the given count
+        let key = this.pinTiers.find(tier => count >= tier) || 1;
+        return this.pinGraphicsByTier.get(key);
     }
 }

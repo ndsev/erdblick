@@ -1,9 +1,10 @@
-import {ChangeDetectorRef, Component, Input} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
 import {MapService} from "./map.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
+import {Listbox} from "primeng/listbox";
 
 @Component({
     selector: "feature-search",
@@ -34,10 +35,11 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
                     <span>{{ trace.content }}</span>
                 </p-accordionTab>
             </p-accordion>
-            <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
-                       optionLabel="label" [virtualScroll]="false" [virtualScrollItemSize]="38"
+            <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
+                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="50"
                        [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
                        emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 22em)'"
+                       #listbox
             />
         </p-dialog>
     `,
@@ -46,9 +48,12 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
     results: Array<any> = [];
+    placeholder: Array<any> = [];
     traceResults: Array<any> = [];
     selectedResult: any;
     percentDone: number = 0;
+
+    @ViewChild('listbox') listbox!: Listbox;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
@@ -58,18 +63,30 @@ export class FeatureSearchComponent {
         this.sidePanelService.observable().subscribe(panel=> {
             this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
         });
-        this.searchService.isFeatureSearchActive.subscribe(value => {
+        this.searchService.isFeatureSearchActive.subscribe(isActive => {
             this.results = [];
+            if (isActive) {
+                this.placeholder = [{label: "Loading..."}];
+            }
+            // else {
+            //     this.placeholder = [];
+            // }
         });
         this.searchService.searchUpdates.subscribe(tileResult => {
             for (const [mapTileKey, featureId, _] of tileResult.matches) {
                 // TODO: Also show info from the mapTileKey
                 const mapId = mapTileKey.split(':')[1]
-                this.results = [...this.results, {label: `${featureId}`, mapId: mapId, featureId: featureId}]
+                this.results.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
             }
+            // if (!this.placeholder.length) {
+            //     this.placeholder = [{label: "Loading..."}];
+            // }
         });
         this.searchService.progress.subscribe(value => {
             this.percentDone = value;
+            if (value >= 100) {
+                this.listbox.options = this.results;
+            }
         });
     }
 

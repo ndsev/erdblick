@@ -9,11 +9,17 @@ export interface SearchWorkerTask {
     nodeId: string;
 }
 
+export interface SearchResultPosition {
+    cartesian: {x: number, y: number, z: number},
+    cartographic: {x: number, y: number, z: number},
+    cartographicRad: {longitude: number, latitude: number, height: number}
+}
+
 export interface SearchResultForTile {
     tileId: bigint;
     query: string;
     numFeatures: number;
-    matches: Array<[string, string, {x: number, y: number, z: number}]>;  // Array of (MapTileKey, FeatureId, (x, y, z))
+    matches: Array<[string, string, SearchResultPosition]>;  // Array of (MapTileKey, FeatureId, SearchResultPosition)
     billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
 }
 
