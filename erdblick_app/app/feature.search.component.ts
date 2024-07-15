@@ -68,9 +68,6 @@ export class FeatureSearchComponent {
             if (isActive) {
                 this.placeholder = [{label: "Loading..."}];
             }
-            // else {
-            //     this.placeholder = [];
-            // }
         });
         this.searchService.searchUpdates.subscribe(tileResult => {
             for (const [mapTileKey, featureId, _] of tileResult.matches) {
@@ -78,9 +75,6 @@ export class FeatureSearchComponent {
                 const mapId = mapTileKey.split(':')[1]
                 this.results.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
             }
-            // if (!this.placeholder.length) {
-            //     this.placeholder = [{label: "Loading..."}];
-            // }
         });
         this.searchService.progress.subscribe(value => {
             this.percentDone = value;
