@@ -2,8 +2,6 @@
 
 `erdblick` is a dynamic mapviewer built on the `mapget` feature service.
 
-> **Warning ⚠️**: Erdblick is still under active development and hasn't reached its final form. However, we'd love to hear your feedback during this phase.
-
 **Capabilities:** 🛠️
 
 * 🗺️ View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.

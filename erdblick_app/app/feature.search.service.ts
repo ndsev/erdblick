@@ -50,9 +50,9 @@ class FeatureSearchQuadTreeNode {
         this.count = count;
         this.markers = markers;
 
-        const tileBox = coreLib.getTileBox(tileId);
-        this.rectangle = Rectangle.fromDegrees(...tileBox);
-        const position = coreLib.getTilePosition(tileId)
+        const tileBox = tileId >= 0 ? coreLib.getTileBox(tileId) as Array<number> : [0, 0, 0, 0];
+        this.rectangle = Rectangle.fromDegrees(tileBox[0], tileBox[1], tileBox[2], tileBox[3]);
+        const position = tileId >= 0 ? coreLib.getTilePosition(tileId) : {x: 0, y: 0, z: 0};
         this.center = Cartesian3.fromDegrees(position.x, position.y, position.z);
     }
 
