@@ -220,10 +220,9 @@ export class FeatureSearchService {
     pinBuilder: PinBuilder;
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     pinTiers = [
-        1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90,
-        100, 200, 300, 400, 500, 600, 700, 800, 900,
-        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
-        10000
+        10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
+        900, 800, 700, 600, 500, 400, 300, 200, 100,
+        90, 80, 70, 60, 50, 40, 30, 20, 10, 5, 2, 1
     ];
 
     private startTime: number = 0;
