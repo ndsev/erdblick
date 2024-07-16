@@ -667,7 +667,7 @@ export class MapService {
 
     setTileLevelForViewport() {
         for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-            if (coreLib.getNumTileIds(this.currentViewport, level) >= 10) {
+            if (coreLib.getNumTileIds(this.currentViewport, level) >= 15) {
                 this.zoomLevel.next(level);
                 return;
             }

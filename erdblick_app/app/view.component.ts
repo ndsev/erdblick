@@ -15,8 +15,7 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
-    HeightReference,
-    PinBuilder
+    HeightReference
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
@@ -54,8 +53,6 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
-    private pinBuilder: PinBuilder | null = null;
-
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
@@ -130,8 +127,6 @@ export class ErdblickViewComponent implements AfterViewInit {
                 baseLayer: false
             }
         );
-
-        this.pinBuilder = new PinBuilder();
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
@@ -412,23 +407,22 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         });
     }
-
+    
     renderFeatureSearchResultTree(level: number, complete: boolean = false) {
-        if (level > MAX_ZOOM_LEVEL || complete) {
-            this.featureSearchService.visualization.removeAll();
-        }
-
+        this.featureSearchService.visualization.removeAll();
+        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
         let markers: Array<SearchResultPosition> = [];
-        for (const node of this.featureSearchService.resultTree.getNodesAtLevel(level)) {
+        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+        for (const node of nodes) {
             if (node.markers.length) {
                 markers.push(...node.markers);
             } else if (node.count > 0) {
                 this.featureSearchService.visualization.add({
                     position: node.center,
                     image: this.featureSearchService.getPinGraphics(node.count),
-                    width: 48,
-                    height: 48,
-                    eyeOffset: new Cartesian3(0, 0, -100)
+                    width: 64,
+                    height: 64,
+                    eyeOffset: new Cartesian3(0, 0, -50)
                 });
             }
         }
@@ -441,8 +435,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                     width: 32,
                     height: 32,
                     pixelOffset: new Cartesian2(0, -10),
-                    eyeOffset: new Cartesian3(0, 0, -100),
-                    color: Color.fromCssColorString(this.featureSearchService.pointColor)
+                    eyeOffset: new Cartesian3(0, 0, -20),
+                    color: color
                 });
             });
         }

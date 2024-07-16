@@ -36,7 +36,7 @@ import {Listbox} from "primeng/listbox";
                 </p-accordionTab>
             </p-accordion>
             <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
-                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="50"
+                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
                        [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
                        emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 22em)'"
                        #listbox

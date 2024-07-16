@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
 import {SearchResultForTile, SearchResultPosition, SearchWorkerTask} from "./featurefilter.worker";
-import {Color, BillboardCollection, Cartographic, Cartesian3, Rectangle, PinBuilder} from "./cesium";
+import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
 
@@ -129,7 +129,11 @@ class FeatureSearchQuadTree {
                 }
                 if (node.containsPoint(markersCenterCartographic)) {
                     node.count += markers.length;
-                    node.center = markersCenter;
+                    // node.center = new Cartesian3(
+                    //     (node.center.x + markersCenter.x) / 2,
+                    //     (node.center.y + markersCenter.y) / 2,
+                    //     (node.center.z + markersCenter.z) / 2
+                    // );
                     node.addChildren(markersCenterCartographic);
                     next.push(...node.children);
                 }
@@ -217,12 +221,12 @@ export class FeatureSearchService {
     timeElapsed: string = this.formatTime(0);  // TODO: Set
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
-    pinBuilder: PinBuilder;
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     pinTiers = [
         10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,
-        90, 80, 70, 60, 50, 40, 30, 20, 10, 5, 2, 1
+        90, 80, 70, 60, 50, 40, 30, 20, 10,
+        9, 8, 7, 6, 5, 4, 3, 2, 1
     ];
 
     private startTime: number = 0;
@@ -238,16 +242,7 @@ export class FeatureSearchService {
 
     constructor(private mapService: MapService) {
         // Instantiate pin graphics
-        this.pinBuilder = new PinBuilder();
-        for (const n of this.pinTiers) {
-            this.pinGraphicsByTier.set(n,
-                this.pinBuilder.fromText(
-                    n.toString().concat('+'),
-                    Color.fromCssColorString(this.pointColor),
-                    64
-                ).toDataURL()
-            );
-        }
+        this.makeClusterPins();
 
         // Instantiate workers.
         const maxWorkers = navigator.hardwareConcurrency || 4;
@@ -264,12 +259,58 @@ export class FeatureSearchService {
         }
     }
 
+    private createCustomPin(text: string): string {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const context = canvas.getContext('2d');
+        if (context) {
+            // Draw the triangle
+            context.fillStyle = this.pointColor;
+            context.beginPath();
+            context.moveTo(20, 16); // Top left point
+            context.lineTo(44, 16); // Top right point
+            context.lineTo(32, 64); // Bottom point
+            context.closePath();
+            context.fill();
+
+            // Draw the circle
+            context.fillStyle = this.pointColor;
+            context.beginPath();
+            context.arc(32, 24, 20, 0, 2 * Math.PI, false);
+            context.fill();
+
+            // Draw the text
+            context.fillStyle = "#ffffff";
+            context.font = "bold 12px sans-serif";
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.fillText(text, 32, 25);
+        }
+        return canvas.toDataURL();
+    }
+
+    private makeClusterPins() {
+        for (const n of this.pinTiers) {
+            let s = "";
+            if (n / 1000 >= 1) {
+                s = (n / 1000 | 0).toString().concat('k+');
+            } else if (n >= 10) {
+                s = n.toString().concat('+');
+            } else {
+                s = n.toString();
+            }
+            this.pinGraphicsByTier.set(n, this.createCustomPin(s));
+        }
+    }
+
     run(query: string) {
         // if (query == this.currentQuery) {
         //     return;
         // }
 
-        // Clear current work queue/visualizations. TODO: Move towards
+        // Clear current work queue/visualizations.
+        // TODO: Move towards
         //  an update-like function which is invoked when the user
         //  moves the viewport to run differential search on newly visible tiles.
         this.clear();
@@ -366,10 +407,7 @@ export class FeatureSearchService {
     }
 
     updatePointColor() {
-        const color = Color.fromCssColorString(this.pointColor);
-        for (let i = 0; i < this.visualization.length; ++i) {
-            this.visualization.get(i).color = color;
-        }
+        this.makeClusterPins();
         this.visualizationChanged.next();
     }
 
