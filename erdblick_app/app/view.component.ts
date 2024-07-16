@@ -209,7 +209,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.renderFeatureSearchResultTree(level, true);
+            this.renderFeatureSearchResultTree(level);
         });
 
         this.jumpService.markedPosition.subscribe(position => {
@@ -408,7 +408,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
     
-    renderFeatureSearchResultTree(level: number, complete: boolean = false) {
+    renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
         let markers: Array<SearchResultPosition> = [];

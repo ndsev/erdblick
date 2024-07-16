@@ -213,6 +213,7 @@ export class FeatureSearchService {
     visualizationChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
     workQueue: Array<FeatureTile> = [];
+    cachedWorkQueue: Array<FeatureTile> = [];
     totalTiles: number = 0;
     doneTiles: number = 0;
     searchUpdates: Subject<SearchResultForTile> = new Subject<SearchResultForTile>();
@@ -304,7 +305,7 @@ export class FeatureSearchService {
         }
     }
 
-    run(query: string) {
+    run(query: string, dirty: boolean = false) {
         // if (query == this.currentQuery) {
         //     return;
         // }
@@ -313,15 +314,25 @@ export class FeatureSearchService {
         // TODO: Move towards
         //  an update-like function which is invoked when the user
         //  moves the viewport to run differential search on newly visible tiles.
-        this.clear();
+        if (!dirty) {
+            this.clear();
+            this.startTime = Date.now();
+        }
         this.currentQuery = query;
-        this.startTime = Date.now();
 
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
-        this.workQueue = this.mapService.getPrioritisedTiles();
-        this.totalTiles = this.workQueue.length;
-        this.isFeatureSearchActive.next(true);
+        if (!this.cachedWorkQueue.length) {
+            this.workQueue = this.mapService.getPrioritisedTiles();
+            this.totalTiles = this.workQueue.length;
+            this.isFeatureSearchActive.next(true);
+        } else {
+            this.workQueue = [...this.cachedWorkQueue];
+            this.cachedWorkQueue = [];
+        }
+        if (this.totalTiles == 0) {
+            this.totalTiles = this.workQueue.length;
+        }
 
         // Send a task to each worker to start processing.
         // Further tasks will be picked up in the worker's
@@ -332,6 +343,11 @@ export class FeatureSearchService {
                 this.scheduleTileForWorker(worker, tile);
             }
         }
+    }
+
+    pause() {
+        this.cachedWorkQueue = [...this.workQueue];
+        this.stop();
     }
 
     stop() {
@@ -348,6 +364,7 @@ export class FeatureSearchService {
         this.visualizationPositions = [];
         this.resultsPerTile.clear();
         this.workQueue = [];
+        this.cachedWorkQueue = [];
         this.totalTiles = 0;
         this.doneTiles = 0;
         this.progress.next(0);

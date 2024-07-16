@@ -9,8 +9,18 @@ import {Listbox} from "primeng/listbox";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="search-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible"
+        <p-dialog class="search-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
+            <div class="feature-search-controls">
+                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
+                          [label]="isSearchPaused ? 'Resume' : 'Pause'" [disabled]="!canPauseStopSearch"
+                          [pTooltip]="isSearchPaused ? 'Resume current search' : 'Pause current search'"
+                          tooltipPosition="bottom"></p-button>
+                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="Stop" [disabled]="!canPauseStopSearch"
+                          pTooltip="Stop current search" tooltipPosition="bottom"></p-button>
+                <p-button (click)="cancelSearch()" icon="pi pi-times-circle" label="Discard" 
+                          pTooltip="Discard current search" tooltipPosition="bottom"></p-button>
+            </div>
             <p-progressBar [value]="percentDone">
                 <ng-template pTemplate="content" let-percentDone>
                     <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
@@ -38,7 +48,7 @@ import {Listbox} from "primeng/listbox";
             <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                        optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
                        [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
-                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 22em)'"
+                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 24em)'"
                        #listbox
             />
         </p-dialog>
@@ -52,6 +62,8 @@ export class FeatureSearchComponent {
     traceResults: Array<any> = [];
     selectedResult: any;
     percentDone: number = 0;
+    isSearchPaused: boolean = false;
+    canPauseStopSearch: boolean = false;
 
     @ViewChild('listbox') listbox!: Listbox;
 
@@ -64,9 +76,12 @@ export class FeatureSearchComponent {
             this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
         });
         this.searchService.isFeatureSearchActive.subscribe(isActive => {
-            this.results = [];
             if (isActive) {
+                this.results = [];
                 this.placeholder = [{label: "Loading..."}];
+                this.canPauseStopSearch = isActive;
+            } else {
+                this.listbox.options = this.results;
             }
         });
         this.searchService.searchUpdates.subscribe(tileResult => {
@@ -80,6 +95,7 @@ export class FeatureSearchComponent {
             this.percentDone = value;
             if (value >= 100) {
                 this.listbox.options = this.results;
+                this.canPauseStopSearch = false;
             }
         });
     }
@@ -89,5 +105,31 @@ export class FeatureSearchComponent {
             this.jumpService.highlightFeature(event.value.mapId, event.value.featureId).then();
             this.mapService.focusOnFeature(this.inspectionService.selectedFeature!)
         }
+    }
+
+    pauseSearch() {
+        if (this.canPauseStopSearch) {
+            if (this.isSearchPaused) {
+                this.isSearchPaused = false;
+                this.searchService.run(this.searchService.currentQuery, true);
+                return;
+            }
+            this.searchService.pause();
+            this.listbox.options = this.results;
+            this.isSearchPaused = true;
+        }
+    }
+
+    stopSearch() {
+        if (this.canPauseStopSearch) {
+            this.listbox.options = this.results;
+            this.searchService.stop();
+            this.canPauseStopSearch = false;
+        }
+    }
+
+    cancelSearch() {
+        this.searchService.clear();
+        this.isPanelVisible = false;
     }
 }
