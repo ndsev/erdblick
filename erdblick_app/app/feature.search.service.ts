@@ -6,7 +6,7 @@ import {Color, BillboardCollection, Cartographic, Cartesian3, Rectangle, PinBuil
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
 
-export const MAX_ZOOM_LEVEL = 16;
+export const MAX_ZOOM_LEVEL = 15;
 
 function generateChildrenIds(parentTileId: bigint) {
     if (parentTileId == -1n) {
