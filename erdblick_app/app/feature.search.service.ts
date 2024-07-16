@@ -329,11 +329,14 @@ export class FeatureSearchService {
             let mapTileKey = tileResult.matches[0][0];
             this.resultsPerTile.set(mapTileKey, tileResult);
             this.resultTree.insert(tileResult.tileId, tileResult.matches.map(result => {
-                result[2].cartographicRad = Cartographic.fromDegrees(
-                    result[2].cartographic.x,
-                    result[2].cartographic.y,
-                    result[2].cartographic.z
-                );
+                if (result[2].cartographic) {
+                    result[2].cartographicRad = Cartographic.fromDegrees(
+                        result[2].cartographic.x,
+                        result[2].cartographic.y,
+                        result[2].cartographic.z
+                    );
+                }
+                result[2].cartographic = null;
                 return result[2];
             }));
         }

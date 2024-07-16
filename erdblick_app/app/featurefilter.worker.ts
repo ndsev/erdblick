@@ -11,7 +11,7 @@ export interface SearchWorkerTask {
 
 export interface SearchResultPosition {
     cartesian: {x: number, y: number, z: number},
-    cartographic: {x: number, y: number, z: number},
+    cartographic: {x: number, y: number, z: number} | null,
     cartographicRad: {longitude: number, latitude: number, height: number}
 }
 
