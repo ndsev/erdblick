@@ -58,7 +58,7 @@ export class InspectionService {
             const [mapId, featureId] = parameters.selected;
             if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
                 this.jumpService.highlightFeature(mapId, featureId).then(() => {
-                    if (this.selectedFeature != null) {
+                    if (this.selectedFeature) {
                         this.mapService.focusOnFeature(this.selectedFeature);
                     }
                 });
