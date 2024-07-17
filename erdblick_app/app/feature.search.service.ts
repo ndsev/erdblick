@@ -305,10 +305,6 @@ export class FeatureSearchService {
     }
 
     run(query: string, dirty: boolean = false) {
-        // if (query == this.currentQuery) {
-        //     return;
-        // }
-
         // Clear current work queue/visualizations.
         // TODO: Move towards
         //  an update-like function which is invoked when the user
