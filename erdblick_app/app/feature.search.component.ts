@@ -1,10 +1,11 @@
-import {Component, ViewChild} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
 import {MapService} from "./map.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Listbox} from "primeng/listbox";
+import {InfoMessageService} from "./info.service";
 
 @Component({
     selector: "feature-search",
@@ -51,6 +52,7 @@ import {Listbox} from "primeng/listbox";
                        #listbox
             />
         </p-dialog>
+        <div #alert></div>
     `,
     styles: [``]
 })
@@ -65,12 +67,14 @@ export class FeatureSearchComponent {
     canPauseStopSearch: boolean = false;
 
     @ViewChild('listbox') listbox!: Listbox;
+    @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapService,
                 public inspectionService: InspectionService,
-                public sidePanelService: SidePanelService) {
+                public sidePanelService: SidePanelService,
+                private infoMessageService: InfoMessageService) {
         this.sidePanelService.observable().subscribe(panel=> {
             this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
         });
@@ -95,6 +99,10 @@ export class FeatureSearchComponent {
             if (value >= 100) {
                 this.listbox.options = this.results;
                 this.canPauseStopSearch = false;
+                // TODO: Incorporate error messages when search has finished
+                // if (this.searchService.errors) {
+                //     this.infoMessageService.showAlertDialog(this.alertContainer, 'Feature Search Errors', errors);
+                // }
             }
         });
     }
@@ -127,6 +135,11 @@ export class FeatureSearchComponent {
             this.listbox.options = this.results;
             this.searchService.stop();
             this.canPauseStopSearch = false;
+
+            // TODO: Incorporate error messages when search has finished
+            // if (this.searchService.errors) {
+            //     this.infoMessageService.showAlertDialog(this.alertContainer, 'Feature Search Errors', errors);
+            // }
         }
     }
 }

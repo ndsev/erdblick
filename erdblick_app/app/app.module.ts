@@ -20,7 +20,7 @@ import {ToastModule} from "primeng/toast";
 import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
-import {InfoMessageService} from "./info.service";
+import {AlertDialogComponent, InfoMessageService} from "./info.service";
 import {SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
@@ -49,6 +49,7 @@ import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
+import {InputTextareaModule} from "primeng/inputtextarea";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -69,7 +70,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         EditorComponent,
         ErdblickViewComponent,
         CoordinatesPanelComponent,
-        FeatureSearchComponent
+        FeatureSearchComponent,
+        AlertDialogComponent
     ],
     imports: [
         BrowserModule,
@@ -99,7 +101,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         CardModule,
         ColorPickerModule,
         ListboxModule,
-        MultiSelectModule
+        MultiSelectModule,
+        InputTextareaModule
     ],
     providers: [
         {
