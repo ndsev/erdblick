@@ -12,20 +12,19 @@ import {Listbox} from "primeng/listbox";
         <p-dialog class="search-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
             <div class="feature-search-controls">
-                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
-                          [label]="isSearchPaused ? 'Resume' : 'Pause'" [disabled]="!canPauseStopSearch"
-                          [pTooltip]="isSearchPaused ? 'Resume current search' : 'Pause current search'"
-                          tooltipPosition="bottom"></p-button>
-                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="Stop" [disabled]="!canPauseStopSearch"
-                          pTooltip="Stop current search" tooltipPosition="bottom"></p-button>
-                <p-button (click)="cancelSearch()" icon="pi pi-times-circle" label="Discard" 
-                          pTooltip="Discard current search" tooltipPosition="bottom"></p-button>
+                <div class="progress-bar-container">
+                    <p-progressBar [value]="percentDone">
+                        <ng-template pTemplate="content" let-percentDone>
+                            <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
+                        </ng-template>
+                    </p-progressBar>
+                </div>
+                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'" label="" 
+                          [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
+                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
+                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                          pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
-            <p-progressBar [value]="percentDone">
-                <ng-template pTemplate="content" let-percentDone>
-                    <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
-                </ng-template>
-            </p-progressBar>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                 <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
             </div>
@@ -48,7 +47,7 @@ import {Listbox} from "primeng/listbox";
             <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                        optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
                        [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
-                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 24em)'"
+                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 23em)'"
                        #listbox
             />
         </p-dialog>
@@ -126,10 +125,5 @@ export class FeatureSearchComponent {
             this.searchService.stop();
             this.canPauseStopSearch = false;
         }
-    }
-
-    cancelSearch() {
-        this.searchService.clear();
-        this.isPanelVisible = false;
     }
 }
