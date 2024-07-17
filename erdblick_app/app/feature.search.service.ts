@@ -217,7 +217,7 @@ export class FeatureSearchService {
     doneTiles: number = 0;
     searchUpdates: Subject<SearchResultForTile> = new Subject<SearchResultForTile>();
     isFeatureSearchActive: Subject<boolean> = new Subject<boolean>();
-    pointColor: string = "#e03e36";
+    pointColor: string = "#ea4336";
     timeElapsed: string = this.formatTime(0);  // TODO: Set
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
