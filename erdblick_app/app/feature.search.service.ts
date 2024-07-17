@@ -35,7 +35,7 @@ class FeatureSearchQuadTreeNode {
     count: number;
     markers: Array<SearchResultPosition> = [];
     rectangle: Rectangle;
-    center: Cartesian3;
+    center: Cartesian3 | null;
 
     constructor(tileId: bigint,
                 parentTileId: bigint | null,
@@ -52,8 +52,7 @@ class FeatureSearchQuadTreeNode {
 
         const tileBox = tileId >= 0 ? coreLib.getTileBox(tileId) as Array<number> : [0, 0, 0, 0];
         this.rectangle = Rectangle.fromDegrees(tileBox[0], tileBox[1], tileBox[2], tileBox[3]);
-        const position = tileId >= 0 ? coreLib.getTilePosition(tileId) : {x: 0, y: 0, z: 0};
-        this.center = Cartesian3.fromDegrees(position.x, position.y, position.z);
+        this.center = null;
     }
 
     containsPoint(point: Cartographic) {
@@ -129,11 +128,11 @@ class FeatureSearchQuadTree {
                 }
                 if (node.containsPoint(markersCenterCartographic)) {
                     node.count += markers.length;
-                    // node.center = new Cartesian3(
-                    //     (node.center.x + markersCenter.x) / 2,
-                    //     (node.center.y + markersCenter.y) / 2,
-                    //     (node.center.z + markersCenter.z) / 2
-                    // );
+                    node.center = node.center ? new Cartesian3(
+                        (node.center.x + markersCenter.x) / 2,
+                        (node.center.y + markersCenter.y) / 2,
+                        (node.center.z + markersCenter.z) / 2
+                    ) : markersCenter;
                     node.addChildren(markersCenterCartographic);
                     next.push(...node.children);
                 }
