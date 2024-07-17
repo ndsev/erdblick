@@ -101,8 +101,9 @@ export class FeatureSearchComponent {
 
     selectResult(event: any) {
         if (event.value.mapId && event.value.featureId) {
-            this.jumpService.highlightFeature(event.value.mapId, event.value.featureId).then();
-            this.mapService.focusOnFeature(this.inspectionService.selectedFeature!)
+            this.jumpService.highlightFeature(event.value.mapId, event.value.featureId).then(() => {
+                this.mapService.focusOnFeature(this.inspectionService.selectedFeature!);
+            });
         }
     }
 

@@ -57,10 +57,11 @@ export class InspectionService {
             parameters => parameters.selected.length == 2)).subscribe(parameters => {
             const [mapId, featureId] = parameters.selected;
             if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
-                this.jumpService.highlightFeature(mapId, featureId);
-                if (this.selectedFeature != null) {
-                    this.mapService.focusOnFeature(this.selectedFeature);
-                }
+                this.jumpService.highlightFeature(mapId, featureId).then(() => {
+                    if (this.selectedFeature != null) {
+                        this.mapService.focusOnFeature(this.selectedFeature);
+                    }
+                });
             }
         });
     }
