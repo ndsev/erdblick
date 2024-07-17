@@ -99,10 +99,12 @@ export class FeatureSearchComponent {
             if (value >= 100) {
                 this.listbox.options = this.results;
                 this.canPauseStopSearch = false;
-                // TODO: Incorporate error messages when search has finished
-                // if (this.searchService.errors) {
-                //     this.infoMessageService.showAlertDialog(this.alertContainer, 'Feature Search Errors', errors);
-                // }
+                if (this.searchService.errors.size) {
+                    this.infoMessageService.showAlertDialog(
+                        this.alertContainer,
+                        'Feature Search Errors',
+                        Array.from(searchService.errors).join('\n'))
+                }
             }
         });
     }
@@ -136,10 +138,12 @@ export class FeatureSearchComponent {
             this.searchService.stop();
             this.canPauseStopSearch = false;
 
-            // TODO: Incorporate error messages when search has finished
-            // if (this.searchService.errors) {
-            //     this.infoMessageService.showAlertDialog(this.alertContainer, 'Feature Search Errors', errors);
-            // }
+            if (this.searchService.errors.size) {
+                this.infoMessageService.showAlertDialog(
+                    this.alertContainer,
+                    'Feature Search Errors',
+                    Array.from(this.searchService.errors).join('\n'))
+            }
         }
     }
 }

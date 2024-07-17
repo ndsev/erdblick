@@ -218,7 +218,7 @@ export class FeatureSearchService {
     searchUpdates: Subject<SearchResultForTile> = new Subject<SearchResultForTile>();
     isFeatureSearchActive: Subject<boolean> = new Subject<boolean>();
     pointColor: string = "#ea4336";
-    timeElapsed: string = this.formatTime(0);  // TODO: Set
+    timeElapsed: string = this.formatTime(0);
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
@@ -231,6 +231,7 @@ export class FeatureSearchService {
 
     private startTime: number = 0;
     private endTime: number = 0;
+    public errors: Set<string> = new Set();
 
     markerGraphics = () => {
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
@@ -369,16 +370,21 @@ export class FeatureSearchService {
         this.endTime = 0;
         this.timeElapsed = this.formatTime(0);
         this.visualizationChanged.next();
+        this.errors.clear();
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
+        if (tileResult.error) {
+            this.errors.add(tileResult.error);
+        }
+
         // Ignore results that are not related to the ongoing query.
         if (tileResult.query != this.currentQuery) {
             return;
         }
 
         // Add visualizations and register the search result.
-        if (tileResult.matches.length) {
+        if (tileResult.matches.length && tileResult.tileId) {
             let mapTileKey = tileResult.matches[0][0];
             this.resultsPerTile.set(mapTileKey, tileResult);
             this.resultTree.insert(tileResult.tileId, tileResult.matches.map(result => {
