@@ -22,9 +22,11 @@ import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
-import {FeatureSearchService} from "./feature.search.service";
+import {FeatureSearchService, MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
+import {distinctUntilChanged} from "rxjs";
+import {SearchResultPosition} from "./featurefilter.worker";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -51,7 +53,6 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
-
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
@@ -203,7 +204,12 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.viewer.scene.primitives.add(this.featureSearchService.visualization);
         this.featureSearchService.visualizationChanged.subscribe(_ => {
+            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
             this.viewer.scene.requestRender();
+        });
+
+        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+            this.renderFeatureSearchResultTree(level);
         });
 
         this.jumpService.markedPosition.subscribe(position => {
@@ -384,7 +390,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
     }
 
-
     addMarker(cartesian: Cartesian3) {
         if (this.marker) {
             this.viewer.entities.remove(this.marker);
@@ -401,5 +406,39 @@ export class ErdblickViewComponent implements AfterViewInit {
                 eyeOffset: new Cartesian3(0, 0, -100)
             }
         });
+    }
+    
+    renderFeatureSearchResultTree(level: number) {
+        this.featureSearchService.visualization.removeAll();
+        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
+        let markers: Array<SearchResultPosition> = [];
+        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+        for (const node of nodes) {
+            if (node.markers.length) {
+                markers.push(...node.markers);
+            } else if (node.count > 0) {
+                this.featureSearchService.visualization.add({
+                    position: node.center,
+                    image: this.featureSearchService.getPinGraphics(node.count),
+                    width: 64,
+                    height: 64,
+                    eyeOffset: new Cartesian3(0, 0, -50)
+                });
+            }
+        }
+
+        if (markers.length) {
+            markers.forEach(position => {
+                this.featureSearchService.visualization.add({
+                    position: position.cartesian as Cartesian3,
+                    image: this.featureSearchService.markerGraphics(),
+                    width: 32,
+                    height: 32,
+                    pixelOffset: new Cartesian2(0, -10),
+                    eyeOffset: new Cartesian3(0, 0, -20),
+                    color: color
+                });
+            });
+        }
     }
 }

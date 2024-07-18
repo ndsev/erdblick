@@ -541,12 +541,30 @@ body {
     }
 }
 
-.p-progressbar {
-    height: 1.5em;
-    font-size: 0.9em;
+.feature-search-controls {
+    button {
+        height: 2em;
+        width: 2em;
+        box-shadow: none;
+    }
 
-    .p-progressbar-value-animate {
-        transition: none !important;
+    padding: 0 0 0.5em 0;
+    display: flex;
+    gap: 0.5em;
+    align-items: center;
+
+    .progress-bar-container {
+        width: 100%;
+
+        .p-progressbar {
+            height: 2em;
+            width: 100%;
+            font-size: 0.9em;
+
+            .p-progressbar-value-animate {
+                transition: none !important;
+            }
+        }
     }
 }
 

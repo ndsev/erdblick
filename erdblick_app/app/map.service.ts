@@ -8,7 +8,8 @@ import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {InfoMessageService} from "./info.service"
+import {InfoMessageService} from "./info.service";
+import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 
 export interface CoverageRectItem extends Object {
     min: number,
@@ -93,7 +94,8 @@ export class MapService {
         tileKey: string,
         resolve: null|((tile: FeatureTile)=>void),
         reject: null|((why: any)=>void),
-    }|null = null;
+    } | null = null;
+    zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
 
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
@@ -597,6 +599,7 @@ export class MapService {
 
     setViewport(viewport: any) {
         this.currentViewport = viewport;
+        this.setTileLevelForViewport();
         this.update();
     }
 
@@ -660,5 +663,15 @@ export class MapService {
     focusOnFeature(feature: FeatureWrapper) {
         const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
         this.moveToWgs84PositionTopic.next(position);
+    }
+
+    setTileLevelForViewport() {
+        for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
+            if (coreLib.getNumTileIds(this.currentViewport, level) >= 15) {
+                this.zoomLevel.next(level);
+                return;
+            }
+        }
+        this.zoomLevel.next(MAX_ZOOM_LEVEL);
     }
 }
