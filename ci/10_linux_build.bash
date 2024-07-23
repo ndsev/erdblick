@@ -9,9 +9,12 @@ cd "$ci_dir/.."
 export EMSCRIPTEN="$ci_dir/emsdk/upstream/emscripten"
 export PATH="$PATH:$(pwd)/node_modules/.bin/"
 
-rm -rf build && mkdir build
-cd build
-mkdir deps
-mkdir assets
-emcmake cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ..
-cmake --build . -- -j"$(nproc)"
+rm -rf build
+mkdir -p build
+mkdir -p build/deps
+mkdir -p build/assets
+
+CMAKE_PRESET="${1:-release}"
+
+emcmake cmake --preset "$CMAKE_PRESET"
+cmake --build --preset "$CMAKE_PRESET" -- -j"$(nproc)"
