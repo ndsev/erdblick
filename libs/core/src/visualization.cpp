@@ -51,7 +51,7 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 {
     if (!tile_) {
         tile_ = tile;
-        internalFieldsDictCopy_ = std::make_shared<simfil::Fields>(*tile->fieldNames());
+        internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile->strings());
     }
 
     // Ensure that the added aux tile and the primary tile use the same
@@ -59,7 +59,7 @@ void FeatureLayerVisualization::addTileFeatureLayer(
     // However, the transcoding process changes the dictionary, as it might
     // add unknown field names. This would fork the dict state from the remote
     // node dict, which leads to undefined behavior. So we work on a copy of it.
-    tile->setFieldNames(internalFieldsDictCopy_);
+    tile->setStrings(internalStringPoolCopy_);
     allTiles_.emplace_back(tile);
 }
 
@@ -522,15 +522,15 @@ void FeatureLayerVisualization::addAttribute(
     // Assemble simfil evaluation context.
     attrEvaluationContext
         .set(
-        internalFieldsDictCopy_->emplace("$name"),
+        internalStringPoolCopy_->emplace("$name"),
         simfil::Value(attr->name()));
     attrEvaluationContext
         .set(
-        internalFieldsDictCopy_->emplace("$feature"),
+        internalStringPoolCopy_->emplace("$feature"),
         simfil::Value::field(constFeature));
     attrEvaluationContext
         .set(
-        internalFieldsDictCopy_->emplace("$layer"),
+        internalStringPoolCopy_->emplace("$layer"),
         simfil::Value(layer));
 
     // Function which can evaluate a simfil expression in the attribute context.
@@ -677,13 +677,13 @@ void RecursiveRelationVisualizationState::render(
 
     // Assemble simfil evaluation context.
     relationEvaluationContext.set(
-        visu_.internalFieldsDictCopy_->emplace("$source"),
+        visu_.internalStringPoolCopy_->emplace("$source"),
         simfil::Value::field(constSource));
     relationEvaluationContext.set(
-        visu_.internalFieldsDictCopy_->emplace("$target"),
+        visu_.internalStringPoolCopy_->emplace("$target"),
         simfil::Value::field(constTarget));
     relationEvaluationContext.set(
-        visu_.internalFieldsDictCopy_->emplace("$twoway"),
+        visu_.internalStringPoolCopy_->emplace("$twoway"),
         simfil::Value(r.twoway_));
 
     // Function which can evaluate a simfil expression in the relation context.
