@@ -7,7 +7,7 @@ using namespace mapget;
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
-    fieldDict_ = featurePtr->model().fieldNames();
+    stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
 
     // Identifiers section.
@@ -239,7 +239,7 @@ void InspectionConverter::convertGeometry(
 }
 
 InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
-    const simfil::FieldId& fieldId,
+    const simfil::StringId& fieldId,
     const simfil::ModelNode::Ptr& value)
 {
     return convertField(convertStringView(fieldId), value);
@@ -306,9 +306,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     return {};
 }
 
-JsValue InspectionConverter::convertStringView(const simfil::FieldId& f)
+JsValue InspectionConverter::convertStringView(const simfil::StringId& f)
 {
-    if (auto fieldStr = fieldDict_->resolve(f)) {
+    if (auto fieldStr = stringPool_->resolve(f)) {
         return convertStringView(*fieldStr);
     }
     return {};

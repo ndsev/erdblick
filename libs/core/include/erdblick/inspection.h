@@ -64,11 +64,11 @@ public:
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
 
-    OptionalValueAndType convertField(simfil::FieldId const& fieldId, simfil::ModelNode::Ptr const& value);
+    OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
 
-    JsValue convertStringView(const simfil::FieldId& f);
+    JsValue convertStringView(const simfil::StringId& f);
     JsValue convertStringView(const std::string_view& f);
 
     std::string featureId_;
@@ -77,7 +77,7 @@ public:
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;
-    std::shared_ptr<simfil::Fields> fieldDict_;
+    std::shared_ptr<simfil::StringPool> stringPool_;
     std::unordered_map<std::string_view, JsValue> translatedFieldNames_;
     std::unordered_map<std::string_view, InspectionNode*> relationsByType_;
 };
