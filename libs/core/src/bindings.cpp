@@ -2,6 +2,8 @@
 
 #include "aabb.h"
 #include "buffer.h"
+#include "mapget/model/info.h"
+#include "mapget/model/sourcedatalayer.h"
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
@@ -163,6 +165,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
 
+    ////////// LayerType
+    em::enum_<mapget::LayerType>("LayerType")
+        .value("FEATURES", mapget::LayerType::Features)
+        .value("HEIGHTMAP", mapget::LayerType::Heightmap)
+        .value("ORTHOiMAGE", mapget::LayerType::OrthoImage)
+        .value("GLTF", mapget::LayerType::GLTF)
+        .value("SOURCEDATA", mapget::LayerType::SourceData);
+
     ////////// ValueType
     em::enum_<InspectionConverter::ValueType>("ValueType")
         .value("NULL", InspectionConverter::ValueType::Null)
@@ -210,7 +220,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "geojson",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return self->toGeoJson().dump(4); }))
+                    return self->toJson().dump(4); }))
         .function(
             "inspectionModel",
             std::function<em::val(FeaturePtr&)>(
@@ -222,6 +232,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 [](FeaturePtr& self){
                     return geometryCenter(self->firstGeometry());
                 }));
+
+    em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
+        .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
+            "std::shared_ptr<mapget::TileSourceDataLayer>");
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
@@ -308,6 +322,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
         .function(
             "filterFeatureJumpTargets",

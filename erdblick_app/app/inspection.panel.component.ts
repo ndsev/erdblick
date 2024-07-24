@@ -7,6 +7,8 @@ import {MapService} from "./map.service";
 import {distinctUntilChanged, filter} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
+import {Fetch} from "./fetch.model";
+import {uint8ArrayToWasm} from "./wasm";
 
 interface Column {
     field: string;
@@ -301,6 +303,53 @@ export class InspectionPanelComponent implements OnInit  {
                 }
             });
         }
+        if (rowData.hasOwnProperty("sourceDataReference")) {
+            const ref = rowData["sourceDataReference"];
+            this.inspectionMenuItems.push({
+                label: 'Show Source Data...',
+                command: () => {
+                    this.fetchSourceData(ref.layerId, Number(ref.tileId))
+                }
+            });
+        }
+    }
+
+    async fetchSourceData(layerId : string, tileId : number)
+    {
+        let requests = [];
+        requests.push({
+            mapId: this.inspectionService.selectedMapIdName,
+            layerId: layerId,
+            tileIds: [tileId]
+        });
+
+        let tileParser = new coreLib.TileLayerParser();
+
+        let newRequestBody = JSON.stringify({
+            requests: requests
+        });
+
+        let fetch = new Fetch("/tiles")
+            .withChunkProcessing()
+            .withMethod("POST")
+            .withBody(newRequestBody)
+            .withBufferCallback((message: any, messageType: any) => {
+                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        tileParser!.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                    let json = uint8ArrayToWasm((wasmBlob: any) => {
+                        let json = tileParser.readTileSourceDataLayer(wasmBlob);
+                        console.error(`SourceData: ${json}`)
+                        return json
+                    }, blob);
+                } else {
+                    console.error(`Encountered unknown message type ${messageType}!`);
+                }
+            });
+        fetch.go();
     }
 
     onValueClick(event: any, rowData: any) {

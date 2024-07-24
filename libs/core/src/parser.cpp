@@ -1,5 +1,6 @@
 #include <iostream>
 #include <regex>
+#include "mapget/model/stringpool.h"
 #include "parser.h"
 
 using namespace mapget;
@@ -104,6 +105,19 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
     std::stringstream inputStream;
     inputStream << buffer.toString();
     auto result = std::make_shared<TileFeatureLayer>(
+        inputStream,
+        [this](auto&& mapId, auto&& layerId)
+        {
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
+        },
+        [this](auto&& nodeId) { return cachedFieldDicts_->getFieldDict(nodeId); });
+    return result;
+}
+mapget::TileSourceDataLayer::Ptr TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
+{
+    std::stringstream inputStream;
+    inputStream << buffer.toString();
+    auto result = std::make_shared<TileSourceDataLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         {
@@ -240,7 +254,7 @@ void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
     std::stringstream bufferStream;
     bufferStream << buffer.toString();
-    auto nodeId = mapget::Fields::readDataSourceNodeId(bufferStream);
+    auto nodeId = mapget::StringPool::readDataSourceNodeId(bufferStream);
     auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
     fieldDict->read(bufferStream);
 }

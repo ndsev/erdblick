@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/stringpool.h"
 #include "parser.h"
 #include "style.h"
 
@@ -437,7 +438,7 @@ public:
 
 private:
     std::shared_ptr<mapget::LayerInfo> layerInfo_;
-    std::shared_ptr<mapget::Fields> fieldNames_;
+    std::shared_ptr<mapget::StringPool> fieldNames_;
 };
 
 }

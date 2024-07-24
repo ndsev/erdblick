@@ -2,8 +2,11 @@
 
 #include "cesium-interface/object.h"
 #include "mapget/model/feature.h"
-#include "simfil/model/fields.h"
+#include "mapget/model/sourceinfo.h"
+#include "simfil/model/string-pool.h"
+#include "sfl/small_vector.hpp"
 #include <unordered_map>
+#include <cstdint>
 
 namespace erdblick
 {
@@ -31,6 +34,14 @@ public:
         std::vector<InspectionNode> children_;
         JsValue direction_;
         std::string geoJsonPath_;
+
+        struct SourceDataReference {
+            uint64_t tileId_;
+            uint64_t address_;
+            std::string layerId_;
+            std::string qualifier_;
+        };
+        sfl::small_vector<SourceDataReference, 1> sourceDataRefs_; // Most nodes have a single source-data reference.
 
         [[nodiscard]] JsValue toJsValue() const;
         [[nodiscard]] JsValue childrenToJsValue() const;
