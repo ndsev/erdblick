@@ -1,4 +1,4 @@
-import {Injectable} from "@angular/core";
+import { EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {BehaviorSubject, distinctUntilChanged, filter} from "rxjs";
 import {MapService} from "./map.service";
@@ -16,8 +16,14 @@ interface InspectionModelData {
     info?: string;
     hoverId?: string
     geoJsonPath?: string;
-    sourceDataReference?: object;
+    sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
+}
+
+interface ShowSourceDataEvent {
+    mapId: string,
+    tileId: number,
+    layerId: string,
 }
 
 @Injectable({providedIn: 'root'})
@@ -31,6 +37,7 @@ export class InspectionService {
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
     selectedFeature: FeatureWrapper | null = null;
+    showSourceDataEvent = new EventEmitter<ShowSourceDataEvent>();
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,
@@ -105,8 +112,8 @@ export class InspectionService {
                 if (data.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;
                 }
-                if (data.hasOwnProperty("sourceDataReference")) {
-                    node.data["sourceDataReference"] = data.sourceDataReference;
+                if (data.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = data.sourceDataReferences;
                 }
                 node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children) : [];
                 treeNodes.push(node);

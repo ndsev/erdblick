@@ -22,7 +22,7 @@ export interface LayerInfoItem extends Object {
     coverage: Array<number|CoverageRectItem>;
     featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
     layerId: string;
-    type: string;
+    type: number;
     version: {major: number, minor: number, patch: number};
     zoomLevels: Array<number>;
     level: number;
@@ -292,7 +292,14 @@ export class MapService {
         const mapItem = this.maps.getValue().get(mapId);
         if (!mapItem)
             return false;
-        return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.visible : false;
+
+        const layer = mapItem.layers.get(layerId);
+        if (layer) {
+            if (layer.type == coreLib.LayerType.SOURCEDATA.value)
+                return false;
+            return layer.visible;
+        }
+        return false;
     }
 
     toggleMapLayerVisibility(mapId: string, layerId: string) {

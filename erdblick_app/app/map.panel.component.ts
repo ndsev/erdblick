@@ -1,4 +1,4 @@
-import {Component, ViewChild} from "@angular/core";
+import {Component, ViewChild, Pipe, PipeTransform} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {CoverageRectItem, MapInfoItem, MapService} from "./map.service";
 import {ErdblickStyle, StyleService} from "./style.service";
@@ -45,7 +45,7 @@ import {Menu} from "primeng/menu";
                                 <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
                                       (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
                                 <span>
-                                    <p-checkbox [(ngModel)]="mapLayer.value.visible" 
+                                    <p-checkbox [(ngModel)]="mapLayer.value.visible"
                                                 (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
                                                 [label]="mapLayer.key" [binary]="true"/>
                                 </span>
@@ -175,8 +175,8 @@ import {Menu} from "primeng/menu";
                         <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
                     </div>
                 </div>
-                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())" 
-                          [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export" 
+                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())"
+                          [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
                           [style]="{margin: '0 0.5em'}">
                 </p-button>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
@@ -193,6 +193,7 @@ import {Menu} from "primeng/menu";
     styles: [``]
 })
 export class MapPanelComponent {
+    protected readonly LayerType = coreLib.LayerType;
 
     editorDialogVisible: boolean = false;
     layerDialogVisible: boolean = false;

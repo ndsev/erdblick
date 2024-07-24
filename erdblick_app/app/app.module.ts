@@ -28,6 +28,7 @@ import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./style.service";
 import {MapPanelComponent} from "./map.panel.component";
+import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionPanelComponent} from "./inspection.panel.component";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
@@ -66,6 +67,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         SearchPanelComponent,
         MapPanelComponent,
         InspectionPanelComponent,
+        SourceDataPanelComponent,
         PreferencesComponent,
         EditorComponent,
         ErdblickViewComponent,

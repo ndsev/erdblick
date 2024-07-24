@@ -3,6 +3,11 @@
 
 #include "aabb.h"
 #include "buffer.h"
+#include "cesium-interface/object.h"
+#include "mapget/model/info.h"
+#include "mapget/model/sourcedatalayer.h"
+#include "mapget/model/sourcedata.h"
+#include "simfil/model/nodes.h"
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
@@ -176,10 +181,126 @@ void validateSimfil(const std::string &query) {
     simfil::compile(*simfilEnv, query, false);
 }
 
+/**
+ * Convert a SourceDataLayar hierarchy to a tree model compatible
+ * structure.
+ **/
+em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
+    const auto& strings = *layer.strings();
+
+    std::function<em::val(em::val&&, const simfil::ModelNode&)> visit;
+    auto visitAtomic = [&](em::val&& key, const simfil::ModelNode& node) {
+        auto value = [&node]() -> em::val {
+            switch (node.type()) {
+            case simfil::ValueType::Null:
+                return em::val::null();
+            case simfil::ValueType::Bool:
+                return em::val(std::get<bool>(node.value()));
+            case simfil::ValueType::Int:
+                return em::val(std::get<int64_t>(node.value()));
+            case simfil::ValueType::Float:
+                return em::val(std::get<double>(node.value()));
+            case simfil::ValueType::String: {
+                auto v = node.value();
+                if (auto vv = std::get_if<std::string>(&v))
+                    return em::val(*vv);
+                if (auto vv = std::get_if<std::string_view>(&v))
+                    return em::val(std::string(*vv));
+            }
+            default:
+                return em::val::null();
+            }
+        }();
+
+        auto res = em::val::object();
+        auto data = em::val::object();
+        data.set("key", std::move(key));
+        data.set("value", std::move(value));
+
+        res.set("data", std::move(data));
+
+        return res;
+    };
+
+    auto visitArray = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
+        auto res = em::val::object();
+
+        auto data = em::val::object();
+        data.set("key", std::move(key));
+        res.set("data", std::move(data));
+
+        auto children = em::val::array();
+        auto i = 0;
+        for (const auto& item : node) {
+            children.call<void>("push", visit(em::val(i++), *item));
+        }
+
+        if (i > 0)
+            res.set("children", std::move(children));
+
+        return res;
+    };
+
+    auto visitObject = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
+        auto res = em::val::object();
+
+        auto data = em::val::object();
+        data.set("key", std::move(key));
+
+        if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
+            auto compound = layer.resolveCompound(*ModelNode::Ptr::make(layer.shared_from_this(), node.addr()));
+
+            auto address = em::val::object();
+            address.set("offset", compound->sourceDataAddress().bitOffset());
+            address.set("size", compound->sourceDataAddress().bitSize());
+            data.set("address", std::move(address));
+            data.set("type", std::string(compound->schemaName()));
+        }
+
+        res.set("data", std::move(data));
+
+        auto children = em::val::array();
+        for (const auto& [field, v] : node.fields()) {
+            if (auto k = strings.resolve(field); k && v) {
+                children.call<void>("push", visit(em::val(k->data()), *v));
+            }
+        }
+
+        if (node.size() > 0)
+            res.set("children", std::move(children));
+
+        return res;
+    };
+
+    visit = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
+        switch (node.type()) {
+        case simfil::ValueType::Array:
+            return visitArray(std::move(key), node);
+        case simfil::ValueType::Object:
+            return visitObject(std::move(key), node);
+        default:
+            return visitAtomic(std::move(key), node);
+        }
+    };
+
+    if (layer.numRoots() == 0)
+        return em::val::object();
+
+    return visit(em::val("root"), *layer.root(0));
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
+
+    ////////// LayerType
+    em::enum_<mapget::LayerType>("LayerType")
+        .value("FEATURES", mapget::LayerType::Features)
+        .value("HEIGHTMAP", mapget::LayerType::Heightmap)
+        .value("ORTHOiMAGE", mapget::LayerType::OrthoImage)
+        .value("GLTF", mapget::LayerType::GLTF)
+        .value("SOURCEDATA", mapget::LayerType::SourceData);
 
     ////////// ValueType
     em::enum_<InspectionConverter::ValueType>("ValueType")
@@ -231,6 +352,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
 
+    em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
+        .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
+            "std::shared_ptr<mapget::TileSourceDataLayer>")
+        .function(
+            "toObject", &tileSourceDataLayerToObject);
+
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
     em::class_<FeaturePtr>("Feature")
@@ -242,7 +369,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "geojson",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return self->toGeoJson().dump(4); }))
+                    return self->toJson().dump(4); }))
         .function(
             "inspectionModel",
             std::function<em::val(FeaturePtr&)>(
@@ -340,6 +467,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
         .function(
             "filterFeatureJumpTargets",
