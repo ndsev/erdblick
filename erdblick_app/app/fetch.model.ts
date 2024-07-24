@@ -8,6 +8,7 @@ export class Fetch
     static CHUNK_HEADER_SIZE = 11;
     static CHUNK_TYPE_FIELDS = 1;
     static CHUNK_TYPE_FEATURES = 2;
+    static CHUNK_TYPE_SOURCEDATA = 3;
     static CHUNK_TYPE_END_OF_STREAM = 128;
     private url: string;
     private method: string;

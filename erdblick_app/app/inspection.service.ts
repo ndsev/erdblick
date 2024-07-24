@@ -16,6 +16,7 @@ interface InspectionModelData {
     info?: string;
     hoverId?: string
     geoJsonPath?: string;
+    sourceDataReference?: object;
     children: Array<InspectionModelData>;
 }
 
@@ -103,6 +104,9 @@ export class InspectionService {
                 }
                 if (data.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;
+                }
+                if (data.hasOwnProperty("sourceDataReference")) {
+                    node.data["sourceDataReference"] = data.sourceDataReference;
                 }
                 node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children) : [];
                 treeNodes.push(node);

@@ -89,8 +89,12 @@ void TileLayerParser::reset()
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
         [this](auto&& layer){
+            const auto type = layer->layerInfo()->type_;
+            if (type != LayerType::Features)
+                return;
+
             if (tileParsedFun_)
-                tileParsedFun_(layer);
+                tileParsedFun_(std::static_pointer_cast<TileFeatureLayer>(layer));
         },
         cachedFieldDicts_);
 }
