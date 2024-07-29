@@ -74,7 +74,7 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
         }
     }
     if (auto node = yaml["default"]) {
-        defaultValue_ = node.as<std::string>();
+        defaultValue_ = JsValue(node.as<std::string>());
     }
     if (auto node = yaml["description"]) {
         description_ = node.as<std::string>();

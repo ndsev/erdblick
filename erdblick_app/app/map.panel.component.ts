@@ -86,61 +86,35 @@ import {Menu} from "primeng/menu";
                     No styles loaded.
                 </div>
                 <div class="styles-container">
-                    <div *ngIf="styleService.builtinStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
-                            <div *ngIf="!style.value.imported" class="flex-container">
-                                <div class="font-bold white-space-nowrap"
-                                     style="margin-left: 0.5em; display: flex; align-items: center;">
-                                    <span class="material-icons"
-                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
-                                    <span>
-                                        <p-checkbox [(ngModel)]="style.value.enabled"
-                                                    (ngModelChange)="toggleStyle(style.key)"
-                                                    [label]="style.key" [binary]="true"/>
-                                    </span>
-                                </div>
-                                <div class="layer-controls style-controls">
-                                    <p-button (click)="resetStyle(style.key)"
-                                              icon="pi pi-refresh"
-                                              label="" pTooltip="Reload style from disk"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                </div>
+                    <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
+                        <div class="flex-container">
+                            <div class="font-bold white-space-nowrap"
+                                 style="margin-left: 0.5em; display: flex; align-items: center;">
+                                <span class="material-icons"
+                                      style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                      (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
+                                <span>
+                                    <p-checkbox [(ngModel)]="style.value.enabled"
+                                                (ngModelChange)="toggleStyle(style.key)"
+                                                [label]="style.key" [binary]="true"/>
+                                </span>
                             </div>
-                        </div>
-                    </div>
-                    <div *ngIf="styleService.importedStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
-                            <div *ngIf="style.value.imported" class="flex-container">
-                                <div class="font-bold white-space-nowrap"
-                                     style="margin-left: 0.5em; display: flex; align-items: center;">
-                                    <span class="material-icons"
-                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
-                                    <span>
-                                        <p-checkbox [(ngModel)]="style.value.enabled"
-                                                    (ngModelChange)="toggleStyle(style.key)"
-                                                    [label]="style.key" [binary]="true"/>
-                                    </span>
-                                </div>
-                                <div class="layer-controls style-controls">
-                                    <p-button (click)="removeStyle(style.key)"
-                                              icon="pi pi-trash"
-                                              label="" pTooltip="Remove style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                </div>
+                            <div class="layer-controls style-controls">
+                                <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                                          icon="pi pi-trash"
+                                          label="" pTooltip="Remove style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button *ngIf="!style.value.imported" (click)="resetStyle(style.key)"
+                                          icon="pi pi-refresh"
+                                          label="" pTooltip="Reload style from disk"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="showStyleEditor(style.key)"
+                                          icon="pi pi-file-edit"
+                                          label="" pTooltip="Edit style"
+                                          tooltipPosition="bottom">
+                                </p-button>
                             </div>
                         </div>
                     </div>

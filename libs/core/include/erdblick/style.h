@@ -15,12 +15,12 @@ enum class FeatureStyleOptionType
 
 struct FeatureStyleOption
 {
-    FeatureStyleOption(YAML::Node const& yaml);
+    explicit FeatureStyleOption(YAML::Node const& yaml);
 
     std::string label_;
     std::string id_;
     FeatureStyleOptionType type_;
-    NativeJsValue defaultValue_;
+    JsValue defaultValue_;
     std::string description_;
 };
 
