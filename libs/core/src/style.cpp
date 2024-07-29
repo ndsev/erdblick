@@ -24,8 +24,12 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     for (auto const& rule : styleYaml["rules"]) {
         // Create FeatureStyleRule object.
-        // TODO store rules by the feature they apply to for faster processing.
         rules_.emplace_back(rule);
+    }
+
+    for (auto const& option : styleYaml["options"]) {
+        // Create FeatureStyleOption object.
+        options_.emplace_back(option);
     }
 
     valid_ = true;
@@ -41,6 +45,40 @@ bool FeatureLayerStyle::isValid() const
 const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 {
     return rules_;
+}
+
+const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
+{
+    return options_;
+}
+
+FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
+{
+    if (auto node = yaml["label"]) {
+        label_ = node.as<std::string>();
+    }
+    if (auto node = yaml["id"]) {
+        id_ = node.as<std::string>();
+    }
+    else {
+        std::cout << "Option has a missing id field!" << std::endl;
+    }
+    if (auto node = yaml["type"]) {
+        auto type = node.as<std::string>();
+        if (type == "bool") {
+            type_ = FeatureStyleOptionType::Bool;
+        }
+        else {
+            // TODO: Eventually we need to throw an exception here.
+            std::cout << "Unrecognized option type " << type << std::endl;
+        }
+    }
+    if (auto node = yaml["default"]) {
+        defaultValue_ = node.as<std::string>();
+    }
+    if (auto node = yaml["description"]) {
+        description_ = node.as<std::string>();
+    }
 }
 
 }
