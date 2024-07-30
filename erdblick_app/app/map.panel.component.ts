@@ -364,8 +364,9 @@ export class MapPanelComponent {
             );
         }
         else {
+            const position = coreLib.getTilePosition(BigInt(coverage as number));
             this.mapService.moveToWgs84PositionTopic.next(
-                coreLib.getTilePosition(BigInt(coverage as number))
+                {x: position.x, y: position.y}
             );
         }
     }

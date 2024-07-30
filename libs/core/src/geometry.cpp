@@ -118,6 +118,32 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
     return averageVectorPosition(intersectedTrianglePoints);
 }
 
+Point erdblick::boundingRadiusVector(const model_ptr<Geometry>& g)
+{
+    const Point center = erdblick::geometryCenter(g);
+    if (!g) {
+        std::cerr << "Cannot obtain bounding radius of null geometry." << std::endl;
+        return center;
+    }
+
+    float maxDistanceSquared = 0.0f;
+    Point farPoint = center;
+    g->forEachPoint([&center, &maxDistanceSquared, &farPoint](const auto& p)
+    {
+        float dx = p.x - center.x;
+        float dy = p.y - center.y;
+        float dz = p.z - center.z;
+        float distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (distanceSquared > maxDistanceSquared) {
+            farPoint = p;
+            maxDistanceSquared = distanceSquared;
+        }
+        return true;
+    });
+
+    return farPoint;
+}
+
 double erdblick::pointSideOfLine(const Point& lineVector, const Point& lineStart, const Point& p)
 {
     return lineVector.x * (p.y - lineStart.y) - lineVector.y * (p.x - lineStart.x);

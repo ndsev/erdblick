@@ -82,7 +82,7 @@ export class MapService {
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    moveToWgs84PositionTopic: Subject<{x: number, y: number}>;
+    moveToWgs84PositionTopic: Subject<{x: number, y: number, z?: number}>;
     allViewportTileIds: Map<number, number> = new Map<number, number>();
     selectionTopic: BehaviorSubject<FeatureWrapper|null> = new BehaviorSubject<FeatureWrapper|null>(null);
     selectionTileRequest: {
@@ -662,7 +662,7 @@ export class MapService {
 
     focusOnFeature(feature: FeatureWrapper) {
         const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
-        this.moveToWgs84PositionTopic.next(position);
+        this.moveToWgs84PositionTopic.next({x: position.x, y: position.y});
     }
 
     setTileLevelForViewport() {

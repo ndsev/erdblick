@@ -33,7 +33,7 @@ class FeatureSearchQuadTreeNode {
     level: number;
     children: Array<FeatureSearchQuadTreeNode>;
     count: number;
-    markers: Array<SearchResultPosition> = [];
+    markers: Array<[number, SearchResultPosition]> = [];
     rectangle: Rectangle;
     center: Cartesian3 | null;
 
@@ -42,7 +42,7 @@ class FeatureSearchQuadTreeNode {
                 level: number,
                 count: number,
                 children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<SearchResultPosition> = []) {
+                markers: Array<[number, SearchResultPosition]> = []) {
         this.tileId = tileId;
         this.parentId = parentTileId;
         this.level = level;
@@ -59,19 +59,19 @@ class FeatureSearchQuadTreeNode {
        return Rectangle.contains(this.rectangle, point);
     }
 
-    contains(points: Array<SearchResultPosition>) {
-        return points.some(point =>
-            this.containsPoint(point.cartographicRad as Cartographic)
+    contains(markers: Array<[number, SearchResultPosition]>) {
+        return markers.some(marker =>
+            this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    filterPointsForNode(points: Array<SearchResultPosition>) {
-        return points.filter(point =>
-            this.containsPoint(point.cartographicRad as Cartographic)
+    filterPointsForNode(markers: Array<[number, SearchResultPosition]>) {
+        return markers.filter(marker =>
+            this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    addChildren(markers: Array<SearchResultPosition> | Cartographic) {
+    addChildren(markers: Array<[number, SearchResultPosition]> | Cartographic) {
         const existingIds = this.children.map(child => child.tileId);
         const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
         for (const id of missingIds) {
@@ -97,12 +97,12 @@ class FeatureSearchQuadTree {
         this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, 0);
     }
 
-    private calculateAveragePosition(markers: Array<SearchResultPosition>): Cartesian3 {
+    private calculateAveragePosition(markers: Array<[number, SearchResultPosition]>): Cartesian3 {
         const sum = markers.reduce(
-            (acc, pos) => {
-                acc.x += pos.cartesian.x;
-                acc.y += pos.cartesian.y;
-                acc.z += pos.cartesian.z;
+            (acc, marker) => {
+                acc.x += marker[1].cartesian.x;
+                acc.y += marker[1].cartesian.y;
+                acc.z += marker[1].cartesian.z;
                 return acc;
             },
             { x: 0, y: 0, z: 0 }
@@ -111,7 +111,7 @@ class FeatureSearchQuadTree {
         return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
-    insert(tileId: bigint, markers: Array<SearchResultPosition>) {
+    insert(tileId: bigint, markers: Array<[number, SearchResultPosition]>) {
         const markersCenter = this.calculateAveragePosition(markers);
         const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
         let currentLevel = 0;
@@ -215,13 +215,13 @@ export class FeatureSearchService {
     cachedWorkQueue: Array<FeatureTile> = [];
     totalTiles: number = 0;
     doneTiles: number = 0;
-    searchUpdates: Subject<SearchResultForTile> = new Subject<SearchResultForTile>();
     isFeatureSearchActive: Subject<boolean> = new Subject<boolean>();
     pointColor: string = "#ea4336";
     timeElapsed: string = this.formatTime(0);
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
+    searchResults: Array<any> = [];
     pinTiers = [
         10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,
@@ -364,6 +364,7 @@ export class FeatureSearchService {
         this.totalTiles = 0;
         this.doneTiles = 0;
         this.progress.next(0);
+        this.searchResults = [];
         this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -385,7 +386,8 @@ export class FeatureSearchService {
 
         // Add visualizations and register the search result.
         if (tileResult.matches.length && tileResult.tileId) {
-            let mapTileKey = tileResult.matches[0][0];
+            const mapTileKey = tileResult.matches[0][0];
+            const mapId = mapTileKey.split(':')[1]
             this.resultsPerTile.set(mapTileKey, tileResult);
             this.resultTree.insert(tileResult.tileId, tileResult.matches.map(result => {
                 if (result[2].cartographic) {
@@ -396,7 +398,10 @@ export class FeatureSearchService {
                     );
                 }
                 result[2].cartographic = null;
-                return result[2];
+                const featureId = result[1];
+                const id = this.searchResults.length;
+                this.searchResults.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
+                return [id, result[2]];
             }));
         }
 
@@ -406,7 +411,6 @@ export class FeatureSearchService {
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.totalFeatureCount += tileResult.numFeatures;
-        this.searchUpdates.next(tileResult);
         this.visualizationChanged.next();
     }
 
