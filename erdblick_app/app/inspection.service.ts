@@ -7,10 +7,10 @@ import {FeatureWrapper} from "./features.model";
 import {ParametersService, TileFeatureId} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
-import {Cartesian3} from "./cesium";
+import {Fetch} from "./fetch.model";
+import {Cartesian3, Cartographic, CesiumMath, Color, Matrix3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
-import {Fetch} from "./fetch.model";
 import {core} from "@angular/compiler";
 
 
@@ -63,7 +63,7 @@ export class InspectionService {
     selectedFeatureGeoJsonTexts: string[] = [];
     selectedFeatureInspectionModel: InspectionModelData[] = [];
     selectedFeatures: FeatureWrapper[] = [];
-    selectedFeatureGeometryType: any;
+    selectedFeatureGeometryType: string = "";
     selectedFeatureCenter: Cartesian3 | null = null;
     selectedFeatureOrigin: Cartesian3 | null = null;
     selectedFeatureBoundingRadius: number = 0;
