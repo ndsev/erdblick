@@ -18,6 +18,8 @@ export type  Cartesian3 = Cesium.Cartesian3;
 export const Cartesian3 = Cesium.Cartesian3;
 export type  Cartographic = Cesium.Cartographic;
 export const Cartographic = Cesium.Cartographic;
+export type  Matrix3 = Cesium.Matrix3;
+export const Matrix3 = Cesium.Matrix3;
 export type  Color = Cesium.Color;
 export const Color = Cesium.Color;
 export type  ColorGeometryInstanceAttribute = Cesium.ColorGeometryInstanceAttribute;
@@ -50,6 +52,9 @@ export type  PrimitiveCollection = Cesium.PrimitiveCollection;
 export const PrimitiveCollection = Cesium.PrimitiveCollection;
 export type  BillboardCollection = Cesium.BillboardCollection;
 export const BillboardCollection = Cesium.BillboardCollection;
+export type  Billboard = Cesium.Billboard;
+export const Billboard = Cesium.Billboard;
+export const defined = Cesium.defined;
 export type  PinBuilder = Cesium.PinBuilder;
 export const PinBuilder = Cesium.PinBuilder;
 export const SceneTransforms = Cesium.SceneTransforms;
@@ -57,6 +62,10 @@ export type  Entity = Cesium.Entity;
 export const Entity = Cesium.Entity;
 export type  Camera = Cesium.Camera;
 export const Camera = Cesium.Camera;
+export type HeadingPitchRange = Cesium.HeadingPitchRange;
+export const HeadingPitchRange = Cesium.HeadingPitchRange;
+export type BoundingSphere = Cesium.BoundingSphere;
+export const BoundingSphere = Cesium.BoundingSphere;
 
 // Math is a namespace.
 

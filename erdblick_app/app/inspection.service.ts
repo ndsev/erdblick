@@ -1,12 +1,15 @@
 import {EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
 import {MapService} from "./map.service";
 import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
+import {Cartesian3, Cartographic, CesiumMath, Color, Matrix3} from "./cesium";
+import {InfoMessageService} from "./info.service";
+import {KeyboardService} from "./keyboard.service";
 import {Fetch} from "./fetch.model";
 
 
@@ -45,7 +48,12 @@ export class InspectionService {
     selectedFeatureInspectionModel: Array<InspectionModelData> | null = null;
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
+    selectedFeatureGeometryType: string = "";
+    selectedFeatureCenter: Cartesian3 | null = null;
+    selectedFeatureOrigin: Cartesian3 | null = null;
+    selectedFeatureBoundingRadius: number = 0;
     selectedFeature: FeatureWrapper | null = null;
+    originNormalAndRadiusForFeatureZoom: Subject<[Cartesian3, Cartesian3, number]> = new Subject();
     selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
 
     // Event called when the active inspector of the inspection panel changed
@@ -53,7 +61,12 @@ export class InspectionService {
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,
+                private infoMessageService: InfoMessageService,
+                private keyboardService: KeyboardService,
                 public parametersService: ParametersService) {
+
+        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
+
         this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
             if (!selectedFeature) {
                 this.isInspectionPanelVisible = false;
@@ -66,6 +79,13 @@ export class InspectionService {
                 this.selectedFeatureInspectionModel = feature.inspectionModel();
                 this.selectedFeatureGeoJsonText = feature.geojson() as string;
                 this.selectedFeatureIdName = feature.id() as string;
+                const center = feature.center() as Cartesian3;
+                this.selectedFeatureCenter = center;
+                this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
+                let radiusPoint = feature.boundingRadiusVector() as Cartesian3;
+                radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
+                this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
+                this.selectedFeatureGeometryType = this.getGeometryType();
                 this.isInspectionPanelVisible = true;
                 this.loadFeatureData();
             });
@@ -168,6 +188,64 @@ export class InspectionService {
             }));
         } else {
             this.featureTree.next('[]');
+        }
+    }
+
+    getGeometryType() {
+        if (this.selectedFeatureInspectionModel) {
+        for (const section of this.selectedFeatureInspectionModel) {
+            if (section.key == "Geometry") {
+                const geometryType = section.children[0].value;
+                console.log(geometryType)
+                return geometryType;
+            }
+        }
+        }
+        return "";
+    }
+
+    zoomToFeature() {
+        if (!this.selectedFeature) {
+            this.infoMessageService.showError("Could not zoom to feature: no feature is selected!");
+            return;
+        }
+        if (!this.selectedFeatureGeometryType) {
+            this.infoMessageService.showError("Could not zoom to feature: geometry type is missing for the feature!");
+            return;
+        }
+
+        if (this.selectedFeatureGeometryType.toLowerCase() == "mesh") {
+            let triangle: Array<Cartesian3> = [];
+            if (this.selectedFeatureInspectionModel) {
+                for (const section of this.selectedFeatureInspectionModel) {
+                    if (section.key == "Geometry") {
+                        for (let i = 0; i < 3; i++) {
+                            const cartographic = section.children[0].children[i].value.map((coordinate: string) => Number(coordinate));
+                            if (cartographic.length == 3) {
+                                triangle.push(Cartesian3.fromDegrees(cartographic[0], cartographic[1], cartographic[2]));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            if (this.selectedFeatureOrigin) {
+                const normal = Cartesian3.cross(
+                    Cartesian3.subtract(triangle[1], triangle[0], new Cartesian3()),
+                    Cartesian3.subtract(triangle[2], triangle[0], new Cartesian3()),
+                    new Cartesian3()
+                );
+                Cartesian3.negate(normal, normal);
+                Cartesian3.normalize(normal, normal);
+                Cartesian3.multiplyByScalar(normal, this.selectedFeatureBoundingRadius, normal);
+                this.originNormalAndRadiusForFeatureZoom.next([this.selectedFeatureOrigin, normal, this.selectedFeatureBoundingRadius]);
+            }
+        } else if (this.selectedFeatureCenter) {
+            this.mapService.moveToWgs84PositionTopic.next({
+                x: this.selectedFeatureCenter.x,
+                y: this.selectedFeatureCenter.y,
+                z: this.selectedFeatureCenter.z + this.selectedFeatureBoundingRadius
+            });
         }
     }
 
