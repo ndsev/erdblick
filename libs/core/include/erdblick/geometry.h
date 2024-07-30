@@ -33,6 +33,13 @@ bool isPointInsideTriangle(Point const& p, Point const& p0, Point const& p1, Poi
 Point geometryCenter(model_ptr<Geometry> const& g);
 
 /**
+ * Calculate a reasonable bounding radius for the given geometry
+ * Used to properly scale the camera in the viewer
+ * relative to the feature's bounding sphere.
+ */
+Point boundingRadiusVector(model_ptr<Geometry> const& g);
+
+/**
  * Calculate a local WGS84 coordinate system for the geometry.
  * The axes are scaled, such that each represents approx. 1m
  * in real-world length. The y-axis will point in the direction
