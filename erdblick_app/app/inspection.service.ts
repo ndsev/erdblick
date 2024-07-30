@@ -7,7 +7,7 @@ import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
-import {Cartesian3} from "./cesium";
+import {Cartesian3, Cartographic, CesiumMath, Color, Matrix3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
 import {Fetch} from "./fetch.model";
