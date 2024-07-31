@@ -14,7 +14,7 @@ TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
     TileLayerParser tlp;
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     auto style = TestDataProvider::style();
-    FeatureLayerVisualization visualization(style);
+    FeatureLayerVisualization visualization(style, {});
     visualization.addTileFeatureLayer(testLayer);
     visualization.run();
     auto result = visualization.primitiveCollection();

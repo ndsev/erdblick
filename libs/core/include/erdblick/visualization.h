@@ -77,11 +77,10 @@ class FeatureLayerVisualization
 public:
     /**
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
-     * @param style The style to apply to the features in the layer.
-     * @param layer A shared pointer to the TileFeatureLayer that needs to be visualized.
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
+        NativeJsValue optionValues,
         std::string highlightFeatureIndex = "");
 
     /**
@@ -233,6 +232,7 @@ private:
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
     std::string highlightFeatureId_;
     std::shared_ptr<simfil::Fields> internalFieldsDictCopy_;
+    std::map<std::string, simfil::Value> optionValues_;
 
     /// ===== Relation Processing Members =====
 

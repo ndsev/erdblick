@@ -20,7 +20,7 @@ struct FeatureStyleOption
     std::string label_;
     std::string id_;
     FeatureStyleOptionType type_;
-    JsValue defaultValue_;
+    YAML::Node defaultValue_;
     std::string description_;
 };
 

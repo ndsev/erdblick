@@ -108,6 +108,11 @@ struct JsValue
     JsValue operator[](std::string const& propertyName);
 
     /**
+     * Assuming this is a dict, check if the entry with the given key exists.
+     */
+    bool has(std::string const& propertyName);
+
+    /**
      * Get the value at the specified index, assuming that this
      * is a list. For both EMSCRIPTEN and the mock version,
      * it will return value_[i].

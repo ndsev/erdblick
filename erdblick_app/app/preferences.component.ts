@@ -121,8 +121,8 @@ export class PreferencesComponent {
     }
 
     clearImportedStyles() {
-        for (let styleId of this.styleService.styleData.keys()) {
-            if (this.styleService.styleData.get(styleId)!.imported) {
+        for (let styleId of this.styleService.styles.keys()) {
+            if (this.styleService.styles.get(styleId)!.imported) {
                 this.styleService.deleteStyle(styleId);
             }
         }
@@ -130,7 +130,7 @@ export class PreferencesComponent {
     }
 
     clearModifiedStyles() {
-        for (let [styleId, style] of this.styleService.styleData) {
+        for (let [styleId, style] of this.styleService.styles) {
             if (!style.imported && style.modified) {
                 this.styleService.reloadStyle(styleId);
             }

@@ -97,6 +97,7 @@ export class TileVisualization {
     private readonly highlight: string;
     private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
+    private readonly options: Record<string, string>;
 
     /**
      * Create a tile visualization.
@@ -112,8 +113,9 @@ export class TileVisualization {
      *  have `mode: highlight` set, otherwise, only rules with the default
      *  `mode: normal` are executed.
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
+     * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight: string = "", boxGrid?: boolean) {
+    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight: string = "", boxGrid?: boolean, options?: Record<string, string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
@@ -122,6 +124,7 @@ export class TileVisualization {
         this.deleted = false;
         this.auxTileFun = auxTileFun;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
+        this.options = options || {};
     }
 
     /**
@@ -149,6 +152,7 @@ export class TileVisualization {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let visualization = new coreLib.FeatureLayerVisualization(
                     this.style,
+                    this.style.,
                     this.highlight!);
                 visualization.addTileFeatureLayer(tileFeatureLayer);
                 try {

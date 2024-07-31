@@ -86,7 +86,7 @@ import {Menu} from "primeng/menu";
                     No styles loaded.
                 </div>
                 <div class="styles-container">
-                    <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
+                    <div *ngFor="let style of styleService.styles | keyvalue: unordered">
                         <div class="flex-container">
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
@@ -94,8 +94,8 @@ import {Menu} from "primeng/menu";
                                       style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
                                       (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
                                 <span>
-                                    <p-checkbox [(ngModel)]="style.value.enabled"
-                                                (ngModelChange)="toggleStyle(style.key)"
+                                    <p-checkbox [(ngModel)]="style.value.params.visible"
+                                                (ngModelChange)="applyStyleConfig(style.value)"
                                                 [label]="style.key" [binary]="true"/>
                                 </span>
                             </div>
@@ -152,8 +152,8 @@ import {Menu} from "primeng/menu";
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                              [disabled]="!dataWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Cancel"'
+                              [disabled]="!sourceWasModified"></p-button>
+                    <p-button (click)="closeEditorDialog($event)" [label]='this.sourceWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
@@ -161,7 +161,7 @@ import {Menu} from "primeng/menu";
                     </div>
                 </div>
                 <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())" 
-                          [disabled]="dataWasModified" label="Export" icon="pi pi-file-export" 
+                          [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export" 
                           [style]="{margin: '0 0.5em'}">
                 </p-button>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
@@ -183,9 +183,9 @@ export class MapPanelComponent {
     layerDialogVisible: boolean = false;
     warningDialogVisible: boolean = false;
     mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
-    editedStyleDataSubscription: Subscription = new Subscription();
-    savedStyleDataSubscription: Subscription = new Subscription();
-    dataWasModified: boolean = false;
+    editedStyleSourceSubscription: Subscription = new Subscription();
+    savedStyleSourceSubscription: Subscription = new Subscription();
+    sourceWasModified: boolean = false;
 
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
@@ -226,9 +226,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All off but This',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = styleId == id;
-                        this.parameterService.setStyleConfig(id, styleId == id);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -237,9 +236,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All on but This',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = styleId != id;
-                        this.parameterService.setStyleConfig(id, styleId != id);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -248,9 +246,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All Off',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = false;
-                        this.parameterService.setStyleConfig(id, false);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -259,9 +256,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All On',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = true;
-                        this.parameterService.setStyleConfig(id, true);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -370,8 +366,9 @@ export class MapPanelComponent {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
-    toggleStyle(styleId: string) {
-        this.styleService.toggleStyle(styleId);
+    applyStyleConfig(style: ErdblickStyle) {
+        this.styleService.reapplyStyle(style.id);
+        this.parameterService.setStyleConfig(style.id, style.params);
     }
 
     resetStyle(styleId: string) {
@@ -415,11 +412,11 @@ export class MapPanelComponent {
     showStyleEditor(styleId: string) {
         this.styleService.selectedStyleIdForEditing.next(styleId);
         this.editorDialogVisible = true;
-        this.editedStyleDataSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleData => {
-            const originalStyleData = this.styleService.styleData.get(styleId)?.data!;
-            this.dataWasModified = !(editedStyleData.replace(/\n+$/, '') == originalStyleData.replace(/\n+$/, ''));
+        this.editedStyleSourceSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleSource => {
+            const originalStyleSource = this.styleService.styles.get(styleId)?.source!;
+            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == originalStyleSource.replace(/\n+$/, ''));
         });
-        this.savedStyleDataSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
+        this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
             this.applyEditedStyle();
         });
     }
@@ -435,17 +432,17 @@ export class MapPanelComponent {
             this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
             return;
         }
-        if (!this.styleService.styleData.has(styleId)) {
+        if (!this.styleService.styles.has(styleId)) {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
-        this.styleService.setStyleData(styleId, styleData);
-        this.dataWasModified = false;
+        this.styleService.setStyleSource(styleId, styleData);
+        this.sourceWasModified = false;
     }
 
     closeEditorDialog(event: any) {
         if (this.editorDialog !== undefined) {
-            if (this.dataWasModified) {
+            if (this.sourceWasModified) {
                 event.stopPropagation();
                 this.warningDialogVisible = true;
             } else {
@@ -453,8 +450,8 @@ export class MapPanelComponent {
                 this.editorDialog.close(event);
             }
         }
-        this.editedStyleDataSubscription.unsubscribe();
-        this.savedStyleDataSubscription.unsubscribe();
+        this.editedStyleSourceSubscription.unsubscribe();
+        this.savedStyleSourceSubscription.unsubscribe();
     }
 
     discardStyleEdits() {

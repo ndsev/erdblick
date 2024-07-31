@@ -20,6 +20,7 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
+    NativeJsValue rawOptionValues,
     std::string highlightFeatureId)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
@@ -27,9 +28,22 @@ FeatureLayerVisualization::FeatureLayerVisualization(
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
       style_(style),
-      highlightFeatureId_(highlightFeatureId),
+      highlightFeatureId_(std::move(highlightFeatureId)),
       externalRelationReferences_(JsValue::List())
 {
+    // Convert option values dict to simfil values
+    auto optionValues = JsValue(rawOptionValues);
+    for (auto const& option : style.options()) {
+        std::string optionValue = option.defaultValue_.IsScalar() ? option.defaultValue_.Scalar() : "";
+        simfil::Value simfilValue = simfil::Value::make(false);
+        if (optionValues.has(option.id_)) {
+            optionValue = optionValues[option.id_].toString();
+        }
+        switch (option.type_) {
+        case FeatureStyleOptionType::Bool: simfilValue = simfil::Value::make(optionValue == "true");
+        }
+        optionValues_[option.id_] = simfilValue;
+    }
 }
 
 void FeatureLayerVisualization::addTileFeatureLayer(

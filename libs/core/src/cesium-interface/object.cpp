@@ -74,11 +74,19 @@ JsValue JsValue::operator[](std::string const& propertyName)
 #ifdef EMSCRIPTEN
     return JsValue(value_[propertyName]);
 #else
-    if(!value_.contains(propertyName))
-    {
+    if (!value_.contains(propertyName)) {
         value_["properties"][propertyName] = {};
     }
     return JsValue(value_["properties"][propertyName]);
+#endif
+}
+
+bool JsValue::has(std::string const& propertyName)
+{
+#ifdef EMSCRIPTEN
+    return value_[propertyName].typeOf().as<std::string>() != "undefined";
+#else
+    return value_.contains(propertyName);
 #endif
 }
 

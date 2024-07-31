@@ -6,6 +6,11 @@ import {Params, Router} from "@angular/router";
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
+export interface StyleParameters {
+    visible: boolean,
+    options: Record<string, string>,
+}
+
 interface ErdblickParameters extends Record<string, any> {
     marker: boolean,
     markedPosition: Array<number>,
@@ -19,7 +24,7 @@ interface ErdblickParameters extends Record<string, any> {
     osm: boolean,
     osmOpacity: number,
     layers: Array<[string, number, boolean, boolean]>,
-    styles: Array<string>,
+    styles: Map<string, StyleParameters>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number,
     enabledCoordsTileIds: Array<string>
@@ -110,9 +115,26 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: true
     },
     styles: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: [],
+        converter: val => {
+            const parsed = JSON.parse(val);
+            const map = new Map<string, StyleParameters>();
+            for (const key in parsed) {
+                if (parsed.hasOwnProperty(key)) {
+                    map.set(key, parsed[key]);
+                }
+            }
+            return map;
+        },
+        validator: val => {
+            if (!(val instanceof Map)) return false;
+            for (const [key, value] of val.entries()) {
+                if (typeof key !== 'string' || typeof value !== 'object' || typeof value.visible !== 'boolean' || typeof value.options !== 'object') {
+                    return false;
+                }
+            }
+            return true;
+        },
+        default: new Map<string, StyleParameters>(),
         urlParam: true
     },
     tilesLoadLimit: {
@@ -182,9 +204,9 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setInitialStyles(styles: Array<string>) {
+    setInitialStyles(styles: Map<string, StyleParameters>) {
         // Only set styles, if there are no configured values yet.
-        if (this.p().styles.length) {
+        if (this.p().styles.size) {
             return;
         }
         this.p().styles = styles;
@@ -246,16 +268,17 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    styleConfig(styleId: string): boolean {
-        return !this.p().styles.length || this.p().styles.includes(styleId);
+    styleConfig(styleId: string): StyleParameters {
+        if (this.p().styles.has(styleId))
+            return this.p().styles.get(styleId)!
+        return {
+            visible: this.p().styles.size == 0,
+            options: {}
+        }
     }
 
-    setStyleConfig(styleId: string, visible: boolean) {
-        let newStyles = this.p().styles.filter(val => val !== styleId);
-        if (visible) {
-            newStyles.push(styleId);
-        }
-        this.p().styles = newStyles;
+    setStyleConfig(styleId: string, params: StyleParameters) {
+        this.p().styles.set(styleId, params);
         this.parameters.next(this.p());
     }
 

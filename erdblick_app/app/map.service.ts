@@ -147,7 +147,7 @@ export class MapService {
         this.styleService.styleAddedForId.subscribe(styleId => {
             this.visualizedTileLayers.set(styleId, []);
             for (let [_, tileLayer] of this.loadedTileLayers) {
-                this.renderTileLayer(tileLayer, this.styleService.styleData.get(styleId)!, styleId);
+                this.renderTileLayer(tileLayer, this.styleService.styles.get(styleId)!, styleId);
             }
         });
 
@@ -175,8 +175,8 @@ export class MapService {
                 return;
 
             // Apply additional highlight styles.
-            for (let [_, styleData] of this.styleService.styleData) {
-                if (styleData.featureLayerStyle && styleData.enabled) {
+            for (let [_, styleData] of this.styleService.styles) {
+                if (styleData.featureLayerStyle && styleData.params.visible) {
                     let visu = new TileVisualization(
                         selectedFeatureWrapper!.featureTile,
                         (tileKey: string)=>this.getFeatureTile(tileKey),
@@ -409,8 +409,8 @@ export class MapService {
                     return false;
                 }
                 let styleEnabled = false;
-                if (this.styleService.styleData.has(styleId)) {
-                    styleEnabled = this.styleService.styleData.get(styleId)?.enabled!;
+                if (this.styleService.styles.has(styleId)) {
+                    styleEnabled = this.styleService.styles.get(styleId)?.params.visible!;
                 }
                 if (styleId != "_builtin" && !styleEnabled) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
@@ -544,7 +544,7 @@ export class MapService {
             if (style && styleId) {
                 this.renderTileLayer(tileLayer, style, styleId);
             } else {
-                this.styleService.styleData.forEach((style, styleId) => {
+                this.styleService.styles.forEach((style, styleId) => {
                     this.renderTileLayer(tileLayer, style, styleId);
                 });
             }
@@ -577,7 +577,7 @@ export class MapService {
         let wasmStyle = (style as ErdblickStyle).featureLayerStyle ? (style as ErdblickStyle).featureLayerStyle : style as FeatureLayerStyle;
         if (!wasmStyle)
             return;
-        if ((style as ErdblickStyle).enabled !== undefined && !(style as ErdblickStyle).enabled) {
+        if ((style as ErdblickStyle).params !== undefined && !(style as ErdblickStyle).params.visible) {
             return;
         }
         const mapName = tileLayer.mapName;
