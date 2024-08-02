@@ -214,8 +214,22 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("camPosLat", &Viewport::camPosLat)
         .field("orientation", &Viewport::orientation);
 
+    ////////// FeatureStyleOptionType
+    em::enum_<FeatureStyleOptionType>("FeatureStyleOptionType")
+        .value("Bool", FeatureStyleOptionType::Bool);
+
+    ////////// FeatureStyleOption
+    em::value_object<FeatureStyleOption>("FeatureStyleOption")
+        .field("label", &FeatureStyleOption::label_)
+        .field("id", &FeatureStyleOption::id_)
+        .field("type", &FeatureStyleOption::type_)
+        .field("defaultValue", &FeatureStyleOption::defaultValue_) // Ensure correct binding/conversion for YAML::Node
+        .field("description", &FeatureStyleOption::description_);
+
     ////////// FeatureLayerStyle
-    em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
+    em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
+    em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
+        .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
 
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;

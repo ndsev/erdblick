@@ -588,7 +588,8 @@ export class MapService {
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
             "",
-            this.getMapLayerBorderState(mapName, layerName));
+            this.getMapLayerBorderState(mapName, layerName),
+            (style as ErdblickStyle).params !== undefined ? (style as ErdblickStyle).params.options : {});
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);

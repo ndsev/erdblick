@@ -74,7 +74,12 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
         }
     }
     if (auto node = yaml["default"]) {
-        defaultValue_ = JsValue(node.as<std::string>());
+        if (node.IsScalar())
+            convertValue(node.Scalar(), [this](auto&& v){
+                defaultValue_ = *JsValue(v);
+            });
+        else
+            std::cout << "Default option value must be a scalar." << std::endl;
     }
     if (auto node = yaml["description"]) {
         description_ = node.as<std::string>();

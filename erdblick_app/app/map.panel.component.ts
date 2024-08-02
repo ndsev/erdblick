@@ -37,9 +37,6 @@ import {Menu} from "primeng/menu";
                 <div *ngIf="mapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
-<!--                            <p-checkbox [(ngModel)]="mapItem.value.visible"-->
-                            <!--                                        (ngModelChange)="toggleLayer(mapItem.key, '')"-->
-                            <!--                                        [label]="mapItem.key" [binary]="true"/>-->
                             {{ mapItem.key }}
                         </span>
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
@@ -99,6 +96,11 @@ import {Menu} from "primeng/menu";
                                                 [label]="style.key" [binary]="true"/>
                                 </span>
                             </div>
+                            <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                                      icon="pi pi-trash"
+                                      label="" pTooltip="Remove style"
+                                      tooltipPosition="bottom">
+                            </p-button>
                             <div class="layer-controls style-controls">
                                 <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
                                           icon="pi pi-trash"
@@ -115,6 +117,14 @@ import {Menu} from "primeng/menu";
                                           label="" pTooltip="Edit style"
                                           tooltipPosition="bottom">
                                 </p-button>
+                            </div>
+                        </div>
+                        <div *ngIf="style.value.options">
+                            <div *ngFor="let option of style.value.options"
+                                 style="margin-left: 1.5em; align-items: center;">
+                                <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
+                                            (ngModelChange)="applyStyleConfig(style.value)"
+                                            [label]="option.label" [binary]="true"/>
                             </div>
                         </div>
                     </div>

@@ -9,7 +9,7 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
-import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, FeatureStyleOption, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
 
@@ -18,6 +18,14 @@ interface StyleConfigEntry {
     url: string
 }
 
+export type FeatureStyleOptionWithStringType = {
+    label: string,
+    id: string,
+    type: FeatureStyleOptionType,
+    defaultValue: string,
+    description: string
+};
+
 export interface ErdblickStyle {
     id: string,
     modified: boolean,
@@ -25,6 +33,7 @@ export interface ErdblickStyle {
     params: StyleParameters,
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
+    options?: Array<FeatureStyleOptionWithStringType>
 }
 
 /**
@@ -317,7 +326,12 @@ export class StyleService {
                 const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                 if (featureLayerStyle) {
                     style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                    this.styles.set(styleId, style);
+                    style.options = [];
+                    // Transport FeatureStyleOptions from WASM array to JS.
+                    let options = style.featureLayerStyle.options();
+                    for (let i = 0; i < options.size(); ++i)
+                        style.options.push(options.get(i)! as FeatureStyleOptionWithStringType);
+                    options.delete();
                     return true;
                 }
                 return false;
@@ -339,13 +353,13 @@ export class StyleService {
         if (!this.styles.has(styleId)) {
             return;
         }
-        let styleData = this.styles.get(styleId)!;
+        let style = this.styles.get(styleId)!;
         this.initializeWasmStyle(styleId);
         this.styleRemovedForId.next(styleId);
-        if (styleData.params.visible) {
+        if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
-        console.log(`${styleData.params.visible ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+        console.log(`${style.params.visible ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
     reapplyStyles(styleIds: Array<string>) {

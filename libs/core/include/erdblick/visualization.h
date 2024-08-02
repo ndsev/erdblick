@@ -80,7 +80,7 @@ public:
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
-        NativeJsValue optionValues,
+        NativeJsValue const& optionValues,
         std::string highlightFeatureIndex = "");
 
     /**
@@ -211,6 +211,11 @@ private:
      * Simfil expression evaluation function for the tile which this visualization belongs to.
      */
     simfil::Value evaluateExpression(std::string const& expression, simfil::ModelNode const& ctx) const;
+
+    /**
+     * Insert style option variables into the given OverlayNode.
+     */
+    void addOptionsToSimfilContext(simfil::OverlayNode& context);
 
     /// =========== Generic Members ===========
 

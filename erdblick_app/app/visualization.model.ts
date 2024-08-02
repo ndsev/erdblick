@@ -152,7 +152,7 @@ export class TileVisualization {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let visualization = new coreLib.FeatureLayerVisualization(
                     this.style,
-                    this.style.,
+                    this.options,
                     this.highlight!);
                 visualization.addTileFeatureLayer(tileFeatureLayer);
                 try {

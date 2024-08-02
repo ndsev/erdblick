@@ -20,7 +20,7 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
-    NativeJsValue rawOptionValues,
+    NativeJsValue const& rawOptionValues,
     std::string highlightFeatureId)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
@@ -31,18 +31,18 @@ FeatureLayerVisualization::FeatureLayerVisualization(
       highlightFeatureId_(std::move(highlightFeatureId)),
       externalRelationReferences_(JsValue::List())
 {
-    // Convert option values dict to simfil values
+    // Convert option values dict to simfil values.
     auto optionValues = JsValue(rawOptionValues);
     for (auto const& option : style.options()) {
-        std::string optionValue = option.defaultValue_.IsScalar() ? option.defaultValue_.Scalar() : "";
+        auto stringValue = JsValue(option.defaultValue_).toString();
         simfil::Value simfilValue = simfil::Value::make(false);
         if (optionValues.has(option.id_)) {
-            optionValue = optionValues[option.id_].toString();
+            stringValue = optionValues[option.id_].toString();
         }
-        switch (option.type_) {
-        case FeatureStyleOptionType::Bool: simfilValue = simfil::Value::make(optionValue == "true");
-        }
-        optionValues_[option.id_] = simfilValue;
+        option.convertValue(stringValue, [&simfilValue](auto&& v){
+            simfilValue = simfil::Value::make(v);
+        });
+        optionValues_.emplace(option.id_, std::move(simfilValue));
     }
 }
 
@@ -194,7 +194,11 @@ void FeatureLayerVisualization::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        auto boundEvalFun = [this, &feature](auto&& str){return evaluateExpression(str, *feature);};
+        auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
+        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
+        addOptionsToSimfilContext(evaluationContext);
+
+        auto boundEvalFun = [this, &evaluationContext](auto&& str){return evaluateExpression(str, evaluationContext);};
         feature->geom()->forEachGeometry(
             [this, id, &rule, &boundEvalFun, &offset](auto&& geom)
             {
@@ -513,6 +517,7 @@ void FeatureLayerVisualization::addAttribute(
     auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
 
     simfil::OverlayNode attrEvaluationContext(simfil::Value::field(constAttr));
+    addOptionsToSimfilContext(attrEvaluationContext);
 
     // Assemble simfil evaluation context.
     attrEvaluationContext
@@ -545,6 +550,13 @@ void FeatureLayerVisualization::addAttribute(
         rule,
         boundEvalFun,
         offset * static_cast<double>(offsetFactor));
+}
+
+void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& context)
+{
+    for (auto const& [key, value] : optionValues_) {
+        context.set(internalFieldsDictCopy_->emplace(key), value);
+    }
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
@@ -661,6 +673,7 @@ void RecursiveRelationVisualizationState::render(
     auto const& constTarget = static_cast<mapget::Feature const&>(*r.targetFeature_);
 
     simfil::OverlayNode relationEvaluationContext(simfil::Value::field(constRelation));
+    visu_.addOptionsToSimfilContext(relationEvaluationContext);
 
     // Assemble simfil evaluation context.
     relationEvaluationContext.set(

@@ -15,13 +15,25 @@ enum class FeatureStyleOptionType
 
 struct FeatureStyleOption
 {
+    FeatureStyleOption() = default;
     explicit FeatureStyleOption(YAML::Node const& yaml);
 
     std::string label_;
     std::string id_;
-    FeatureStyleOptionType type_;
-    YAML::Node defaultValue_;
+    FeatureStyleOptionType type_ = FeatureStyleOptionType::Bool;
+    NativeJsValue defaultValue_;
     std::string description_;
+
+    template <class LambdaT>
+    void convertValue(std::string const& v, LambdaT callback) const {
+        switch (type_) {
+        case FeatureStyleOptionType::Bool:
+            callback(std::ranges::equal(
+                v,
+                std::string_view("true"),
+                [](char a, char b) { return std::tolower(a) == std::tolower(b); }));
+        }
+    }
 };
 
 class FeatureLayerStyle
