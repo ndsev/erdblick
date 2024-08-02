@@ -1,0 +1,46 @@
+{
+    "version": 4,
+    "configurePresets": [
+        {
+            "name": "common",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "build",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "BUILD_SHARED_LIBS": "OFF"
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "common",
+            "displayName": "Debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "common",
+            "displayName": "Release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "displayName": "Debug",
+            "environment": {
+                "NG_DEVELOP": "TRUE"
+            }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "displayName": "Release"
+        }
+    ]
+}

@@ -21,6 +21,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Install build dependencies
+        run: sudo apt-get install ninja-build
+
       - name: Install npm dependencies
         run: npm -g install --force --include=dev
 

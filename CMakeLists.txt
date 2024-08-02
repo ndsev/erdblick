@@ -24,22 +24,13 @@ FetchContent_Declare(mapget
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
-set(CESIUM_TESTS_ENABLED OFF)
-set(CESIUM_GLM_STRICT_ENABLED OFF)
-set(CESIUM_TRACING_ENABLED OFF)
-set(DRACO_JS_GLUE OFF CACHE BOOL "Disable JS glue for Draco" FORCE)
-FetchContent_Declare(
-  cesiumnative
-  GIT_REPOSITORY https://github.com/Klebert-Engineering/cesium-native.git
-  GIT_TAG "spdlog-upgrade"
-  GIT_SHALLOW ON)
-FetchContent_MakeAvailable(cesiumnative)
-
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
   GIT_TAG        "yaml-cpp-0.7.0"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(yaml-cpp)
+
+include(cmake/cesium.cmake)
 
 # Erdblick Core Library
 
