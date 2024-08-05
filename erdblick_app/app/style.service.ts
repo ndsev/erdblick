@@ -113,7 +113,7 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.parameterService.setInitialStyles(new Map<string, StyleParameters>([...this.styles.entries()].map(([k, v]) => [k, v.params])));
+        this.parameterService.setInitialStyles(Object.fromEntries([...this.styles.entries()].map(([k, v]) => [k, v.params])));
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
@@ -158,7 +158,8 @@ export class StyleService {
                             imported: false,
                             params: this.parameterService.styleConfig(styleId),
                             source: styleString,
-                            featureLayerStyle: null
+                            featureLayerStyle: null,
+                            options: []
                         });
                         this.saveModifiedBuiltinStyles();
                         this.reapplyStyle(styleId);

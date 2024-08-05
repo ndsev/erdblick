@@ -26,7 +26,7 @@ interface ErdblickParameters extends Record<string, any> {
     osm: boolean,
     osmOpacity: number,
     layers: Array<[string, number, boolean, boolean]>,
-    styles: Map<string, StyleParameters>,
+    styles: Record<string, StyleParameters>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number,
     enabledCoordsTileIds: Array<string>
@@ -117,25 +117,8 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: true
     },
     styles: {
-        converter: val => {
-            const parsed = JSON.parse(val);
-            const map = new Map<string, StyleParameters>();
-            for (const key in parsed) {
-                if (parsed.hasOwnProperty(key)) {
-                    map.set(key, parsed[key]);
-                }
-            }
-            return map;
-        },
-        validator: val => {
-            if (!(val instanceof Map)) return false;
-            for (const [key, value] of val.entries()) {
-                if (typeof key !== 'string' || typeof value !== 'object' || typeof value.visible !== 'boolean' || typeof value.options !== 'object') {
-                    return false;
-                }
-            }
-            return true;
-        },
+        converter: val => JSON.parse(val),
+        validator: val => typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(([_, v]) => typeof v["visible"] === "boolean" && typeof v["showOptions"] === "boolean" && typeof v["options"] === "object"),
         default: new Map<string, StyleParameters>(),
         urlParam: true
     },
@@ -206,9 +189,9 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setInitialStyles(styles: Map<string, StyleParameters>) {
+    setInitialStyles(styles: Record<string, StyleParameters>) {
         // Only set styles, if there are no configured values yet.
-        if (this.p().styles.size) {
+        if (!Object.entries(this.p().styles).length) {
             return;
         }
         this.p().styles = styles;
@@ -271,16 +254,17 @@ export class ParametersService {
     }
 
     styleConfig(styleId: string): StyleParameters {
-        if (this.p().styles.has(styleId))
-            return this.p().styles.get(styleId)!
+        if (this.p().styles.hasOwnProperty(styleId))
+            return this.p().styles[styleId]
         return {
-            visible: this.p().styles.size == 0,
-            options: {}
+            visible: !Object.entries(this.p().styles).length,
+            options: {},
+            showOptions: true,
         }
     }
 
     setStyleConfig(styleId: string, params: StyleParameters) {
-        this.p().styles.set(styleId, params);
+        this.p().styles[styleId] = params;
         this.parameters.next(this.p());
     }
 
