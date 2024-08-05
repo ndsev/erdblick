@@ -151,6 +151,18 @@ cities and roads. The label text is dynamically generated from the feature's nam
 attribute. The labels are styled with a white fill color, a black outline, and are
 scaled up by a factor of 1.2 for better visibility.
 
+### Style Options
+
+In addition to the `rules` section, a style sheet may have a top-level `options` key.
+Under this key, variables may be defined for the style sheet which can be controlled
+by the user. Each `option` entry may have the following fields:
+
+* `label`: UI label for the control to change the option value.
+* `id`: Simfil variable name, under which the current option value will be available in
+   different style rule expressions, e.g. `filter` or `color-expression` etc.
+* `type`: Data type for the option variable. Both the default and currently the only allowed value is `bool`, which will be shown to the user as a checkbox.
+* `default`: Default value for the option.
+
 ### Relation Styling
 
 In Erdblick, relation styling is used to visualize relationships between different features.
