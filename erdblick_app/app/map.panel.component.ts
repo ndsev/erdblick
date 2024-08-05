@@ -42,7 +42,7 @@ import {Menu} from "primeng/menu";
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span class="material-icons" style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
                                       (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
                                 <span>
                                     <p-checkbox [(ngModel)]="mapLayer.value.visible" 
@@ -87,8 +87,13 @@ import {Menu} from "primeng/menu";
                         <div class="flex-container">
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
+                                <span *ngIf="style.value.options.length" class="material-icons" [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
+                                      style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
+                                      (click)="style.value.params.showOptions = !style.value.params.showOptions; applyStyleConfig(style.value, false)">
+                                    expand_more
+                                </span>
                                 <span class="material-icons"
-                                      style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                      style="font-size: 1.5em; cursor: pointer"
                                       (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
                                 <span>
                                     <p-checkbox [(ngModel)]="style.value.params.visible"
@@ -119,9 +124,9 @@ import {Menu} from "primeng/menu";
                                 </p-button>
                             </div>
                         </div>
-                        <div *ngIf="style.value.options">
+                        <div *ngIf="style.value.options.length && style.value.params.showOptions">
                             <div *ngFor="let option of style.value.options"
-                                 style="margin-left: 1.5em; align-items: center;">
+                                 style="margin-left: 4.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
                                 <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
                                             (ngModelChange)="applyStyleConfig(style.value)"
                                             [label]="option.label" [binary]="true"/>
@@ -376,8 +381,10 @@ export class MapPanelComponent {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
-    applyStyleConfig(style: ErdblickStyle) {
-        this.styleService.reapplyStyle(style.id);
+    applyStyleConfig(style: ErdblickStyle, redraw: boolean=true) {
+        if (redraw) {
+            this.styleService.reapplyStyle(style.id);
+        }
         this.parameterService.setStyleConfig(style.id, style.params);
     }
 

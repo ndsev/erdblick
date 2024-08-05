@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
+import {ErdblickStyle} from "./style.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -9,6 +10,7 @@ export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export interface StyleParameters {
     visible: boolean,
     options: Record<string, string>,
+    showOptions: boolean,
 }
 
 interface ErdblickParameters extends Record<string, any> {

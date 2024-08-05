@@ -33,7 +33,7 @@ export interface ErdblickStyle {
     params: StyleParameters,
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
-    options?: Array<FeatureStyleOptionWithStringType>
+    options: Array<FeatureStyleOptionWithStringType>
 }
 
 /**
@@ -100,7 +100,8 @@ export class StyleService {
                     imported: false,
                     params: this.parameterService.styleConfig(styleId),
                     source: styleString,
-                    featureLayerStyle: null
+                    featureLayerStyle: null,
+                    options: []
                 });
                 this.builtinStylesCount++;
                 styleUrls.forEach(styleUrl => {
@@ -231,10 +232,12 @@ export class StyleService {
             imported: true,
             params: {
                 visible: true,
-                options: {}
+                options: {},
+                showOptions: true
             },
             source: styleData,
-            featureLayerStyle: null
+            featureLayerStyle: null,
+            options: []
         });
 
         ++this.importedStylesCount;
