@@ -20,7 +20,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "v2024.3.1"
+  GIT_TAG        "tile-id-neighbor"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
