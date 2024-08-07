@@ -9,6 +9,7 @@ import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
 import {Fetch} from "./fetch.model";
 import {uint8ArrayToWasm} from "./wasm";
+import {SourceDataPanelComponent} from "./sourcedata.panel.component"
 
 interface Column {
     field: string;
@@ -20,6 +21,24 @@ interface Column {
     template: `
         <p-accordion *ngIf="inspectionService.featureTree.value.length && inspectionService.isInspectionPanelVisible"
                      class="w-full inspect-panel" [activeIndex]="0">
+            <p-accordionTab>
+                <ng-template pTemplate="header">
+                    <div class="flex align-items-center">
+                        <i class="pi pi-sitemap mr-2"></i>&nbsp;
+                        <span class="vertical-align-middle">Source Data</span>
+                    </div>
+                </ng-template>
+                <ng-template pTemplate="content">
+                    <div class="resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }">
+                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
+                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
+                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
+                        </div>
+                        <sourcedata-panel />
+                    </div>
+                </ng-template>
+            </p-accordionTab>
+
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">
@@ -303,53 +322,32 @@ export class InspectionPanelComponent implements OnInit  {
                 }
             });
         }
-        if (rowData.hasOwnProperty("sourceDataReference")) {
-            const ref = rowData["sourceDataReference"];
-            this.inspectionMenuItems.push({
-                label: 'Show Source Data...',
-                command: () => {
-                    this.fetchSourceData(ref.layerId, Number(ref.tileId))
-                }
-            });
+        if (rowData.hasOwnProperty("sourceDataReferences")) {
+            const ref = rowData.sourceDataReferences;
+            ref.forEach((item: any) => {
+                const qualifier = item.qualifier || "";
+                const layerId = item.layerId;
+                const tileId = item.tileId;
+
+                this.inspectionMenuItems!.push({
+                    label: `Show ${qualifier} Source-Data`,
+                    command: () => {
+                        this.showSourceData(layerId, Number(tileId))
+                    }
+                });
+            })
         }
     }
 
-    async fetchSourceData(layerId : string, tileId : number)
+    async showSourceData(layerId: string, tileId: number)
     {
-        let requests = [];
-        requests.push({
-            mapId: this.inspectionService.selectedMapIdName,
+        const mapId = this.inspectionService.selectedMapIdName;
+
+        this.inspectionService.showSourceDataEvent.emit({
+            tileId: tileId,
             layerId: layerId,
-            tileIds: [tileId]
-        });
-
-        let tileParser = new coreLib.TileLayerParser();
-
-        let newRequestBody = JSON.stringify({
-            requests: requests
-        });
-
-        let fetch = new Fetch("/tiles")
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody(newRequestBody)
-            .withBufferCallback((message: any, messageType: any) => {
-                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                    uint8ArrayToWasm((wasmBuffer: any) => {
-                        tileParser!.readFieldDictUpdate(wasmBuffer);
-                    }, message);
-                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
-                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                    let json = uint8ArrayToWasm((wasmBlob: any) => {
-                        let json = tileParser.readTileSourceDataLayer(wasmBlob);
-                        console.error(`SourceData: ${json}`)
-                        return json
-                    }, blob);
-                } else {
-                    console.error(`Encountered unknown message type ${messageType}!`);
-                }
-            });
-        fetch.go();
+            mapId: mapId,
+        })
     }
 
     onValueClick(event: any, rowData: any) {
