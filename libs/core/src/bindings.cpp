@@ -105,10 +105,15 @@ double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
 
 /** Get the center position for a mapget tile id in WGS84. */
 mapget::Point getTilePosition(uint64_t tileIdValue) {
-    mapget::TileId tid(tileIdValue);
-    return tid.center();
+    return mapget::TileId(tileIdValue).center();
 }
 
+/** Get the level for a mapget tile id. */
+uint16_t getTileLevel(uint64_t tileIdValue) {
+    return mapget::TileId(tileIdValue).z();
+}
+
+/** Get the tile ID for the given level and position. */
 uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
     return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
 }
@@ -124,10 +129,13 @@ em::val getTileBox(uint64_t tileIdValue) {
     });
 }
 
-/** Get the neighbor for a mapget tile id. */
+/**
+ * Get the neighbor for a mapget tile id. Tile row will be clamped to [0, maxForLevel],
+ * so a positive/negative wraparound is not possible. The tile id column will wrap at the
+ * antimeridian.
+ */
 uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
-    mapget::TileId tid(tileIdValue);
-    return mapget::TileId(tid.x() + offsetX, tid.y() + offsetY, tid.z()).value_;
+    return mapget::TileId(tileIdValue).neighbor(offsetX, offsetY).value_;
 }
 
 /** Get the full string key of a map tile feature layer. */
@@ -403,9 +411,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
-
-    ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);
+    em::function("getTileLevel", &getTileLevel);
 
     ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);

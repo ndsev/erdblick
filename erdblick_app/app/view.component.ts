@@ -53,6 +53,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
