@@ -97,7 +97,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     @ViewChild('editor') private editorRef!: ElementRef;
 
     private editorView?: EditorView;
-    private styleData: string = "";
+    private styleSource: string = "";
 
     constructor(public styleService: StyleService,
                 public renderer: Renderer2) {}
@@ -118,13 +118,13 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     }
 
     createEditorState(styleId: string) {
-        if (this.styleService.styleData.has(styleId)) {
-            this.styleData = `${this.styleService.styleData.get(styleId)!.data}\n\n\n\n\n`;
+        if (this.styleService.styles.has(styleId)) {
+            this.styleSource = `${this.styleService.styles.get(styleId)!.source}\n\n\n\n\n`;
         } else {
-            this.styleData = "";
+            this.styleSource = "";
         }
         return EditorState.create({
-            doc: this.styleData,
+            doc: this.styleSource,
             extensions: [
                 basicSetup,
                 yaml(),

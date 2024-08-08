@@ -75,9 +75,10 @@ export class ErdblickDebugApi {
             id: "_builtin",
             modified: false,
             imported: false,
-            enabled: true,
-            data: "",
-            featureLayerStyle: style
+            params: {visible: true, options: {}, showOptions: true},
+            source: "",
+            featureLayerStyle: style,
+            options: []
         }, "_builtin", true);
     }
 }

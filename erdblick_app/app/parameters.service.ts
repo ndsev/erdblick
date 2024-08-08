@@ -2,9 +2,16 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
+import {ErdblickStyle} from "./style.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
+
+export interface StyleParameters {
+    visible: boolean,
+    options: Record<string, string>,
+    showOptions: boolean,
+}
 
 interface ErdblickParameters extends Record<string, any> {
     marker: boolean,
@@ -19,7 +26,7 @@ interface ErdblickParameters extends Record<string, any> {
     osm: boolean,
     osmOpacity: number,
     layers: Array<[string, number, boolean, boolean]>,
-    styles: Array<string>,
+    styles: Record<string, StyleParameters>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number,
     enabledCoordsTileIds: Array<string>
@@ -111,8 +118,8 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     styles: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: [],
+        validator: val => typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(([_, v]) => typeof v["visible"] === "boolean" && typeof v["showOptions"] === "boolean" && typeof v["options"] === "object"),
+        default: new Map<string, StyleParameters>(),
         urlParam: true
     },
     tilesLoadLimit: {
@@ -182,9 +189,9 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setInitialStyles(styles: Array<string>) {
+    setInitialStyles(styles: Record<string, StyleParameters>) {
         // Only set styles, if there are no configured values yet.
-        if (this.p().styles.length) {
+        if (!Object.entries(this.p().styles).length) {
             return;
         }
         this.p().styles = styles;
@@ -246,16 +253,18 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    styleConfig(styleId: string): boolean {
-        return !this.p().styles.length || this.p().styles.includes(styleId);
+    styleConfig(styleId: string): StyleParameters {
+        if (this.p().styles.hasOwnProperty(styleId))
+            return this.p().styles[styleId]
+        return {
+            visible: !Object.entries(this.p().styles).length,
+            options: {},
+            showOptions: true,
+        }
     }
 
-    setStyleConfig(styleId: string, visible: boolean) {
-        let newStyles = this.p().styles.filter(val => val !== styleId);
-        if (visible) {
-            newStyles.push(styleId);
-        }
-        this.p().styles = newStyles;
+    setStyleConfig(styleId: string, params: StyleParameters) {
+        this.p().styles[styleId] = params;
         this.parameters.next(this.p());
     }
 

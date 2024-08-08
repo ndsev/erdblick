@@ -383,6 +383,11 @@ body {
         margin-top: 0.25em;
         padding-right: 0.75em;
         margin-right: -0.75em;
+
+        .rotated-icon {
+            transform: rotate(-90deg);
+            transition: transform 0.3s ease-in-out;
+        }
     }
 
     .flex-container {

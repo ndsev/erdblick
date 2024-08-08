@@ -77,11 +77,10 @@ class FeatureLayerVisualization
 public:
     /**
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
-     * @param style The style to apply to the features in the layer.
-     * @param layer A shared pointer to the TileFeatureLayer that needs to be visualized.
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
+        NativeJsValue const& optionValues,
         std::string highlightFeatureIndex = "");
 
     /**
@@ -213,6 +212,11 @@ private:
      */
     simfil::Value evaluateExpression(std::string const& expression, simfil::ModelNode const& ctx) const;
 
+    /**
+     * Insert style option variables into the given OverlayNode.
+     */
+    void addOptionsToSimfilContext(simfil::OverlayNode& context);
+
     /// =========== Generic Members ===========
 
     bool featuresAdded_ = false;
@@ -233,6 +237,7 @@ private:
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
     std::string highlightFeatureId_;
     std::shared_ptr<simfil::Fields> internalFieldsDictCopy_;
+    std::map<std::string, simfil::Value> optionValues_;
 
     /// ===== Relation Processing Members =====
 

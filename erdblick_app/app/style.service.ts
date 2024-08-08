@@ -9,22 +9,31 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
-import {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, FeatureStyleOption, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
-import {ParametersService} from "./parameters.service";
+import {ParametersService, StyleParameters} from "./parameters.service";
 
 interface StyleConfigEntry {
     id: string,
     url: string
 }
 
+export type FeatureStyleOptionWithStringType = {
+    label: string,
+    id: string,
+    type: FeatureStyleOptionType,
+    defaultValue: string,
+    description: string
+};
+
 export interface ErdblickStyle {
     id: string,
     modified: boolean,
     imported: boolean,
-    enabled: boolean,
-    data: string,
-    featureLayerStyle: FeatureLayerStyle | null
+    params: StyleParameters,
+    source: string,
+    featureLayerStyle: FeatureLayerStyle | null,
+    options: Array<FeatureStyleOptionWithStringType>
 }
 
 /**
@@ -34,7 +43,7 @@ export interface ErdblickStyle {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    styleData: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
+    styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
@@ -57,8 +66,8 @@ export class StyleService {
             if (this.parameterService.initialQueryParamsSet) {
                 return;
             }
-            for (let [styleId, style] of this.styleData) {
-                style.enabled = this.parameterService.styleConfig(styleId);
+            for (let [styleId, style] of this.styles) {
+                style.params = this.parameterService.styleConfig(styleId);
             }
             this.reapplyAllStyles();
         })
@@ -85,13 +94,14 @@ export class StyleService {
                     console.error(`Wrong URL or no data available for style: ${styleId}`);
                     return;
                 }
-                this.styleData.set(styleId, {
+                this.styles.set(styleId, {
                     id: styleId,
                     modified: false,
                     imported: false,
-                    enabled: this.parameterService.styleConfig(styleId),
-                    data: styleString,
-                    featureLayerStyle: null
+                    params: this.parameterService.styleConfig(styleId),
+                    source: styleString,
+                    featureLayerStyle: null,
+                    options: []
                 });
                 this.builtinStylesCount++;
                 styleUrls.forEach(styleUrl => {
@@ -103,7 +113,7 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.parameterService.setInitialStyles([...this.styleData.keys()]);
+        this.parameterService.setInitialStyles(Object.fromEntries([...this.styles.entries()].map(([k, v]) => [k, v.params])));
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
@@ -139,16 +149,17 @@ export class StyleService {
                     const result= await this.fetchStylesYamlSources([erdblickStyle]);
                     if (result !== undefined && result.get(styleId) !== undefined) {
                         const styleString = result.get(styleId)!;
-                        if (this.styleData.has(styleId)) {
-                            this.styleData.get(styleId)!.featureLayerStyle?.delete();
+                        if (this.styles.has(styleId)) {
+                            this.styles.get(styleId)!.featureLayerStyle?.delete();
                         }
-                        this.styleData.set(styleId, {
+                        this.styles.set(styleId, {
                             id: styleId,
                             modified: false,
                             imported: false,
-                            enabled: this.parameterService.styleConfig(styleId),
-                            data: styleString,
-                            featureLayerStyle: null
+                            params: this.parameterService.styleConfig(styleId),
+                            source: styleString,
+                            featureLayerStyle: null,
+                            options: []
                         });
                         this.saveModifiedBuiltinStyles();
                         this.reapplyStyle(styleId);
@@ -161,13 +172,13 @@ export class StyleService {
     }
 
     exportStyleYamlFile(styleId: string) {
-        const content = this.styleData.get(styleId)!;
+        const content = this.styles.get(styleId)!;
         if (content === undefined) {
             return false;
         }
         try {
             // Create a blob from the content
-            const blob = new Blob([content.data], { type: 'text/plain;charset=utf-8' });
+            const blob = new Blob([content.source], { type: 'text/plain;charset=utf-8' });
             // Create a URL for the blob
             const url = window.URL.createObjectURL(blob);
             // Create a temporary anchor tag to trigger the download
@@ -216,13 +227,18 @@ export class StyleService {
         }
 
         this.deleteStyle(styleId);
-        this.styleData.set(styleId, {
+        this.styles.set(styleId, {
             id: styleId,
             modified: false,
             imported: true,
-            enabled: true,
-            data: styleData,
-            featureLayerStyle: null
+            params: {
+                visible: true,
+                options: {},
+                showOptions: true
+            },
+            source: styleData,
+            featureLayerStyle: null,
+            options: []
         });
 
         ++this.importedStylesCount;
@@ -233,12 +249,12 @@ export class StyleService {
 
     deleteStyle(styleId: string) {
         // TODO: check if the style was modified and offer to export it
-        let style = this.styleData.get(styleId);
+        let style = this.styles.get(styleId);
         if (!style)
             return;
         style.featureLayerStyle?.delete();
         this.styleRemovedForId.next(styleId);
-        this.styleData.delete(styleId);
+        this.styles.delete(styleId);
         if (style.imported) {
             this.importedStylesCount--;
             this.saveImportedStyles();
@@ -247,11 +263,11 @@ export class StyleService {
             this.saveModifiedBuiltinStyles();
     }
 
-    setStyleData(styleId: string, styleData: string) {
-        if (!this.styleData.has(styleId))
+    setStyleSource(styleId: string, styleSource: string) {
+        if (!this.styles.has(styleId))
             return;
-        const style = this.styleData.get(styleId)!;
-        style.data = styleData;
+        const style = this.styles.get(styleId)!;
+        style.source = styleSource;
         style.modified = true;
         if (style.imported) {
             this.saveImportedStyles();
@@ -263,13 +279,13 @@ export class StyleService {
 
     saveModifiedBuiltinStyles() {
         localStorage.setItem('builtinStyleData', JSON.stringify(
-            [...this.styleData].filter(([_, value]) => !value.imported && value.modified)
+            [...this.styles].filter(([_, value]) => !value.imported && value.modified)
         ));
     }
 
     saveImportedStyles() {
         localStorage.setItem('importedStyleData', JSON.stringify(
-            [...this.styleData].filter(([_, value]) => value.imported)
+            [...this.styles].filter(([_, value]) => value.imported)
         ));
     }
 
@@ -278,7 +294,7 @@ export class StyleService {
         if (importedStyleData) {
             for (let [styleId, style] of JSON.parse(importedStyleData)) {
                 style.featureLayerStyle = null;
-                this.styleData.set(styleId, style);
+                this.styles.set(styleId, style);
                 this.importedStylesCount++;
             }
         }
@@ -288,9 +304,9 @@ export class StyleService {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
-                if (this.styleData.has(styleId)) {
+                if (this.styles.has(styleId)) {
                     style.featureLayerStyle = null;
-                    this.styleData.set(styleId, style);
+                    this.styles.set(styleId, style);
                 }
             }
         }
@@ -305,44 +321,49 @@ export class StyleService {
     }
 
     initializeWasmStyle(styleId: string) {
-        const style = this.styleData.get(styleId);
+        const style = this.styles.get(styleId);
         if (!style)
             return;
-        const styleUint8Array = this.textEncoder.encode(style.data);
+        const styleUint8Array = this.textEncoder.encode(style.source);
         const result = uint8ArrayToWasm(
             (wasmBuffer: any) => {
                 const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                 if (featureLayerStyle) {
                     style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                    this.styleData.set(styleId, style);
+                    style.options = [];
+                    // Transport FeatureStyleOptions from WASM array to JS.
+                    let options = style.featureLayerStyle.options();
+                    for (let i = 0; i < options.size(); ++i)
+                        style.options.push(options.get(i)! as FeatureStyleOptionWithStringType);
+                    options.delete();
                     return true;
                 }
                 return false;
             },
             styleUint8Array);
         if (result === undefined || !result) {
-            console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.data}`)
+            console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.source}`)
             this.erroredStyleIds.set(styleId, "YAML Parse Error");
         }
     }
 
     reloadStyle(styleId: string) {
-        if (this.styleData.has(styleId)) {
+        if (this.styles.has(styleId)) {
             this.syncStyleYamlData(styleId);
         }
     }
 
-    private reapplyStyle(styleId: string) {
-        if (!this.styleData.has(styleId)) {
+    reapplyStyle(styleId: string) {
+        if (!this.styles.has(styleId)) {
             return;
         }
-        let styleData = this.styleData.get(styleId)!;
+        let style = this.styles.get(styleId)!;
         this.initializeWasmStyle(styleId);
         this.styleRemovedForId.next(styleId);
-        if (styleData.enabled) {
+        if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
-        console.log(`${styleData.enabled ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
+        console.log(`${style.params.visible ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
     reapplyStyles(styleIds: Array<string>) {
@@ -350,15 +371,18 @@ export class StyleService {
     }
 
     reapplyAllStyles() {
-        this.reapplyStyles([...this.styleData.keys()]);
+        this.reapplyStyles([...this.styles.keys()]);
     }
 
-    toggleStyle(styleId: string, enabled: boolean|undefined = undefined) {
-        if (!this.styleData.has(styleId)) {
+    toggleStyle(styleId: string, enabled: boolean|undefined = undefined, delayRepaint: boolean = false) {
+        if (!this.styles.has(styleId)) {
             return;
         }
-        let style = this.styleData.get(styleId)!;
-        this.reapplyStyle(styleId);
-        this.parameterService.setStyleConfig(styleId, style.enabled);
+        let style = this.styles.get(styleId)!;
+        style.params.visible = enabled !== undefined ? enabled : !style.params.visible;
+        if (delayRepaint) {
+            this.reapplyStyle(styleId);
+        }
+        this.parameterService.setStyleConfig(styleId, style.params);
     }
 }

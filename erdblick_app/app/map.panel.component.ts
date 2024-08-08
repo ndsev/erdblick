@@ -37,15 +37,12 @@ import {Menu} from "primeng/menu";
                 <div *ngIf="mapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
                         <span class="font-bold white-space-nowrap map-header">
-<!--                            <p-checkbox [(ngModel)]="mapItem.value.visible"-->
-                            <!--                                        (ngModelChange)="toggleLayer(mapItem.key, '')"-->
-                            <!--                                        [label]="mapItem.key" [binary]="true"/>-->
                             {{ mapItem.key }}
                         </span>
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span class="material-icons" style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
+                                <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
                                       (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
                                 <span>
                                     <p-checkbox [(ngModel)]="mapLayer.value.visible" 
@@ -86,61 +83,53 @@ import {Menu} from "primeng/menu";
                     No styles loaded.
                 </div>
                 <div class="styles-container">
-                    <div *ngIf="styleService.builtinStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
-                            <div *ngIf="!style.value.imported" class="flex-container">
-                                <div class="font-bold white-space-nowrap"
-                                     style="margin-left: 0.5em; display: flex; align-items: center;">
-                                    <span class="material-icons"
-                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
-                                    <span>
-                                        <p-checkbox [(ngModel)]="style.value.enabled"
-                                                    (ngModelChange)="toggleStyle(style.key)"
-                                                    [label]="style.key" [binary]="true"/>
-                                    </span>
-                                </div>
-                                <div class="layer-controls style-controls">
-                                    <p-button (click)="resetStyle(style.key)"
-                                              icon="pi pi-refresh"
-                                              label="" pTooltip="Reload style from disk"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                </div>
+                    <div *ngFor="let style of styleService.styles | keyvalue: unordered">
+                        <div class="flex-container">
+                            <div class="font-bold white-space-nowrap"
+                                 style="margin-left: 0.5em; display: flex; align-items: center;">
+                                <span *ngIf="style.value.options.length" class="material-icons" [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
+                                      style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
+                                      (click)="style.value.params.showOptions = !style.value.params.showOptions; applyStyleConfig(style.value, false)">
+                                    expand_more
+                                </span>
+                                <span class="material-icons"
+                                      style="font-size: 1.5em; cursor: pointer"
+                                      (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
+                                <span>
+                                    <p-checkbox [(ngModel)]="style.value.params.visible"
+                                                (ngModelChange)="applyStyleConfig(style.value)"
+                                                [label]="style.key" [binary]="true"/>
+                                </span>
+                            </div>
+                            <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                                      icon="pi pi-trash"
+                                      label="" pTooltip="Remove style"
+                                      tooltipPosition="bottom">
+                            </p-button>
+                            <div class="layer-controls style-controls">
+                                <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                                          icon="pi pi-trash"
+                                          label="" pTooltip="Remove style"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button *ngIf="!style.value.imported" (click)="resetStyle(style.key)"
+                                          icon="pi pi-refresh"
+                                          label="" pTooltip="Reload style from disk"
+                                          tooltipPosition="bottom">
+                                </p-button>
+                                <p-button (click)="showStyleEditor(style.key)"
+                                          icon="pi pi-file-edit"
+                                          label="" pTooltip="Edit style"
+                                          tooltipPosition="bottom">
+                                </p-button>
                             </div>
                         </div>
-                    </div>
-                    <div *ngIf="styleService.importedStylesCount">
-                        <div *ngFor="let style of styleService.styleData | keyvalue: unordered">
-                            <div *ngIf="style.value.imported" class="flex-container">
-                                <div class="font-bold white-space-nowrap"
-                                     style="margin-left: 0.5em; display: flex; align-items: center;">
-                                    <span class="material-icons"
-                                          style="font-size: 1.5em; margin-left: -0.25em; cursor: pointer"
-                                          (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
-                                    <span>
-                                        <p-checkbox [(ngModel)]="style.value.enabled"
-                                                    (ngModelChange)="toggleStyle(style.key)"
-                                                    [label]="style.key" [binary]="true"/>
-                                    </span>
-                                </div>
-                                <div class="layer-controls style-controls">
-                                    <p-button (click)="removeStyle(style.key)"
-                                              icon="pi pi-trash"
-                                              label="" pTooltip="Remove style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                    <p-button (click)="showStyleEditor(style.key)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom">
-                                    </p-button>
-                                </div>
+                        <div *ngIf="style.value.options.length && style.value.params.showOptions">
+                            <div *ngFor="let option of style.value.options"
+                                 style="margin-left: 4.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
+                                <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
+                                            (ngModelChange)="applyStyleConfig(style.value)"
+                                            [label]="option.label" [binary]="true"/>
                             </div>
                         </div>
                     </div>
@@ -178,8 +167,8 @@ import {Menu} from "primeng/menu";
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                              [disabled]="!dataWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)" [label]='this.dataWasModified ? "Discard" : "Cancel"'
+                              [disabled]="!sourceWasModified"></p-button>
+                    <p-button (click)="closeEditorDialog($event)" [label]='this.sourceWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
@@ -187,7 +176,7 @@ import {Menu} from "primeng/menu";
                     </div>
                 </div>
                 <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())" 
-                          [disabled]="dataWasModified" label="Export" icon="pi pi-file-export" 
+                          [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export" 
                           [style]="{margin: '0 0.5em'}">
                 </p-button>
                 <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
@@ -209,9 +198,9 @@ export class MapPanelComponent {
     layerDialogVisible: boolean = false;
     warningDialogVisible: boolean = false;
     mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
-    editedStyleDataSubscription: Subscription = new Subscription();
-    savedStyleDataSubscription: Subscription = new Subscription();
-    dataWasModified: boolean = false;
+    editedStyleSourceSubscription: Subscription = new Subscription();
+    savedStyleSourceSubscription: Subscription = new Subscription();
+    sourceWasModified: boolean = false;
 
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
@@ -252,9 +241,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All off but This',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = styleId == id;
-                        this.parameterService.setStyleConfig(id, styleId == id);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -263,9 +251,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All on but This',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = styleId != id;
-                        this.parameterService.setStyleConfig(id, styleId != id);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -274,9 +261,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All Off',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = false;
-                        this.parameterService.setStyleConfig(id, false);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -285,9 +271,8 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All On',
                 command: () => {
-                    for (const id of this.styleService.styleData.keys()) {
-                        this.styleService.styleData.get(id)!.enabled = true;
-                        this.parameterService.setStyleConfig(id, true);
+                    for (const id of this.styleService.styles.keys()) {
+                        this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
                     this.mapService.update();
@@ -396,8 +381,11 @@ export class MapPanelComponent {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
-    toggleStyle(styleId: string) {
-        this.styleService.toggleStyle(styleId);
+    applyStyleConfig(style: ErdblickStyle, redraw: boolean=true) {
+        if (redraw) {
+            this.styleService.reapplyStyle(style.id);
+        }
+        this.parameterService.setStyleConfig(style.id, style.params);
     }
 
     resetStyle(styleId: string) {
@@ -441,11 +429,11 @@ export class MapPanelComponent {
     showStyleEditor(styleId: string) {
         this.styleService.selectedStyleIdForEditing.next(styleId);
         this.editorDialogVisible = true;
-        this.editedStyleDataSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleData => {
-            const originalStyleData = this.styleService.styleData.get(styleId)?.data!;
-            this.dataWasModified = !(editedStyleData.replace(/\n+$/, '') == originalStyleData.replace(/\n+$/, ''));
+        this.editedStyleSourceSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleSource => {
+            const originalStyleSource = this.styleService.styles.get(styleId)?.source!;
+            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == originalStyleSource.replace(/\n+$/, ''));
         });
-        this.savedStyleDataSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
+        this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
             this.applyEditedStyle();
         });
     }
@@ -461,17 +449,17 @@ export class MapPanelComponent {
             this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
             return;
         }
-        if (!this.styleService.styleData.has(styleId)) {
+        if (!this.styleService.styles.has(styleId)) {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
-        this.styleService.setStyleData(styleId, styleData);
-        this.dataWasModified = false;
+        this.styleService.setStyleSource(styleId, styleData);
+        this.sourceWasModified = false;
     }
 
     closeEditorDialog(event: any) {
         if (this.editorDialog !== undefined) {
-            if (this.dataWasModified) {
+            if (this.sourceWasModified) {
                 event.stopPropagation();
                 this.warningDialogVisible = true;
             } else {
@@ -479,8 +467,8 @@ export class MapPanelComponent {
                 this.editorDialog.close(event);
             }
         }
-        this.editedStyleDataSubscription.unsubscribe();
-        this.savedStyleDataSubscription.unsubscribe();
+        this.editedStyleSourceSubscription.unsubscribe();
+        this.savedStyleSourceSubscription.unsubscribe();
     }
 
     discardStyleEdits() {
