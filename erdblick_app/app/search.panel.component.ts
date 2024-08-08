@@ -43,7 +43,16 @@ export class EnterSelectDirective {
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
                           [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
-                    <p-tabView>
+                    <p-tabView *ngIf="!searchInputValue">
+                        <p-tabPanel header="History">
+                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
+                                <p-divider></p-divider>
+                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">
+                                    <span class="search-option-name">{{ item.input }}</span><br><span
+                                        [innerHTML]="item.label"></span>
+                                </p>
+                            </div>
+                        </p-tabPanel>
                         <p-tabPanel header="Options">
                             <div class="search-menu" *ngFor="let item of searchItems; let i = index">
                                 <p-divider></p-divider>
@@ -54,16 +63,34 @@ export class EnterSelectDirective {
                                 </p>
                             </div>
                         </p-tabPanel>
-                        <p-tabPanel header="History">
-                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
-                                <p-divider></p-divider>
-                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">
-                                    <span class="search-option-name">{{ item.input }}</span><br><span
-                                        [innerHTML]="item.label"></span>
-                                </p>
-                            </div>
-                        </p-tabPanel>
                     </p-tabView>
+                    <div *ngIf="searchInputValue">
+                        <div class="search-menu" *ngFor="let item of searchItems; let i = index">
+                            <div appEnterSelect (click)="targetToHistory(i)" class="search-option-wrapper"
+                               [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
+                                <span class="icon-circle blue">
+                                    <i class="pi pi-bolt"></i>
+                                </span>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.name }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
+                            <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
+                                <div class="icon-circle grey">
+                                    <i class="pi pi-history"></i>
+                                </div>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.input }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </p-dialog>
             </div>
         </div>
