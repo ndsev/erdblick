@@ -6,7 +6,6 @@ import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {FeatureSearchService} from "./feature.search.service";
 import {Dialog} from "primeng/dialog";
 
 
@@ -29,6 +28,7 @@ export class EnterSelectDirective {
     template: `
         <div class="search-wrapper">
             <div class="search-input">
+                <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" rows="1" pInputTextarea
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay($event)"
@@ -390,7 +390,17 @@ export class SearchPanelComponent implements AfterViewInit {
             ...this.jumpToTargetService.jumpTargets.getValue().filter(target => target.validate(value)),
             ...this.staticTargets.filter(target => target.validate(value))
         ]
-        this.visibleSearchHistory = this.searchHistory.filter(entry => entry.input.includes(value));
+        this.visibleSearchHistory = Object.values(
+            this.searchHistory.reduce((acc, obj) => {
+                if (obj.input.includes(value)) {
+                    const key = `${obj.label}-${obj.index}-${obj.input}`;
+                    if (!acc[key]) {
+                        acc[key] = obj;
+                    }
+                }
+                return acc;
+            }, {} as Record<string, typeof this.searchHistory[number]>)
+        );
     }
 
     setSelectedMap(value: string|null) {
