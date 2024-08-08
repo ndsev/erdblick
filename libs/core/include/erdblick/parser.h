@@ -122,7 +122,7 @@ public:
 
     std::map<std::string, mapget::DataSourceInfo> info_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
-    std::shared_ptr<mapget::TileLayerStream::CachedFieldsProvider> cachedFieldDicts_;
+    std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
 
