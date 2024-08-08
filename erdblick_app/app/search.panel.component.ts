@@ -111,6 +111,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
     @ViewChild('textarea') textarea!: ElementRef;
     @ViewChild('actionsdialog') dialog!: Dialog;
+    @ViewChild('searchcontrols') container!: HTMLDivElement;
     cursorPosition: number = 0;
     private clickListener: () => void;
 
