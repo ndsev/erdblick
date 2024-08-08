@@ -10,7 +10,8 @@ import {InfoMessageService} from "./info.service";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="search-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
+        <p-dialog class="side-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible"
+                  style="padding: 0 0.5em 0.5em 0.5em"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -20,7 +21,8 @@ import {InfoMessageService} from "./info.service";
                         </ng-template>
                     </p-progressBar>
                 </div>
-                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'" label="" 
+                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
+                          label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
                           [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
                 <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
@@ -47,7 +49,7 @@ import {InfoMessageService} from "./info.service";
             </p-accordion>
             <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                        optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
-                       [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)" 
+                       [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
                        emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 23em)'"
                        #listbox
             />

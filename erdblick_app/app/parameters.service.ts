@@ -14,6 +14,7 @@ export interface StyleParameters {
 }
 
 interface ErdblickParameters extends Record<string, any> {
+    search: [number, string] | [],
     marker: boolean,
     markedPosition: Array<number>,
     selected: Array<string>,
@@ -44,6 +45,12 @@ interface ParameterDescriptor {
 }
 
 const erdblickParameters: Record<string, ParameterDescriptor> = {
+    search: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
+        default: [],
+        urlParam: true
+    },
     marker: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
@@ -158,6 +165,8 @@ export class ParametersService {
                 roll: 0.25,
             }
         });
+
+    lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
 
     constructor(public router: Router) {
         let parameters = this.loadSavedParameters();
@@ -366,5 +375,31 @@ export class ParametersService {
             return erdblickParameters[name].urlParam;
         }
         return false;
+    }
+
+    setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
+        if (value && saveHistory) {
+            this.saveHistoryStateValue(value);
+        }
+        this.p().search = value ? value : [];
+        this._replaceUrl = false;
+        this.parameters.next(this.p())
+        this.lastSearchHistoryEntry.next(value);
+    }
+
+    private saveHistoryStateValue(value: [number, string]) {
+        const searchHistoryString = localStorage.getItem("searchHistory");
+        if (searchHistoryString) {
+            const searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+            searchHistory.unshift(value);
+            let ldiff = searchHistory.length - 50;
+            while (ldiff > 0) {
+                searchHistory.pop();
+                ldiff -= 1;
+            }
+            localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+        } else {
+            localStorage.setItem("searchHistory", JSON.stringify(value));
+        }
     }
 }

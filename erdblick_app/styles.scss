@@ -183,24 +183,7 @@ body {
     }
 }
 
-.search-input {
-    width: 21.5em;
-    height: 3em;
-    position: absolute;
-    top: 0.5em;
-    left: 4em;
-
-    input {
-        width: 100%;
-        height: 100%;
-        padding-left: 2em;
-        border-radius: 6px;
-        border: solid 1px lightgray;
-        font-size: medium;
-    }
-}
-
-.search-menu-dialog {
+.side-menu-dialog {
     .search-menu {
         &:first-child {
             .p-divider {
@@ -231,7 +214,120 @@ body {
     }
 }
 
-.map-layer-dialog, .search-menu-dialog {
+.search-wrapper {
+    position: absolute;
+    top: 0.5em;
+    left: 4em;
+    min-width: 22em;
+    min-height: 3.5em;
+    max-width: calc(100vw - 5em);
+    max-height: calc(100vh - 5em);
+
+    .resizable-container {
+        min-width: 22em;
+        min-height: 0em;
+        resize: horizontal;
+        overflow: auto;
+        max-width: calc(100vw - 5em);
+        max-height: calc(100vh - 7.8em);
+    }
+
+    .resizable-container.multiline {
+        max-height: calc(100vh - 10.8em) !important;
+    }
+
+    .p-tabview-nav li {
+        width: 50%;
+    }
+
+    .p-tabview-nav-link {
+        padding: 0.5em 1em;
+        font-size: 0.9em;
+        width: 100%;
+    }
+
+    .p-tabview-title {
+        margin: 0 auto;
+    }
+
+    .search-input {
+        width: 100%;
+        z-index: 10500;
+
+        textarea {
+            width: 100%;
+            transition: all 0.3s;
+            overflow: scroll;
+            resize: none;
+        }
+
+        textarea.single-line {
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+        }
+
+        //input {
+        //    width: 100%;
+        //    height: 100%;
+        //    padding-left: 2em;
+        //    border-radius: 6px;
+        //    border: solid 1px lightgray;
+        //    font-size: medium;
+        //}
+    }
+
+    .p-dialog-mask {
+        position: relative;
+    }
+
+    .p-dialog {
+        width: 100%;
+        margin: 0;
+        overflow: auto;
+        max-height: calc(100vh - 7.75em)
+    }
+
+    .p-dialog-content {
+        padding: 0.5em;
+    }
+
+    .p-dialog-header {
+        display: none;
+    }
+
+    .search-menu {
+        &:first-child {
+            .p-divider {
+                display: none;
+            }
+        }
+
+        .p-divider {
+            margin: 0.9em 0;
+        }
+
+        .search-option {
+            text-align: left;
+            font-size: 0.9em;
+            margin: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+
+            .search-option-name {
+                font-weight: bold;
+            }
+
+            .search-option-warning {
+                color: burlywood;
+            }
+        }
+    }
+}
+
+
+.map-layer-dialog, .side-menu-dialog {
     .p-dialog {
         width: 25em;
         min-width: 25em;
@@ -758,7 +854,7 @@ body {
         }
     }
 
-    .map-layer-dialog, .search-menu-dialog {
+    .map-layer-dialog, .side-menu-dialog {
         .p-dialog {
             width: 100vw !important;
             height: calc(100vh - 3em) !important;
