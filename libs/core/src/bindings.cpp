@@ -253,6 +253,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
                     return geometryCenter(self->firstGeometry());
+                }))
+        .function(
+            "boundingRadiusVector",
+            std::function<mapget::Point(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return boundingRadiusVector(self->firstGeometry());
                 }));
 
     ////////// TileFeatureLayer

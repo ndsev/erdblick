@@ -15,7 +15,11 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
-    HeightReference
+    HeightReference,
+    Billboard,
+    BoundingSphere,
+    HeadingPitchRange,
+    defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
@@ -27,6 +31,7 @@ import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 import {distinctUntilChanged} from "rxjs";
 import {SearchResultPosition} from "./featurefilter.worker";
+import {InspectionService} from "./inspection.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -67,6 +72,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public featureSearchService: FeatureSearchService,
                 public parameterService: ParametersService,
                 public jumpService: JumpTargetService,
+                public inspectionService: InspectionService,
                 public coordinatesService: CoordinatesService) {
 
         this.tileVisForPrimitive = new Map();
@@ -93,13 +99,13 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number}) => {
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number, z?: number}) => {
             this.parameterService.cameraViewData.next({
                 // Convert lon/lat to Cartesian3 using current camera altitude.
                 destination: Cartesian3.fromDegrees(
                     pos.x,
                     pos.y,
-                    Cartographic.fromCartesian(this.viewer.camera.position).height),
+                    pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
                 orientation: {
                     heading: CesiumMath.toRadians(0), // East, in radians.
                     pitch: CesiumMath.toRadians(-90), // Directly looking down.
@@ -141,6 +147,24 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
             }
             let feature = this.viewer.scene.pick(position);
+            if (defined(feature) && feature.primitive instanceof Billboard) {
+                if (feature.primitive.id) {
+                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id];
+                    if (featureInfo.mapId && featureInfo.featureId) {
+                        this.jumpService.highlightFeature(featureInfo.mapId, featureInfo.featureId).then(() => {
+                            if (this.inspectionService.selectedFeature) {
+                                this.mapService.focusOnFeature(this.inspectionService.selectedFeature);
+                            }
+                        });
+                    }
+                } else {
+                    this.mapService.moveToWgs84PositionTopic.next({
+                        x: feature.primitive.position.x,
+                        y: feature.primitive.position.y,
+                        z: feature.primitive.position.z + 1000
+                    });
+                }
+            }
             if (this.isKnownCesiumFeature(feature)) {
                 this.setPickedCesiumFeature(feature);
             } else {
@@ -217,6 +241,41 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.parameterService.setMarkerState(true);
                 this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
             }
+        });
+
+        this.inspectionService.originNormalAndRadiusForFeatureZoom.subscribe(values => {
+            const [origin, normal, radius] = values;
+            // this.viewer.entities.add({
+            //     position: origin,
+            //     point: {
+            //         pixelSize: 10,
+            //         color: Color.BLUE
+            //     }
+            // });
+            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+            Cartesian3.normalize(direction, direction);
+            Cartesian3.negate(direction, direction);
+            const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(endPoint, new Cartesian3());
+            const right = Cartesian3.cross(direction, up, new Cartesian3());
+            Cartesian3.normalize(right, right);
+            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+            Cartesian3.normalize(cameraUp, cameraUp);
+            // this.viewer.entities.add({
+            //     position: endPoint,
+            //     point: {
+            //         pixelSize: 10,
+            //         color: Color.RED
+            //     }
+            // });
+            this.viewer.camera.flyToBoundingSphere(new BoundingSphere(origin, radius));
+            this.viewer.camera.flyTo({
+                destination: endPoint,
+                orientation: {
+                    direction: direction,
+                    up: cameraUp,
+                }
+            });
         });
     }
 
@@ -411,7 +470,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-        let markers: Array<SearchResultPosition> = [];
+        let markers: Array<[number, SearchResultPosition]> = [];
         const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
         for (const node of nodes) {
             if (node.markers.length) {
@@ -428,9 +487,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
 
         if (markers.length) {
-            markers.forEach(position => {
+            markers.forEach(marker => {
                 this.featureSearchService.visualization.add({
-                    position: position.cartesian as Cartesian3,
+                    id: marker[0],
+                    position: marker[1].cartesian as Cartesian3,
                     image: this.featureSearchService.markerGraphics(),
                     width: 32,
                     height: 32,

@@ -33,7 +33,7 @@ import {InfoMessageService} from "./info.service";
                 <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
             </div>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Matched:</span><span>{{ results.length }}</span>
+                <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
             </div>
             <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                 <span>Highlight colour:</span>
@@ -58,7 +58,6 @@ import {InfoMessageService} from "./info.service";
 })
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
-    results: Array<any> = [];
     placeholder: Array<any> = [];
     traceResults: Array<any> = [];
     selectedResult: any;
@@ -80,24 +79,16 @@ export class FeatureSearchComponent {
         });
         this.searchService.isFeatureSearchActive.subscribe(isActive => {
             if (isActive) {
-                this.results = [];
                 this.placeholder = [{label: "Loading..."}];
                 this.canPauseStopSearch = isActive;
             } else {
-                this.listbox.options = this.results;
-            }
-        });
-        this.searchService.searchUpdates.subscribe(tileResult => {
-            for (const [mapTileKey, featureId, _] of tileResult.matches) {
-                // TODO: Also show info from the mapTileKey
-                const mapId = mapTileKey.split(':')[1]
-                this.results.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
+                this.listbox.options = this.searchService.searchResults;
             }
         });
         this.searchService.progress.subscribe(value => {
             this.percentDone = value;
             if (value >= 100) {
-                this.listbox.options = this.results;
+                this.listbox.options = this.searchService.searchResults;
                 this.canPauseStopSearch = false;
                 if (this.searchService.errors.size) {
                     this.infoMessageService.showAlertDialog(
@@ -127,14 +118,14 @@ export class FeatureSearchComponent {
                 return;
             }
             this.searchService.pause();
-            this.listbox.options = this.results;
+            this.listbox.options = this.searchService.searchResults;
             this.isSearchPaused = true;
         }
     }
 
     stopSearch() {
         if (this.canPauseStopSearch) {
-            this.listbox.options = this.results;
+            this.listbox.options = this.searchService.searchResults;
             this.searchService.stop();
             this.canPauseStopSearch = false;
 
