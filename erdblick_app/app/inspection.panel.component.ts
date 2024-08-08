@@ -25,30 +25,20 @@ interface Column {
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">
                         <i class="pi pi-sitemap mr-2"></i>&nbsp;
-                        <span class="vertical-align-middle">Source Data</span>
-                    </div>
-                </ng-template>
-                <ng-template pTemplate="content">
-                    <div class="resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }">
-                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-                        </div>
-                        <sourcedata-panel />
-                    </div>
-                </ng-template>
-            </p-accordionTab>
-
-            <p-accordionTab>
-                <ng-template pTemplate="header">
-                    <div class="flex align-items-center">
-                        <i class="pi pi-sitemap mr-2"></i>&nbsp;
                         <span class="vertical-align-middle">{{ inspectionService.selectedFeatureIdName }}</span>
                     </div>
                 </ng-template>
                 <ng-template pTemplate="content">
                     <div class="flex justify-content-end align-items-center"
                          style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
+                        <div [hidden]="!sourceDataVisible">
+                            <p-button (click)="hideSourceData()"
+                                      icon="pi pi-arrow-left"
+                                      label="" pTooltip="Go back"
+                                      tooltipPosition="bottom"
+                                      [style]="{'padding-left': '0', 'padding-right': '0', 'margin-right': '0.5em', width: '2em', height: '2em'}">
+                            </p-button>
+                        </div>
                         <div class="p-input-icon-left filter-container">
                             <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                             <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
@@ -73,13 +63,28 @@ interface Column {
                             </p-button>
                         </div>
                     </div>
-                    <div class="resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }">
+                    <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }" [hidden]="!sourceDataVisible">
                         <div class="resize-handle" (click)="isExpanded = !isExpanded">
                             <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
                             <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
                         </div>
-                        <p-treeTable #tt [value]="filteredTree" [columns]="cols"
-                                     class="panel-tree" filterMode="strict" [tableStyle]="{'min-width':'100%'}">
+                        <sourcedata-panel />
+                    </div>
+                    <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded }" [hidden]="sourceDataVisible">
+                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
+                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
+                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
+                        </div>
+                        <p-treeTable #tt
+                            filterMode="strict"
+                            scrollHeight="flex"
+                            [value]="filteredTree"
+                            [columns]="cols"
+                            [scrollable]="true"
+                            [virtualScroll]="true"
+                            [virtualScrollItemSize]="26"
+                            [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
+                        >
                             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                                 <tr [ttRow]="rowNode"
                                     [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}"
@@ -180,6 +185,7 @@ export class InspectionPanelComponent implements OnInit  {
     filterByValues = true;
     filterOnlyFeatureIds = false;
     filterGeometryEntries = false;
+    sourceDataVisible = false;
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
@@ -339,8 +345,15 @@ export class InspectionPanelComponent implements OnInit  {
         }
     }
 
+    hideSourceData()
+    {
+        this.sourceDataVisible = false;
+    }
+
     async showSourceData(layerId: string, tileId: number)
     {
+        this.sourceDataVisible = true;
+
         const mapId = this.inspectionService.selectedMapIdName;
 
         this.inspectionService.showSourceDataEvent.emit({

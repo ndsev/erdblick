@@ -142,6 +142,7 @@ body {
 
     .resizable-container {
         width: 30em;
+        height: 30em;
         min-width: 30em;
         min-height: 18em;
         resize: both;
@@ -172,6 +173,10 @@ body {
 
             td {
                 padding: 0;
+            }
+
+            tr {
+                height: 26px;
             }
 
             .p-treetable-toggler {
