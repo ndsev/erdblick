@@ -3,7 +3,7 @@ import {BrowserModule} from '@angular/platform-browser';
 
 import {AppRoutingModule} from './app-routing.module';
 import {AppComponent} from './app.component';
-import {provideHttpClient, withInterceptorsFromDi} from "@angular/common/http";
+import {HttpClientModule, provideHttpClient, withInterceptorsFromDi} from "@angular/common/http";
 import {SpeedDialModule} from "primeng/speeddial";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./info.service";
-import {SearchPanelComponent} from "./search.panel.component";
+import {EnterSelectDirective, SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
@@ -58,6 +58,8 @@ import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {InputTextareaModule} from "primeng/inputtextarea";
+import {FloatLabelModule} from "primeng/floatlabel";
+import {TabViewModule} from "primeng/tabview";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -82,6 +84,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         AlertDialogComponent,
+        EnterSelectDirective,
         HighlightSearch,
         TreeTableFilterPatchDirective,
     ],
@@ -93,6 +96,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         BrowserAnimationsModule,
         AnimateModule,
         AppRoutingModule,
+        HttpClientModule,
         SpeedDialModule,
         DialogModule,
         FormsModule,
@@ -117,6 +121,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ListboxModule,
         MultiSelectModule,
         InputTextareaModule,
+        FloatLabelModule,
+        TabViewModule,
+        InputTextareaModule,
         ButtonGroupModule,
         TabViewModule,
         BreadcrumbModule,
@@ -127,7 +134,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
             provide: APP_INITIALIZER,
             useFactory: initializeServices,
             deps: [StyleService, MapService, CoordinatesService],
-            multi: true,
+            multi: true
         },
         MapService,
         MessageService,
@@ -139,6 +146,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FeatureSearchService,
         ClipboardService,
         provideHttpClient(withInterceptorsFromDi()),
-    ] })
+    ]
+})
 export class AppModule {
 }
