@@ -17,7 +17,7 @@ interface Column {
     selector: 'inspection-panel',
     template: `
         <p-accordion *ngIf="inspectionService.featureTree.value.length && inspectionService.isInspectionPanelVisible"
-                     class="w-full inspect-panel" [activeIndex]="0">
+                     class="w-full inspect-panel" [activeIndex]="0" >
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <div class="flex align-items-center">

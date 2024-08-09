@@ -9,6 +9,8 @@ import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 
 export interface SearchTarget {
+    icon: string;
+    color: string;
     name: string;
     label: string;
     enabled: boolean;
@@ -90,6 +92,8 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
+            icon: "pi-bolt",
+            color: "blue",
             name: "Search Loaded Features",
             label: label,
             enabled: false,
@@ -113,6 +117,8 @@ export class JumpTargetService {
                     label += `<br><span class="search-option-warning">${fjt.error}</span>`;
                 }
                 return {
+                    icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
+                    color: "orange",
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,

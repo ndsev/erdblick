@@ -225,7 +225,7 @@ body {
 
     .resizable-container {
         min-width: 22em;
-        min-height: 0em;
+        min-height: 0;
         resize: horizontal;
         overflow: auto;
         max-width: calc(100vw - 5em);
@@ -252,16 +252,20 @@ body {
 
     .search-input {
         width: 100%;
-        z-index: 10500;
+        z-index: 150;
+        position: relative;
 
         textarea {
-            width: 100%;
+            width: 100% !important;
             transition: all 0.3s;
             overflow: scroll;
             resize: none;
+            animation-duration: 0.1s !important;
+            transition-duration: 0.1s !important;
         }
 
         textarea.single-line {
+            width: 22em !important;
             white-space: nowrap;
             text-overflow: ellipsis;
             overflow: hidden;
@@ -344,8 +348,20 @@ body {
             background-color: var(--primary-color);
         }
 
+        .orange {
+            background-color: darkorange;
+        }
+
+        .green {
+            background-color: limegreen;
+        }
+
         .grey {
             background-color: darkgrey;
+        }
+
+        .violet {
+            background-color: blueviolet;
         }
     }
 }
