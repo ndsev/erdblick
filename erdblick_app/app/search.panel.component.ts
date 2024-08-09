@@ -9,6 +9,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {FeatureSearchService} from "./feature.search.service";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {Dialog} from "primeng/dialog";
+import {KeyboardService} from "./keyboard.service";
 
 
 @Directive({
@@ -167,9 +168,13 @@ export class SearchPanelComponent implements AfterViewInit {
     constructor(private renderer: Renderer2,
                 public mapService: MapService,
                 public parametersService: ParametersService,
+                private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
                 private sidePanelService: SidePanelService) {
+
+        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+K", this.clickOnSearchToStart.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
@@ -200,6 +205,20 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.reloadSearchHistory();
+    }
+
+    ngAfterViewInit() {
+        this.dialog.onShow.subscribe(() => {
+            setTimeout(() => {
+                this.expandTextarea();
+            }, 0);
+        });
+
+        this.dialog.onHide.subscribe(() => {
+            setTimeout(() => {
+                this.shrinkTextarea();
+            }, 0);
+        });
     }
 
     private reloadSearchHistory() {
@@ -450,7 +469,6 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     expandTextarea() {
-        // const target = this.textarea.nativeElement as HTMLTextAreaElement;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         this.textarea.nativeElement.focus();
@@ -460,31 +478,14 @@ export class SearchPanelComponent implements AfterViewInit {
 
     shrinkTextarea() {
         this.cursorPosition = this.textarea.nativeElement.selectionStart;
-        // const target = this.textarea.nativeElement as HTMLTextAreaElement;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
         // this.renderer.removeClass(this.container, "multiline");
     }
 
-    ngAfterViewInit() {
-        this.dialog.onShow.subscribe(() => {
-            setTimeout(() => {
-                this.expandTextarea();
-            }, 0);
-        });
-
-        this.dialog.onHide.subscribe(() => {
-            setTimeout(() => {
-                this.shrinkTextarea();
-            }, 0);
-        });
-    }
-
-    restoreCursorPosition() {
-        const textarea = this.textarea.nativeElement;
-        setTimeout(() => {
-            textarea.focus();
-            textarea.setSelectionRange(this.cursorPosition, this.cursorPosition);
-        }, 0);
+    clickOnSearchToStart() {
+        this.setSearchValue("");
+        this.cursorPosition = 0;
+        this.textarea.nativeElement.click();
     }
 }
