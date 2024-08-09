@@ -18,7 +18,7 @@ interface InspectorTab {
     template: `
         <p-accordion *ngIf="inspectionService.featureTree.value.length && inspectionService.isInspectionPanelVisible"
                      class="w-full inspect-panel"
-                     [activeIndex]="0">
+                     [activeIndex]="0" >
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <span class="inspector-title" *ngIf="activeIndex < tabs.length">

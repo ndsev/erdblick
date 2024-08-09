@@ -11,6 +11,9 @@ import {FeatureSearchComponent} from "./feature.search.component";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
 
+interface ExtendedSearchTarget extends SearchTarget {
+    index: number;
+}
 
 @Directive({
     selector: '[appEnterSelect]'
@@ -43,33 +46,47 @@ export class EnterSelectDirective {
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
                           [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
-                    <p-tabView *ngIf="!searchInputValue">
-                        <p-tabPanel header="History">
-                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
-                                <p-divider></p-divider>
-                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">
-                                    <span class="search-option-name">{{ item.input }}</span><br><span
-                                        [innerHTML]="item.label"></span>
-                                </p>
+<!--                    <p-tabView *ngIf="!searchInputValue">-->
+<!--                        <p-tabPanel header="History">-->
+<!--                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >-->
+<!--                                <p-divider></p-divider>-->
+<!--                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">-->
+<!--                                    <span class="search-option-name">{{ item.input }}</span><br><span-->
+<!--                                        [innerHTML]="item.label"></span>-->
+<!--                                </p>-->
+<!--                            </div>-->
+<!--                        </p-tabPanel>-->
+<!--                        <p-tabPanel header="Options">-->
+<!--                            <div class="search-menu" *ngFor="let item of searchItems; let i = index">-->
+<!--                                <p-divider></p-divider>-->
+<!--                                <p appEnterSelect (click)="targetToHistory(i)" class="search-option"-->
+<!--                                   [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">-->
+<!--                                    <span class="search-option-name">{{ item.name }}</span><br><span-->
+<!--                                        [innerHTML]="item.label"></span>-->
+<!--                                </p>-->
+<!--                            </div>-->
+<!--                        </p-tabPanel>-->
+<!--                    </p-tabView>-->
+                    <div *ngIf="!searchInputValue">
+                        <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
+                            <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
+                                <div class="icon-circle violet">
+                                    <i class="pi pi-history"></i>
+                                </div>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.input }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
                             </div>
-                        </p-tabPanel>
-                        <p-tabPanel header="Options">
-                            <div class="search-menu" *ngFor="let item of searchItems; let i = index">
-                                <p-divider></p-divider>
-                                <p appEnterSelect (click)="targetToHistory(i)" class="search-option"
-                                   [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
-                                    <span class="search-option-name">{{ item.name }}</span><br><span
-                                        [innerHTML]="item.label"></span>
-                                </p>
-                            </div>
-                        </p-tabPanel>
-                    </p-tabView>
+                        </div>
+                    </div>
                     <div *ngIf="searchInputValue">
-                        <div class="search-menu" *ngFor="let item of searchItems; let i = index">
-                            <div appEnterSelect (click)="targetToHistory(i)" class="search-option-wrapper"
+                        <div class="search-menu" *ngFor="let item of activeSearchItems">
+                            <div appEnterSelect (click)="targetToHistory(item.index)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
-                                <span class="icon-circle blue">
-                                    <i class="pi pi-bolt"></i>
+                                <span class="icon-circle {{ item.color }}">
+                                    <i class="pi {{ item.icon }}"></i>
                                 </span>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.name }}</span>
@@ -80,11 +97,24 @@ export class EnterSelectDirective {
                         </div>
                         <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
                             <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
-                                <div class="icon-circle grey">
+                                <div class="icon-circle violet">
                                     <i class="pi pi-history"></i>
                                 </div>
                                 <div class="search-option">
                                     <span class="search-option-name">{{ item.input }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="search-menu" *ngFor="let item of inactiveSearchItems; let i = index">
+                            <div appEnterSelect (click)="targetToHistory(i)" class="search-option-wrapper"
+                                 [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
+                                <span class="icon-circle grey">
+                                    <i class="pi {{ item.icon }}"></i>
+                                </span>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.name }}</span>
                                     <br>
                                     <span [innerHTML]="item.label"></span>
                                 </div>
@@ -114,6 +144,8 @@ export class EnterSelectDirective {
 export class SearchPanelComponent implements AfterViewInit {
 
     searchItems: Array<SearchTarget> = [];
+    activeSearchItems: Array<ExtendedSearchTarget> = [];
+    inactiveSearchItems: Array<SearchTarget> = [];
     searchInputValue: string = "";
     searchMenuVisible: boolean = false;
     searchHistory: Array<any> = [];
@@ -127,8 +159,10 @@ export class SearchPanelComponent implements AfterViewInit {
     @ViewChild('searchcontrols') container!: HTMLDivElement;
     cursorPosition: number = 0;
 
-    staticTargets = [
+    staticTargets: Array<SearchTarget> = [
         {
+            icon: "pi-table",
+            color: "green",
             name: "Tile ID",
             label: "Jump to Tile by its Mapget ID",
             enabled: false,
@@ -136,6 +170,8 @@ export class SearchPanelComponent implements AfterViewInit {
             validate: (value: string) => { return this.validateMapgetTileId(value) }
         },
         {
+            icon: "pi-map-marker",
+            color: "green",
             name: "WGS84 Lat-Lon Coordinates",
             label: "Jump to WGS84 Coordinates",
             enabled: false,
@@ -143,6 +179,8 @@ export class SearchPanelComponent implements AfterViewInit {
             validate: (value: string) => { return this.validateWGS84(value, false) }
         },
         {
+            icon: "pi-map-marker",
+            color: "green",
             name: "WGS84 Lon-Lat Coordinates",
             label: "Jump to WGS84 Coordinates",
             enabled: false,
@@ -150,6 +188,8 @@ export class SearchPanelComponent implements AfterViewInit {
             validate: (value: string) => { return this.validateWGS84(value, true) }
         },
         {
+            icon: "pi-map-marker",
+            color: "green",
             name: "Open WGS84 Lat-Lon in Google Maps",
             label: "Open Location in External Map Service",
             enabled: false,
@@ -157,6 +197,8 @@ export class SearchPanelComponent implements AfterViewInit {
             validate: (value: string) => { return this.validateWGS84(value, false) }
         },
         {
+            icon: "pi-map-marker",
+            color: "green",
             name: "Open WGS84 Lat-Lon in Open Street Maps",
             label: "Open Location in External Map Service",
             enabled: false,
@@ -400,15 +442,28 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!value) {
             this.parametersService.setSearchHistoryState(null);
             this.jumpToTargetService.targetValueSubject.next(value);
-            this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets]
+            this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets];
+            this.activeSearchItems = [];
+            this.inactiveSearchItems = this.searchItems;
             this.visibleSearchHistory = this.searchHistory;
             return;
         }
         this.jumpToTargetService.targetValueSubject.next(value);
-        this.searchItems = [
-            ...this.jumpToTargetService.jumpTargets.getValue().filter(target => target.validate(value)),
-            ...this.staticTargets.filter(target => target.validate(value))
-        ]
+        this.activeSearchItems = [];
+        this.inactiveSearchItems = [];
+        for (let i = 0; i < this.searchItems.length; i++) {
+            if (this.searchItems[i].validate(this.searchInputValue)) {
+                const target = this.searchItems[i] as ExtendedSearchTarget;
+                target.index = i;
+                this.activeSearchItems.push(target);
+            } else {
+                this.inactiveSearchItems.push(this.searchItems[i]);
+            }
+        }
+        // this.activeSearchItems = [
+        //     ...this.jumpToTargetService.jumpTargets.getValue().filter(target => target.validate(value)),
+        //     ...this.staticTargets.filter(target => target.validate(value))
+        // ]
         this.visibleSearchHistory = Object.values(
             this.searchHistory.reduce((acc, obj) => {
                 if (obj.input.includes(value)) {
@@ -420,6 +475,10 @@ export class SearchPanelComponent implements AfterViewInit {
                 return acc;
             }, {} as Record<string, typeof this.searchHistory[number]>)
         );
+        // this.inactiveSearchItems = [
+        //     ...this.jumpToTargetService.jumpTargets.getValue().filter(target => !target.validate(value)),
+        //     ...this.staticTargets.filter(target => !target.validate(value))
+        // ]
     }
 
     setSelectedMap(value: string|null) {
