@@ -35,8 +35,6 @@ export class EnterSelectDirective {
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay($event)"
                           (ngModelChange)="setSearchValue(searchInputValue)"
-                          (focus)="expandTextarea($event)"
-                          (blur)="shrinkTextarea($event)"
                           (keydown)="onKeydown($event)"
                           placeholder="Search">
                 </textarea>
@@ -451,29 +449,35 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
-    expandTextarea(event: FocusEvent) {
-        const target = event.target as HTMLTextAreaElement;
-        this.renderer.setAttribute(target, 'rows', '3');
-        this.renderer.removeClass(target, 'single-line');
+    expandTextarea() {
+        // const target = this.textarea.nativeElement as HTMLTextAreaElement;
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
+        this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
+        this.textarea.nativeElement.focus();
+        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         // this.renderer.addClass(this.container, "multiline");
     }
 
-    shrinkTextarea(event: FocusEvent) {
-        this.saveCursorPosition();
-        const target = event.target as HTMLTextAreaElement;
-        this.renderer.setAttribute(target, 'rows', '1');
-        this.renderer.addClass(target, 'single-line');
+    shrinkTextarea() {
+        this.cursorPosition = this.textarea.nativeElement.selectionStart;
+        // const target = this.textarea.nativeElement as HTMLTextAreaElement;
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
+        this.renderer.addClass(this.textarea.nativeElement, 'single-line');
         // this.renderer.removeClass(this.container, "multiline");
     }
 
     ngAfterViewInit() {
         this.dialog.onShow.subscribe(() => {
-            this.restoreCursorPosition();
+            setTimeout(() => {
+                this.expandTextarea();
+            }, 0);
         });
-    }
 
-    saveCursorPosition() {
-        this.cursorPosition = this.textarea.nativeElement.selectionStart;
+        this.dialog.onHide.subscribe(() => {
+            setTimeout(() => {
+                this.shrinkTextarea();
+            }, 0);
+        });
     }
 
     restoreCursorPosition() {

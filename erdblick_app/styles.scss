@@ -254,7 +254,7 @@ body {
         resize: horizontal;
         overflow: auto;
         max-width: calc(100vw - 5em);
-        max-height: calc(100vh - 7.8em);
+        max-height: calc(100vh - 10.5em);
     }
 
     .resizable-container.multiline {
@@ -301,7 +301,7 @@ body {
         width: 100%;
         margin: 0;
         overflow: auto;
-        max-height: calc(100vh - 7.75em)
+        max-height: calc(100vh - 10.5em)
     }
 
     .p-dialog-content {
