@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./info.service";
-import {SearchPanelComponent} from "./search.panel.component";
+import {EnterSelectDirective, SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
@@ -50,6 +50,8 @@ import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
 import {InputTextareaModule} from "primeng/inputtextarea";
+import {FloatLabelModule} from "primeng/floatlabel";
+import {TabViewModule} from "primeng/tabview";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -71,7 +73,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ErdblickViewComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
-        AlertDialogComponent
+        AlertDialogComponent,
+        EnterSelectDirective
     ],
     imports: [
         BrowserModule,
@@ -102,7 +105,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ColorPickerModule,
         ListboxModule,
         MultiSelectModule,
-        InputTextareaModule
+        InputTextareaModule,
+        FloatLabelModule,
+        TabViewModule
     ],
     providers: [
         {

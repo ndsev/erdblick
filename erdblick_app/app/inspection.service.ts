@@ -46,6 +46,7 @@ export class InspectionService {
                 public parametersService: ParametersService) {
 
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+J", this.zoomToFeature.bind(this));
 
         this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
             if (!selectedFeature) {

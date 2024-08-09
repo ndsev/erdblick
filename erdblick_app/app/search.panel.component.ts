@@ -1,4 +1,4 @@
-import {Component} from "@angular/core";
+import {AfterViewInit, Component, Directive, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
@@ -6,28 +6,93 @@ import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {FeatureSearchService} from "./feature.search.service";
+import {Dialog} from "primeng/dialog";
+import {KeyboardService} from "./keyboard.service";
+
+
+@Directive({
+    selector: '[appEnterSelect]'
+})
+export class EnterSelectDirective {
+    constructor(private el: ElementRef, private renderer: Renderer2) {}
+
+    @HostListener('keydown', ['$event'])
+    handleKeyDown(event: KeyboardEvent) {
+        if (event.key === 'Enter') {
+            this.renderer.selectRootElement(this.el.nativeElement).click();
+        }
+    }
+}
 
 @Component({
     selector: 'search-panel',
     template: `
-        <span class="p-input-icon-left search-input">
-            <i class="pi pi-search"></i>
-            <input type="text" pInputText [(ngModel)]="searchInputValue"
-                   (click)="showSearchOverlay($event)"
-                   (ngModelChange)="setSearchValue(searchInputValue)"
-                   (keydown)="onKeydown($event)"
-            />
-        </span>
-        <p-dialog class="search-menu-dialog" header="" [(visible)]="searchMenuVisible"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false" header="Search Options">
-            <div class="search-menu" *ngFor="let item of searchItems">
-                <p-divider></p-divider>
-                <p (click)="runTarget(item)" class="search-option" [ngClass]="{'item-disabled': !item.enabled }">
-                    <span class="search-option-name">{{ item.name }}</span><br><span [innerHTML]="item.label"></span>
-                </p>
+        <div class="search-wrapper">
+            <div class="search-input">
+                <!-- Expand on dialog show and collapse on dialog hide -->
+                <textarea #textarea class="single-line" rows="1" pInputTextarea
+                          [(ngModel)]="searchInputValue"
+                          (click)="showSearchOverlay($event)"
+                          (ngModelChange)="setSearchValue(searchInputValue)"
+                          (keydown)="onKeydown($event)"
+                          placeholder="Search">
+                </textarea>
             </div>
-        </p-dialog>
+            <div class="resizable-container" #searchcontrols>
+                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
+                          [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
+                    <p-tabView *ngIf="!searchInputValue">
+                        <p-tabPanel header="History">
+                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
+                                <p-divider></p-divider>
+                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">
+                                    <span class="search-option-name">{{ item.input }}</span><br><span
+                                        [innerHTML]="item.label"></span>
+                                </p>
+                            </div>
+                        </p-tabPanel>
+                        <p-tabPanel header="Options">
+                            <div class="search-menu" *ngFor="let item of searchItems; let i = index">
+                                <p-divider></p-divider>
+                                <p appEnterSelect (click)="targetToHistory(i)" class="search-option"
+                                   [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
+                                    <span class="search-option-name">{{ item.name }}</span><br><span
+                                        [innerHTML]="item.label"></span>
+                                </p>
+                            </div>
+                        </p-tabPanel>
+                    </p-tabView>
+                    <div *ngIf="searchInputValue">
+                        <div class="search-menu" *ngFor="let item of searchItems; let i = index">
+                            <div appEnterSelect (click)="targetToHistory(i)" class="search-option-wrapper"
+                               [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
+                                <span class="icon-circle blue">
+                                    <i class="pi pi-bolt"></i>
+                                </span>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.name }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
+                            <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
+                                <div class="icon-circle grey">
+                                    <i class="pi pi-history"></i>
+                                </div>
+                                <div class="search-option">
+                                    <span class="search-option-name">{{ item.input }}</span>
+                                    <br>
+                                    <span [innerHTML]="item.label"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </p-dialog>
+            </div>
+        </div>
+        
         <p-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" class="map-selection-dialog">
             <div *ngFor="let map of mapSelection; let i = index" style="width: 100%">
@@ -44,20 +109,70 @@ import {FeatureSearchService} from "./feature.search.service";
         }
     `]
 })
-export class SearchPanelComponent {
+export class SearchPanelComponent implements AfterViewInit {
 
     searchItems: Array<SearchTarget> = [];
     searchInputValue: string = "";
     searchMenuVisible: boolean = false;
+    searchHistory: Array<any> = [];
+    visibleSearchHistory: Array<any> = [];
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
 
-    constructor(public mapService: MapService,
+    @ViewChild('textarea') textarea!: ElementRef;
+    @ViewChild('actionsdialog') dialog!: Dialog;
+    @ViewChild('searchcontrols') container!: HTMLDivElement;
+    cursorPosition: number = 0;
+
+    staticTargets = [
+        {
+            name: "Tile ID",
+            label: "Jump to Tile by its Mapget ID",
+            enabled: false,
+            jump: (value: string) => { return this.parseMapgetTileId(value) },
+            validate: (value: string) => { return this.validateMapgetTileId(value) }
+        },
+        {
+            name: "WGS84 Lat-Lon Coordinates",
+            label: "Jump to WGS84 Coordinates",
+            enabled: false,
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
+            validate: (value: string) => { return this.validateWGS84(value, false) }
+        },
+        {
+            name: "WGS84 Lon-Lat Coordinates",
+            label: "Jump to WGS84 Coordinates",
+            enabled: false,
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, true) },
+            validate: (value: string) => { return this.validateWGS84(value, true) }
+        },
+        {
+            name: "Open WGS84 Lat-Lon in Google Maps",
+            label: "Open Location in External Map Service",
+            enabled: false,
+            jump: (value: string) => { return this.openInGM(value) },
+            validate: (value: string) => { return this.validateWGS84(value, false) }
+        },
+        {
+            name: "Open WGS84 Lat-Lon in Open Street Maps",
+            label: "Open Location in External Map Service",
+            enabled: false,
+            jump: (value: string) => { return this.openInOSM(value) },
+            validate: (value: string) => { return this.validateWGS84(value, false) }
+        }
+    ];
+
+    constructor(private renderer: Renderer2,
+                public mapService: MapService,
                 public parametersService: ParametersService,
+                private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
                 private sidePanelService: SidePanelService) {
+
+        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+K", this.clickOnSearchToStart.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
@@ -70,43 +185,7 @@ export class SearchPanelComponent {
         this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
             this.searchItems = [
                 ...jumpTargets,
-                ...[
-                    {
-                        name: "Tile ID",
-                        label: "Jump to Tile by its Mapget ID",
-                        enabled: false,
-                        jump: (value: string) => { return this.parseMapgetTileId(value) },
-                        validate: (value: string) => { return this.validateMapgetTileId(value) }
-                    },
-                    {
-                        name: "WGS84 Lat-Lon Coordinates",
-                        label: "Jump to WGS84 Coordinates",
-                        enabled: false,
-                        jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
-                        validate: (value: string) => { return this.validateWGS84(value, false) }
-                    },
-                    {
-                        name: "WGS84 Lon-Lat Coordinates",
-                        label: "Jump to WGS84 Coordinates",
-                        enabled: false,
-                        jump: (value: string) => { return this.parseWgs84Coordinates(value, true) },
-                        validate: (value: string) => { return this.validateWGS84(value, true) }
-                    },
-                    {
-                        name: "Open WGS84 Lat-Lon in Google Maps",
-                        label: "Open Location in External Map Service",
-                        enabled: false,
-                        jump: (value: string) => { return this.openInGM(value) },
-                        validate: (value: string) => { return this.validateWGS84(value, false) }
-                    },
-                    {
-                        name: "Open WGS84 Lat-Lon in Open Street Maps",
-                        label: "Open Location in External Map Service",
-                        enabled: false,
-                        jump: (value: string) => { return this.openInOSM(value) },
-                        validate: (value: string) => { return this.validateWGS84(value, false) }
-                    }
-                ]
+                ...this.staticTargets
             ];
         });
 
@@ -114,6 +193,45 @@ export class SearchPanelComponent {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
         });
+
+        this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
+            if (entry) {
+                this.searchInputValue = entry[1];
+                this.runTarget(entry[0]);
+            }
+            this.reloadSearchHistory();
+        });
+
+        this.reloadSearchHistory();
+    }
+
+    ngAfterViewInit() {
+        this.dialog.onShow.subscribe(() => {
+            setTimeout(() => {
+                this.expandTextarea();
+            }, 0);
+        });
+
+        this.dialog.onHide.subscribe(() => {
+            setTimeout(() => {
+                this.shrinkTextarea();
+            }, 0);
+        });
+    }
+
+    private reloadSearchHistory() {
+        const searchHistoryString = localStorage.getItem("searchHistory");
+        if (searchHistoryString) {
+            const searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+            this.searchHistory = [];
+            searchHistory.forEach(value => {
+                if (0 <= value[0] && value[0] < this.searchItems.length) {
+                    const item = this.searchItems[value[0]];
+                    this.searchHistory.push({label: item.name, index: value[0], input: value[1]});
+                }
+            });
+            this.visibleSearchHistory = this.searchHistory;
+        }
     }
 
     parseMapgetTileId(value: string): number[] | undefined {
@@ -261,7 +379,7 @@ export class SearchPanelComponent {
     }
 
     validateMapgetTileId(value: string) {
-        return value.length > 0 && !/\s/g.test(value.trim());
+        return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
     }
 
     validateWGS84(value: string, isLonLat: boolean = false) {
@@ -272,11 +390,34 @@ export class SearchPanelComponent {
     showSearchOverlay(event: Event) {
         event.stopPropagation();
         this.sidePanelService.panel = SidePanelState.SEARCH;
+        this.setSearchValue(this.searchInputValue);
     }
 
     setSearchValue(value: string) {
         this.searchInputValue = value;
+        if (!value) {
+            this.parametersService.setSearchHistoryState(null);
+            this.jumpToTargetService.targetValueSubject.next(value);
+            this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets]
+            this.visibleSearchHistory = this.searchHistory;
+            return;
+        }
         this.jumpToTargetService.targetValueSubject.next(value);
+        this.searchItems = [
+            ...this.jumpToTargetService.jumpTargets.getValue().filter(target => target.validate(value)),
+            ...this.staticTargets.filter(target => target.validate(value))
+        ]
+        this.visibleSearchHistory = Object.values(
+            this.searchHistory.reduce((acc, obj) => {
+                if (obj.input.includes(value)) {
+                    const key = `${obj.label}-${obj.index}-${obj.input}`;
+                    if (!acc[key]) {
+                        acc[key] = obj;
+                    }
+                }
+                return acc;
+            }, {} as Record<string, typeof this.searchHistory[number]>)
+        );
     }
 
     setSelectedMap(value: string|null) {
@@ -284,7 +425,12 @@ export class SearchPanelComponent {
         this.mapSelectionVisible = false;
     }
 
-    runTarget(item: SearchTarget) {
+    targetToHistory(index: number) {
+        this.parametersService.setSearchHistoryState([index, this.searchInputValue]);
+    }
+
+    runTarget(index: number) {
+        const item = this.searchItems[index];
         if (item.jump !== undefined) {
             const coord = item.jump(this.searchInputValue);
             this.jumpToWGS84(coord);
@@ -302,9 +448,42 @@ export class SearchPanelComponent {
 
     onKeydown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
-            this.runTarget(this.searchItems[0]);
+            if (this.searchInputValue.trim()) {
+                this.parametersService.setSearchHistoryState([0, this.searchInputValue]);
+            } else {
+                this.parametersService.setSearchHistoryState(null);
+            }
         } else if (event.key === 'Escape') {
-            this.searchInputValue = "";
+            event.stopPropagation();
+            this.setSearchValue("");
         }
+    }
+
+    selectHistoryEntry(index: number) {
+        const entry = this.searchHistory[index];
+        if (entry.index !== undefined && entry.input !== undefined) {
+            this.parametersService.setSearchHistoryState([entry.index, entry.input]);
+        }
+    }
+
+    expandTextarea() {
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
+        this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
+        this.textarea.nativeElement.focus();
+        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
+        // this.renderer.addClass(this.container, "multiline");
+    }
+
+    shrinkTextarea() {
+        this.cursorPosition = this.textarea.nativeElement.selectionStart;
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
+        this.renderer.addClass(this.textarea.nativeElement, 'single-line');
+        // this.renderer.removeClass(this.container, "multiline");
+    }
+
+    clickOnSearchToStart() {
+        this.setSearchValue("");
+        this.cursorPosition = 0;
+        this.textarea.nativeElement.click();
     }
 }
