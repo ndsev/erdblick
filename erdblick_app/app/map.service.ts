@@ -490,7 +490,7 @@ export class MapService {
         // Abort previous fetch operation, if it is different from the new one.
         let newRequestBody = JSON.stringify({
             requests: requests,
-            maxKnownFieldIds: this.tileParser!.getFieldDictOffsets()
+            stringPoolOffsets: this.tileParser!.getFieldDictOffsets()
         });
         if (this.currentFetch) {
             if (this.currentFetch.bodyJson === newRequestBody)

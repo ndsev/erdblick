@@ -24,6 +24,7 @@ interface ShowSourceDataEvent {
     mapId: string,
     tileId: number,
     layerId: string,
+    address: number,
 }
 
 @Injectable({providedIn: 'root'})
