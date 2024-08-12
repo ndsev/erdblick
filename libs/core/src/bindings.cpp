@@ -24,6 +24,9 @@
 using namespace erdblick;
 namespace em = emscripten;
 
+namespace
+{
+
 /**
  * WGS84 Viewport Descriptor, which may be used with the
  * `getTileIds` function below.
@@ -163,6 +166,10 @@ void validateSimfil(const std::string &query) {
     simfil::compile(*simfilEnv, query, false);
 }
 
+/**
+ * Convert a SourceDataLayar hierarchie to a tree model compatible
+ * structure.
+ **/
 em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer)
 {
     const auto& strings = *layer.strings();
@@ -220,6 +227,18 @@ em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer)
         return res;
     };
 
+    auto visitAddress = [&](const SourceDataAddress& addr) {
+        //if (layer.sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
+            auto res = em::val::object();
+            res.set("offset", addr.bitOffset());
+            res.set("size", addr.bitSize());
+
+            return res;
+        //}
+
+        //return em::val(addr.u64());
+    };
+
     auto visitObject = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
         auto res = em::val::object();
 
@@ -229,10 +248,7 @@ em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer)
         if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
             auto compound = layer.resolveCompound(*ModelNode::Ptr::make(layer.shared_from_this(), node.addr()));
 
-            auto address = em::val::object();
-            address.set("offset", compound->sourceDataAddress().bitOffset());
-            address.set("size", compound->sourceDataAddress().bitSize());
-            data.set("address", std::move(address));
+            data.set("address", visitAddress(compound->sourceDataAddress()));
             data.set("type", std::string(compound->schemaName()));
         }
 
@@ -266,6 +282,8 @@ em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer)
         return em::val::object();
 
     return visit(em::val("root"), *layer.root(0));
+}
+
 }
 
 EMSCRIPTEN_BINDINGS(erdblick)
@@ -317,9 +335,21 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// FeatureLayerStyle
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>();
 
+    em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
+        .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
+        .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
+
     em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
         .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
             "std::shared_ptr<mapget::TileSourceDataLayer>")
+        .function(
+            "addressFormat",
+            &mapget::TileSourceDataLayer::sourceDataAddressFormat)
+        .function(
+            "toJson",
+            std::function<std::string(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
+                return self.toJson().dump(2);
+            }))
         .function(
             "toObject", &tileSourceDataLayerToObject);
 

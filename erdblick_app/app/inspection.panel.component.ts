@@ -96,7 +96,20 @@ interface Column {
                                             <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                             </p-treeTableToggler>
                                             <span (click)="onKeyClick($event, rowData)"
-                                                  style="cursor: pointer">{{ rowData['key'] }}</span>
+                                                style="cursor: pointer">{{ rowData['key'] }}
+                                            </span>
+                                            <span *ngIf="rowData['sourceDataReferences']" class="source-data-ref-container">
+                                                <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
+                                                    <p-button
+                                                        (click)="onGotoSourceData(item)"
+                                                        icon="pi pi-fw pi-database"
+                                                        label=""
+                                                        pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                        tooltipPosition="bottom"
+                                                    >
+                                                    </p-button>
+                                                </ng-template>
+                                            </span>
                                         </div>
                                     </td>
                                     <td [class]="getStyleClassByType(rowData['type'])">
@@ -163,7 +176,16 @@ interface Column {
             text-decoration: underline dotted;
             font-style: italic;
         }
-        
+
+        .source-data-ref-container {
+            button {
+                width: 20px;
+                height: 20px;
+                padding: 3px;
+                margin-left: 3px;
+            }
+        }
+
         @media only screen and (max-width: 56em) {
             .resizable-container-expanded {
                 height: calc(100vh - 3em);;
@@ -334,15 +356,25 @@ export class InspectionPanelComponent implements OnInit  {
                 const qualifier = item.qualifier || "";
                 const layerId = item.layerId;
                 const tileId = item.tileId;
+                const address = item.address;
 
                 this.inspectionMenuItems!.push({
                     label: `Show ${qualifier} Source-Data`,
                     command: () => {
-                        this.showSourceData(layerId, Number(tileId))
+                        this.showSourceData(layerId, Number(tileId), Number(address))
                     }
                 });
             })
         }
+    }
+
+    onGotoSourceData(sourceDataRef: any) {
+        const qualifier = sourceDataRef.qualifier || "";
+        const layerId = sourceDataRef.layerId;
+        const tileId = sourceDataRef.tileId;
+        const address = sourceDataRef.address;
+
+        this.showSourceData(layerId, Number(tileId), Number(address))
     }
 
     hideSourceData()
@@ -350,7 +382,7 @@ export class InspectionPanelComponent implements OnInit  {
         this.sourceDataVisible = false;
     }
 
-    async showSourceData(layerId: string, tileId: number)
+    showSourceData(layerId: string, tileId: number, address: number)
     {
         this.sourceDataVisible = true;
 
@@ -360,6 +392,7 @@ export class InspectionPanelComponent implements OnInit  {
             tileId: tileId,
             layerId: layerId,
             mapId: mapId,
+            address: address,
         })
     }
 
