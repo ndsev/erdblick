@@ -44,42 +44,7 @@ export class EnterSelectDirective {
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
                           [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
-<!--                    <p-tabView *ngIf="!searchInputValue">-->
-<!--                        <p-tabPanel header="History">-->
-<!--                            <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >-->
-<!--                                <p-divider></p-divider>-->
-<!--                                <p appEnterSelect (click)="selectHistoryEntry(i)" class="search-option" tabindex="0">-->
-<!--                                    <span class="search-option-name">{{ item.input }}</span><br><span-->
-<!--                                        [innerHTML]="item.label"></span>-->
-<!--                                </p>-->
-<!--                            </div>-->
-<!--                        </p-tabPanel>-->
-<!--                        <p-tabPanel header="Options">-->
-<!--                            <div class="search-menu" *ngFor="let item of searchItems; let i = index">-->
-<!--                                <p-divider></p-divider>-->
-<!--                                <p appEnterSelect (click)="targetToHistory(i)" class="search-option"-->
-<!--                                   [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">-->
-<!--                                    <span class="search-option-name">{{ item.name }}</span><br><span-->
-<!--                                        [innerHTML]="item.label"></span>-->
-<!--                                </p>-->
-<!--                            </div>-->
-<!--                        </p-tabPanel>-->
-<!--                    </p-tabView>-->
-                    <div *ngIf="!searchInputValue">
-                        <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
-                            <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
-                                <div class="icon-circle violet">
-                                    <i class="pi pi-history"></i>
-                                </div>
-                                <div class="search-option">
-                                    <span class="search-option-name">{{ item.input }}</span>
-                                    <br>
-                                    <span [innerHTML]="item.label"></span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div *ngIf="searchInputValue">
+                    <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div appEnterSelect (click)="targetToHistory(item.index)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
@@ -154,7 +119,6 @@ export class SearchPanelComponent implements AfterViewInit {
 
     @ViewChild('textarea') textarea!: ElementRef;
     @ViewChild('actionsdialog') dialog!: Dialog;
-    @ViewChild('searchcontrols') container!: HTMLDivElement;
     cursorPosition: number = 0;
 
     staticTargets: Array<SearchTarget> = [
@@ -530,14 +494,12 @@ export class SearchPanelComponent implements AfterViewInit {
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         this.textarea.nativeElement.focus();
         this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
-        // this.renderer.addClass(this.container, "multiline");
     }
 
     shrinkTextarea() {
         this.cursorPosition = this.textarea.nativeElement.selectionStart;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
-        // this.renderer.removeClass(this.container, "multiline");
     }
 
     clickOnSearchToStart() {
