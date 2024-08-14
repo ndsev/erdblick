@@ -1,8 +1,8 @@
 import {Component} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
+import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
-import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
 import {ParametersService} from "./parameters.service";
 import {StyleService} from "./style.service";
 import {filter} from "rxjs";
@@ -14,8 +14,8 @@ import {filter} from "rxjs";
         <map-panel></map-panel>
         <p-toast position="top-center" key="tc"></p-toast>
         <search-panel #searchoverlay></search-panel>
-        <pref-components></pref-components>
         <inspection-panel></inspection-panel>
+        <pref-components></pref-components>
         <coordinates-panel></coordinates-panel>
         <div id="info">
             {{ title }} {{ version }}

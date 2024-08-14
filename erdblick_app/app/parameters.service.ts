@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
+import {InspectionService} from "./inspection.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -22,7 +23,8 @@ interface ErdblickParameters extends Record<string, any> {
     styles: Array<string>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number,
-    enabledCoordsTileIds: Array<string>
+    enabledCoordsTileIds: Array<string>,
+    sourceDataInspector: Array<any>,
 }
 
 interface ParameterDescriptor {
@@ -132,6 +134,12 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
         default: ["WGS84"],
         urlParam: false
+    },
+    sourceDataInspector: {
+        converter: JSON.parse,
+        validator: Array.isArray,
+        default: [],
+        urlParam: true
     }
 };
 
@@ -152,7 +160,7 @@ export class ParametersService {
             }
         });
 
-    constructor(public router: Router) {
+    constructor(public router: Router /*, private inspectionService: InspectionService*/) {
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();
@@ -161,6 +169,19 @@ export class ParametersService {
                 this.saveParameters();
             }
         });
+/*
+        this.inspectionService.showSourceDataEvent.subscribe(event => {
+            this.p().sourceDataInspector = [
+                ...Object.values(event)
+            ];
+            this.parameters.next(this.p());
+        });
+
+        this.inspectionService.showFeatureInspectorEvent.subscribe(event => {
+            this.p().sourceDataInspector = [];
+        });
+
+ */
     }
 
     get replaceUrl() {
@@ -171,6 +192,32 @@ export class ParametersService {
 
     p() {
         return this.parameters.getValue();
+    }
+
+    setSelectedSourceData(tileId: Number, layerId: string, mapId: string, address: Number) {
+        this.p().sourceDataInspector = [
+            tileId,
+            layerId,
+            mapId,
+            address,
+        ];
+        this.parameters.next(this.p());
+    }
+
+    unsetSelectedSourceData() {
+        this.p().sourceDataInspector = [];
+        this.parameters.next(this.p());
+    }
+
+    getSelectedSourceData() {
+        const sd = this.p().sourceDataInspector;
+
+        return {
+            tileId: sd[0],
+            layerId: sd[0],
+            mapId: sd[0],
+            address: sd[0],
+        };
     }
 
     setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
