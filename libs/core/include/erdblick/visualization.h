@@ -80,7 +80,8 @@ public:
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
-        NativeJsValue const& optionValues,
+        NativeJsValue const& rawoptionValues,
+        NativeJsValue const& rawFeatureMergeService,
         std::string highlightFeatureIndex = "");
 
     /**
@@ -231,6 +232,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumPrimitiveLabelsCollection labelCollection_;
+    JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;

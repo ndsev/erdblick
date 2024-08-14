@@ -21,6 +21,7 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
+    NativeJsValue const& rawFeatureMergeService,
     std::string highlightFeatureId)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),

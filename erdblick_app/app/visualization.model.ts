@@ -10,6 +10,7 @@ import {
     HeightReference
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
+import {PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
@@ -98,10 +99,12 @@ export class TileVisualization {
     private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
     private readonly options: Record<string, string>;
+    private readonly pointMergeService: PointMergeService;
 
     /**
      * Create a tile visualization.
      * @param tile {FeatureTile} The tile to visualize.
+     * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
      *  for relation visualization.
      * @param style The style to use for visualization.
@@ -115,7 +118,16 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight: string = "", boxGrid?: boolean, options?: Record<string, string>) {
+    constructor(
+        tile: FeatureTile,
+        pointMergeService: PointMergeService,
+        auxTileFun: (key: string) => FeatureTile | null,
+        style: FeatureLayerStyle,
+        highDetail: boolean,
+        highlight: string = "",
+        boxGrid?: boolean,
+        options?: Record<string, string>)
+    {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
@@ -125,6 +137,7 @@ export class TileVisualization {
         this.auxTileFun = auxTileFun;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
+        this.pointMergeService = pointMergeService;
     }
 
     /**
@@ -153,6 +166,7 @@ export class TileVisualization {
                 let visualization = new coreLib.FeatureLayerVisualization(
                     this.style,
                     this.options,
+                    this.pointMergeService,
                     this.highlight!);
                 visualization.addTileFeatureLayer(tileFeatureLayer);
                 try {

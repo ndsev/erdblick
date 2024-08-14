@@ -27,7 +27,7 @@ interface MergedPointVisualization {
  * Note: A MergedPointsTile is always unique for its NW corner tile ID and its Map-Layer-Style-Rule ID.
  */
 export class MergedPointsTile {
-    quadId: string = ""  // NE-NW-SE-SW tile IDs
+    tileId: bigint = 0n;  // NW tile ID
     mapLayerStyleRuleId: MapLayerStyleRule = "";
 
     missingTiles: Array<bigint> = [];
@@ -37,6 +37,20 @@ export class MergedPointsTile {
     labelPrimitives: LabelCollection|null = null;
 
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
+
+    add(point: MergedPointVisualization) {
+        let existingPoint = this.features.get(point.positionHash);
+        if (!existingPoint) {
+            this.features.set(point.positionHash, point);
+        }
+        else {
+            for (let fid in point.featureIds) {
+                existingPoint.featureIds.push(fid);
+            }
+            existingPoint.pointParameters = point.pointParameters;
+            existingPoint.labelParameters = point.labelParameters;
+        }
+    }
 
     count(positionHash: PositionHash) {
         return this.features.has(positionHash) ? this.features.get(positionHash)!.featureIds.length : 0;
@@ -85,11 +99,12 @@ export class MergedPointsTile {
 @Injectable({providedIn: 'root'})
 export class PointMergeService
 {
-    mergedPointsTiles: Map<MapLayerStyleRule, Map<number, MergedPointsTile>> = new Map<MapLayerStyleRule, Map<number, MergedPointsTile>>();
+    mergedPointsTiles: Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>>();
 
     /**
      * Check if the corner tile at geoPos is interested in contributions from `tileId`.
-     * Returns true if respective corner has sourceTileId in is in missingTiles.
+     * Returns true if respective corner has sourceTileId in its in missingTiles.
+     * __Note: This is called from WASM.__
      */
     wants(geoPos: Cartographic, sourceTileId: bigint, mapLayerStyleRuleId: MapLayerStyleRule): boolean {
         return this.get(geoPos, coreLib.getTileLevel(sourceTileId), mapLayerStyleRuleId).missingTiles.findIndex(v => v == sourceTileId) != -1;
@@ -108,8 +123,40 @@ export class PointMergeService
      * is north if the tile center, the tile IDs y component is decremented (unless it is already 0).
      * If the position is west of the tile center, the tile IDs x component is decremented (unless it is already 0).
      */
-    get(geoPos: Cartographic, level: number, mapLayerStyleRuleId: string): MergedPointsTile {
-        // TODO
+    get(geoPos: Cartographic, level: number, mapLayerStyleRuleId: MapLayerStyleRule): MergedPointsTile {
+        // Calculate the correct corner tile ID.
+        let tileId = coreLib.getTileIdFromPosition(geoPos.x, geoPos.y, level);
+        let tilePos = coreLib.getTilePosition(tileId);
+        let offsetX = 0;
+        let offsetY = 0;
+        if (geoPos.x < tilePos.x)
+            offsetX = -1;
+        if (geoPos.y > tilePos.y)
+            offsetY = -1;
+        tileId = coreLib.getTileNeighbor(tileId, offsetX, offsetY);
+
+        // Get or create the tile-map for the mapLayerStyleRuleId.
+        let styleRuleMap = this.mergedPointsTiles.get(mapLayerStyleRuleId);
+        if (!styleRuleMap) {
+            styleRuleMap = new Map<bigint, MergedPointsTile>();
+            this.mergedPointsTiles.set(mapLayerStyleRuleId, styleRuleMap);
+        }
+
+        // Get or create the entry for the tile in the map.
+        let result = styleRuleMap.get(tileId);
+        if (!result) {
+            result = new MergedPointsTile();
+            result.tileId = tileId;
+            result.mapLayerStyleRuleId = mapLayerStyleRuleId;
+            result.missingTiles = [
+                tileId,
+                coreLib.getTileNeighbor(tileId, 1, 0),
+                coreLib.getTileNeighbor(tileId, 0, 1),
+                coreLib.getTileNeighbor(tileId, 1, 1),
+            ]
+            styleRuleMap.set(tileId, result);
+        }
+        return result;
     }
 
     /**
@@ -118,8 +165,42 @@ export class PointMergeService
      * the missingTiles of each. MergedPointsTiles with empty referencingTiles (requiring render)
      * are yielded. The sourceTileId is also added to the MergedPointsTiles referencingTiles set.
      */
-    *insert(points: Array<MergedPointVisualization>, sourceTileId: number, mapLayerStyleRuleId: MapLayerStyleRule): Iterator<MergedPointsTile> {
-        // TODO
+    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, mapLayerStyleRuleId: MapLayerStyleRule): Iterator<MergedPointsTile> {
+        // Insert the points into the relevant corner tiles.
+        let level = coreLib.getTileLevel(sourceTileId);
+        for (let point of points) {
+            let mergedPointsTile = this.get(point.position, level, mapLayerStyleRuleId);
+            mergedPointsTile.add(point);
+        }
+
+        // Remove the sourceTileId from the corner tile IDs.
+        let cornerTileIds = [
+            sourceTileId,
+            coreLib.getTileNeighbor(sourceTileId, -1, 0),
+            coreLib.getTileNeighbor(sourceTileId, 0, -1),
+            coreLib.getTileNeighbor(sourceTileId, -1, -1),
+        ];
+        let styleRuleMap = this.mergedPointsTiles.get(mapLayerStyleRuleId)!;
+        for (let cornerTileId of cornerTileIds) {
+            let cornerTile = styleRuleMap.get(cornerTileId);
+            if (cornerTile) {
+                let newMissingTiles = cornerTile.missingTiles.filter(val => val != sourceTileId);
+
+                // Add the source tile ID to the referencing tiles,
+                // if it was removed from the missing tiles. This can only happen once.
+                // This way, we are prepared for the idea that a style sheet might
+                // re-insert some data.
+                if (newMissingTiles.length != cornerTile.missingTiles.length) {
+                    cornerTile.referencingTiles.push(sourceTileId);
+                    cornerTile.missingTiles = newMissingTiles;
+                }
+
+                // Yield the corner tile as to-be-rendered, if it does not have any missing tiles.
+                if (!cornerTile.missingTiles.length) {
+                    yield cornerTile;
+                }
+            }
+        }
     }
 
     /**
@@ -127,7 +208,18 @@ export class PointMergeService
      * prefix-match with the mapLayerStyleId. Yields MergedPointsTiles which now have empty referencingTiles,
      * and whose visualization (if existing) must therefore be removed from the scene.
      */
-    *remove(sourceTileId: number, mapLayerStyleId: string): Iterator<MergedPointsTile> {
-        // TODO
+    *remove(sourceTileId: bigint, mapLayerStyleId: string): Iterator<MergedPointsTile> {
+        for (let [mapLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
+            if (mapLayerStyleRuleId.startsWith(mapLayerStyleId)) {
+                for (let [tileId, tile] of tiles) {
+                    // Yield the corner tile as to-be-rendered, if it does not have any referencing tiles.
+                    tile.referencingTiles = tile.referencingTiles.filter(val => val == sourceTileId);
+                    if (!tile.referencingTiles.length) {
+                        yield tile;
+                        tiles.delete(tileId);
+                    }
+                }
+            }
+        }
     }
 }
