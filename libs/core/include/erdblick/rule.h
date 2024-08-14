@@ -58,6 +58,7 @@ public:
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
     [[nodiscard]] glm::dvec3 const& offset() const;
+    [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
@@ -119,6 +120,7 @@ private:
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
     glm::dvec3 offset_{.0, .0, .0};
+    std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";

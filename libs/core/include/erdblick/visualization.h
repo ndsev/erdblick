@@ -80,7 +80,7 @@ public:
      */
      FeatureLayerVisualization(
         const FeatureLayerStyle& style,
-        NativeJsValue const& rawoptionValues,
+        NativeJsValue const& rawOptionValues,
         NativeJsValue const& rawFeatureMergeService,
         std::string highlightFeatureIndex = "");
 
