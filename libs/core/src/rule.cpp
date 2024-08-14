@@ -12,13 +12,13 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     if (arrowStr == "none") {
         return FeatureStyleRule::NoArrow;
     }
-    else if (arrowStr == "forward") {
+    if (arrowStr == "forward") {
         return FeatureStyleRule::ForwardArrow;
     }
-    else if (arrowStr == "backward") {
+    if (arrowStr == "backward") {
         return FeatureStyleRule::BackwardArrow;
     }
-    else if (arrowStr == "double") {
+    if (arrowStr == "double") {
         return FeatureStyleRule::DoubleArrow;
     }
 
@@ -30,13 +30,13 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
         return mapget::GeomType::Points;
     }
-    else if (enumStr == "mesh") {
+    if (enumStr == "mesh") {
         return mapget::GeomType::Mesh;
     }
-    else if (enumStr == "line") {
+    if (enumStr == "line") {
         return mapget::GeomType::Line;
     }
-    else if (enumStr == "polygon") {
+    if (enumStr == "polygon") {
         return mapget::GeomType::Polygon;
     }
 
@@ -167,6 +167,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offset_.x = yaml["offset"][0].as<double>();
         offset_.y = yaml["offset"][1].as<double>();
         offset_.z = yaml["offset"][2].as<double>();
+    }
+    if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
+        pointMergeGridCellSize_ = glm::dvec3();
+        pointMergeGridCellSize_->x = yaml["point-merge-grid-cell"][0].as<double>();
+        pointMergeGridCellSize_->y = yaml["point-merge-grid-cell"][1].as<double>();
+        pointMergeGridCellSize_->z = yaml["point-merge-grid-cell"][2].as<double>();
     }
 
     /////////////////////////////////////
@@ -648,6 +654,11 @@ std::optional<std::array<float, 4>> const& FeatureStyleRule::offsetScaleByDistan
 glm::dvec3 const& FeatureStyleRule::offset() const
 {
     return offset_;
+}
+
+std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const
+{
+    return pointMergeGridCellSize_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const

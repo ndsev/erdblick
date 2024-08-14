@@ -30,7 +30,8 @@ FeatureLayerVisualization::FeatureLayerVisualization(
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
       style_(style),
       highlightFeatureId_(std::move(highlightFeatureId)),
-      externalRelationReferences_(JsValue::List())
+      externalRelationReferences_(JsValue::List()),
+      featureMergeService_(rawFeatureMergeService)
 {
     // Convert option values dict to simfil values.
     auto optionValues = JsValue(rawOptionValues);
