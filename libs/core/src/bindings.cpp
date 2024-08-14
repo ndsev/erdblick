@@ -219,7 +219,6 @@ em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
         auto data = em::val::object();
         data.set("key", std::move(key));
         data.set("value", std::move(value));
-
         res.set("data", std::move(data));
 
         return res;
@@ -245,15 +244,15 @@ em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
     };
 
     auto visitAddress = [&](const SourceDataAddress& addr) {
-        //if (layer.sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
+        if (layer.sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
             auto res = em::val::object();
             res.set("offset", addr.bitOffset());
             res.set("size", addr.bitSize());
 
             return res;
-        //}
-
-        //return em::val(addr.u64());
+        } else {
+            return em::val(addr.u64());
+        }
     };
 
     auto visitObject = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {

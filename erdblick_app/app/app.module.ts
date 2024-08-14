@@ -27,9 +27,11 @@ import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./style.service";
+import {FeatureSearchComponent} from "./feature.search.component";
 import {MapPanelComponent} from "./map.panel.component";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionPanelComponent} from "./inspection.panel.component";
+import {FeaturePanelComponent} from "./feature.panel.component";
+import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionService} from "./inspection.service";
 import {ParametersService} from "./parameters.service";
 import {PreferencesComponent} from "./preferences.component";
@@ -44,12 +46,17 @@ import {SidePanelService} from "./sidepanel.service";
 import {MenuModule} from "primeng/menu";
 import {CardModule} from "primeng/card";
 import {CoordinatesService} from "./coordinates.service";
-import {FeatureSearchComponent} from "./feature.search.component";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {ListboxModule} from "primeng/listbox";
 import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
+import {ButtonGroupModule} from "primeng/buttongroup";
+import {TabViewModule} from "primeng/tabview";
+import {BreadcrumbModule} from "primeng/breadcrumb";
+import {TableModule} from "primeng/table";
+import {HighlightSearch} from "./highlight.pipe";
+import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {InputTextareaModule} from "primeng/inputtextarea";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
@@ -67,6 +74,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         SearchPanelComponent,
         MapPanelComponent,
         InspectionPanelComponent,
+        FeaturePanelComponent,
         SourceDataPanelComponent,
         PreferencesComponent,
         EditorComponent,
@@ -74,6 +82,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         AlertDialogComponent
+        HighlightSearch,
+        TreeTableFilterPatchDirective
     ],
     imports: [
         BrowserModule,
@@ -105,6 +115,10 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ListboxModule,
         MultiSelectModule,
         InputTextareaModule
+        ButtonGroupModule,
+        TabViewModule,
+        BreadcrumbModule,
+        TableModule
     ],
     providers: [
         {

@@ -1,12 +1,13 @@
-import { EventEmitter, Injectable} from "@angular/core";
+import {Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged, filter} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, filter, ReplaySubject} from "rxjs";
 import {MapService} from "./map.service";
-import {Feature} from "../../build/libs/core/erdblick-core";
+import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
-import {coreLib} from "./wasm";
+import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
+import {Fetch} from "./fetch.model";
 
 
 interface InspectionModelData {
@@ -20,11 +21,11 @@ interface InspectionModelData {
     children: Array<InspectionModelData>;
 }
 
-interface ShowSourceDataEvent {
+export interface SelectedSourceData {
     mapId: string,
     tileId: number,
     layerId: string,
-    address: number,
+    address: bigint,
 }
 
 @Injectable({providedIn: 'root'})
@@ -38,7 +39,7 @@ export class InspectionService {
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
     selectedFeature: FeatureWrapper | null = null;
-    showSourceDataEvent = new EventEmitter<ShowSourceDataEvent>();
+    sourceData: ReplaySubject<SelectedSourceData> = new ReplaySubject<SelectedSourceData>();
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,
@@ -151,6 +152,49 @@ export class InspectionService {
         } else {
             this.featureTree.next('[]');
         }
+    }
+
+    async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
+        console.log(`Loading SourceDataLayer layerId=${layerId} tileId=${tileId}`);
+
+        let requests = [{
+            mapId: mapId,
+            layerId: layerId,
+            tileIds: [tileId]
+        }];
+
+        let tileParser = new coreLib.TileLayerParser();
+
+        let newRequestBody = JSON.stringify({
+            requests: requests
+        });
+
+        let layer: TileSourceDataLayer | undefined;
+        let fetch = new Fetch("/tiles")
+            .withChunkProcessing()
+            .withMethod("POST")
+            .withBody(newRequestBody)
+            .withBufferCallback((message: any, messageType: any) => {
+                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        tileParser!.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                    layer = uint8ArrayToWasm((wasmBlob: any) => {
+                        return tileParser.readTileSourceDataLayer(wasmBlob);
+                    }, blob);
+                } else {
+                    throw new Error(`Unknown message type ${messageType}.`)
+                }
+            });
+
+        return fetch.go()
+            .then(_ => {
+                if (!layer)
+                    throw new Error(`Error loading layer.`);
+                return layer;
+            });
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
