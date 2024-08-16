@@ -45,9 +45,7 @@ import {TreeTable} from "primeng/treetable";
 
                     <ng-template pTemplate="header">
                         <tr>
-                            <th *ngFor="let col of columns"
-                                [ngStyle]="{width: col.width ? col.width + 'px' : 'auto'}"
-                            >
+                            <th *ngFor="let col of columns">
                                 {{ col.header }}
                             </th>
                         </tr>
@@ -55,9 +53,7 @@ import {TreeTable} from "primeng/treetable";
 
                     <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                         <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
-                            <td *ngFor="let col of columns; let i = index"
-                                [ngStyle]="{width: col.width ? col.width + 'px' : 'auto'}"
-                            >
+                            <td *ngFor="let col of columns; let i = index">
                                 <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
                                 <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
                                 <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>
@@ -182,22 +178,23 @@ export class SourceDataPanelComponent implements OnInit {
 
     selectItemWithAddress(address: bigint) {
         let searchAddress: any = address;
+        let addressInRange: any;
         if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
             searchAddress = {
                 offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
                 size: address & BigInt(0xFFFFFFFF),
             }
-        }
 
-        console.log(`Highlighting item with address`, searchAddress);
-        const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
-        const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
+            const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
+            const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
 
-        let addressInRange = (addr: any) => {
-            if (typeof addr === 'object') {
+            addressInRange = (addr: any) => {
                 return addr.offset >= addressLow && addr.offset + addr.size <= addressHigh;
             }
-            return addr == searchAddress
+        } else {
+            addressInRange = (addr: any) => {
+                return addr == searchAddress;
+            }
         }
 
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
@@ -230,6 +227,7 @@ export class SourceDataPanelComponent implements OnInit {
             }
         };
 
+        console.log(`Highlighting item with address`, searchAddress);
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
@@ -251,6 +249,4 @@ export class SourceDataPanelComponent implements OnInit {
             this.clearFilter();
         }
     }
-
-    protected readonly HTMLInputElement = HTMLInputElement;
 }

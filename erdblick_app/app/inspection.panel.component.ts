@@ -35,7 +35,23 @@ interface InspectorTab {
                 </ng-template>
             </p-accordionTab>
         </p-accordion>
-    `
+    `,
+    styles: [
+        `@layer erdblick {
+            .inspector-title {
+                display: flex;
+                gap: 4px;
+                justify-content: center;
+                align-items: center;
+
+                .p-button {
+                    width: 30px;
+                    height: 30px;
+                    margin: 0;
+                }
+            }
+        }`,
+    ]
 })
 export class InspectionPanelComponent implements OnInit
 {
