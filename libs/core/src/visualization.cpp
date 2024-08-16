@@ -22,16 +22,17 @@ FeatureLayerVisualization::FeatureLayerVisualization(
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
     NativeJsValue const& rawFeatureMergeService,
-    std::string highlightFeatureId)
+    FeatureStyleRule::HighlightMode const& highlightMode,
+    NativeJsValue const& rawFeatureIdSubset)
     : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
+      featureMergeService_(rawFeatureMergeService),
       style_(style),
-      highlightFeatureId_(std::move(highlightFeatureId)),
-      externalRelationReferences_(JsValue::List()),
-      featureMergeService_(rawFeatureMergeService)
+      highlightMode_(highlightMode),
+      externalRelationReferences_(JsValue::List())
 {
     // Convert option values dict to simfil values.
     auto optionValues = JsValue(rawOptionValues);
@@ -45,6 +46,12 @@ FeatureLayerVisualization::FeatureLayerVisualization(
             simfilValue = simfil::Value::make(v);
         });
         optionValues_.emplace(option.id_, std::move(simfilValue));
+    }
+
+    // Convert feature ID subset.
+    auto featureIdSubset = JsValue(rawFeatureIdSubset);
+    for (auto i = 0; i < featureIdSubset.size(); ++i) {
+        featureIdSubset_.insert(featureIdSubset.at(i).as<std::string>());
     }
 }
 
@@ -67,30 +74,22 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 
 void FeatureLayerVisualization::run()
 {
-    uint32_t featureId = 0;
-
     for (auto&& feature : *tile_) {
-        if (!highlightFeatureId_.empty()) {
-            if (feature->id()->toString() != highlightFeatureId_) {
-                ++featureId;
+        if (!featureIdSubset_.empty()) {
+            if (featureIdSubset_.find(feature->id()->toString()) == featureIdSubset_.end()) {
                 continue;
             }
         }
 
         for (auto&& rule : style_.rules()) {
-            if (!highlightFeatureId_.empty()) {
-                if (rule.mode() != FeatureStyleRule::Highlight)
-                    continue;
-            }
-            else if (rule.mode() != FeatureStyleRule::Normal)
+            if (rule.mode() != highlightMode_)
                 continue;
 
             if (auto* matchingSubRule = rule.match(*feature)) {
-                addFeature(feature, featureId, *matchingSubRule);
+                addFeature(feature, *matchingSubRule);
                 featuresAdded_ = true;
             }
         }
-        ++featureId;
     }
 }
 
@@ -189,9 +188,9 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
 
 void FeatureLayerVisualization::addFeature(
     model_ptr<Feature>& feature,
-    uint32_t id,
     FeatureStyleRule const& rule)
 {
+    auto id = feature->id()->toString();
     auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
 
     switch(rule.aspect()) {
@@ -249,7 +248,7 @@ void FeatureLayerVisualization::addFeature(
 
 void FeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
-    uint32_t id,
+    std::string_view id,
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     glm::dvec3 const& offset)
@@ -400,7 +399,7 @@ CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
 void erdblick::FeatureLayerVisualization::addLine(
     const Point& wgsA,
     const Point& wgsB,
-    uint32_t id,
+    std::string_view const& id,
     const erdblick::FeatureStyleRule& rule,
     BoundEvalFun const& evalFun,
     glm::dvec3 const& offset,
@@ -431,7 +430,7 @@ void erdblick::FeatureLayerVisualization::addLine(
 void FeatureLayerVisualization::addPolyLine(
     std::vector<mapget::Point> const& vertsCartesian,
     const FeatureStyleRule& rule,
-    uint32_t id,
+    std::string_view const& id,
     BoundEvalFun const& evalFun)
 {
     if (vertsCartesian.size() < 2)
@@ -490,7 +489,7 @@ void FeatureLayerVisualization::addAttribute(
     model_ptr<Feature> const& feature,
     std::string_view const& layer,
     model_ptr<Attribute> const& attr,
-    uint32_t id,
+    std::string_view const& id,
     const FeatureStyleRule& rule,
     uint32_t& offsetFactor,
     glm::dvec3 const& offset)

@@ -129,7 +129,7 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightFeature(mapId: string, featureId: string) {
+    async selectFeature(mapId: string, featureId: string) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {

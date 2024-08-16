@@ -133,25 +133,31 @@ export class FeatureTile {
     level() {
         return Number(this.tileId & BigInt(0xffff));
     }
+
+    has(featureId: string) {
+        return this.peek((tileFeatureLayer: TileFeatureLayer) => {
+            return tileFeatureLayer.find(featureId) !== null;
+        });
+    }
 }
 
 /**
- * Wrapper which combines a FeatureTile and the index of
- * a feature within the tileset. Using the peek-function, it is
- * possible to access the WASM feature view in a memory-safe way.
+ * Wrapper which combines a FeatureTile and feature id.
+ * Using the peek-function, it is possible to access the
+ * WASM feature view in a memory-safe way.
  */
 export class FeatureWrapper {
-    public readonly index: number;
+    public readonly featureId: string;
     public featureTile: FeatureTile;
 
     /**
      * Construct a feature wrapper from a featureTile and a feature index
      * within that tile.
-     * @param index The index of the feature within the tile.
+     * @param featureId The feature-id of the feature.
      * @param featureTile {FeatureTile} The feature tile container.
      */
-    constructor(index: number, featureTile: FeatureTile) {
-        this.index = index;
+    constructor(featureId: string, featureTile: FeatureTile) {
+        this.featureId = featureId;
         this.featureTile = featureTile;
     }
 
@@ -165,7 +171,10 @@ export class FeatureWrapper {
             throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
         }
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
-            let feature = tileFeatureLayer.at(this.index);
+            let feature = tileFeatureLayer.find(this.featureId);
+            if (feature.isNull()) {
+                return null;
+            }
             let result = null;
             if (callback) {
                 result = callback(feature);
@@ -179,6 +188,6 @@ export class FeatureWrapper {
         if (!other) {
             return false;
         }
-        return this.featureTile.id == other.featureTile.id && this.index == other.index;
+        return this.featureTile.id == other.featureTile.id && this.featureId == other.featureId;
     }
 }

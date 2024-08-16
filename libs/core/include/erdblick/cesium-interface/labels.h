@@ -18,7 +18,7 @@ struct CesiumPrimitiveLabelsCollection {
         JsValue const &position,
         const std::string& labelText,
         FeatureStyleRule const &style,
-        uint32_t id,
+        std::string_view const& id,
         BoundEvalFun const& evalFun);
 
     /**

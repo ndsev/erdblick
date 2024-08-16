@@ -9,7 +9,7 @@ import {
     CallbackProperty,
     HeightReference
 } from "./cesium";
-import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
 import {PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
@@ -95,7 +95,8 @@ export class TileVisualization {
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
-    private readonly highlight: string;
+    private readonly highlightMode: HighlightMode;
+    private readonly featureIdSubset: string[];
     private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
     private readonly options: Record<string, string>;
@@ -103,7 +104,7 @@ export class TileVisualization {
 
     /**
      * Create a tile visualization.
-     * @param tile {FeatureTile} The tile to visualize.
+     * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
      *  for relation visualization.
@@ -112,9 +113,10 @@ export class TileVisualization {
      *  a low-detail representation is indicated by `false`, and
      *  will result in a dot representation. A high-detail representation
      *  based on the style can be triggered using `true`.
-     * @param highlight Controls whether the visualization will run rules that
-     *  have `mode: highlight` set, otherwise, only rules with the default
-     *  `mode: normal` are executed.
+     * @param highlightMode Controls whether the visualization will run rules that
+     *  have a specific highlight mode.
+     * @param featureIdSubset Subset of feature IDs for visualization. If not set,
+     *  all features in the tile will be visualized.
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
@@ -124,7 +126,8 @@ export class TileVisualization {
         auxTileFun: (key: string) => FeatureTile | null,
         style: FeatureLayerStyle,
         highDetail: boolean,
-        highlight: string = "",
+        highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+        featureIdSubset?: string[],
         boxGrid?: boolean,
         options?: Record<string, string>)
     {
@@ -132,7 +135,8 @@ export class TileVisualization {
         this.style = style as StyleWithIsDeleted;
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
-        this.highlight = highlight;
+        this.highlightMode = highlightMode;
+        this.featureIdSubset = featureIdSubset || [];
         this.deleted = false;
         this.auxTileFun = auxTileFun;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
@@ -167,7 +171,8 @@ export class TileVisualization {
                     this.style,
                     this.options,
                     this.pointMergeService,
-                    this.highlight!);
+                    this.highlightMode,
+                    this.featureIdSubset);
                 visualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
                     visualization.run();

@@ -28,9 +28,10 @@ public:
         Attribute
     };
 
-    enum Mode {
-        Normal,
-        Highlight
+    enum HighlightMode {
+        NoHighlight,
+        HoverHighlight,
+        SelectionHighlight
     };
 
     enum Arrow {
@@ -42,7 +43,7 @@ public:
 
     FeatureStyleRule const* match(mapget::Feature& feature) const;
     [[nodiscard]] Aspect aspect() const;
-    [[nodiscard]] Mode mode() const;
+    [[nodiscard]] HighlightMode mode() const;
     [[nodiscard]] bool selectable() const;
     [[nodiscard]] bool supports(mapget::GeomType const& g) const;
 
@@ -101,7 +102,7 @@ private:
     }
 
     Aspect aspect_ = Feature;
-    Mode mode_ = Normal;
+    HighlightMode mode_ = NoHighlight;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::regex> type_;

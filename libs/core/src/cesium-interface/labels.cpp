@@ -13,7 +13,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
         JsValue const &position,
         const std::string &labelText,
         FeatureStyleRule const &style,
-        uint32_t id,
+        std::string_view const& id,
         BoundEvalFun const& evalFun) {
     auto const &color = style.labelColor();
     auto const &outlineColor = style.labelOutlineColor();

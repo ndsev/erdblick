@@ -100,11 +100,14 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["mode"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto modeStr = yaml["mode"].as<std::string>();
-        if (modeStr == "normal") {
-            mode_ = Normal;
+        if (modeStr == "none") {
+            mode_ = NoHighlight;
         }
-        else if (modeStr == "highlight") {
-            mode_ = Highlight;
+        else if (modeStr == "hover") {
+            mode_ = HoverHighlight;
+        }
+        else if (modeStr == "selection") {
+            mode_ = SelectionHighlight;
         }
         else {
             std::cout << "Unsupported mode: " << modeStr << std::endl;
@@ -532,7 +535,7 @@ bool FeatureStyleRule::selectable() const
     return selectable_;
 }
 
-FeatureStyleRule::Mode FeatureStyleRule::mode() const
+FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
 {
     return mode_;
 }

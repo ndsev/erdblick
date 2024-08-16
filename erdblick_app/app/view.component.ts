@@ -47,10 +47,7 @@ declare let window: DebugWindow;
 })
 export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;
-    private hoveredFeature: any = null;
-    private hoveredFeatureOrigColor: Color | null = null;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
-    private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
 
@@ -70,26 +67,15 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public jumpService: JumpTargetService,
                 public coordinatesService: CoordinatesService) {
 
-        this.tileVisForPrimitive = new Map();
-
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
                 if (wasRendered) {
-                    tileVis.forEachPrimitive((primitive: any) => {
-                        this.tileVisForPrimitive.set(primitive, tileVis);
-                    })
                     this.viewer.scene.requestRender();
                 }
             });
         });
 
         this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-            if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
-                this.setHoveredCesiumFeature(null);
-            }
-            tileVis.forEachPrimitive((primitive: any) => {
-                this.tileVisForPrimitive.delete(primitive);
-            })
             tileVis.destroy(this.viewer);
             this.viewer.scene.requestRender();
         });
@@ -221,40 +207,30 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    /**
-     * Check if two cesium features are equal. A cesium feature is a
-     * combination of a feature id and a primitive which contains it.
-     */
-    private cesiumFeaturesAreEqual(f1: any, f2: any) {
-        return (!f1 && !f2) || (f1 && f2 && f1.id === f2.id && f1.primitive === f1.primitive);
-    }
-
     /** Check if the given feature is known and can be selected. */
     isKnownCesiumFeature(f: any) {
-        return f && f.id !== undefined && f.primitive !== undefined && (
-            this.tileVisForPrimitive.has(f.primitive) ||
-            this.tileVisForPrimitive.has(f.primitive._pointPrimitiveCollection))
+        return f && f.id !== undefined && f.id.hasOwnProperty("type")
     }
 
     /**
      * Set or re-set the hovered feature.
      */
     private setHoveredCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
+        // Get the actual mapget feature for the picked Cesium feature.
+        let resolvedFeature = feature ? this.mapService.resolveFeature(feature.id) : null;
+        if (!resolvedFeature) {
+            this.mapService.hoverTopic.next([]);
             return;
         }
-        // Restore the previously hovered feature to its original color.
-        if (this.hoveredFeature && this.hoveredFeatureOrigColor) {
-            this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
+
+        if (this.mapService.selectionTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+            return;
         }
-        this.hoveredFeature = null;
-        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
-        if (resolvedFeature && !resolvedFeature?.equals(this.mapService.selectionTopic.getValue())) {
-            // Highlight the new hovered feature and remember its original color.
-            this.hoveredFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Color.YELLOW);
-            this.hoveredFeature = feature;
+        if (this.mapService.hoverTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+            return;
         }
+
+        this.mapService.hoverTopic.next([resolvedFeature]);
     }
 
     /**
@@ -262,67 +238,20 @@ export class ErdblickViewComponent implements AfterViewInit {
      */
     private setPickedCesiumFeature(feature: any) {
         // Get the actual mapget feature for the picked Cesium feature.
-        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
+        let resolvedFeature = feature ? this.mapService.resolveFeature(feature.id) : null;
         if (!resolvedFeature) {
-            this.mapService.selectionTopic.next(null);
+            this.mapService.selectionTopic.next([]);
             return;
         }
 
-        if (resolvedFeature.equals(this.mapService.selectionTopic.getValue())) {
+        if (this.mapService.selectionTopic.getValue().some(f => resolvedFeature!.equals(f))) {
             return;
         }
-
-        // Make sure that if the hovered feature is picked, we don't
-        // remember the hover color as the original color.
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
+        if (this.mapService.hoverTopic.getValue().some(f => resolvedFeature!.equals(f))) {
             this.setHoveredCesiumFeature(null);
         }
-        this.mapService.selectionTopic.next(resolvedFeature);
-    }
 
-    /** Set the color of a cesium feature through its associated primitive. */
-    private setFeatureColor(feature: any, color: Color) {
-        if (feature.primitive.color !== undefined) {
-            // Special treatment for point primitives.
-            feature.primitive.color = color;
-            this.viewer.scene.requestRender();
-            return;
-        }
-        if (feature.primitive.isDestroyed()) {
-            return;
-        }
-        const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        attributes.color = ColorGeometryInstanceAttribute.toValue(color);
-        this.viewer.scene.requestRender();
-    }
-
-    /** Read the color of a cesium feature through its associated primitive. */
-    private getFeatureColor(feature: any): Color | null {
-        if (feature.primitive.color !== undefined) {
-            // Special treatment for point primitives.
-            return feature.primitive.color.clone();
-        }
-        if (feature.primitive.isDestroyed()) {
-            return null;
-        }
-        const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        if (attributes.color === undefined) {
-            return null;
-        }
-        return Color.fromBytes(...attributes.color);
-    }
-
-    /** Get a mapget feature from a cesium feature. */
-    private resolveFeature(primitive: any, index: number) {
-        let tileVis = this.tileVisForPrimitive.get(primitive);
-        if (!tileVis) {
-            tileVis = this.tileVisForPrimitive.get(primitive._pointPrimitiveCollection);
-            if (!tileVis) {
-                console.error("Failed find tileLayer for primitive!");
-                return null;
-            }
-        }
-        return new FeatureWrapper(index, tileVis.tile);
+        this.mapService.selectionTopic.next([resolvedFeature]);
     }
 
     /**
