@@ -81,9 +81,9 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ErdblickViewComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
-        AlertDialogComponent
+        AlertDialogComponent,
         HighlightSearch,
-        TreeTableFilterPatchDirective
+        TreeTableFilterPatchDirective,
     ],
     imports: [
         BrowserModule,
@@ -114,18 +114,18 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ColorPickerModule,
         ListboxModule,
         MultiSelectModule,
-        InputTextareaModule
+        InputTextareaModule,
         ButtonGroupModule,
         TabViewModule,
         BreadcrumbModule,
-        TableModule
+        TableModule,
     ],
     providers: [
         {
             provide: APP_INITIALIZER,
             useFactory: initializeServices,
             deps: [StyleService, MapService, CoordinatesService],
-            multi: true
+            multi: true,
         },
         MapService,
         MessageService,
@@ -135,7 +135,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ParametersService,
         SidePanelService,
         FeatureSearchService,
-        ClipboardService
+        ClipboardService,
     ],
     bootstrap: [AppComponent]
 })

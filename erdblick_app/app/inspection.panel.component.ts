@@ -92,9 +92,9 @@ export class InspectionPanelComponent implements OnInit
             title: "",
             icon: "pi-sitemap",
             component: FeaturePanelComponent,
-            onClose: () => {
-                this.inspectionService.featureTree.next("");
-            },
+            //onClose: () => {
+            //    this.inspectionService.featureTree.next("");
+            //},
         }
 
         this.tabs = [...this.tabs, tab];
@@ -109,9 +109,9 @@ export class InspectionPanelComponent implements OnInit
             inputs: {
                 sourceData: data
             },
-            onClose: () => {
-                this.inspectionService.selectedSourceData.next(null);
-            },
+            //onClose: () => {
+                //this.inspectionService.selectedSourceData.next(null);
+            //},
         }
 
         this.tabs = [...this.tabs, tab];
@@ -128,8 +128,8 @@ export class InspectionPanelComponent implements OnInit
         event.stopPropagation();
         if (this.activeIndex > 0) {
             const onClose = this.tabs[this.activeIndex]['onClose'];
-            if (onClose)
-                onClose();
+            //if (onClose)
+            //    onClose();
             this.activeIndex = this.activeIndex - 1;
         }
     }

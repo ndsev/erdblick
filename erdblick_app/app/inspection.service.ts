@@ -79,7 +79,7 @@ export class InspectionService {
                         }
                     }
 
-                    this.selectedSourceData.next(this.parametersService.getSelectedSourceData());
+                    //this.selectedSourceData.next(this.parametersService.getSelectedSourceData());
                 }
             } finally {
                 isNotifyingParametersChange = false;
@@ -91,10 +91,10 @@ export class InspectionService {
                 if (isNotifyingParametersChange)
                     return;
                 isNotifyingParametersChange = true;
-                if (selection)
-                    this.parametersService.setSelectedSourceData(selection);
-                else
-                    this.parametersService.unsetSelectedSourceData();
+                //if (selection)
+                //    this.parametersService.setSelectedSourceData(selection);
+                //else
+                //    this.parametersService.unsetSelectedSourceData();
             } finally {
                 isNotifyingParametersChange = false;
             }

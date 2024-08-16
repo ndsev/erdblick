@@ -551,7 +551,7 @@ void FeatureLayerVisualization::addAttribute(
 void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& context)
 {
     for (auto const& [key, value] : optionValues_) {
-        context.set(internalFieldsDictCopy_->emplace(key), value);
+        context.set(internalStringPoolCopy_->emplace(key), value);
     }
 }
 
