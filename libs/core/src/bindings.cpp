@@ -283,6 +283,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
     em::class_<FeaturePtr>("Feature")
         .function(
+            "isNull",
+            std::function<bool(FeaturePtr& self)>(
+                [](FeaturePtr& self) { return !self; }))
+        .function(
             "id",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) { return self->id()->toString(); }))
@@ -350,15 +354,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     return result;
                 }))
         .function(
-            "at",
+            "find",
             std::function<
-                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, int i)>(
-                [](mapget::TileFeatureLayer const& self, int i)
+                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, std::string const& id)>(
+                [](mapget::TileFeatureLayer const& self, std::string const& id)
                 {
-                    if (i < 0 || i >= self.numRoots()) {
-                        mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
-                    }
-                    return self.at(i);
+                    return self.find(id);
                 }))
         .function(
             "findFeatureIndex",
@@ -374,9 +375,15 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 }));
     em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
+    ////////// Highlight Modes
+    em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")
+        .value("NO_HIGHLIGHT", FeatureStyleRule::NoHighlight)
+        .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
+        .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
+
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, em::val, std::string>()
+        .constructor<FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)

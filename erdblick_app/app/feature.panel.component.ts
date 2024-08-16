@@ -365,7 +365,7 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
+            this.jumpService.selectFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
         }
         this.copyToClipboard(rowData["value"]);
     }

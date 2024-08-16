@@ -18,7 +18,7 @@ class FeatureLayerVisualization;
  * Feature ID which is used when the rendered representation is not
  * supposed to be selectable.
  */
-static constexpr uint32_t UnselectableId = 0xffffffff;
+static std::string UnselectableId;
 
 /**
  * Covers the state for the visualization of a single Relation-Style+Feature
@@ -82,7 +82,8 @@ public:
         const FeatureLayerStyle& style,
         NativeJsValue const& rawOptionValues,
         NativeJsValue const& rawFeatureMergeService,
-        std::string highlightFeatureIndex = "");
+        FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
+        NativeJsValue const& rawFeatureIdSubset = {});
 
     /**
      * Add a tile which is considered for visualization. All tiles added after
@@ -131,7 +132,6 @@ private:
      */
     void addFeature(
         mapget::model_ptr<mapget::Feature>& feature,
-        uint32_t id,
         FeatureStyleRule const& rule);
 
     /**
@@ -141,7 +141,7 @@ private:
         mapget::model_ptr<mapget::Feature> const& feature,
         std::string_view const& layer,
         mapget::model_ptr<mapget::Attribute> const& attr,
-        uint32_t id,
+        std::string_view const& id,
         const FeatureStyleRule& rule,
         uint32_t& offsetFactor,
         glm::dvec3 const& offset);
@@ -152,7 +152,7 @@ private:
      */
     void addGeometry(
         mapget::model_ptr<mapget::Geometry> const& geom,
-        uint32_t id,
+        std::string_view id,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
@@ -165,7 +165,7 @@ private:
     void addLine(
         mapget::Point const& wgsA,
         mapget::Point const& wgsB,
-        uint32_t id,
+        std::string_view const& id,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         glm::dvec3 const& offset,
@@ -177,7 +177,7 @@ private:
     void addPolyLine(
         std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
-        uint32_t id,
+        std::string_view const& id,
         BoundEvalFun const& evalFun);
 
         /**
@@ -237,9 +237,10 @@ private:
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
-    std::string highlightFeatureId_;
+    std::set<std::string> featureIdSubset_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::map<std::string, simfil::Value> optionValues_;
+    FeatureStyleRule::HighlightMode highlightMode_;
 
     /// ===== Relation Processing Members =====
 
