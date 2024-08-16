@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged, filter, ReplaySubject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
 import {MapService} from "./map.service";
 import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
@@ -39,7 +39,7 @@ export class InspectionService {
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
     selectedFeature: FeatureWrapper | null = null;
-    sourceData: ReplaySubject<SelectedSourceData> = new ReplaySubject<SelectedSourceData>();
+    selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,
@@ -63,15 +63,40 @@ export class InspectionService {
             this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
         });
 
-        this.parametersService.parameters.pipe(filter(
-            parameters => parameters.selected.length == 2)).subscribe(parameters => {
-            const [mapId, featureId] = parameters.selected;
-            if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
-                this.jumpService.highlightFeature(mapId, featureId).then(() => {
-                    if (this.selectedFeature) {
-                        this.mapService.focusOnFeature(this.selectedFeature);
+        let isNotifyingParametersChange = false;
+        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
+            try {
+                if (isNotifyingParametersChange)
+                    return;
+
+                isNotifyingParametersChange = true;
+                if (parameters.selected.length == 2) {
+                    const [mapId, featureId] = parameters.selected;
+                    if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
+                        this.jumpService.highlightFeature(mapId, featureId);
+                        if (this.selectedFeature != null) {
+                            this.mapService.focusOnFeature(this.selectedFeature);
+                        }
                     }
-                });
+
+                    this.selectedSourceData.next(this.parametersService.getSelectedSourceData());
+                }
+            } finally {
+                isNotifyingParametersChange = false;
+            }
+        });
+
+        this.selectedSourceData.pipe(distinctUntilChanged()).subscribe(selection => {
+            try {
+                if (isNotifyingParametersChange)
+                    return;
+                isNotifyingParametersChange = true;
+                if (selection)
+                    this.parametersService.setSelectedSourceData(selection);
+                else
+                    this.parametersService.unsetSelectedSourceData();
+            } finally {
+                isNotifyingParametersChange = false;
             }
         });
     }

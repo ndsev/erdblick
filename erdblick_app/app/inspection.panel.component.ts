@@ -9,6 +9,7 @@ interface InspectorTab {
     icon: string,
     component: any,
     inputs?: Record<string, any>,
+    onClose?: any,
 }
 
 @Component({
@@ -64,11 +65,17 @@ export class InspectionPanelComponent implements OnInit
 
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.reset();
+
+            // TODO: Create a new FeaturePanelComponent instance for each unique selected feature
+            //       then we can get rid of all the service's View Component logic/functions.
+            //       reset() Would then completely clear the tabs.
+            this.tabs[0].title = this.inspectionService.selectedFeatureIdName;
         });
 
-        this.inspectionService.sourceData.pipe(distinctUntilChanged()).subscribe(data => {
+        this.inspectionService.selectedSourceData.pipe(distinctUntilChanged()).subscribe(selection => {
             this.reset();
-            this.pushSourceDataInspector(data);
+            if (selection)
+                this.pushSourceDataInspector(selection);
         })
     }
 
@@ -82,9 +89,12 @@ export class InspectionPanelComponent implements OnInit
 
     pushFeatureInspector() {
         let tab = {
-            title: "Feature",
+            title: "",
             icon: "pi-sitemap",
             component: FeaturePanelComponent,
+            onClose: () => {
+                this.inspectionService.featureTree.next("");
+            },
         }
 
         this.tabs = [...this.tabs, tab];
@@ -98,6 +108,9 @@ export class InspectionPanelComponent implements OnInit
             component: SourceDataPanelComponent,
             inputs: {
                 sourceData: data
+            },
+            onClose: () => {
+                this.inspectionService.selectedSourceData.next(null);
             },
         }
 
@@ -113,6 +126,11 @@ export class InspectionPanelComponent implements OnInit
 
     onGoBack(event: any) {
         event.stopPropagation();
-        this.activeIndex = Math.max(0, this.activeIndex - 1);
+        if (this.activeIndex > 0) {
+            const onClose = this.tabs[this.activeIndex]['onClose'];
+            if (onClose)
+                onClose();
+            this.activeIndex = this.activeIndex - 1;
+        }
     }
 }

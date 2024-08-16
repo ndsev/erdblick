@@ -184,12 +184,11 @@ export class FeaturePanelComponent implements OnInit  {
     filterByValues = true;
     filterOnlyFeatureIds = false;
     filterGeometryEntries = false;
+    jsonTree = "";
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
-
-    @Input() jsonTree = "";
 
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
@@ -336,7 +335,7 @@ export class FeaturePanelComponent implements OnInit  {
         const address = sourceDataRef.address;
         const mapId = this.inspectionService.selectedMapIdName;
 
-        this.inspectionService.sourceData.next({
+        this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
             layerId: String(layerId),
             mapId: String(mapId),
