@@ -10,7 +10,7 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
  * WASM TileFeatureLayer, use the peek()-function.
  */
 export class FeatureTile {
-    id: string;
+    mapTileKey: string;
     nodeId: string;
     mapName: string;
     layerName: string;
@@ -31,7 +31,7 @@ export class FeatureTile {
         let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
-        this.id = mapTileMetadata.id;
+        this.mapTileKey = mapTileMetadata.id;
         this.nodeId = mapTileMetadata.nodeId;
         this.mapName = mapTileMetadata.mapName;
         this.layerName = mapTileMetadata.layerName;
@@ -168,7 +168,7 @@ export class FeatureWrapper {
      */
     peek(callback: any) {
         if (this.featureTile.disposed) {
-            throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
+            throw new Error(`Unable to access feature of deleted layer ${this.featureTile.mapTileKey}!`);
         }
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature = tileFeatureLayer.find(this.featureId);
@@ -188,6 +188,6 @@ export class FeatureWrapper {
         if (!other) {
             return false;
         }
-        return this.featureTile.id == other.featureTile.id && this.featureId == other.featureId;
+        return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
     }
 }

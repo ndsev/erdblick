@@ -401,7 +401,7 @@ export class MapService {
             if (evictTileLayer(tileLayer)) {
                 tileLayer.destroy();
             } else {
-                newTileLayers.set(tileLayer.id, tileLayer);
+                newTileLayers.set(tileLayer.mapTileKey, tileLayer);
             }
         }
         this.loadedTileLayers = newTileLayers;
@@ -527,7 +527,7 @@ export class MapService {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
 
         // Consider, if this tile is a selection tile request.
-        if (this.selectionTileRequest && tileLayer.id == this.selectionTileRequest.tileKey) {
+        if (this.selectionTileRequest && tileLayer.mapTileKey == this.selectionTileRequest.tileKey) {
             this.selectionTileRequest.resolve!(tileLayer);
             this.selectionTileRequest = null;
         }
@@ -540,10 +540,10 @@ export class MapService {
 
         // If this one replaces an older tile with the same key,
         // then first remove the older existing one.
-        if (this.loadedTileLayers.has(tileLayer.id)) {
-            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.id));
+        if (this.loadedTileLayers.has(tileLayer.mapTileKey)) {
+            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey));
         }
-        this.loadedTileLayers.set(tileLayer.id, tileLayer);
+        this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
 
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
@@ -562,7 +562,7 @@ export class MapService {
         tileLayer.destroy()
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
-                if (tileVisu.tile.id === tileLayer.id) {
+                if (tileVisu.tile.mapTileKey === tileLayer.id) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
@@ -575,7 +575,7 @@ export class MapService {
             }
         }
         this.tileVisualizationQueue = this.tileVisualizationQueue.filter(([_, tileVisu]) => {
-            return tileVisu.tile.id !== tileLayer.id;
+            return tileVisu.tile.mapTileKey !== tileLayer.id;
         });
         this.loadedTileLayers.delete(tileLayer.id);
     }

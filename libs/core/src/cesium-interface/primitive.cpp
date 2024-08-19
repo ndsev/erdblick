@@ -64,7 +64,7 @@ CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSync
 void CesiumPrimitive::addPolyLine(
         JsValue const &vertices,
         FeatureStyleRule const &style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const &evalFun) {
     JsValue polyline;
     if (clampToGround_) {
@@ -85,7 +85,7 @@ void CesiumPrimitive::addPolyLine(
 void CesiumPrimitive::addPolygon(
         const JsValue &vertices,
         const FeatureStyleRule &style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const &evalFun) {
     auto polygon = Cesium().PolygonGeometry.New({
         {"polygonHierarchy",  Cesium().PolygonHierarchy.New(*vertices)},
@@ -98,7 +98,7 @@ void CesiumPrimitive::addPolygon(
 void CesiumPrimitive::addTriangles(
         const JsValue &float64Array,
         const FeatureStyleRule &style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const &evalFun) {
     auto geometry = Cesium().Geometry.New({
         {"attributes", JsValue::Dict({
@@ -115,7 +115,7 @@ void CesiumPrimitive::addTriangles(
 
 void CesiumPrimitive::addGeometryInstance(
         const FeatureStyleRule &style,
-        std::string_view const& id,
+        JsValue const& id,
         const JsValue &geom,
         BoundEvalFun const &evalFun) {
     auto attributes = JsValue::Dict();
@@ -125,7 +125,7 @@ void CesiumPrimitive::addGeometryInstance(
     }
     auto geometryInstance = Cesium().GeometryInstance.New({
         {"geometry",   geom},
-        {"id",         JsValue(id)},
+        {"id",         id},
         {"attributes", attributes}
     });
     ++numGeometryInstances_;

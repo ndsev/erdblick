@@ -64,7 +64,7 @@ struct CesiumPrimitive
     void addPolyLine(
         JsValue const& vertices,
         FeatureStyleRule const& style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -77,7 +77,7 @@ struct CesiumPrimitive
     void addPolygon(
         JsValue const& vertices,
         FeatureStyleRule const& style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -91,7 +91,7 @@ struct CesiumPrimitive
     void addTriangles(
         JsValue const& float64Array,
         FeatureStyleRule const& style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -111,7 +111,7 @@ private:
      */
     void addGeometryInstance(
         const FeatureStyleRule& style,
-        std::string_view const& id,
+        JsValue const& id,
         const JsValue& geom,
         BoundEvalFun const& evalFun);
 

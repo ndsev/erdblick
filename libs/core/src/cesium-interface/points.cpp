@@ -15,7 +15,7 @@ CesiumPointPrimitiveCollection::CesiumPointPrimitiveCollection() :
 void CesiumPointPrimitiveCollection::addPoint(
     const JsValue& position,
     FeatureStyleRule const& style,
-    std::string_view const& id,
+    JsValue const& id,
     BoundEvalFun const& evalFun)
 {
     auto const color = style.color(evalFun);
@@ -25,7 +25,7 @@ void CesiumPointPrimitiveCollection::addPoint(
         {"position", position},
         {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
         {"pixelSize", JsValue(style.width())},
-        {"id", JsValue(id)},
+        {"id", id},
         {"outlineColor", Cesium().Color.New(oColor.r, oColor.g, oColor.b, oColor.a)},
         {"outlineWidth", JsValue(style.outlineWidth())},
     });

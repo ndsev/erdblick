@@ -18,7 +18,7 @@ struct CesiumPointPrimitiveCollection
     void addPoint(
         const JsValue& position,
         FeatureStyleRule const& style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**

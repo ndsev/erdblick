@@ -19,12 +19,14 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 }
 
 FeatureLayerVisualization::FeatureLayerVisualization(
+    std::string const& mapTileKey,
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
     NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
     NativeJsValue const& rawFeatureIdSubset)
-    : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
+    : mapTileKey_(mapTileKey),
+      coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
@@ -75,12 +77,6 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 void FeatureLayerVisualization::run()
 {
     for (auto&& feature : *tile_) {
-        if (!featureIdSubset_.empty()) {
-            if (featureIdSubset_.find(feature->id()->toString()) == featureIdSubset_.end()) {
-                continue;
-            }
-        }
-
         for (auto&& rule : style_.rules()) {
             if (rule.mode() != highlightMode_)
                 continue;
@@ -190,7 +186,13 @@ void FeatureLayerVisualization::addFeature(
     model_ptr<Feature>& feature,
     FeatureStyleRule const& rule)
 {
-    auto id = feature->id()->toString();
+    auto featureId = feature->id()->toString();
+    if (!featureIdSubset_.empty()) {
+        if (featureIdSubset_.find(featureId) == featureIdSubset_.end()) {
+            return;
+        }
+    }
+
     auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
 
     switch(rule.aspect()) {
@@ -201,10 +203,10 @@ void FeatureLayerVisualization::addFeature(
 
         auto boundEvalFun = [this, &evaluationContext](auto&& str){return evaluateExpression(str, evaluationContext);};
         feature->geom()->forEachGeometry(
-            [this, id, &rule, &boundEvalFun, &offset](auto&& geom)
+            [this, featureId, &rule, &boundEvalFun, &offset](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, id, rule, boundEvalFun, offset);
+                    addGeometry(geom, featureId, rule, boundEvalFun, offset);
                 return true;
             });
         break;
@@ -233,7 +235,7 @@ void FeatureLayerVisualization::addFeature(
                     feature,
                     layerName,
                     attr,
-                    id, // TODO: Rethink, how an attribute link may be encoded in the id.
+                        featureId, // TODO: Rethink, how an attribute link may be encoded in the id.
                     rule,
                     offsetFactor,
                     offset);
@@ -256,12 +258,16 @@ void FeatureLayerVisualization::addGeometry(
     if (!rule.selectable())
         id = UnselectableId;
 
+    // Combine the ID with the mapTileKey to create an
+    // easy link from the geometry back to the feature.
+    auto tileFeatureId = makeTileFeatureId(id);
+
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
         [&vertsCartesian, &offset](auto&& vertex)
         {
-             vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
+            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
             return true;
         });
 
@@ -270,23 +276,23 @@ void FeatureLayerVisualization::addGeometry(
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsList(vertsCartesian);
             if (rule.flat())
-                coloredGroundMeshes_.addPolygon(jsVerts, rule, id, evalFun);
+                coloredGroundMeshes_.addPolygon(jsVerts, rule, tileFeatureId, evalFun);
             else
-                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, id, evalFun);
+                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, tileFeatureId, evalFun);
         }
         break;
     case GeomType::Line:
-        addPolyLine(vertsCartesian, rule, id, evalFun);
+        addPolyLine(vertsCartesian, rule, tileFeatureId, evalFun);
         break;
     case GeomType::Mesh:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsFloat64Array(vertsCartesian);
-            coloredTrivialMeshes_.addTriangles(jsVerts, rule, id, evalFun);
+            coloredTrivialMeshes_.addTriangles(jsVerts, rule, tileFeatureId, evalFun);
         }
         break;
     case GeomType::Points:
         for (auto const& pt : vertsCartesian) {
-            coloredPoints_.addPoint(JsValue(pt), rule, id, evalFun);
+            coloredPoints_.addPoint(JsValue(pt), rule, tileFeatureId, evalFun);
         }
         break;
     }
@@ -298,7 +304,7 @@ void FeatureLayerVisualization::addGeometry(
                 JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), offset)),
                 text,
                 rule,
-                id,
+                tileFeatureId,
                 evalFun);
         }
     }
@@ -408,10 +414,14 @@ void erdblick::FeatureLayerVisualization::addLine(
     auto cartA = wgsToCartesian<glm::dvec3>(wgsA, offset);
     auto cartB = wgsToCartesian<glm::dvec3>(wgsB, offset);
 
+    // Combine the ID with the mapTileKey to create an
+    // easy link from the geometry back to the feature.
+    auto tileFeatureId = makeTileFeatureId(id);
+
     addPolyLine(
         {cartA, cartB},
         rule,
-        id,
+        tileFeatureId,
         evalFun);
 
     if (rule.hasLabel()) {
@@ -421,7 +431,7 @@ void erdblick::FeatureLayerVisualization::addLine(
                 JsValue(mapget::Point(cartA + (cartB - cartA) * labelPositionHint)),
                 text,
                 rule,
-                id,
+                tileFeatureId,
                 evalFun);
         }
     }
@@ -430,7 +440,7 @@ void erdblick::FeatureLayerVisualization::addLine(
 void FeatureLayerVisualization::addPolyLine(
     std::vector<mapget::Point> const& vertsCartesian,
     const FeatureStyleRule& rule,
-    std::string_view const& id,
+    JsValue const& tileFeatureId,
     BoundEvalFun const& evalFun)
 {
     if (vertsCartesian.size() < 2)
@@ -441,27 +451,27 @@ void FeatureLayerVisualization::addPolyLine(
     if (arrowType == FeatureStyleRule::DoubleArrow) {
         auto jsVertsPair = encodeVerticesAsReversedSplitList(vertsCartesian);
         auto& primitive = getPrimitiveForArrowMaterial(rule, evalFun);
-        primitive.addPolyLine(jsVertsPair.first, rule, id, evalFun);
-        primitive.addPolyLine(jsVertsPair.second, rule, id, evalFun);
+        primitive.addPolyLine(jsVertsPair.first, rule, tileFeatureId, evalFun);
+        primitive.addPolyLine(jsVertsPair.second, rule, tileFeatureId, evalFun);
         return;
     }
 
     auto jsVerts = encodeVerticesAsList(vertsCartesian);
     if (arrowType == FeatureStyleRule::ForwardArrow) {
-        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (arrowType == FeatureStyleRule::BackwardArrow) {
         jsVerts.call<void>("reverse");
-        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (rule.isDashed()) {
-        getPrimitiveForDashMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForDashMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (rule.flat()) {
-        coloredGroundLines_.addPolyLine(jsVerts, rule, id, evalFun);
+        coloredGroundLines_.addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else {
-        coloredLines_.addPolyLine(jsVerts, rule, id, evalFun);
+        coloredLines_.addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
 }
 
@@ -554,6 +564,14 @@ void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& c
     for (auto const& [key, value] : optionValues_) {
         context.set(internalStringPoolCopy_->emplace(key), value);
     }
+}
+
+JsValue FeatureLayerVisualization::makeTileFeatureId(const std::string_view& featureId) const
+{
+    return JsValue::Dict({
+        {"mapTileKey", mapTileKey_},
+        {"featureId", JsValue(featureId)}
+    });
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
