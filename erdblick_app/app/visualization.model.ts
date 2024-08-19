@@ -146,7 +146,7 @@ export class TileVisualization {
 
     /**
      * Actually create the visualization.
-     * @param viewer {Cesium.Viewer} The viewer to add the rendered entity to.
+     * @param viewer {Viewer} The viewer to add the rendered entity to.
      * @return True if anything was rendered, false otherwise.
      */
     async render(viewer: Viewer) {
@@ -168,6 +168,7 @@ export class TileVisualization {
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let visualization = new coreLib.FeatureLayerVisualization(
+                    this.tile.mapTileKey,
                     this.style,
                     this.options,
                     this.pointMergeService,
@@ -256,7 +257,7 @@ export class TileVisualization {
 
     /**
      * Destroy any current visualization.
-     * @param viewer {Cesium.Viewer} The viewer to remove the rendered entity from.
+     * @param viewer {Viewer} The viewer to remove the rendered entity from.
      */
     destroy(viewer: Viewer) {
         this.deleted = true;
@@ -276,17 +277,6 @@ export class TileVisualization {
         }
         this.hasHighDetailVisualization = false;
         this.hasTileBorder = false;
-    }
-
-    /**
-     * Iterate over all Cesium primitives of this visualization.
-     */
-    forEachPrimitive(callback: any) {
-        if (this.primitiveCollection) {
-            for (let i = 0; i < this.primitiveCollection.length; ++i) {
-                callback(this.primitiveCollection.get(i));
-            }
-        }
     }
 
     /**

@@ -7,9 +7,9 @@
 
 namespace erdblick {
 
-struct CesiumPrimitiveLabelsCollection {
-
-    CesiumPrimitiveLabelsCollection();
+struct CesiumLabelCollection
+{
+    CesiumLabelCollection();
 
     /**
     * Add an individual label to the collection
@@ -18,7 +18,7 @@ struct CesiumPrimitiveLabelsCollection {
         JsValue const &position,
         const std::string& labelText,
         FeatureStyleRule const &style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**

@@ -6,14 +6,14 @@
 
 namespace erdblick {
 
-CesiumPrimitiveLabelsCollection::CesiumPrimitiveLabelsCollection() :
+CesiumLabelCollection::CesiumLabelCollection() :
     labelCollection_(Cesium().LabelCollection.New()) {}
 
-void CesiumPrimitiveLabelsCollection::addLabel(
+void CesiumLabelCollection::addLabel(
         JsValue const &position,
         const std::string &labelText,
         FeatureStyleRule const &style,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun) {
     auto const &color = style.labelColor();
     auto const &outlineColor = style.labelOutlineColor();
@@ -21,7 +21,7 @@ void CesiumPrimitiveLabelsCollection::addLabel(
     auto const &padding = style.labelBackgroundPadding();
 
     auto labelProperties = JsValue::Dict({
-         {"id", JsValue(id)},
+         {"id", id},
          {"position", position},
          {"show", JsValue(true)},
          {"text", JsValue(labelText)},
@@ -66,11 +66,11 @@ void CesiumPrimitiveLabelsCollection::addLabel(
     numLabelInstances_++;
 }
 
-NativeJsValue CesiumPrimitiveLabelsCollection::toJsObject() const {
+NativeJsValue CesiumLabelCollection::toJsObject() const {
     return *labelCollection_;
 }
 
-bool CesiumPrimitiveLabelsCollection::empty() const {
+bool CesiumLabelCollection::empty() const {
     return numLabelInstances_ == 0;
 }
 

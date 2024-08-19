@@ -263,7 +263,7 @@ export class ErdblickViewComponent implements AfterViewInit {
 
     /** Check if the given feature is known and can be selected. */
     isKnownCesiumFeature(f: any) {
-        return f && f.id !== undefined && f.id.hasOwnProperty("type")
+        return f && f.id !== undefined && f.id.hasOwnProperty("mapTileKey")
     }
 
     /**

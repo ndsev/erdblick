@@ -79,6 +79,7 @@ public:
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
      */
      FeatureLayerVisualization(
+        std::string const& mapTileKey,
         const FeatureLayerStyle& style,
         NativeJsValue const& rawOptionValues,
         NativeJsValue const& rawFeatureMergeService,
@@ -177,7 +178,7 @@ private:
     void addPolyLine(
         std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
-        std::string_view const& id,
+        JsValue const& id,
         BoundEvalFun const& evalFun);
 
         /**
@@ -218,8 +219,14 @@ private:
      */
     void addOptionsToSimfilContext(simfil::OverlayNode& context);
 
+    /**
+     * Create a feature primitive ID struct from the mapTileKey_ and the given feature ID.
+     */
+    JsValue makeTileFeatureId(std::string_view const& featureId) const;
+
     /// =========== Generic Members ===========
 
+    JsValue mapTileKey_;
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
     std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
@@ -231,7 +238,7 @@ private:
     std::map<uint32_t, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
-    CesiumPrimitiveLabelsCollection labelCollection_;
+    CesiumLabelCollection labelCollection_;
     JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;
