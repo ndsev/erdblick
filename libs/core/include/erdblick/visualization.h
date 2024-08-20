@@ -133,6 +133,7 @@ private:
      */
     void addFeature(
         mapget::model_ptr<mapget::Feature>& feature,
+        BoundEvalFun const& evalFun,
         FeatureStyleRule const& rule);
 
     /**
