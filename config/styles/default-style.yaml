@@ -1,15 +1,51 @@
 name: DefaultStyle
 version: 1.0
+options:
+  - label: Show Meshes/Polygons
+    id: showMesh
+  - label: Show Points
+    id: showPoint
+  - label: Show Lines
+    id: showLine
+
 rules:
+  # Normal styles
   - geometry: ["mesh", "polygon"]
+    filter: "showMesh"
     color: teal
     opacity: 0.8
-  - geometry: ["point", "line"]
+    offset: [0, 0, -0.5]
+  - geometry: ["point"]
+    filter: "showPoint"
     color: moccasin
     opacity: 1.0
     width: 1.0
-  - geometry: ["point", "line", "mesh", "polygon"]
+  - geometry: ["line"]
+    filter: "showLine"
+    color: moccasin
+    opacity: 1.0
+    width: 5.0
+
+  # Hover/Selection styles
+  - geometry: ["mesh", "polygon"]
+    color: yellow
+    opacity: 1.0
+    width: 4.0
+    mode: hover
+    offset: [0, 0, -0.5]
+  - geometry: ["point", "line"]
+    color: yellow
+    opacity: 1.0
+    width: 4.0
+    mode: hover
+  - geometry: ["mesh", "polygon"]
     color: red
     opacity: 1.0
     width: 4.0
-    mode: highlight
+    mode: selection
+    offset: [0, 0, -0.5]
+  - geometry: ["point", "line"]
+    color: red
+    opacity: 1.0
+    width: 4.0
+    mode: selection
