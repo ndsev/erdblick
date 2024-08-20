@@ -77,12 +77,17 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 void FeatureLayerVisualization::run()
 {
     for (auto&& feature : *tile_) {
+        auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
+        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
+        addOptionsToSimfilContext(evaluationContext);
+        auto boundEvalFun = [this, &evaluationContext](auto&& str){return evaluateExpression(str, evaluationContext);};
+
         for (auto&& rule : style_.rules()) {
             if (rule.mode() != highlightMode_)
                 continue;
 
-            if (auto* matchingSubRule = rule.match(*feature)) {
-                addFeature(feature, *matchingSubRule);
+            if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
+                addFeature(feature, boundEvalFun, *matchingSubRule);
                 featuresAdded_ = true;
             }
         }
@@ -184,6 +189,7 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
 
 void FeatureLayerVisualization::addFeature(
     model_ptr<Feature>& feature,
+    BoundEvalFun const& evalFun,
     FeatureStyleRule const& rule)
 {
     auto featureId = feature->id()->toString();
@@ -197,16 +203,11 @@ void FeatureLayerVisualization::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
-        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
-        addOptionsToSimfilContext(evaluationContext);
-
-        auto boundEvalFun = [this, &evaluationContext](auto&& str){return evaluateExpression(str, evaluationContext);};
         feature->geom()->forEachGeometry(
-            [this, featureId, &rule, &boundEvalFun, &offset](auto&& geom)
+            [this, featureId, &rule, &evalFun, &offset](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, featureId, rule, boundEvalFun, offset);
+                    addGeometry(geom, featureId, rule, evalFun, offset);
                 return true;
             });
         break;
@@ -570,7 +571,7 @@ JsValue FeatureLayerVisualization::makeTileFeatureId(const std::string_view& fea
 {
     return JsValue::Dict({
         {"mapTileKey", mapTileKey_},
-        {"featureId", JsValue(featureId)}
+        {"featureId", JsValue(std::string(featureId))}
     });
 }
 

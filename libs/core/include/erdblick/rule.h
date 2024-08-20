@@ -41,7 +41,7 @@ public:
         DoubleArrow
     };
 
-    FeatureStyleRule const* match(mapget::Feature& feature) const;
+    FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
     [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] HighlightMode mode() const;
     [[nodiscard]] bool selectable() const;

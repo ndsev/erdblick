@@ -373,7 +373,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
 }
 
-FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
+FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
 {
     // Filter by feature type regular expression.
     if (type_) {
@@ -385,7 +385,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
+        if (!evalFun(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
     }
@@ -393,7 +393,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
     // Return matching sub-rule or this.
     if (!firstOfRules_.empty()) {
         for (auto const& rule : firstOfRules_) {
-            if (auto matchingRule = rule.match(feature)) {
+            if (auto matchingRule = rule.match(feature, evalFun)) {
                 return matchingRule;
             }
         }
