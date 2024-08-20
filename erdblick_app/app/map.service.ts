@@ -711,12 +711,11 @@ export class MapService {
                 return;
         }
 
-        if (!featureWrappers.length) {
-            return;
-        }
-
         while (visualizationCollection.length) {
             this.tileVisualizationDestructionTopic.next(visualizationCollection.pop());
+        }
+        if (!featureWrappers.length) {
+            return;
         }
 
         // Apply additional highlight styles.
