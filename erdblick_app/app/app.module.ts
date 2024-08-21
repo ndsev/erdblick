@@ -83,7 +83,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         FeatureSearchComponent,
         AlertDialogComponent,
         HighlightSearch,
-        TreeTableFilterPatchDirective,
+        TreeTableFilterPatchDirective
     ],
     imports: [
         BrowserModule,

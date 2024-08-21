@@ -1,14 +1,28 @@
-import {Component, OnInit, Input, ViewChild} from "@angular/core";
+import {
+    Component,
+    OnInit,
+    Input,
+    ViewChild,
+    HostListener,
+    Directive,
+    Output,
+    EventEmitter,
+    OnDestroy, AfterViewInit, ElementRef,
+    Renderer2
+} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
 import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {TreeTable} from "primeng/treetable";
+import {TreeTable, TTScrollableView} from "primeng/treetable";
+import {VirtualScroller} from "primeng/virtualscroller";
+import {combine} from "cesium";
+
 
 @Component({
     selector: 'sourcedata-panel',
     template: `
-        <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
+        <div #resizableContainer class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}" >
             <div class="resize-handle" (click)="isExpanded = !isExpanded">
                 <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
                 <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
@@ -19,32 +33,34 @@ import {TreeTable} from "primeng/treetable";
                     scrollHeight="flex"
                     [value]="treeData"
                     [loading]="loading"
-                    [autoLayout]="false"
                     [scrollable]="true"
                     [resizableColumns]="true"
                     columnResizeMode="expand"
                     [virtualScroll]="true"
-                    [virtualScrollItemSize]="26"
-                    [tableStyle]="{'min-width': '150px', 'min-height': '1px', 'padding': '0px'}"
+                    [virtualScrollItemSize]="26" 
+                    [tableStyle]="{ 'min-width': '30em', 'min-height': '26px' }"
+                             
                     
                     filterMode="strict"
                     [globalFilterFields]="filterFields"
                 >
                     <ng-template pTemplate="caption">
-                        <div class="p-input-icon-left ml-auto filter-container">
-                            <i class="pi pi-search"></i>
-                            <input class="filter-input" type="text" pInputText placeholder="Filter data"
-                                   [(ngModel)]="filterString"
-                                   (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
-                                   (input)="tt.filterGlobal($any($event.target).value, 'contains')"
-                            />
-                            <i *ngIf="filterString" (click)="clearFilter()"
-                               class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                        <div class="filter-wrapper">
+                            <div class="p-input-icon-left ml-auto filter-container">
+                                <i class="pi pi-search"></i>
+                                <input class="filter-input" type="text" pInputText placeholder="Filter data"
+                                       [(ngModel)]="filterString"
+                                       (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
+                                       (input)="tt.filterGlobal($any($event.target).value, 'contains')"
+                                />
+                                <i *ngIf="filterString" (click)="clearFilter()"
+                                   class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                            </div>
                         </div>
                     </ng-template>
 
                     <ng-template pTemplate="header">
-                        <tr>
+                        <tr style="visibility: collapse">
                             <th *ngFor="let col of columns">
                                 {{ col.header }}
                             </th>
@@ -54,9 +70,11 @@ import {TreeTable} from "primeng/treetable";
                     <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                         <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
                             <td *ngFor="let col of columns; let i = index">
-                                <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
-                                <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
-                                <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>
+                                <div class="scroll-cell">
+                                    <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
+                                    <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
+                                    <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>
+                                </div>
                             </td>
                         </tr>
                     </ng-template>
@@ -75,11 +93,10 @@ import {TreeTable} from "primeng/treetable";
     `
 })
 export class SourceDataPanelComponent implements OnInit {
-    @Input()
-    sourceData!: SelectedSourceData;
+    @Input() sourceData!: SelectedSourceData;
 
-    @ViewChild('tt')
-    table!: TreeTable;
+    @ViewChild('tt') table!: TreeTable;
+    @ViewChild('resizableContainer') resizableContainer!: HTMLDivElement;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -99,7 +116,8 @@ export class SourceDataPanelComponent implements OnInit {
     isExpanded = false;
     filterString = "";
 
-    constructor(private inspectionService: InspectionService) {}
+    constructor(private renderer: Renderer2,
+                private inspectionService: InspectionService) {}
 
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
@@ -110,7 +128,8 @@ export class SourceDataPanelComponent implements OnInit {
                 layer.delete();
 
                 if (root) {
-                    this.treeData = root.children ? root.children : [root]
+                    const firstRow = {data: {key: "Key", value: "Value", address: "Address", type: "Type"}, children: []};
+                    this.treeData = root.children ? [firstRow, ...root.children] : [firstRow, root];
                     this.selectItemWithAddress(this.sourceData.address);
                 } else {
                     this.treeData = []
@@ -227,7 +246,7 @@ export class SourceDataPanelComponent implements OnInit {
             }
         };
 
-        console.log(`Highlighting item with address`, searchAddress);
+        // console.log(`Highlighting item with address`, searchAddress);
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
@@ -248,5 +267,9 @@ export class SourceDataPanelComponent implements OnInit {
         if (event.key === 'Escape') {
             this.clearFilter();
         }
+    }
+
+    onContainerResize(event: any) {
+        const scrollableChild = this.table.scrollableViewChild as unknown as TTScrollableView;
     }
 }

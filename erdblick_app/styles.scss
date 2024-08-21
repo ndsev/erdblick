@@ -127,6 +127,14 @@ body {
         padding: 0;
     }
 
+    .filter-wrapper {
+        display: flex;
+        align-content: center;
+        justify-content: center;
+        width: 100%;
+        padding: 0.5em;
+    }
+
     .filter-container {
         width: 100%;
     }
@@ -142,15 +150,16 @@ body {
     }
 
     .resizable-container {
-        width: 30em;
-        height: 30em;
+        width: 40em;
+        height: calc(100vh - 7em);
         min-width: 30em;
-        min-height: 18em;
+        min-height: 10em;
         resize: both;
-        overflow: auto;
+        overflow-y: auto;
+        overflow-x: scroll;
         direction: rtl;
         max-width: calc(100vw - 27em);
-        max-height: calc(100vh - 8.5em);
+        max-height: calc(100vh - 7em);
 
         * {
             direction: ltr;
@@ -167,22 +176,44 @@ body {
         }
 
         .p-treetable-header {
-            padding: 0.5em;
+            padding: 0em;
             direction: ltr;
+        }
+
+        .p-scroller-spacer {
+            height: 100% !important;
+        }
+
+        .scroll-cell {
+            white-space: nowrap;
+            padding-right: 0.5em;
+        }
+
+        .panel-tree {
+            tr:first-child {
+                background: lightgrey;
+                font-weight: bold;
+            }
         }
 
         table {
             direction: ltr;
             font-size: smaller;
             border-collapse: collapse;
+            table-layout: auto;
+            overflow-x: scroll;
+
+            tr {
+                height: 26px;
+            }
 
             td {
-                padding: 0px;
-                height: 25px;
+                padding: 0;
+                height: 26px;
             }
 
             th {
-                padding: 0px;
+                padding: 0;
                 height: 26px;
             }
 

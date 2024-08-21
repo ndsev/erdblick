@@ -416,7 +416,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         for (const node of nodes) {
             if (node.markers.length) {
                 markers.push(...node.markers);
-            } else if (node.count > 0) {
+            } else if (node.count > 0 && node.center) {
                 this.featureSearchService.visualization.add({
                     position: node.center,
                     image: this.featureSearchService.getPinGraphics(node.count),

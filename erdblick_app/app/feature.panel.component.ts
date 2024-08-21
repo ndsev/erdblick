@@ -18,32 +18,7 @@ interface Column {
 @Component({
     selector: 'feature-panel',
     template: `
-        <div class="flex justify-content-end align-items-center"
-                style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
-            <div class="p-input-icon-left filter-container">
-                <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
-                <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                        [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
-                        (keydown)="onKeydown($event)"
-                />
-                <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
-                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
-            </div>
-            <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
-                            label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                            [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
-                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
-                </p-button>
-            </div>
-            <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
-                            icon="pi pi-fw pi-copy" label=""
-                            [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                            pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                </p-button>
-            </div>
-        </div>
+        
         <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
             <div class="resize-handle" (click)="isExpanded = !isExpanded">
                 <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
@@ -56,17 +31,47 @@ interface Column {
                 [columns]="cols"
                 [scrollable]="true"
                 [virtualScroll]="true"
-                [virtualScrollItemSize]="26"
-                [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
+                [virtualScrollItemSize]="26" 
+                [tableStyle]="{ 'min-width': '30em', 'min-height': '26px' }"
             >
+                <ng-template pTemplate="caption">
+                    <div class="flex justify-content-end align-items-center filter-wrapper">
+                        <div class="p-input-icon-left filter-container">
+                            <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
+                            <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
+                                   [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
+                                   (keydown)="onKeydown($event)"
+                            />
+                            <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
+                               class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                        </div>
+                        <div>
+                            <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
+                                      label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                                      [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                            </p-button>
+                        </div>
+                        <div>
+                            <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
+                                      icon="pi pi-fw pi-copy" label=""
+                                      [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                                      pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                            </p-button>
+                        </div>
+                    </div>
+                </ng-template>
+                <ng-template pTemplate="header">
+                    <tr style="visibility: collapse">
+                    </tr>
+                </ng-template>
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode"
                         [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}"
                         (click)="onRowClick(rowNode)">
                         <td>
-                            <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                            <div class="scroll-cell" [pTooltip]="rowData['key'].toString()" tooltipPosition="left" 
+                                 [tooltipOptions]="tooltipOptions">
                                 <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                 </p-treeTableToggler>
                                 <span (click)="onKeyClick($event, rowData)"
@@ -93,9 +98,8 @@ interface Column {
                             </div>
                         </td>
                         <td [class]="getStyleClassByType(rowData['type'])">
-                            <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                            <div class="scroll-cell" [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <div (click)="onValueClick($event, rowData)"
                                         (mouseover)="highlightFeature(rowData)"
                                         (mouseout)="stopHighlight(rowData)">
