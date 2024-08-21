@@ -189,7 +189,7 @@ export class SourceDataPanelComponent implements OnInit {
             const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
 
             addressInRange = (addr: any) => {
-                return addr.offset >= addressLow && addr.offset + addr.size <= addressHigh;
+                return addr.offset >= addressLow && addr.offset + addr.size <= addressHigh && (addr.size != 0 || addressLow == addressHigh);
             }
         } else {
             addressInRange = (addr: any) => {

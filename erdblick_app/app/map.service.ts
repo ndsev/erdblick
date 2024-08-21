@@ -241,7 +241,7 @@ export class MapService {
     }
 
     public async reloadDataSources() {
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
             let bufferCompleted = false;
             let jsonCompleted = false;
 
