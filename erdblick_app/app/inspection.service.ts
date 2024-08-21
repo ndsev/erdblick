@@ -28,6 +28,12 @@ export interface SelectedSourceData {
     address: bigint,
 }
 
+export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
+    if (!a || !b)
+        return false;
+    return (a == b || (a.mapId == b.mapId && a.tileId == b.tileId && a.layerId == b.layerId && a.address == b.address));
+}
+
 @Injectable({providedIn: 'root'})
 export class InspectionService {
 
@@ -63,41 +69,23 @@ export class InspectionService {
             this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
         });
 
-        let isNotifyingParametersChange = false;
         this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-            try {
-                if (isNotifyingParametersChange)
-                    return;
-
-                isNotifyingParametersChange = true;
-                if (parameters.selected.length == 2) {
-                    const [mapId, featureId] = parameters.selected;
-                    if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
-                        this.jumpService.highlightFeature(mapId, featureId);
-                        if (this.selectedFeature != null) {
-                            this.mapService.focusOnFeature(this.selectedFeature);
-                        }
+            if (parameters.selected.length == 2) {
+                const [mapId, featureId] = parameters.selected;
+                if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
+                    this.jumpService.highlightFeature(mapId, featureId);
+                    if (this.selectedFeature != null) {
+                        this.mapService.focusOnFeature(this.selectedFeature);
                     }
-
-                    //this.selectedSourceData.next(this.parametersService.getSelectedSourceData());
                 }
-            } finally {
-                isNotifyingParametersChange = false;
             }
         });
 
-        this.selectedSourceData.pipe(distinctUntilChanged()).subscribe(selection => {
-            try {
-                if (isNotifyingParametersChange)
-                    return;
-                isNotifyingParametersChange = true;
-                //if (selection)
-                //    this.parametersService.setSelectedSourceData(selection);
-                //else
-                //    this.parametersService.unsetSelectedSourceData();
-            } finally {
-                isNotifyingParametersChange = false;
-            }
+        this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
+            if (selection)
+                this.parametersService.setSelectedSourceData(selection);
+            else
+                this.parametersService.unsetSelectedSourceData();
         });
     }
 

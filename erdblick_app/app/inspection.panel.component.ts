@@ -1,8 +1,9 @@
 import {Component, OnInit} from "@angular/core";
-import {InspectionService, SelectedSourceData} from "./inspection.service";
+import {InspectionService, SelectedSourceData, selectedSourceDataEqualTo} from "./inspection.service";
 import {distinctUntilChanged} from "rxjs";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
+import {ParametersService} from "./parameters.service";
 
 interface InspectorTab {
     title: string,
@@ -60,7 +61,7 @@ export class InspectionPanelComponent implements OnInit
     tabs: InspectorTab[] = [];
     activeIndex = 0;
 
-    constructor(public inspectionService: InspectionService) {
+    constructor(public inspectionService: InspectionService, private parameterService: ParametersService) {
         this.pushFeatureInspector();
 
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
@@ -70,9 +71,13 @@ export class InspectionPanelComponent implements OnInit
             //       then we can get rid of all the service's View Component logic/functions.
             //       reset() Would then completely clear the tabs.
             this.tabs[0].title = this.inspectionService.selectedFeatureIdName;
+
+            const selectedSourceData = parameterService.getSelectedSourceData()
+            if (selectedSourceData)
+                this.pushSourceDataInspector(selectedSourceData);
         });
 
-        this.inspectionService.selectedSourceData.pipe(distinctUntilChanged()).subscribe(selection => {
+        this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             this.reset();
             if (selection)
                 this.pushSourceDataInspector(selection);
@@ -92,9 +97,9 @@ export class InspectionPanelComponent implements OnInit
             title: "",
             icon: "pi-sitemap",
             component: FeaturePanelComponent,
-            //onClose: () => {
-            //    this.inspectionService.featureTree.next("");
-            //},
+            onClose: () => {
+                this.inspectionService.featureTree.next("");
+            },
         }
 
         this.tabs = [...this.tabs, tab];
@@ -109,9 +114,9 @@ export class InspectionPanelComponent implements OnInit
             inputs: {
                 sourceData: data
             },
-            //onClose: () => {
-                //this.inspectionService.selectedSourceData.next(null);
-            //},
+            onClose: () => {
+                this.inspectionService.selectedSourceData.next(null);
+            },
         }
 
         this.tabs = [...this.tabs, tab];
@@ -128,8 +133,8 @@ export class InspectionPanelComponent implements OnInit
         event.stopPropagation();
         if (this.activeIndex > 0) {
             const onClose = this.tabs[this.activeIndex]['onClose'];
-            //if (onClose)
-            //    onClose();
+            if (onClose)
+                onClose();
             this.activeIndex = this.activeIndex - 1;
         }
     }
