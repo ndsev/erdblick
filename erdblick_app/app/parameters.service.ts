@@ -194,6 +194,7 @@ export class ParametersService {
             selection.layerId,
             selection.mapId,
             selection.address.toString(),
+            selection.featureId,
         ];
         this.parameters.next(this.p());
     }
@@ -213,6 +214,7 @@ export class ParametersService {
             layerId: sd[1],
             mapId: sd[2],
             address: BigInt(sd[3] || '0'),
+            featureId: sd[4],
         };
     }
 

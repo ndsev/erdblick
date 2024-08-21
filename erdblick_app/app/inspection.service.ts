@@ -26,12 +26,13 @@ export interface SelectedSourceData {
     tileId: number,
     layerId: string,
     address: bigint,
+    featureId: string,
 }
 
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
     if (!a || !b)
         return false;
-    return (a == b || (a.mapId == b.mapId && a.tileId == b.tileId && a.layerId == b.layerId && a.address == b.address));
+    return (a == b || (a.mapId == b.mapId && a.tileId == b.tileId && a.layerId == b.layerId && a.address == b.address && a.featureId == b.featureId));
 }
 
 @Injectable({providedIn: 'root'})

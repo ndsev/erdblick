@@ -21,10 +21,10 @@ interface InspectorTab {
                      [activeIndex]="0">
             <p-accordionTab>
                 <ng-template pTemplate="header">
-                    <span class="inspector-title">
+                    <span class="inspector-title" *ngIf="activeIndex < tabs.length">
                         <p-button icon="pi pi-chevron-left" *ngIf="activeIndex > 0" (click)="onGoBack($event)" />
                         
-                        <i class="pi {{ tabs[activeIndex].icon }}"></i>{{ tabs[activeIndex].title }}
+                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
                     </span>
                 </ng-template>
 
@@ -70,15 +70,17 @@ export class InspectionPanelComponent implements OnInit
             // TODO: Create a new FeaturePanelComponent instance for each unique selected feature
             //       then we can get rid of all the service's View Component logic/functions.
             //       reset() Would then completely clear the tabs.
-            this.tabs[0].title = this.inspectionService.selectedFeatureIdName;
+            const featureId = this.inspectionService.selectedFeatureIdName;
+            this.tabs[0].title = featureId;
 
             const selectedSourceData = parameterService.getSelectedSourceData()
-            if (selectedSourceData)
-                this.pushSourceDataInspector(selectedSourceData);
+            if (selectedSourceData?.featureId === featureId)
+                this.inspectionService.selectedSourceData.next(selectedSourceData);
+            else
+                this.inspectionService.selectedSourceData.next(null);
         });
 
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            this.reset();
             if (selection)
                 this.pushSourceDataInspector(selection);
         })
@@ -89,7 +91,14 @@ export class InspectionPanelComponent implements OnInit
     reset() {
         /* We always keep the first tab, which is a feature inspector. */
         this.setTab(0);
-        this.tabs = [this.tabs.at(0)!];
+        for (let i = 1; i < this.tabs.length - 1; ++i) {
+            let close = this.tabs[this.tabs.length - i]['onClose']
+            if (close)
+                close();
+        }
+        if (this.tabs.length > 0) {
+            this.tabs = [this.tabs[0]!];
+        }
     }
 
     pushFeatureInspector() {
@@ -136,6 +145,8 @@ export class InspectionPanelComponent implements OnInit
             if (onClose)
                 onClose();
             this.activeIndex = this.activeIndex - 1;
+            if (this.tabs.length > 1)
+                this.tabs.pop();
         }
     }
 }

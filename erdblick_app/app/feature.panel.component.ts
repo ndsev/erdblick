@@ -334,12 +334,14 @@ export class FeaturePanelComponent implements OnInit  {
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
         const mapId = this.inspectionService.selectedMapIdName;
+        const featureId = this.inspectionService.selectedFeatureIdName;
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
             layerId: String(layerId),
             mapId: String(mapId),
             address: BigInt(address),
+            featureId: featureId,
         })
     }
 
