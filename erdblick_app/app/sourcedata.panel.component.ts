@@ -153,14 +153,15 @@ export class SourceDataPanelComponent implements OnInit {
 
         const prefix = "https://developer.nds.live/schema/";
 
-        // Test for a string like "nds.v1234_56.a.b.c"
-        if (!schema.match(/^nds\.(.*\.)+v\d{4}_\d{2}(\..*)+/)) {
+        let match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
+        if (!match || match.length <= 4)
             return schema;
-        }
 
-        let url = schema.replaceAll(".", "/")
-            .replace(/^nds\//, "")
-            .replace(/v(\d{4})_(\d{2})/, "$1.$2");
+        // Sub-namespaces in front of the version get joined by "-". Names past the version get joined by "/"
+        let url =
+            match[1].replace(/^(.*)\.$/, "$1/").replaceAll(".", "-") +
+            match[3].replaceAll("_", ".") +
+            match[4].replaceAll(".", "/");
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
