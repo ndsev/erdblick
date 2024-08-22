@@ -3,7 +3,7 @@ import {BrowserModule} from '@angular/platform-browser';
 
 import {AppRoutingModule} from './app-routing.module';
 import {AppComponent} from './app.component';
-import {HttpClientModule} from "@angular/common/http";
+import {provideHttpClient, withInterceptorsFromDi} from "@angular/common/http";
 import {SpeedDialModule} from "primeng/speeddial";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
@@ -85,12 +85,14 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         HighlightSearch,
         TreeTableFilterPatchDirective,
     ],
+    bootstrap: [
+        AppComponent
+    ],
     imports: [
         BrowserModule,
         BrowserAnimationsModule,
         AnimateModule,
         AppRoutingModule,
-        HttpClientModule,
         SpeedDialModule,
         DialogModule,
         FormsModule,
@@ -118,7 +120,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ButtonGroupModule,
         TabViewModule,
         BreadcrumbModule,
-        TableModule,
+        TableModule
     ],
     providers: [
         {
@@ -136,8 +138,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         SidePanelService,
         FeatureSearchService,
         ClipboardService,
-    ],
-    bootstrap: [AppComponent]
-})
+        provideHttpClient(withInterceptorsFromDi()),
+    ] })
 export class AppModule {
 }
