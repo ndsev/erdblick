@@ -1,4 +1,4 @@
-import {Injectable} from "@angular/core";
+import {EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {BehaviorSubject, distinctUntilChanged, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
 import {MapService} from "./map.service";
@@ -47,6 +47,9 @@ export class InspectionService {
     selectedMapIdName: string = "";
     selectedFeature: FeatureWrapper | null = null;
     selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
+
+    // Event called when the active inspector of the inspection panel changed
+    inspectionPanelChanged  = new EventEmitter<void>();
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,

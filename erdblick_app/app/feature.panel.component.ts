@@ -4,11 +4,10 @@ import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
 import {MapService} from "./map.service";
-import {distinctUntilChanged, filter} from "rxjs";
+import {distinctUntilChanged} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
-import {Fetch} from "./fetch.model";
-import {uint8ArrayToWasm} from "./wasm";
+import {TTScrollableView} from "primeng/treetable";
 
 interface Column {
     field: string;
@@ -186,6 +185,9 @@ export class FeaturePanelComponent implements OnInit  {
     filterGeometryEntries = false;
     jsonTree = "";
 
+    @ViewChild('tt')
+    table!: TTScrollableView;
+
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
@@ -202,6 +204,10 @@ export class FeaturePanelComponent implements OnInit  {
                 this.filterTree();
             }
         });
+
+        this.inspectionService.inspectionPanelChanged.subscribe(() => {
+            this.table.scroller!.calculateOptions();
+        })
     }
 
     ngOnInit(): void {

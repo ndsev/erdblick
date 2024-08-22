@@ -135,6 +135,7 @@ export class InspectionPanelComponent implements OnInit
     setTab(index: number) {
         if (index < 0)
             index = this.tabs.length - 1;
+        this.inspectionService.inspectionPanelChanged.emit();
         this.activeIndex = index
     }
 
