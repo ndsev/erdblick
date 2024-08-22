@@ -31,7 +31,7 @@
     "js-yaml": "^4.1.0",
     "material-icons": "^1.13.12",
     "primeicons": "^7.0.0",
-    "primeng": "~/Workspace/klebert/primeng/dist/primeng-17.18.20.tgz",
+    "primeng": "https://github.com/Klebert-Engineering/primeng/releases/download/17.18.9-patched/primeng-17.18.9-patched.tgz",
     "rxjs": "~7.8.1",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
