@@ -19,10 +19,9 @@ import {TreeTable} from "primeng/treetable";
                     scrollHeight="flex"
                     [value]="treeData"
                     [loading]="loading"
-                    [autoLayout]="false"
+                    [autoLayout]="true"
                     [scrollable]="true"
                     [resizableColumns]="true"
-                    columnResizeMode="expand"
                     [virtualScroll]="true"
                     [virtualScrollItemSize]="26"
                     [tableStyle]="{'min-width': '150px', 'min-height': '1px', 'padding': '0px'}"
@@ -43,9 +42,15 @@ import {TreeTable} from "primeng/treetable";
                         </div>
                     </ng-template>
 
+                    <ng-template pTemplate="colgroup">
+                        <colgroup>
+                            <col *ngFor="let col of columns" [style.width]="col.width" />
+                        </colgroup>
+                    </ng-template>
+
                     <ng-template pTemplate="header">
                         <tr>
-                            <th *ngFor="let col of columns">
+                            <th *ngFor="let col of columns" ttResizableColumn>
                                 {{ col.header }}
                             </th>
                         </tr>
@@ -87,10 +92,10 @@ export class SourceDataPanelComponent implements OnInit {
         "value"
     ];
     columns = [
-        { key: "key", header: "Key", transform: (v: any) => v },
-        { key: "value", header: "Value", transform: (v: any) => v },
-        { key: "address", header: "Address", transform: this.addressFormatter },
-        { key: "type", header: "Type", transform: this.schemaTypeURLFormatter },
+        { key: "key",     header: "Key",     width: '180px', transform: (v: any) => v },
+        { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
+        { key: "address", header: "Address", width: '80px',  transform: this.addressFormatter },
+        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter },
     ]
 
     loading: boolean = true;
