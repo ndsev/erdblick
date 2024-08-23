@@ -117,7 +117,7 @@ interface Column {
                 </ng-template>
             </p-treeTable>
         </div>
-        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="1000"
+        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="9999" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-overlayPanel #filterPanel class="filter-panel">
             <div class="font-bold white-space-nowrap"
