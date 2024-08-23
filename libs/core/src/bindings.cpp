@@ -187,6 +187,10 @@ void validateSimfil(const std::string &query) {
 /**
  * Convert a SourceDataLayar hierarchy to a tree model compatible
  * structure.
+ *
+ * Layout:
+ *   [{ data: [{key: "...", value: ...}, ...], children: [{ ... }] }, ...]
+ *
  **/
 em::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
     const auto& strings = *layer.strings();
@@ -447,7 +451,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 }))
         .function(
             "findFeatureIndex",
-            std::function<
+            std::function<
+
                 int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
                 [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
                 {
