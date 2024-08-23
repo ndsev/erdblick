@@ -136,7 +136,7 @@ export class InspectionPanelComponent implements OnInit
         if (index < 0)
             index = this.tabs.length - 1;
         this.inspectionService.inspectionPanelChanged.emit();
-        this.activeIndex = index
+        this.activeIndex = Math.max(0, index)
     }
 
     onGoBack(event: any) {
@@ -145,7 +145,7 @@ export class InspectionPanelComponent implements OnInit
             const onClose = this.tabs[this.activeIndex]['onClose'];
             if (onClose)
                 onClose();
-            this.activeIndex = this.activeIndex - 1;
+            this.setTab(this.activeIndex - 1);
             if (this.tabs.length > 1)
                 this.tabs.pop();
         }

@@ -7,7 +7,7 @@ import {MapService} from "./map.service";
 import {distinctUntilChanged} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
-import {TTScrollableView} from "primeng/treetable";
+import {TreeTable} from "primeng/treetable";
 
 interface Column {
     field: string;
@@ -185,8 +185,7 @@ export class FeaturePanelComponent implements OnInit  {
     filterGeometryEntries = false;
     jsonTree = "";
 
-    @ViewChild('tt')
-    table!: TTScrollableView;
+    @ViewChild('tt') table!: TreeTable;
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
@@ -206,7 +205,14 @@ export class FeaturePanelComponent implements OnInit  {
         });
 
         this.inspectionService.inspectionPanelChanged.subscribe(() => {
-            this.table.scroller!.calculateOptions();
+            // We have to force recalculate the tables number of visible items
+            setTimeout(() => {
+                let scroller = (<any>this.table.scrollableViewChild)?.scroller;
+                if (scroller) {
+                    scroller.init();
+                    scroller.calculateAutoSize();
+                }
+            }, 0);
         })
     }
 
