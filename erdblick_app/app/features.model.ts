@@ -52,6 +52,9 @@ export class FeatureTile {
         // Deserialize the WASM tileFeatureLayer from the blob.
         return uint8ArrayToWasm((bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            if (!deserializedLayer)
+                return null;
+
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
             let result = null;
@@ -70,6 +73,9 @@ export class FeatureTile {
         // Deserialize the WASM tileFeatureLayer from the blob.
         return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            if (!deserializedLayer)
+                return null;
+
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
             let result = null;
