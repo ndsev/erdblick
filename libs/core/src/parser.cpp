@@ -113,6 +113,7 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
         [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); });
     return result;
 }
+
 mapget::TileSourceDataLayer::Ptr TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
     std::stringstream inputStream;
