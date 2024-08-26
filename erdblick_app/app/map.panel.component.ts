@@ -193,8 +193,6 @@ import {Menu} from "primeng/menu";
     styles: [``]
 })
 export class MapPanelComponent {
-    protected readonly LayerType = coreLib.LayerType;
-
     editorDialogVisible: boolean = false;
     layerDialogVisible: boolean = false;
     warningDialogVisible: boolean = false;
