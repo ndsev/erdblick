@@ -1,13 +1,49 @@
 #include "inspection.h"
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/sourcedatareference.h"
+#include "simfil/model/nodes.h"
+#include <cstdint>
 #include <iostream>
 
 using namespace erdblick;
 using namespace mapget;
 
+namespace
+{
+
+/**
+ * Converts a collection of qualified source-data references to the internal
+ * inspection node model.
+ */
+InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr<SourceDataReferenceCollection>& modelNode,
+                                                                 InspectionConverter::InspectionNode& node)
+{
+    using Ref = InspectionConverter::InspectionNode::SourceDataReference;
+
+    if (!modelNode)
+        return node;
+
+    const auto& model = modelNode->model();
+    const auto& strings = model.strings();
+    const auto tileId = model.tileId().value_;
+
+    modelNode->forEachReference([tileId, &node](const mapget::SourceDataReferenceItem& item) {
+        node.sourceDataRefs_.push_back(Ref{
+            .tileId_ = tileId,
+            .address_ = item.address().u64(),
+            .layerId_ = std::string{item.layerId()},
+            .qualifier_ = std::string{item.qualifier()}
+        });
+    });
+
+    return node;
+}
+
+}
+
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
-    fieldDict_ = featurePtr->model().fieldNames();
+    stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
 
     // Identifiers section.
@@ -140,6 +176,7 @@ void InspectionConverter::convertAttributeLayer(
     l->forEachAttribute([this](model_ptr<Attribute> const& attr)
     {
         auto attrScope = push(convertStringView(attr->name()), attr->name(), ValueType::Null);
+        convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
         auto numValues = 0;
         OptionalValueAndType singleValue;
@@ -201,6 +238,7 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
     relScope->value_ = JsValue(r->target()->toString());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
+    convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (r->hasSourceValidity()) {
         convertGeometry(convertStringView("sourceValidity"), r->sourceValidity());
     }
@@ -227,6 +265,8 @@ void InspectionConverter::convertGeometry(
     case GeomType::Mesh: geomScope->value_ = convertStringView("Mesh"); break;
     }
 
+    convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
+
     uint32_t index = 0;
     g->forEachPoint([this, &geomScope, &index](auto&& pt){
         auto ptScope = push(
@@ -239,7 +279,7 @@ void InspectionConverter::convertGeometry(
 }
 
 InspectionConverter::OptionalValueAndType InspectionConverter::convertField(
-    const simfil::FieldId& fieldId,
+    const simfil::StringId& fieldId,
     const simfil::ModelNode::Ptr& value)
 {
     return convertField(convertStringView(fieldId), value);
@@ -306,9 +346,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     return {};
 }
 
-JsValue InspectionConverter::convertStringView(const simfil::FieldId& f)
+JsValue InspectionConverter::convertStringView(const simfil::StringId& f)
 {
-    if (auto fieldStr = fieldDict_->resolve(f)) {
+    if (auto fieldStr = stringPool_->resolve(f)) {
         return convertStringView(*fieldStr);
     }
     return {};
@@ -338,6 +378,20 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
         newDict.set("children", childrenToJsValue());
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
+    if (!sourceDataRefs_.empty()) {
+        auto list = JsValue::List();
+        for (const auto& ref : sourceDataRefs_) {
+            list.push(JsValue::Dict({
+                {"tileId", JsValue(ref.tileId_)},
+                {"address", JsValue(ref.address_)},
+                {"layerId", JsValue(ref.layerId_)},
+                {"qualifier", JsValue(ref.qualifier_)},
+            }));
+        }
+
+        newDict.set("sourceDataReferences", std::move(list));
+    }
+
     return newDict;
 }
 

@@ -7,6 +7,7 @@ import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {FeatureSearchService} from "./feature.search.service";
+import {FeatureSearchComponent} from "./feature.search.component";
 
 @Component({
     selector: 'search-panel',

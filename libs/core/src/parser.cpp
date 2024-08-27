@@ -1,5 +1,6 @@
 #include <iostream>
 #include <regex>
+#include "mapget/model/stringpool.h"
 #include "parser.h"
 
 using namespace mapget;
@@ -10,7 +11,7 @@ namespace erdblick
 TileLayerParser::TileLayerParser()
 {
     // Create field dict cache
-    cachedFieldDicts_ = std::make_shared<mapget::TileLayerStream::CachedFieldsProvider>();
+    cachedStrings_ = std::make_shared<mapget::TileLayerStream::StringPoolCache>();
 
     // Create fresh mapget stream parser.
     reset();
@@ -74,7 +75,7 @@ void TileLayerParser::readFieldDictUpdate(SharedUint8Array const& bytes)
 
 NativeJsValue TileLayerParser::getFieldDictOffsets()
 {
-    auto offsets = reader_->fieldDictCache()->fieldDictOffsets();
+    auto offsets = reader_->stringPoolCache()->stringPoolOffsets();
     auto result = JsValue::Dict();
     for (auto const& [nodeId, highestFieldId] : offsets)
         result.set(nodeId, JsValue(highestFieldId));
@@ -89,10 +90,14 @@ void TileLayerParser::reset()
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
         [this](auto&& layer){
+            const auto type = layer->layerInfo()->type_;
+            if (type != LayerType::Features)
+                return;
+
             if (tileParsedFun_)
-                tileParsedFun_(layer);
+                tileParsedFun_(std::static_pointer_cast<TileFeatureLayer>(layer));
         },
-        cachedFieldDicts_);
+        cachedStrings_);
 }
 
 mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const SharedUint8Array& buffer)
@@ -105,7 +110,21 @@ mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const Shared
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedFieldDicts_->getFieldDict(nodeId); });
+        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); });
+    return result;
+}
+
+mapget::TileSourceDataLayer::Ptr TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
+{
+    std::stringstream inputStream;
+    inputStream << buffer.toString();
+    auto result = std::make_shared<TileSourceDataLayer>(
+        inputStream,
+        [this](auto&& mapId, auto&& layerId)
+        {
+            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
+        },
+        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); });
     return result;
 }
 
@@ -226,7 +245,7 @@ void TileLayerParser::getDataSourceInfo(SharedUint8Array& out, std::string const
 
 void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nodeId)
 {
-    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
+    auto fieldDict = cachedStrings_->getStringPool(nodeId);
     std::stringstream outStream;
     fieldDict->write(outStream, 0);
     out.writeToArray(outStream.str());
@@ -236,8 +255,8 @@ void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
     std::stringstream bufferStream;
     bufferStream << buffer.toString();
-    auto nodeId = mapget::Fields::readDataSourceNodeId(bufferStream);
-    auto fieldDict = cachedFieldDicts_->getFieldDict(nodeId);
+    auto nodeId = mapget::StringPool::readDataSourceNodeId(bufferStream);
+    auto fieldDict = cachedStrings_->getStringPool(nodeId);
     fieldDict->read(bufferStream);
 }
 

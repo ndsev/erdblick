@@ -8,6 +8,7 @@ export class Fetch
     static CHUNK_HEADER_SIZE = 11;
     static CHUNK_TYPE_FIELDS = 1;
     static CHUNK_TYPE_FEATURES = 2;
+    static CHUNK_TYPE_SOURCEDATA = 3;
     static CHUNK_TYPE_END_OF_STREAM = 128;
     private url: string;
     private method: string;
@@ -88,7 +89,7 @@ export class Fetch
     /**
      * Method to start the fetch request and process the response.
      */
-    go() {
+    async go() {
         let requestOptions: Record<string, any> = {
             method: this.method,
             signal: this.abortController.signal,
@@ -102,18 +103,18 @@ export class Fetch
         }
         requestOptions["headers"] = headers
 
-        fetch(this.url, requestOptions)
+        return fetch(this.url, requestOptions)
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 } else {
                     if (this.jsonCallback) {
                         console.assert(!this.processChunks)
-                        this.handleJsonResponse(response);
+                        return this.handleJsonResponse(response);
                     } else if (this.processChunks) {
-                        this.handleChunkedResponse(response).then(_ => {}).catch(e => this.handleError(e));
+                        return this.handleChunkedResponse(response).then(_ => {}).catch(e => this.handleError(e));
                     } else {
-                        this.handleBlobResponse(response);
+                        return this.handleBlobResponse(response);
                     }
                 }
             })
@@ -124,8 +125,8 @@ export class Fetch
      * Method to handle and process a Blob response.
      * @param {Response} response - The fetch response.
      */
-    private handleBlobResponse(response: Response) {
-        response.blob()
+    private async handleBlobResponse(response: Response) {
+        return response.blob()
             .then(blob => {
                 this.processBlob(blob);
             });
@@ -193,8 +194,8 @@ export class Fetch
      * Method to handle and process a JSON response.
      * @param {Response} response - The fetch response.
      */
-    handleJsonResponse(response: Response) {
-        response.json()
+    private async handleJsonResponse(response: Response) {
+        return response.json()
             .then(jsonData => {
                 // Serialize the JSON before it is passed to the callback, so that
                 // any manipulations to it will not side-effect a later buffer callback.

@@ -3,6 +3,7 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 import {ErdblickStyle} from "./style.service";
+import {InspectionService, SelectedSourceData} from "./inspection.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -29,7 +30,8 @@ interface ErdblickParameters extends Record<string, any> {
     styles: Record<string, StyleParameters>,
     tilesLoadLimit: number,
     tilesVisualizeLimit: number,
-    enabledCoordsTileIds: Array<string>
+    enabledCoordsTileIds: Array<string>,
+    selectedSourceData: Array<any>,
 }
 
 interface ParameterDescriptor {
@@ -139,6 +141,12 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
         default: ["WGS84"],
         urlParam: false
+    },
+    selectedSourceData: {
+        converter: JSON.parse,
+        validator: Array.isArray,
+        default: [],
+        urlParam: true
     }
 };
 
@@ -159,7 +167,7 @@ export class ParametersService {
             }
         });
 
-    constructor(public router: Router) {
+    constructor(public router: Router /*, private inspectionService: InspectionService*/) {
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();
@@ -178,6 +186,36 @@ export class ParametersService {
 
     p() {
         return this.parameters.getValue();
+    }
+
+    public setSelectedSourceData(selection: SelectedSourceData) {
+        this.p().selectedSourceData = [
+            selection.tileId,
+            selection.layerId,
+            selection.mapId,
+            selection.address.toString(),
+            selection.featureId,
+        ];
+        this.parameters.next(this.p());
+    }
+
+    public unsetSelectedSourceData() {
+        this.p().selectedSourceData = [];
+        this.parameters.next(this.p());
+    }
+
+    public getSelectedSourceData(): SelectedSourceData | null {
+        const sd = this.p().selectedSourceData;
+        if (!sd || !sd.length)
+            return null;
+
+        return {
+            tileId: sd[0],
+            layerId: sd[1],
+            mapId: sd[2],
+            address: BigInt(sd[3] || '0'),
+            featureId: sd[4],
+        };
     }
 
     setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {

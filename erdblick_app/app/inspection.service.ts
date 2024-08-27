@@ -1,12 +1,13 @@
-import {Injectable} from "@angular/core";
+import {EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged, filter} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
 import {MapService} from "./map.service";
-import {Feature} from "../../build/libs/core/erdblick-core";
+import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
-import {coreLib} from "./wasm";
+import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
+import {Fetch} from "./fetch.model";
 
 
 interface InspectionModelData {
@@ -16,7 +17,22 @@ interface InspectionModelData {
     info?: string;
     hoverId?: string
     geoJsonPath?: string;
+    sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
+}
+
+export interface SelectedSourceData {
+    mapId: string,
+    tileId: number,
+    layerId: string,
+    address: bigint,
+    featureId: string,
+}
+
+export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
+    if (!a || !b)
+        return false;
+    return (a == b || (a.mapId == b.mapId && a.tileId == b.tileId && a.layerId == b.layerId && a.address == b.address && a.featureId == b.featureId));
 }
 
 @Injectable({providedIn: 'root'})
@@ -30,6 +46,10 @@ export class InspectionService {
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
     selectedFeature: FeatureWrapper | null = null;
+    selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
+
+    // Event called when the active inspector of the inspection panel changed
+    inspectionPanelChanged  = new EventEmitter<void>();
 
     constructor(private mapService: MapService,
                 private jumpService: JumpTargetService,
@@ -53,16 +73,23 @@ export class InspectionService {
             this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
         });
 
-        this.parametersService.parameters.pipe(filter(
-            parameters => parameters.selected.length == 2)).subscribe(parameters => {
-            const [mapId, featureId] = parameters.selected;
-            if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
-                this.jumpService.highlightFeature(mapId, featureId).then(() => {
-                    if (this.selectedFeature) {
+        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
+            if (parameters.selected.length == 2) {
+                const [mapId, featureId] = parameters.selected;
+                if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
+                    this.jumpService.highlightFeature(mapId, featureId);
+                    if (this.selectedFeature != null) {
                         this.mapService.focusOnFeature(this.selectedFeature);
                     }
-                });
+                }
             }
+        });
+
+        this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
+            if (selection)
+                this.parametersService.setSelectedSourceData(selection);
+            else
+                this.parametersService.unsetSelectedSourceData();
         });
     }
 
@@ -104,6 +131,9 @@ export class InspectionService {
                 if (data.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;
                 }
+                if (data.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = data.sourceDataReferences;
+                }
                 node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children) : [];
                 treeNodes.push(node);
             }
@@ -139,6 +169,49 @@ export class InspectionService {
         } else {
             this.featureTree.next('[]');
         }
+    }
+
+    async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
+        console.log(`Loading SourceDataLayer layerId=${layerId} tileId=${tileId}`);
+
+        let requests = [{
+            mapId: mapId,
+            layerId: layerId,
+            tileIds: [tileId]
+        }];
+
+        let tileParser = new coreLib.TileLayerParser();
+
+        let newRequestBody = JSON.stringify({
+            requests: requests
+        });
+
+        let layer: TileSourceDataLayer | undefined;
+        let fetch = new Fetch("/tiles")
+            .withChunkProcessing()
+            .withMethod("POST")
+            .withBody(newRequestBody)
+            .withBufferCallback((message: any, messageType: any) => {
+                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        tileParser!.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                    layer = uint8ArrayToWasm((wasmBlob: any) => {
+                        return tileParser.readTileSourceDataLayer(wasmBlob);
+                    }, blob);
+                } else {
+                    throw new Error(`Unknown message type ${messageType}.`)
+                }
+            });
+
+        return fetch.go()
+            .then(_ => {
+                if (!layer)
+                    throw new Error(`Error loading layer.`);
+                return layer;
+            });
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;

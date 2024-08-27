@@ -22,7 +22,7 @@ export interface LayerInfoItem extends Object {
     coverage: Array<number|CoverageRectItem>;
     featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
     layerId: string;
-    type: string;
+    type: number;
     version: {major: number, minor: number, patch: number};
     zoomLevels: Array<number>;
     level: number;
@@ -241,7 +241,7 @@ export class MapService {
     }
 
     public async reloadDataSources() {
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
             let bufferCompleted = false;
             let jsonCompleted = false;
 
@@ -265,6 +265,10 @@ export class MapService {
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
+                            // Filter out source-data layers
+                            if (layerId.startsWith("SourceData-"))
+                                continue;
+
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
                                 mapInfo.mapId + '/' + layerId,
@@ -292,7 +296,14 @@ export class MapService {
         const mapItem = this.maps.getValue().get(mapId);
         if (!mapItem)
             return false;
-        return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.visible : false;
+
+        const layer = mapItem.layers.get(layerId);
+        if (layer) {
+            if (layer.type == coreLib.LayerType.SOURCEDATA.value)
+                return false;
+            return layer.visible;
+        }
+        return false;
     }
 
     toggleMapLayerVisibility(mapId: string, layerId: string) {
@@ -483,7 +494,7 @@ export class MapService {
         // Abort previous fetch operation, if it is different from the new one.
         let newRequestBody = JSON.stringify({
             requests: requests,
-            maxKnownFieldIds: this.tileParser!.getFieldDictOffsets()
+            stringPoolOffsets: this.tileParser!.getFieldDictOffsets()
         });
         if (this.currentFetch) {
             if (this.currentFetch.bodyJson === newRequestBody)

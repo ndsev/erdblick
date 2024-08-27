@@ -7,20 +7,17 @@ erdblick::FeatureLayerSearch::FeatureLayerSearch(mapget::TileFeatureLayer& tfl) 
 
 erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& q)
 {
-    auto const& expr = tfl_.compiledExpression(anyWrap(q));
     auto results = JsValue::List();
     auto mapTileKey = tfl_.id().toString();
 
-    for (auto feature : tfl_) {
-        auto evalResult = simfil::eval(
-            tfl_.evaluationEnvironment(),
-            *expr,
-            *feature);
+    for (const auto& feature : tfl_) {
+        auto evalResult = tfl_.evaluate(anyWrap(q), *feature);
         if (evalResult.empty())
             continue;
         auto& firstEvalResult = evalResult[0];
         if (!firstEvalResult.as<simfil::ValueType::Bool>())
             continue;
+
         auto jsResultForFeature = JsValue::List();
         jsResultForFeature.push(JsValue(mapTileKey));
         jsResultForFeature.push(JsValue(feature->id()->toString()));

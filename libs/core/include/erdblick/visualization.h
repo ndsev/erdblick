@@ -236,7 +236,7 @@ private:
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
     std::string highlightFeatureId_;
-    std::shared_ptr<simfil::Fields> internalFieldsDictCopy_;
+    std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::map<std::string, simfil::Value> optionValues_;
 
     /// ===== Relation Processing Members =====

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/stringpool.h"
 #include "parser.h"
 #include "style.h"
 
@@ -108,7 +109,7 @@ public:
         // Get a field dictionary which the parser can later pick up again,
         // and also inform the parser about the layer info used by features
         // in the test data.
-        fieldNames_ = tileLayerParser.cachedFieldDicts_->getFieldDict("TestDataNode");
+        fieldNames_ = tileLayerParser.cachedStrings_->getStringPool("TestDataNode");
         tileLayerParser.setFallbackLayerInfo(layerInfo_);
     }
 
@@ -437,7 +438,7 @@ public:
 
 private:
     std::shared_ptr<mapget::LayerInfo> layerInfo_;
-    std::shared_ptr<mapget::Fields> fieldNames_;
+    std::shared_ptr<mapget::StringPool> fieldNames_;
 };
 
 }

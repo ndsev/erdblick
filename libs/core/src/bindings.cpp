@@ -3,6 +3,9 @@
 
 #include "aabb.h"
 #include "buffer.h"
+#include "cesium-interface/object.h"
+#include "mapget/model/info.h"
+#include "simfil/model/nodes.h"
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
@@ -10,6 +13,7 @@
 #include "inspection.h"
 #include "geometry.h"
 #include "search.h"
+#include "sourcedata.hpp"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -19,6 +23,9 @@
 
 using namespace erdblick;
 namespace em = emscripten;
+
+namespace
+{
 
 /**
  * WGS84 Viewport Descriptor, which may be used with the
@@ -176,10 +183,20 @@ void validateSimfil(const std::string &query) {
     simfil::compile(*simfilEnv, query, false);
 }
 
+}
+
 EMSCRIPTEN_BINDINGS(erdblick)
 {
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
+
+    ////////// LayerType
+    em::enum_<mapget::LayerType>("LayerType")
+        .value("FEATURES", mapget::LayerType::Features)
+        .value("HEIGHTMAP", mapget::LayerType::Heightmap)
+        .value("ORTHOiMAGE", mapget::LayerType::OrthoImage)
+        .value("GLTF", mapget::LayerType::GLTF)
+        .value("SOURCEDATA", mapget::LayerType::SourceData);
 
     ////////// ValueType
     em::enum_<InspectionConverter::ValueType>("ValueType")
@@ -231,6 +248,24 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
 
+    em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
+        .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
+        .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
+
+    em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
+        .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
+            "std::shared_ptr<mapget::TileSourceDataLayer>")
+        .function(
+            "addressFormat",
+            &mapget::TileSourceDataLayer::sourceDataAddressFormat)
+        .function(
+            "toJson",
+            std::function<std::string(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
+                return self.toJson().dump(2);
+            }))
+        .function(
+            "toObject", &tileSourceDataLayerToObject);
+
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
     em::class_<FeaturePtr>("Feature")
@@ -242,7 +277,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "geojson",
             std::function<std::string(FeaturePtr&)>(
                 [](FeaturePtr& self) {
-                    return self->toGeoJson().dump(4); }))
+                    return self->toJson().dump(4); }))
         .function(
             "inspectionModel",
             std::function<em::val(FeaturePtr&)>(
@@ -296,6 +331,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function(
             "findFeatureIndex",
             std::function<
+
                 int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
                 [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
                 {
@@ -340,6 +376,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
         .function(
             "filterFeatureJumpTargets",

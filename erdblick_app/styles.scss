@@ -1,4 +1,5 @@
 @import "primeicons/primeicons.css";
+@layer primeng, erdblick;
 
 body {
     overflow: hidden;
@@ -142,6 +143,7 @@ body {
 
     .resizable-container {
         width: 30em;
+        height: 30em;
         min-width: 30em;
         min-height: 18em;
         resize: both;
@@ -149,6 +151,10 @@ body {
         direction: rtl;
         max-width: calc(100vw - 27em);
         max-height: calc(100vh - 8.5em);
+
+        * {
+            direction: ltr;
+        }
 
         .resize-handle {
             display: none;
@@ -171,13 +177,24 @@ body {
             border-collapse: collapse;
 
             td {
-                padding: 0;
+                padding: 0px;
+                height: 26px;
+            }
+
+            th {
+                padding: 0px;
+                height: 26px;
             }
 
             .p-treetable-toggler {
                 margin: 0;
                 width: 1.25em;
                 height: 1.25em;
+            }
+
+            /* Style used for highlighting individual table rows. */
+            tr.highlight {
+                background: hsl(105, 30%, 90%);
             }
         }
     }
