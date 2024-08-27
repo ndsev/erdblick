@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <variant>
 #include "mapget/model/info.h"
 
@@ -32,6 +33,16 @@ struct always_false : std::false_type {};
  */
 struct JsValue
 {
+    template <class T>
+    static auto UnpackNativeValue(T&& v)
+    {
+        if constexpr (std::is_base_of_v<JsValue, std::decay_t<T>>) {
+            return *v;
+        } else {
+            return std::forward<T>(v);
+        }
+    }
+
     /**
      * Construct an Object from a global JavaScript name using em::val::global.
      * If EMSCRIPTEN is not defined, simply returns an empty JSON object.
@@ -185,7 +196,7 @@ template <typename ReturnType, typename... Args>
 ReturnType JsValue::call(std::string const& methodName, Args... args)
 {
 #ifdef EMSCRIPTEN
-    return value_.call<ReturnType>(methodName.c_str(), args...);
+    return value_.call<ReturnType>(methodName.c_str(), UnpackNativeValue(args)...);
 #else
     // Record the method call in the mock object
     value_["methodCalls"].push_back({

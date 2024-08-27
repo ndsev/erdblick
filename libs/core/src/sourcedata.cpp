@@ -11,39 +11,39 @@
  *   [{ data: [{key: "...", value: ...}, ...], children: [{ ... }] }, ...]
  *
  **/
-emscripten::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
-    namespace em = emscripten;
+erdblick::JsValue tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
+    using namespace erdblick;
     using namespace mapget;
     using namespace simfil;
 
     const auto& strings = *layer.strings();
 
-    std::function<em::val(em::val&&, const simfil::ModelNode&)> visit;
-    auto visitAtomic = [&](em::val&& key, const simfil::ModelNode& node) {
-        auto value = [&node]() -> em::val {
+    std::function<JsValue(JsValue&&, const simfil::ModelNode&)> visit;
+    auto visitAtomic = [&](JsValue&& key, const simfil::ModelNode& node) {
+        auto value = [&node]() -> JsValue {
             switch (node.type()) {
             case simfil::ValueType::Null:
-                return em::val::null();
+                return JsValue();
             case simfil::ValueType::Bool:
-                return em::val(std::get<bool>(node.value()));
+                return JsValue(std::get<bool>(node.value()));
             case simfil::ValueType::Int:
-                return em::val(std::get<int64_t>(node.value()));
+                return JsValue(std::get<int64_t>(node.value()));
             case simfil::ValueType::Float:
-                return em::val(std::get<double>(node.value()));
+                return JsValue(std::get<double>(node.value()));
             case simfil::ValueType::String: {
                 auto v = node.value();
                 if (auto vv = std::get_if<std::string>(&v))
-                    return em::val(*vv);
+                    return JsValue(*vv);
                 if (auto vv = std::get_if<std::string_view>(&v))
-                    return em::val(std::string(*vv));
+                    return JsValue(std::string(*vv));
             }
             default:
-                return em::val::null();
+                return JsValue();
             }
         }();
 
-        auto res = em::val::object();
-        auto data = em::val::object();
+        auto res = JsValue::Dict();
+        auto data = JsValue::Dict();
         data.set("key", std::move(key));
         data.set("value", std::move(value));
         res.set("data", std::move(data));
@@ -51,17 +51,17 @@ emscripten::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& l
         return res;
     };
 
-    auto visitArray = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
-        auto res = em::val::object();
+    auto visitArray = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
+        auto res = JsValue::Dict();
 
-        auto data = em::val::object();
+        auto data = JsValue::Dict();
         data.set("key", std::move(key));
         res.set("data", std::move(data));
 
-        auto children = em::val::array();
+        auto children = JsValue::List();
         auto i = 0;
         for (const auto& item : node) {
-            children.call<void>("push", visit(em::val(i++), *item));
+            children.call<void>("push", visit(JsValue(i++), *item));
         }
 
         if (i > 0)
@@ -72,35 +72,35 @@ emscripten::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& l
 
     auto visitAddress = [&](const SourceDataAddress& addr) {
         if (layer.sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
-            auto res = em::val::object();
-            res.set("offset", addr.bitOffset());
-            res.set("size", addr.bitSize());
+            auto res = JsValue::Dict();
+            res.set("offset", JsValue(addr.bitOffset()));
+            res.set("size", JsValue(addr.bitSize()));
 
             return res;
         } else {
-            return em::val(addr.u64());
+            return JsValue(addr.u64());
         }
     };
 
-    auto visitObject = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
-        auto res = em::val::object();
+    auto visitObject = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
+        auto res = JsValue::Dict();
 
-        auto data = em::val::object();
+        auto data = JsValue::Dict();
         data.set("key", std::move(key));
 
         if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
             auto compound = layer.resolveCompound(*ModelNode::Ptr::make(layer.shared_from_this(), node.addr()));
 
             data.set("address", visitAddress(compound->sourceDataAddress()));
-            data.set("type", std::string(compound->schemaName()));
+            data.set("type", JsValue(std::string(compound->schemaName())));
         }
 
         res.set("data", std::move(data));
 
-        auto children = em::val::array();
+        auto children = JsValue::List();
         for (const auto& [field, v] : node.fields()) {
             if (auto k = strings.resolve(field); k && v) {
-                children.call<void>("push", visit(em::val(k->data()), *v));
+                children.call<void>("push", visit(JsValue(k->data()), *v));
             }
         }
 
@@ -110,7 +110,7 @@ emscripten::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& l
         return res;
     };
 
-    visit = [&](em::val&& key, const simfil::ModelNode& node) -> em::val {
+    visit = [&](JsValue&& key, const simfil::ModelNode& node) -> JsValue {
         switch (node.type()) {
         case simfil::ValueType::Array:
             return visitArray(std::move(key), node);
@@ -122,7 +122,7 @@ emscripten::val tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& l
     };
 
     if (layer.numRoots() == 0)
-        return em::val::object();
+        return JsValue::Dict();
 
-    return visit(em::val("root"), *layer.root(0));
+    return visit(JsValue("root"), *layer.root(0));
 }
