@@ -40,7 +40,10 @@ set(ERDBLICK_SOURCE_FILES
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
-  list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
+  list(APPEND ERDBLICK_SOURCE_FILES
+    src/bindings.cpp
+    src/sourcedata.hpp
+    src/sourcedata.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
   # target_compile_options(erdblick-core PRIVATE -fwasm-exceptions)
