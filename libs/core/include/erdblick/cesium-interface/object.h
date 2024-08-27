@@ -201,7 +201,7 @@ ReturnType JsValue::call(std::string const& methodName, Args... args)
     // Record the method call in the mock object
     value_["methodCalls"].push_back({
         {"methodName", methodName},
-        {"arguments", {args...}} // This assumes Args are convertible to nlohmann::json
+        {"arguments", {UnpackNativeValue(args)...}} // This assumes Args are convertible to nlohmann::json
     });
     return ReturnType(); // default-constructed value
 #endif
