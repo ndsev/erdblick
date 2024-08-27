@@ -129,6 +129,14 @@ body {
 
     .filter-container {
         width: 100%;
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+
+        .p-button {
+            width: 32px;
+            height: 32px;
+        }
     }
 
     .filter-input {

@@ -1,9 +1,11 @@
 import {Component, OnInit, Input, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
+import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
+import {Menu} from "primeng/menu";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -39,6 +41,7 @@ import {TreeTable} from "primeng/treetable";
                             />
                             <i *ngIf="filterString" (click)="clearFilter()"
                                class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerListMenu.toggle($event)" />
                         </div>
                     </ng-template>
 
@@ -77,14 +80,15 @@ import {TreeTable} from "primeng/treetable";
                 </div>
             </div>
         </ng-template>
+
+        <p-menu #layerListMenu [model]="layerList" [popup]="true" appendTo="body" />
     `
 })
 export class SourceDataPanelComponent implements OnInit {
-    @Input()
-    sourceData!: SelectedSourceData;
+    @Input() sourceData!: SelectedSourceData;
 
-    @ViewChild('tt')
-    table!: TreeTable;
+    @ViewChild('tt') table!: TreeTable;
+    @ViewChild('layerListMenu') layerListMenu!: Menu;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -92,10 +96,10 @@ export class SourceDataPanelComponent implements OnInit {
         "value"
     ];
     columns = [
-        { key: "key",     header: "Key",     width: '180px', transform: (v: any) => v },
-        { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
-        { key: "address", header: "Address", width: '80px',  transform: this.addressFormatter },
-        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter },
+        { key: "key",     header: "Key",     width: '0*',   transform: (v: any) => v },
+        { key: "value",   header: "Value",   width: '0*',   transform: (v: any) => v },
+        { key: "address", header: "Address", width: '80px', transform: this.addressFormatter },
+        { key: "type",    header: "Type",    width: 'auto', transform: this.schemaTypeURLFormatter },
     ]
 
     loading: boolean = true;
@@ -104,7 +108,9 @@ export class SourceDataPanelComponent implements OnInit {
     isExpanded = false;
     filterString = "";
 
-    constructor(private inspectionService: InspectionService) {}
+    layerList: any[] = [];
+
+    constructor(private inspectionService: InspectionService, public mapService: MapService) {}
 
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
@@ -128,6 +134,29 @@ export class SourceDataPanelComponent implements OnInit {
             .finally(() => {
                 this.loading = false;
             });
+
+        this.mapService.maps.subscribe(maps => {
+            const map = maps.get(this.sourceData.mapId);
+            if (map) {
+                this.layerList = Array.from(map.layers.values())
+                    .filter(item => item.layerId.startsWith("SourceData-"))
+                    .map(item => {
+                        return {
+                            label: item.layerId,
+                            disabled: item.layerId === this.sourceData.layerId,
+                            command: () => {
+                                let sourceData = {...this.sourceData};
+                                sourceData.layerId = item.layerId;
+                                sourceData.address = BigInt(0);
+
+                                this.inspectionService.selectedSourceData.next(sourceData);
+                            },
+                        };
+                    });
+            } else {
+                this.layerList = [];
+            }
+        });
     }
 
     /**

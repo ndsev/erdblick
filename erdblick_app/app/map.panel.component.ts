@@ -39,41 +39,43 @@ import {Menu} from "primeng/menu";
                         <span class="font-bold white-space-nowrap map-header">
                             {{ mapItem.key }}
                         </span>
-                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered" class="flex-container">
-                            <div class="font-bold white-space-nowrap"
-                                 style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
-                                      (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
-                                <span>
-                                    <p-checkbox [(ngModel)]="mapLayer.value.visible"
-                                                (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
-                                                [label]="mapLayer.key" [binary]="true"/>
-                                </span>
+                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered">
+                            <div *ngIf="!mapLayer.value.layerId.startsWith('SourceData-')" class="flex-container">
+                                <div class="font-bold white-space-nowrap"
+                                    style="margin-left: 0.5em; display: flex; align-items: center;">
+                                    <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
+                                        (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
+                                    <span>
+                                        <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                    (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
+                                                    [label]="mapLayer.key" [binary]="true"/>
+                                    </span>
+                                </div>
+                                <div class="layer-controls">
+                                    <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
+                                            label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                        <span class="material-icons"
+                                            style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
+                                    </p-button>
+                                    <p-button *ngIf="mapLayer.value.coverage.length"
+                                            (click)="focus(mapLayer.value.coverage[0], $event)"
+                                            label="" pTooltip="Focus on layer" tooltipPosition="bottom"
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                    </p-button>
+                                    <p-inputNumber [(ngModel)]="mapLayer.value.level"
+                                                (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.key)"
+                                                [showButtons]="true" [min]="0" [max]="15"
+                                                buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
+                                                decrementButtonClass="p-button-secondary"
+                                                incrementButtonClass="p-button-secondary"
+                                                incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
+                                                pTooltip="Change zoom level" tooltipPosition="bottom">
+                                    </p-inputNumber>
+                                </div>
+                                <input class="level-indicator" type="text" pInputText [disabled]="true" [(ngModel)]="mapLayer.value.level" />
                             </div>
-                            <div class="layer-controls">
-                                <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
-                                          label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
-                                          [style]="{'padding-left': '0', 'padding-right': '0'}">
-                                    <span class="material-icons"
-                                          style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
-                                </p-button>
-                                <p-button *ngIf="mapLayer.value.coverage.length"
-                                          (click)="focus(mapLayer.value.coverage[0], $event)"
-                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom"
-                                          [style]="{'padding-left': '0', 'padding-right': '0'}">
-                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
-                                </p-button>
-                                <p-inputNumber [(ngModel)]="mapLayer.value.level"
-                                               (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.key)"
-                                               [showButtons]="true" [min]="0" [max]="15"
-                                               buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
-                                               decrementButtonClass="p-button-secondary"
-                                               incrementButtonClass="p-button-secondary"
-                                               incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
-                                               pTooltip="Change zoom level" tooltipPosition="bottom">
-                                </p-inputNumber>
-                            </div>
-                            <input class="level-indicator" type="text" pInputText [disabled]="true" [(ngModel)]="mapLayer.value.level" />
                         </div>
                     </div>
                 </div>
