@@ -115,7 +115,7 @@ export class SourceDataPanelComponent implements OnInit {
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
             .then(layer => {
-                let root = layer.toObject()
+                const root = layer.toObject()
                 this.addressFormat = layer.addressFormat();
 
                 layer.delete();
@@ -170,7 +170,7 @@ export class SourceDataPanelComponent implements OnInit {
         this.treeData = [];
         this.errorMessage = message;
 
-        console.error(this.errorMessage);
+        console.error("Error while processing SourceData tree:", this.errorMessage)
     }
 
     /**
@@ -187,23 +187,19 @@ export class SourceDataPanelComponent implements OnInit {
 
         const prefix = "https://developer.nds.live/schema/";
 
-        let match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
+        const match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
         if (!match || match.length <= 4)
             return schema;
 
         // Sub-namespaces in front of the version get joined by "-". Names past the version get joined by "/"
-        let url =
+        const url =
             match[1].replace(/^(.*)\.$/, "$1/").replaceAll(".", "-") +
             match[3].replaceAll("_", ".") +
             match[4].replaceAll(".", "/");
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    addressFormatter(address?: any) {
-        if (!address) {
-            return address;
-        }
-
+    addressFormatter(address?: any): string {
         if (typeof address === 'object') {
             return `${address.offset}:${address.size}`
         } else {
@@ -212,10 +208,9 @@ export class SourceDataPanelComponent implements OnInit {
     }
 
     selectItemWithAddress(address: bigint) {
-        let searchAddress: any = address;
         let addressInRange: any;
         if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
-            searchAddress = {
+            const searchAddress = {
                 offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
                 size: address & BigInt(0xFFFFFFFF),
             }
@@ -223,12 +218,15 @@ export class SourceDataPanelComponent implements OnInit {
             const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
             const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
 
-            addressInRange = (addr: any) => {
-                return addr.offset >= addressLow && addr.offset + addr.size <= addressHigh && (addr.size != 0 || addressLow == addressHigh);
+            addressInRange = (address: any) => {
+                return address.offset >= addressLow &&
+                    address.offset + address.size <= addressHigh &&
+                    (address.size != 0 || addressLow == addressHigh);
             }
         } else {
-            addressInRange = (addr: any) => {
-                return addr == searchAddress;
+            const searchAddress = address;
+            addressInRange = (address: any) => {
+                return address == searchAddress;
             }
         }
 
@@ -244,8 +242,7 @@ export class SourceDataPanelComponent implements OnInit {
                 node.data.styleClass = "highlight";
             }
 
-            const address = node.data.address;
-            if (address && addressInRange(address)) {
+            if (node.data.address && addressInRange(node.data.address)) {
                 highlight = true;
 
                 if (!firstHighlightedItemIndex)
@@ -262,7 +259,6 @@ export class SourceDataPanelComponent implements OnInit {
             }
         };
 
-        console.log(`Highlighting item with address`, searchAddress);
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });

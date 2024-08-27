@@ -9,7 +9,7 @@ export class HighlightSearch implements PipeTransform {
             return value;
         }
 
-        let re = new RegExp(String(args).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        const re = new RegExp(String(args).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         return String(value).replace(re, '<mark>$&</mark>');
     }
 }

@@ -55,7 +55,7 @@ interface InspectorTab {
         }`,
     ]
 })
-export class InspectionPanelComponent implements OnInit
+export class InspectionPanelComponent
 {
     title = "";
     tabs: InspectorTab[] = [];
@@ -85,8 +85,6 @@ export class InspectionPanelComponent implements OnInit
                 this.pushSourceDataInspector(selection);
         })
     }
-
-    ngOnInit(): void {}
 
     reset() {
         /* We always keep the first tab, which is a feature inspector. */
