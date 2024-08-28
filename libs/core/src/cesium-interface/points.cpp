@@ -12,11 +12,11 @@ CesiumPointPrimitiveCollection::CesiumPointPrimitiveCollection() :
     pointPrimitiveCollection_(Cesium().PointPrimitiveCollection.New())
 {}
 
-void CesiumPointPrimitiveCollection::addPoint(
+JsValue CesiumPointPrimitiveCollection::pointParams(
     const JsValue& position,
-    FeatureStyleRule const& style,
-    JsValue const& id,
-    BoundEvalFun const& evalFun)
+    const FeatureStyleRule& style,
+    const JsValue& id,
+    const BoundEvalFun& evalFun)
 {
     auto const color = style.color(evalFun);
     auto const& oColor = style.outlineColor();
@@ -36,7 +36,17 @@ void CesiumPointPrimitiveCollection::addPoint(
             Cesium().NearFarScalar.New((*nfs)[0], (*nfs)[1], (*nfs)[2], (*nfs)[3]));
     }
 
-    pointPrimitiveCollection_.call<void>("add", *options);
+    return options;
+}
+
+void CesiumPointPrimitiveCollection::addPoint(
+    const JsValue& position,
+    FeatureStyleRule const& style,
+    JsValue const& id,
+    BoundEvalFun const& evalFun)
+{
+    auto params = pointParams(position, style, id, evalFun);
+    pointPrimitiveCollection_.call<void>("add", *params);
     ++numGeometryInstances_;
 }
 

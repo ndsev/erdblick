@@ -43,11 +43,13 @@ public:
     [[nodiscard]] bool isValid() const;
     [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
+    [[nodiscard]] std::string const& name() const;
 
 private:
     std::vector<FeatureStyleRule> rules_;
     std::vector<FeatureStyleOption> options_;
     bool valid_ = false;
+    std::string name_;
 };
 
 }

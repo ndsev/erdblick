@@ -13,9 +13,18 @@ struct CesiumPointPrimitiveCollection
     CesiumPointPrimitiveCollection();
 
     /**
-     * Add an individual point to the collection
+     * Add an individual point to the collection.
      */
     void addPoint(
+        const JsValue& position,
+        FeatureStyleRule const& style,
+        JsValue const& id,
+        BoundEvalFun const& evalFun);
+
+    /**
+     * Get the parameters for a PointPrimitiveCollection::add() call.
+     */
+    JsValue pointParams(
         const JsValue& position,
         FeatureStyleRule const& style,
         JsValue const& id,
