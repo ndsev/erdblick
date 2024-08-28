@@ -219,8 +219,10 @@ export class SourceDataPanelComponent implements OnInit {
     addressFormatter(address?: any): string {
         if (typeof address === 'object') {
             return `${address.offset}:${address.size}`
-        } else {
+        } else if (address) {
             return `${address}`
+        } else {
+            return '';
         }
     }
 
