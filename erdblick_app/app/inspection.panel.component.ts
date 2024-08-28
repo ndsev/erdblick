@@ -115,7 +115,7 @@ export class InspectionPanelComponent
 
     pushSourceDataInspector(data: SelectedSourceData) {
         let tab = {
-            title: data.layerId,
+            title: SourceDataPanelComponent.layerNameForLayerId(data.layerId),
             icon: "pi-database",
             component: SourceDataPanelComponent,
             inputs: {

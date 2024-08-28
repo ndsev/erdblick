@@ -41,7 +41,7 @@ import {Menu} from "primeng/menu";
                             />
                             <i *ngIf="filterString" (click)="clearFilter()"
                                class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerListMenu.toggle($event)" />
+                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerMenuItemsMenu.toggle($event)" />
                         </div>
                     </ng-template>
 
@@ -81,14 +81,14 @@ import {Menu} from "primeng/menu";
             </div>
         </ng-template>
 
-        <p-menu #layerListMenu [model]="layerList" [popup]="true" appendTo="body" />
+        <p-menu #layerMenuItemsMenu [model]="layerMenuItems" [popup]="true" appendTo="body" [style]="{'width': 'auto'}" />
     `
 })
 export class SourceDataPanelComponent implements OnInit {
     @Input() sourceData!: SelectedSourceData;
 
     @ViewChild('tt') table!: TreeTable;
-    @ViewChild('layerListMenu') layerListMenu!: Menu;
+    @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -96,19 +96,31 @@ export class SourceDataPanelComponent implements OnInit {
         "value"
     ];
     columns = [
-        { key: "key",     header: "Key",     width: '0*',   transform: (v: any) => v },
-        { key: "value",   header: "Value",   width: '0*',   transform: (v: any) => v },
-        { key: "address", header: "Address", width: '80px', transform: this.addressFormatter },
-        { key: "type",    header: "Type",    width: 'auto', transform: this.schemaTypeURLFormatter },
+        { key: "key",     header: "Key",     width: '0*',    transform: (v: any) => v },
+        { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
+        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter },
+        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter },
     ]
 
     loading: boolean = true;
+    filterString = "";
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     errorMessage = "";
     isExpanded = false;
-    filterString = "";
 
-    layerList: any[] = [];
+    layerMenuItems: any[] = [];
+
+    /**
+     * Returns a human readable layer name for a layer id.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    public static layerNameForLayerId(layerId: string) {
+        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
+        if (match)
+            return `${match[2]}.${match[3]}`;
+        return layerId;
+    }
 
     constructor(private inspectionService: InspectionService, public mapService: MapService) {}
 
@@ -138,23 +150,28 @@ export class SourceDataPanelComponent implements OnInit {
         this.mapService.maps.subscribe(maps => {
             const map = maps.get(this.sourceData.mapId);
             if (map) {
-                this.layerList = Array.from(map.layers.values())
-                    .filter(item => item.layerId.startsWith("SourceData-"))
-                    .map(item => {
-                        return {
-                            label: item.layerId,
-                            disabled: item.layerId === this.sourceData.layerId,
-                            command: () => {
-                                let sourceData = {...this.sourceData};
-                                sourceData.layerId = item.layerId;
-                                sourceData.address = BigInt(0);
+                this.layerMenuItems = [
+                    {
+                        label: "Switch Layer",
+                        items: Array.from(map.layers.values())
+                            .filter(item => item.layerId.startsWith("SourceData-"))
+                            .map(item => {
+                                return {
+                                    label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
+                                    disabled: item.layerId === this.sourceData.layerId,
+                                    command: () => {
+                                        let sourceData = {...this.sourceData};
+                                        sourceData.layerId = item.layerId;
+                                        sourceData.address = BigInt(0);
 
-                                this.inspectionService.selectedSourceData.next(sourceData);
-                            },
-                        };
-                    });
+                                        this.inspectionService.selectedSourceData.next(sourceData);
+                                    },
+                                };
+                            }),
+                    },
+                ];
             } else {
-                this.layerList = [];
+                this.layerMenuItems = [];
             }
         });
     }
@@ -170,7 +187,7 @@ export class SourceDataPanelComponent implements OnInit {
         this.treeData = [];
         this.errorMessage = message;
 
-        console.error("Error while processing SourceData tree:", this.errorMessage)
+        console.error("Error while processing SourceData tree:", this.errorMessage);
     }
 
     /**
