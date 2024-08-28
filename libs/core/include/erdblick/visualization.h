@@ -127,14 +127,21 @@ public:
      */
     [[nodiscard]] NativeJsValue primitiveCollection() const;
 
+    /**
+     * Returns all merged point features as a dict form mapLayerStyleRuleId
+     * to MergedPointVisualization primitives.
+     */
+    [[nodiscard]] NativeJsValue mergedPointFeatures() const;
+
 private:
     /**
      * Add all geometry of some feature which is compatible with the given rule.
      */
     void addFeature(
         mapget::model_ptr<mapget::Feature>& feature,
-        BoundEvalFun const& evalFun,
-        FeatureStyleRule const& rule);
+        BoundEvalFun& evalFun,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId);
 
     /**
      * Visualize an attribute.
@@ -145,6 +152,7 @@ private:
         mapget::model_ptr<mapget::Attribute> const& attr,
         std::string_view const& id,
         const FeatureStyleRule& rule,
+        std::string const& mapLayerStyleRuleId,
         uint32_t& offsetFactor,
         glm::dvec3 const& offset);
 
@@ -156,7 +164,8 @@ private:
         mapget::model_ptr<mapget::Geometry> const& geom,
         std::string_view id,
         FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
 
     /**
@@ -169,7 +178,7 @@ private:
         mapget::Point const& wgsB,
         std::string_view const& id,
         FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun,
+        BoundEvalFun& evalFun,
         glm::dvec3 const& offset,
         double labelPositionHint=0.5);
 
@@ -180,9 +189,21 @@ private:
         std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
         JsValue const& id,
-        BoundEvalFun const& evalFun);
+        BoundEvalFun& evalFun);
 
-        /**
+    /**
+     * Add a merged point feature.
+     */
+    void addMergedPointGeometry(
+        const std::string_view& id,
+        const std::string& mapLayerStyleRuleId,
+        const std::optional<glm::dvec3>& gridCellSize,
+        mapget::Point const& pointCartographic,
+        const char* geomField,
+        BoundEvalFun& evalFun,
+        std::function<JsValue(BoundEvalFun&)> const& makeGeomParams);
+
+    /**
      * Get some cartesian points as a list of Cesium Cartesian points.
      */
     static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
@@ -202,13 +223,13 @@ private:
      * Get an initialised primitive for a particular PolylineDashMaterialAppearance.
      */
     CesiumPrimitive&
-    getPrimitiveForDashMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
+    getPrimitiveForDashMaterial(const FeatureStyleRule& rule, BoundEvalFun& evalFun);
 
     /**
      * Get an initialised primitive for a particular PolylineArrowMaterialAppearance.
      */
     CesiumPrimitive&
-    getPrimitiveForArrowMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
+    getPrimitiveForArrowMaterial(const FeatureStyleRule& rule, BoundEvalFun& evalFun);
 
     /**
      * Simfil expression evaluation function for the tile which this visualization belongs to.
@@ -240,6 +261,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumLabelCollection labelCollection_;
+    std::map<std::string, JsValue> mergedPointsPerStyleRuleId_;
     JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;

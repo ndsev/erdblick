@@ -45,10 +45,16 @@ export class MergedPointsTile {
         }
         else {
             for (let fid in point.featureIds) {
-                existingPoint.featureIds.push(fid);
+                if (existingPoint.featureIds.findIndex(v => v == fid) == -1) {
+                    existingPoint.featureIds.push(fid);
+                }
             }
-            existingPoint.pointParameters = point.pointParameters;
-            existingPoint.labelParameters = point.labelParameters;
+            if (point.pointParameters !== undefined) {
+                existingPoint.pointParameters = point.pointParameters;
+            }
+            if (point.labelParameters !== undefined) {
+                existingPoint.labelParameters = point.labelParameters;
+            }
         }
     }
 

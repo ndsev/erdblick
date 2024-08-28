@@ -2,6 +2,7 @@
 
 #include "mapget/model/feature.h"
 #include "simfil/model/nodes.h"
+#include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
 
 #include "color.h"
@@ -12,9 +13,13 @@ namespace erdblick
 {
 
 /**
- * Simfil expression evaluation lambda, bound to a particular model node.
+ * Simfil expression evaluation lambda, bound to a particular context model node.
  */
-using BoundEvalFun = std::function<simfil::Value(std::string const& expr)>;
+struct BoundEvalFun
+{
+    simfil::OverlayNode context_;
+    std::function<simfil::Value(std::string const& expr)> eval_;
+};
 
 class FeatureStyleRule
 {

@@ -368,6 +368,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
+        .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 

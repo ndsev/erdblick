@@ -385,7 +385,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!evalFun(filter_).as<simfil::ValueType::Bool>()) {
+        if (!evalFun.eval_(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
     }
@@ -411,7 +411,7 @@ bool FeatureStyleRule::supports(const mapget::GeomType& g) const
 glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 {
     if (!colorExpression_.empty()) {
-        auto colorVal = evalFun(colorExpression_);
+        auto colorVal = evalFun.eval_(colorExpression_);
         if (colorVal.isa(simfil::ValueType::Int)) {
             auto colorInt = colorVal.as<simfil::ValueType::Int>();
             auto a = static_cast<float>(colorInt & 0xff) / 255.;
@@ -467,7 +467,7 @@ int FeatureStyleRule::dashPattern() const
 FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) const
 {
     if (!arrowExpression_.empty()) {
-        auto arrowVal = evalFun(arrowExpression_);
+        auto arrowVal = evalFun.eval_(arrowExpression_);
         if (arrowVal.isa(simfil::ValueType::String)) {
             auto arrowStr = arrowVal.as<simfil::ValueType::String>();
             if (auto arrowMode = parseArrowMode(arrowStr))
@@ -608,7 +608,7 @@ std::string const& FeatureStyleRule::labelTextExpression() const
 std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
-        auto resultVal = evalFun(labelTextExpression_);
+        auto resultVal = evalFun.eval_(labelTextExpression_);
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;

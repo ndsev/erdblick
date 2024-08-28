@@ -700,7 +700,8 @@ export class MapService {
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
                 if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
-                    this.sidePanelService.panel = SidePanelState.NONE;
+                    this.sidePanelService.panel = SidePanelState.NONE
+;
                 }
                 visualizationCollection = this.selectionVisualizations;
                 break;
