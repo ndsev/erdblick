@@ -233,7 +233,11 @@ export class TileVisualization {
                         }
                     });
                 }
+
                 this.primitiveCollection = visualization.primitiveCollection();
+                for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(visualization.mergedPointFeatures())) {
+                    this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId);
+                }
                 visualization.delete();
                 return true;
             });
@@ -264,6 +268,11 @@ export class TileVisualization {
         if (this.renderingInProgress) {
             return;
         }
+
+        // Remove point-merge contributions that were made by this map-layer+style visualization combo.
+        this.pointMergeService.remove(
+            this.tile.tileId,
+            `${this.tile.mapName}:${this.tile.layerName}:${this.style.name()}`);
 
         if (this.primitiveCollection) {
             viewer.scene.primitives.remove(this.primitiveCollection);
