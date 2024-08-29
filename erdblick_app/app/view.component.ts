@@ -31,6 +31,13 @@ import {SearchResultPosition} from "./featurefilter.worker";
 // Redeclare window with extended interface
 declare let window: DebugWindow;
 
+/**
+ * Determine if two lists of feature wrappers have the same features.
+ */
+function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
+    return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
+}
+
 @Component({
     selector: 'erdblick-view',
     template: `
@@ -216,42 +223,63 @@ export class ErdblickViewComponent implements AfterViewInit {
      * Set or re-set the hovered feature.
      */
     private setHoveredCesiumFeature(feature: any) {
-        // Get the actual mapget feature for the picked Cesium feature.
-        let resolvedFeature = feature ? this.mapService.resolveFeature(feature.id) : null;
-        if (!resolvedFeature) {
-            this.mapService.hoverTopic.next([]);
+        // Get the actual mapget features for the picked Cesium feature.
+        let resolvedFeatures = this.resolveMapgetFeatures(feature);
+        if (!resolvedFeatures.length) {
+            this.mapService.selectionTopic.next([]);
             return;
         }
 
-        if (this.mapService.selectionTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+        if (featureSetsEqual(this.mapService.selectionTopic.getValue(), resolvedFeatures)) {
             return;
         }
-        if (this.mapService.hoverTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+        if (featureSetsEqual(this.mapService.hoverTopic.getValue(), resolvedFeatures)) {
             return;
         }
 
-        this.mapService.hoverTopic.next([resolvedFeature]);
+        this.mapService.hoverTopic.next(resolvedFeatures);
     }
 
     /**
      * Set or re-set the picked feature.
      */
     private setPickedCesiumFeature(feature: any) {
-        // Get the actual mapget feature for the picked Cesium feature.
-        let resolvedFeature = feature ? this.mapService.resolveFeature(feature.id) : null;
-        if (!resolvedFeature) {
+        // Get the actual mapget features for the picked Cesium feature.
+        let resolvedFeatures = this.resolveMapgetFeatures(feature);
+        if (!resolvedFeatures.length) {
             this.mapService.selectionTopic.next([]);
             return;
         }
 
-        if (this.mapService.selectionTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+        if (featureSetsEqual(this.mapService.selectionTopic.getValue(), resolvedFeatures)) {
             return;
         }
-        if (this.mapService.hoverTopic.getValue().some(f => resolvedFeature!.equals(f))) {
+        if (featureSetsEqual(this.mapService.hoverTopic.getValue(), resolvedFeatures)) {
             this.setHoveredCesiumFeature(null);
         }
 
-        this.mapService.selectionTopic.next([resolvedFeature]);
+        this.mapService.selectionTopic.next(resolvedFeatures);
+    }
+
+    /**
+     * Resolve a Cesium primitive feature ID to a list of mapget FeatureWrappers.
+     */
+    private resolveMapgetFeatures(feature: any) {
+        let resolvedFeatures: FeatureWrapper[] = [];
+        if (Array.isArray(feature?.id)) {
+            for (const fid of feature.id) {
+                const resolvedFeature = this.mapService.resolveFeature(feature.id);
+                if (resolvedFeature) {
+                    resolvedFeatures = [resolvedFeature];
+                }
+            }
+        } else if (feature) {
+            const resolvedFeature = this.mapService.resolveFeature(feature.id);
+            if (resolvedFeature) {
+                resolvedFeatures = [resolvedFeature];
+            }
+        }
+        return resolvedFeatures;
     }
 
     /**

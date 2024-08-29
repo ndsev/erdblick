@@ -429,7 +429,7 @@ void FeatureLayerVisualization::addMergedPointGeometry(
         {"position", JsValue(pointCartographic)},
         {"positionHash", JsValue(gridPositionHash)},
         {geomField, JsValue(makeGeomParams(evalFun))},
-        {"featureIds", JsValue::List({JsValue(std::string(id))})},
+        {"featureIds", JsValue::List({makeTileFeatureId(id)})},
     }));
 }
 
