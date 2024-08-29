@@ -25,11 +25,11 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
             if (node) {
                 let matched = false;
                 if (node.children) {
-                    let childNodes = [...node.children].map(node => { return { ...node }; });
+                    const children = node.children.map(node => { return { ...node }; });
                     node.children = [];
 
                     let hadMatchingLeaf = false;
-                    for (let childNode of childNodes) {
+                    for (const childNode of children) {
                         if (this.tt.isFilterMatched(childNode, paramsWithoutNode)) {
                             matched = true;
                             hadMatchingLeaf = hadMatchingLeaf || this.tt.isNodeLeaf(childNode);
@@ -41,7 +41,7 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
                     // If we had a matching leaf node, add all leaf nodes.
                     // Since we are in strict mode, if no child matched, add all
                     if (hadMatchingLeaf || !matched) {
-                        node.children = childNodes;
+                        node.children = children;
                     }
                 }
 

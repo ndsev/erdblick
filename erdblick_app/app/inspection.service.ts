@@ -32,7 +32,7 @@ export interface SelectedSourceData {
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
     if (!a || !b)
         return false;
-    return (a == b || (a.mapId == b.mapId && a.tileId == b.tileId && a.layerId == b.layerId && a.address == b.address && a.featureId == b.featureId));
+    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address && a.featureId === b.featureId));
 }
 
 @Injectable({providedIn: 'root'})
@@ -174,16 +174,13 @@ export class InspectionService {
     async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
         console.log(`Loading SourceDataLayer layerId=${layerId} tileId=${tileId}`);
 
-        let requests = [{
-            mapId: mapId,
-            layerId: layerId,
-            tileIds: [tileId]
-        }];
-
-        let tileParser = new coreLib.TileLayerParser();
-
-        let newRequestBody = JSON.stringify({
-            requests: requests
+        const tileParser = new coreLib.TileLayerParser();
+        const newRequestBody = JSON.stringify({
+            requests: [{
+                mapId: mapId,
+                layerId: layerId,
+                tileIds: [tileId]
+            }]
         });
 
         let layer: TileSourceDataLayer | undefined;

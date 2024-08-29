@@ -55,7 +55,7 @@ interface InspectorTab {
         }`,
     ]
 })
-export class InspectionPanelComponent implements OnInit
+export class InspectionPanelComponent
 {
     title = "";
     tabs: InspectorTab[] = [];
@@ -86,8 +86,6 @@ export class InspectionPanelComponent implements OnInit
         })
     }
 
-    ngOnInit(): void {}
-
     reset() {
         /* We always keep the first tab, which is a feature inspector. */
         this.setTab(0);
@@ -117,7 +115,7 @@ export class InspectionPanelComponent implements OnInit
 
     pushSourceDataInspector(data: SelectedSourceData) {
         let tab = {
-            title: data.layerId,
+            title: SourceDataPanelComponent.layerNameForLayerId(data.layerId),
             icon: "pi-database",
             component: SourceDataPanelComponent,
             inputs: {

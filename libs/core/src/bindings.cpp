@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include "cesium-interface/object.h"
 #include "mapget/model/info.h"
+#include "mapget/model/sourcedatalayer.h"
 #include "simfil/model/nodes.h"
 #include "visualization.h"
 #include "parser.h"
@@ -248,10 +249,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
 
+    ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
         .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
 
+    ////////// TileSourceDataLayer
     em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
         .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
             "std::shared_ptr<mapget::TileSourceDataLayer>")
@@ -264,7 +267,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 return self.toJson().dump(2);
             }))
         .function(
-            "toObject", &tileSourceDataLayerToObject);
+            "toObject", std::function<em::val(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
+                return *tileSourceDataLayerToObject(self);
+            }));
 
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;

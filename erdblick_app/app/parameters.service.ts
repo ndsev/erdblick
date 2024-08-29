@@ -167,7 +167,7 @@ export class ParametersService {
             }
         });
 
-    constructor(public router: Router /*, private inspectionService: InspectionService*/) {
+    constructor(public router: Router) {
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();

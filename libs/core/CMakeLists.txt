@@ -13,6 +13,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/geometry.h
   include/erdblick/inspection.h
   include/erdblick/search.h
+  include/erdblick/sourcedata.hpp
 
   include/erdblick/cesium-interface/object.h
   include/erdblick/cesium-interface/primitive.h
@@ -31,6 +32,7 @@ set(ERDBLICK_SOURCE_FILES
   src/geometry.cpp
   src/inspection.cpp
   src/search.cpp
+  src/sourcedata.cpp
 
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp
@@ -40,10 +42,7 @@ set(ERDBLICK_SOURCE_FILES
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
-  list(APPEND ERDBLICK_SOURCE_FILES
-    src/bindings.cpp
-    src/sourcedata.hpp
-    src/sourcedata.cpp)
+  list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
   # target_compile_options(erdblick-core PRIVATE -fwasm-exceptions)

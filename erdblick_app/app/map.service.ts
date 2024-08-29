@@ -22,7 +22,7 @@ export interface LayerInfoItem extends Object {
     coverage: Array<number|CoverageRectItem>;
     featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
     layerId: string;
-    type: number;
+    type: string;
     version: {major: number, minor: number, patch: number};
     zoomLevels: Array<number>;
     level: number;
@@ -265,10 +265,6 @@ export class MapService {
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
-                            // Filter out source-data layers
-                            if (layerId.startsWith("SourceData-"))
-                                continue;
-
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
                                 mapInfo.mapId + '/' + layerId,
@@ -299,7 +295,7 @@ export class MapService {
 
         const layer = mapItem.layers.get(layerId);
         if (layer) {
-            if (layer.type == coreLib.LayerType.SOURCEDATA.value)
+            if (layer.type == "SourceData")
                 return false;
             return layer.visible;
         }

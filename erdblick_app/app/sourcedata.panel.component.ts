@@ -1,9 +1,11 @@
 import {Component, OnInit, Input, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
+import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
+import {Menu} from "primeng/menu";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -39,6 +41,7 @@ import {TreeTable} from "primeng/treetable";
                             />
                             <i *ngIf="filterString" (click)="clearFilter()"
                                class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerMenuItemsMenu.toggle($event)" />
                         </div>
                     </ng-template>
 
@@ -77,14 +80,15 @@ import {TreeTable} from "primeng/treetable";
                 </div>
             </div>
         </ng-template>
+
+        <p-menu #layerMenuItemsMenu [model]="layerMenuItems" [popup]="true" appendTo="body" [style]="{'width': 'auto'}" />
     `
 })
 export class SourceDataPanelComponent implements OnInit {
-    @Input()
-    sourceData!: SelectedSourceData;
+    @Input() sourceData!: SelectedSourceData;
 
-    @ViewChild('tt')
-    table!: TreeTable;
+    @ViewChild('tt') table!: TreeTable;
+    @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -92,24 +96,38 @@ export class SourceDataPanelComponent implements OnInit {
         "value"
     ];
     columns = [
-        { key: "key",     header: "Key",     width: '180px', transform: (v: any) => v },
+        { key: "key",     header: "Key",     width: '0*',    transform: (v: any) => v },
         { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
-        { key: "address", header: "Address", width: '80px',  transform: this.addressFormatter },
+        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter },
         { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter },
     ]
 
     loading: boolean = true;
+    filterString = "";
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     errorMessage = "";
     isExpanded = false;
-    filterString = "";
 
-    constructor(private inspectionService: InspectionService) {}
+    layerMenuItems: any[] = [];
+
+    /**
+     * Returns a human readable layer name for a layer id.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    public static layerNameForLayerId(layerId: string) {
+        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
+        if (match)
+            return `${match[2]}.${match[3]}`;
+        return layerId;
+    }
+
+    constructor(private inspectionService: InspectionService, public mapService: MapService) {}
 
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
             .then(layer => {
-                let root = layer.toObject()
+                const root = layer.toObject()
                 this.addressFormat = layer.addressFormat();
 
                 layer.delete();
@@ -128,6 +146,34 @@ export class SourceDataPanelComponent implements OnInit {
             .finally(() => {
                 this.loading = false;
             });
+
+        this.mapService.maps.subscribe(maps => {
+            const map = maps.get(this.sourceData.mapId);
+            if (map) {
+                this.layerMenuItems = [
+                    {
+                        label: "Switch Layer",
+                        items: Array.from(map.layers.values())
+                            .filter(item => item.type == "SourceData")
+                            .map(item => {
+                                return {
+                                    label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
+                                    disabled: item.layerId === this.sourceData.layerId,
+                                    command: () => {
+                                        let sourceData = {...this.sourceData};
+                                        sourceData.layerId = item.layerId;
+                                        sourceData.address = BigInt(0);
+
+                                        this.inspectionService.selectedSourceData.next(sourceData);
+                                    },
+                                };
+                            }),
+                    },
+                ];
+            } else {
+                this.layerMenuItems = [];
+            }
+        });
     }
 
     /**
@@ -141,7 +187,7 @@ export class SourceDataPanelComponent implements OnInit {
         this.treeData = [];
         this.errorMessage = message;
 
-        console.error(this.errorMessage);
+        console.error("Error while processing SourceData tree:", this.errorMessage);
     }
 
     /**
@@ -158,35 +204,32 @@ export class SourceDataPanelComponent implements OnInit {
 
         const prefix = "https://developer.nds.live/schema/";
 
-        let match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
+        const match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
         if (!match || match.length <= 4)
             return schema;
 
         // Sub-namespaces in front of the version get joined by "-". Names past the version get joined by "/"
-        let url =
+        const url =
             match[1].replace(/^(.*)\.$/, "$1/").replaceAll(".", "-") +
             match[3].replaceAll("_", ".") +
             match[4].replaceAll(".", "/");
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    addressFormatter(address?: any) {
-        if (!address) {
-            return address;
-        }
-
+    addressFormatter(address?: any): string {
         if (typeof address === 'object') {
             return `${address.offset}:${address.size}`
-        } else {
+        } else if (address) {
             return `${address}`
+        } else {
+            return '';
         }
     }
 
     selectItemWithAddress(address: bigint) {
-        let searchAddress: any = address;
         let addressInRange: any;
         if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
-            searchAddress = {
+            const searchAddress = {
                 offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
                 size: address & BigInt(0xFFFFFFFF),
             }
@@ -194,12 +237,15 @@ export class SourceDataPanelComponent implements OnInit {
             const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
             const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
 
-            addressInRange = (addr: any) => {
-                return addr.offset >= addressLow && addr.offset + addr.size <= addressHigh && (addr.size != 0 || addressLow == addressHigh);
+            addressInRange = (address: any) => {
+                return address.offset >= addressLow &&
+                    address.offset + address.size <= addressHigh &&
+                    (address.size != 0 || addressLow == addressHigh);
             }
         } else {
-            addressInRange = (addr: any) => {
-                return addr == searchAddress;
+            const searchAddress = address;
+            addressInRange = (address: any) => {
+                return address == searchAddress;
             }
         }
 
@@ -215,8 +261,7 @@ export class SourceDataPanelComponent implements OnInit {
                 node.data.styleClass = "highlight";
             }
 
-            const address = node.data.address;
-            if (address && addressInRange(address)) {
+            if (node.data.address && addressInRange(node.data.address)) {
                 highlight = true;
 
                 if (!firstHighlightedItemIndex)
@@ -233,7 +278,6 @@ export class SourceDataPanelComponent implements OnInit {
             }
         };
 
-        console.log(`Highlighting item with address`, searchAddress);
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
