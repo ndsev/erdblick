@@ -16,7 +16,7 @@ import {PointMergeService} from "./pointmerge.service";
  * Combination of a tile id and a feature id, which may be resolved
  * to a feature object.
  */
-interface TileFeatureId {
+export interface TileFeatureId {
     featureId: string,
     mapTileKey: string,
 }

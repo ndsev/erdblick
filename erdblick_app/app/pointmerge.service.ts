@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
 import {PointPrimitiveCollection, LabelCollection, Viewer} from "./cesium";
 import {coreLib} from "./wasm";
+import {TileFeatureId} from "./map.service";
 
 type MapLayerStyleRule = string;
 type PositionHash = string;
@@ -12,12 +13,12 @@ type Cartographic = {x: number, y: number, z: number};
  * To this end, the visualization retains visualization parameters for
  * calls to either/both Cesium PointPrimitiveCollection.add() and/or LabelCollection.add().
  */
-interface MergedPointVisualization {
+export interface MergedPointVisualization {
     position: Cartographic,
     positionHash: PositionHash,
     pointParameters?: Record<string, any>|null,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
     labelParameters?: Record<string, any>|null,  // Label Visualization Parameters for call to LabelCollection.add().
-    featureIds: Array<string>
+    featureIds: Array<TileFeatureId>
 }
 
 /**
@@ -44,8 +45,8 @@ export class MergedPointsTile {
             this.features.set(point.positionHash, point);
         }
         else {
-            for (let fid in point.featureIds) {
-                if (existingPoint.featureIds.findIndex(v => v == fid) == -1) {
+            for (let fid of point.featureIds) {
+                if (existingPoint.featureIds.findIndex(v => v.featureId == fid.featureId) == -1) {
                     existingPoint.featureIds.push(fid);
                 }
             }
@@ -72,10 +73,12 @@ export class MergedPointsTile {
 
         for (let [_, feature] of this.features) {
             if (feature.pointParameters) {
+                feature.pointParameters["id"] = feature.featureIds;
                 this.pointPrimitives.add(feature.pointParameters);
                 feature.pointParameters = null;
             }
             if (feature.labelParameters) {
+                feature.labelParameters["id"] = feature.featureIds;
                 this.labelPrimitives.add(feature.labelParameters);
                 feature.labelParameters = null;
             }

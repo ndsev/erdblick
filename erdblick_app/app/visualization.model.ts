@@ -10,7 +10,7 @@ import {
     HeightReference
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
-import {PointMergeService} from "./pointmerge.service";
+import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
