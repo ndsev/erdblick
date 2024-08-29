@@ -3,14 +3,9 @@
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/sourcedata.h"
 
-/**
- * Convert a SourceDataLayar hierarchy to a tree model compatible
- * structure.
- *
- * Layout:
- *   [{ data: [{key: "...", value: ...}, ...], children: [{ ... }] }, ...]
- *
- **/
+namespace erdblick
+{
+
 erdblick::JsValue tileSourceDataLayerToObject(const mapget::TileSourceDataLayer& layer) {
     using namespace erdblick;
     using namespace mapget;
@@ -125,4 +120,6 @@ erdblick::JsValue tileSourceDataLayerToObject(const mapget::TileSourceDataLayer&
         return JsValue::Dict();
 
     return visit(JsValue("root"), *layer.root(0));
+}
+
 }
