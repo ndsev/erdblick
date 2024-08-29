@@ -154,7 +154,7 @@ export class SourceDataPanelComponent implements OnInit {
                     {
                         label: "Switch Layer",
                         items: Array.from(map.layers.values())
-                            .filter(item => item.layerId.startsWith("SourceData-"))
+                            .filter(item => item.type == "SourceData")
                             .map(item => {
                                 return {
                                     label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),

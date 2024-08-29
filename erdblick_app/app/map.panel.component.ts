@@ -40,7 +40,7 @@ import {Menu} from "primeng/menu";
                             {{ mapItem.key }}
                         </span>
                         <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered">
-                            <div *ngIf="!mapLayer.value.layerId.startsWith('SourceData-')" class="flex-container">
+                            <div *ngIf="mapLayer.value.type != 'SourceData'" class="flex-container">
                                 <div class="font-bold white-space-nowrap"
                                     style="margin-left: 0.5em; display: flex; align-items: center;">
                                     <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
