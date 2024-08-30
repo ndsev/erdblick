@@ -86,8 +86,10 @@ export class InspectionPanelComponent
         });
 
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            if (selection)
+            if (selection) {
+                this.reset();
                 this.pushSourceDataInspector(selection);
+            }
         })
     }
 
