@@ -46,6 +46,10 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
 
+    // Top-Level Feature Item
+    auto featureScope = push("Feature", "", ValueType::Section);
+    featureScope->value_ = JsValue(featurePtr->id()->toString());
+    convertSourceDataReferences(featurePtr->sourceDataReferences(), *featureScope);
     // Identifiers section.
     {
         auto scope = push(convertStringView("Identifiers"), "", ValueType::Section);
