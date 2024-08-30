@@ -79,8 +79,7 @@ interface Column {
                                     />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
-                                            (click)="showSourceData(item)"
-
+                                            (click)="showSourceData($event, item)"
                                             [rounded]="true"
                                             severity="secondary"
                                             label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
@@ -342,7 +341,9 @@ export class FeaturePanelComponent implements OnInit  {
         }
     }
 
-    showSourceData(sourceDataRef: any) {
+    showSourceData(event: any, sourceDataRef: any) {
+        event.stopPropagation();
+
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
