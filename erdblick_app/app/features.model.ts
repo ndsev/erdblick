@@ -136,7 +136,7 @@ export class FeatureTile {
 
     has(featureId: string) {
         return this.peek((tileFeatureLayer: TileFeatureLayer) => {
-            return tileFeatureLayer.find(featureId) !== null;
+            return !tileFeatureLayer.find(featureId).isNull();
         });
     }
 }
