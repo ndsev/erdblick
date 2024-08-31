@@ -246,6 +246,12 @@ private:
      */
     JsValue makeTileFeatureId(std::string_view const& featureId) const;
 
+    /**
+     * Get a unique identifier for the map+layer+style+rule-id+highlight-mode.
+     * In combination with a tile id, this uniquely identifiers a merged corner tile.
+     */
+    std::string getMapLayerStyleRuleId(const uint32_t& ruleIndex) const;
+
     /// =========== Generic Members ===========
 
     JsValue mapTileKey_;
@@ -261,7 +267,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumLabelCollection labelCollection_;
-    std::map<std::string, JsValue> mergedPointsPerStyleRuleId_;
+    std::map<std::string, std::map<std::string, std::vector<JsValue>>> mergedPointsPerStyleRuleId_;
     JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;

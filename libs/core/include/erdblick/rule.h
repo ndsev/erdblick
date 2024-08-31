@@ -24,7 +24,7 @@ struct BoundEvalFun
 class FeatureStyleRule
 {
 public:
-    explicit FeatureStyleRule(YAML::Node const& yaml);
+    explicit FeatureStyleRule(YAML::Node const& yaml, uint32_t index=0);
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     enum Aspect {
@@ -99,6 +99,8 @@ public:
     [[nodiscard]] std::optional<std::array<float, 4>> const& scaleByDistance() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& offsetScaleByDistance() const;
 
+    [[nodiscard]] uint32_t const& index() const;
+
 private:
     void parse(YAML::Node const& yaml);
 
@@ -162,6 +164,9 @@ private:
     std::optional<bool> attributeValidityGeometry_;
 
     std::vector<FeatureStyleRule> firstOfRules_;
+
+    // Index of the rule within the style sheet
+    int32_t index_ = 0;
 };
 
 }

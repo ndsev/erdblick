@@ -27,9 +27,10 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         return;
     }
 
+    uint32_t ruleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
         // Create FeatureStyleRule object.
-        rules_.emplace_back(rule);
+        rules_.emplace_back(rule, ruleIndex++);
     }
 
     for (auto const& option : styleYaml["options"]) {

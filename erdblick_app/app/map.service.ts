@@ -687,9 +687,9 @@ export class MapService {
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
     }
 
-    resolveFeature(id: TileFeatureId) {
-        const tile = this.loadedTileLayers.get(id.mapTileKey);
-        if (!tile) {
+    resolveFeature(id: TileFeatureId|null) {
+        const tile = this.loadedTileLayers.get(id?.mapTileKey || "");
+        if (!tile || !id?.featureId) {
             return null;
         }
         return new FeatureWrapper(id.featureId, tile);

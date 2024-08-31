@@ -161,11 +161,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                     });
                 }
             }
-            if (this.isKnownCesiumFeature(feature)) {
-                this.setPickedCesiumFeature(feature);
-            } else {
-                this.setPickedCesiumFeature(null);
-            }
+            this.setPickedCesiumFeature(feature);
         }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
@@ -176,11 +172,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
             }
             let feature = this.viewer.scene.pick(position);
-            if (this.isKnownCesiumFeature(feature)) {
-                this.setHoveredCesiumFeature(feature);
-            } else {
-                this.setHoveredCesiumFeature(null);
-            }
+            this.setHoveredCesiumFeature(feature);
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
@@ -268,11 +260,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
     }
 
-    /** Check if the given feature is known and can be selected. */
-    isKnownCesiumFeature(f: any) {
-        return f && f.id !== undefined && f.id.hasOwnProperty("mapTileKey")
-    }
-
     /**
      * Set or re-set the hovered feature.
      */
@@ -280,7 +267,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Get the actual mapget features for the picked Cesium feature.
         let resolvedFeatures = this.resolveMapgetFeatures(feature);
         if (!resolvedFeatures.length) {
-            this.mapService.selectionTopic.next([]);
+            this.mapService.hoverTopic.next([]);
             return;
         }
 
@@ -320,17 +307,16 @@ export class ErdblickViewComponent implements AfterViewInit {
      */
     private resolveMapgetFeatures(feature: any) {
         let resolvedFeatures: FeatureWrapper[] = [];
-        if (Array.isArray(feature?.id)) {
-            for (const fid of feature.id) {
-                const resolvedFeature = this.mapService.resolveFeature(feature.id);
-                if (resolvedFeature) {
-                    resolvedFeatures = [resolvedFeature];
-                }
+        for (const fid of Array.isArray(feature?.id) ? feature.id : [feature?.id]) {
+            if (fid == "hover-highlight") {
+                return this.mapService.hoverTopic.getValue();
             }
-        } else if (feature) {
-            const resolvedFeature = this.mapService.resolveFeature(feature.id);
+            if (fid == "selection-highlight") {
+                return this.mapService.selectionTopic.getValue();
+            }
+            const resolvedFeature = this.mapService.resolveFeature(fid);
             if (resolvedFeature) {
-                resolvedFeatures = [resolvedFeature];
+                resolvedFeatures.push(resolvedFeature);
             }
         }
         return resolvedFeatures;

@@ -44,15 +44,15 @@ export class InspectionService {
     featureTree: BehaviorSubject<string> = new BehaviorSubject<string>("");
     featureTreeFilterValue: string = "";
     isInspectionPanelVisible: boolean = false;
-    selectedFeatureGeoJsonText: string = "";
-    selectedFeatureInspectionModel: Array<InspectionModelData> | null = null;
-    selectedFeatureIdName: string = "";
+    selectedFeatureGeoJsonTexts: string[] = [];
+    selectedFeatureInspectionModel: InspectionModelData[] = [];
+    selectedFeatureIdNames: string[] = [];
     selectedMapIdName: string = "";
+    selectedFeatures: FeatureWrapper[] = [];
     selectedFeatureGeometryType: any;
     selectedFeatureCenter: Cartesian3 | null = null;
     selectedFeatureOrigin: Cartesian3 | null = null;
     selectedFeatureBoundingRadius: number = 0;
-    selectedFeature: FeatureWrapper | null = null;
     originAndNormalForFeatureZoom: Subject<[Cartesian3, Cartesian3]> = new Subject();
     selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
 
@@ -67,40 +67,44 @@ export class InspectionService {
 
         this.keyboardService.registerShortcuts(["Ctrl+j", "Ctrl+J"], this.zoomToFeature.bind(this));
 
-        this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeature => {
-            if (!selectedFeature) {
+        this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeatures => {
+            if (!selectedFeatures.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
                 this.parametersService.unsetSelectedFeature();
                 return;
             }
-            this.selectedMapIdName = selectedFeature.featureTile.mapName;
-            selectedFeature.peek((feature: Feature) => {
-                this.selectedFeatureInspectionModel = feature.inspectionModel();
-                this.selectedFeatureGeoJsonText = feature.geojson() as string;
-                this.selectedFeatureIdName = feature.id() as string;
-                const center = feature.center() as Cartesian3;
+            // TODO: Handle case where selected features are from different maps.
+            //  Atm, multiple features can merely come from merged feature points.
+            this.selectedMapIdName = selectedFeatures[0].featureTile.mapName;
+            this.selectedFeatureInspectionModel = [];
+            this.selectedFeatureIdNames = [];
+            this.selectedFeatureGeoJsonTexts = [];
+
+            selectedFeatures.forEach(selectedFeature => {
+                selectedFeature.peek((feature: Feature) => {
+                    this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                    this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+                    this.selectedFeatureIdNames.push(feature.id() as string);
+                    const center = feature.center() as Cartesian3;
                 this.selectedFeatureCenter = center;
                 this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
                 let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
                 radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
                 this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
-                this.selectedFeatureGeometryType = feature.getGeometryType() as any;
-                this.isInspectionPanelVisible = true;
-                this.loadFeatureData();
+                this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
+                    this.loadFeatureData();
+                });
             });
-            this.selectedFeature = selectedFeature;
-            this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdName);
+            this.selectedFeatures = selectedFeatures;
+            this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdNames[0]);
         });
 
         this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
             if (parameters.selected.length == 2) {
                 const [mapId, featureId] = parameters.selected;
-                if (mapId != this.selectedMapIdName || featureId != this.selectedFeatureIdName) {
-                    this.jumpService.highlightFeature(mapId, featureId);
-                    if (this.selectedFeature != null) {
-                        this.mapService.focusOnFeature(this.selectedFeature);
-                    }
+                if (!this.selectedFeatureIdNames.some(n => n == featureId)) {
+                    this.jumpService.selectFeature(mapId, featureId);
                 }
             }
         });
@@ -274,6 +278,10 @@ export class InspectionService {
                     throw new Error(`Error loading layer.`);
                 return layer;
             });
+    }
+
+    selectedFeatureGeoJsonCollection() {
+        return `{"type": "FeatureCollection", "features": [${this.selectedFeatureGeoJsonTexts.join(", ")}]}`;
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
