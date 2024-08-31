@@ -67,14 +67,19 @@ export class InspectionPanelComponent
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.reset();
 
-            // TODO: Create a new FeaturePanelComponent instance for each unique selected feature
-            //       then we can get rid of all the service's View Component logic/functions.
+            // TODO: Create a new FeaturePanelComponent instance for each unique feature selection.
+            //       Then we can get rid of all the service's View Component logic/functions.
             //       reset() Would then completely clear the tabs.
-            const featureId = this.inspectionService.selectedFeatureIdNames.join(", ");
-            this.tabs[0].title = featureId;
+            const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
+            if (this.inspectionService.selectedFeatures.length == 1) {
+                this.tabs[0].title = featureIds;
+            }
+            else {
+                this.tabs[0].title = `Selected ${this.inspectionService.selectedFeatures.length} Features`;
+            }
 
             const selectedSourceData = parameterService.getSelectedSourceData()
-            if (selectedSourceData?.featureId === featureId)
+            if (selectedSourceData?.featureIds === featureIds)
                 this.inspectionService.selectedSourceData.next(selectedSourceData);
             else
                 this.inspectionService.selectedSourceData.next(null);
