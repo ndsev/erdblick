@@ -29,17 +29,17 @@ interface Column {
                     class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </div>
             <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
-                            label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                            [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
+                          label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                          [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                     <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                 </p-button>
             </div>
             <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
-                            icon="pi pi-fw pi-copy" label=""
-                            [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                            pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonCollection())"
+                          icon="pi pi-fw pi-copy" label=""
+                          [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                          pTooltip="Copy GeoJSON" tooltipPosition="bottom">
                 </p-button>
             </div>
         </div>
@@ -346,7 +346,7 @@ export class FeaturePanelComponent implements OnInit  {
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
         const mapId = this.inspectionService.selectedMapIdName;
-        const featureId = this.inspectionService.selectedFeatureIdName;
+        const featureId = this.inspectionService.selectedFeatureIdNames.join(", ");
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),

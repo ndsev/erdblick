@@ -236,7 +236,9 @@ export class TileVisualization {
 
                 this.primitiveCollection = visualization.primitiveCollection();
                 for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(visualization.mergedPointFeatures())) {
-                    this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId);
+                    for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                        finishedCornerTile.render(viewer);
+                    }
                 }
                 visualization.delete();
                 return true;
@@ -245,6 +247,11 @@ export class TileVisualization {
                 viewer.scene.primitives.add(this.primitiveCollection);
             }
             this.hasHighDetailVisualization = true;
+        }
+        else if (this.tile.numFeatures <= 0) {
+            for (let finishedCornerTile of this.pointMergeService.insertEmpty(this.tile.tileId, this.mapLayerStyleId())) {
+                finishedCornerTile.render(viewer);
+            }
         }
 
         if (this.showTileBorder) {
@@ -270,9 +277,12 @@ export class TileVisualization {
         }
 
         // Remove point-merge contributions that were made by this map-layer+style visualization combo.
-        this.pointMergeService.remove(
+        let removedCornerTiles = this.pointMergeService.remove(
             this.tile.tileId,
-            `${this.tile.mapName}:${this.tile.layerName}:${this.style.name()}`);
+            this.mapLayerStyleId());
+        for (let removedCornerTile of removedCornerTiles) {
+            removedCornerTile.remove(viewer);
+        }
 
         if (this.primitiveCollection) {
             viewer.scene.primitives.remove(this.primitiveCollection);
@@ -306,5 +316,14 @@ export class TileVisualization {
             (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
             (this.showTileBorder != this.hasTileBorder)
         );
+    }
+
+    /**
+     * Combination of map name, layer name, style name and highlight mode which
+     * (in combination with the tile id) uniquely identifies that rendered contents
+     * if this TileVisualization as expected by the surrounding MergedPointsTiles.
+     */
+    private mapLayerStyleId() {
+        return `${this.tile.mapName}:${this.tile.layerName}:${this.style.name()}:${this.highlightMode.value}`;
     }
 }

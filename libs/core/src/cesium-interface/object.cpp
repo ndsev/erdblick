@@ -69,6 +69,15 @@ JsValue JsValue::Float64Array(const std::vector<double>& coordinates)
 #endif
 }
 
+JsValue JsValue::Undefined()
+{
+#ifdef EMSCRIPTEN
+    return JsValue(emscripten::val::undefined());
+#else
+    return JsValue("<undefined>");
+#endif
+}
+
 JsValue JsValue::operator[](std::string const& propertyName)
 {
 #ifdef EMSCRIPTEN

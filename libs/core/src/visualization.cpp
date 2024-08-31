@@ -63,7 +63,18 @@ void FeatureLayerVisualization::addTileFeatureLayer(
     if (!tile_) {
         tile_ = tile;
         internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile->strings());
+
+        // Pre-create empty merged point feature visualization lists.
+        for (auto&& rule : style_.rules()) {
+            if (rule.mode() != highlightMode_ || !rule.pointMergeGridCellSize()) {
+                continue;
+            }
+            mergedPointsPerStyleRuleId_.emplace(
+                getMapLayerStyleRuleId(rule.index()),
+                std::map<std::string, std::vector<JsValue>>());
+        }
     }
+
 
     // Ensure that the added aux tile and the primary tile use the same
     // field name encoding. So we transcode the aux tile into the same dict.
@@ -87,27 +98,28 @@ void FeatureLayerVisualization::run()
                 return evaluateExpression(str, evaluationContext);
             }};
 
-        uint32_t ruleIndex = 0;
         for (auto&& rule : style_.rules()) {
             if (rule.mode() != highlightMode_) {
-                ++ruleIndex;
                 continue;
             }
-
-            auto mapLayerStyleRuleId = fmt::format(
-                "{}:{}:{}:{}",
-                tile_->mapId(),
-                tile_->layerInfo()->layerId_,
-                style_.name(),
-                ruleIndex);
-
+            auto mapLayerStyleRuleId = getMapLayerStyleRuleId(rule.index());
             if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
                 addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
             }
-            ++ruleIndex;
         }
     }
+}
+
+std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t const& ruleIndex) const
+{
+    return fmt::format(
+        "{}:{}:{}:{}:{}",
+        tile_->mapId(),
+        tile_->layerInfo()->layerId_,
+        style_.name(),
+        static_cast<uint32_t>(highlightMode_),
+        ruleIndex);
 }
 
 NativeJsValue FeatureLayerVisualization::primitiveCollection() const
@@ -152,7 +164,13 @@ NativeJsValue FeatureLayerVisualization::mergedPointFeatures() const
 {
     auto result = JsValue::Dict();
     for (auto const& [mapLayerStyleRuleId, primitives] : mergedPointsPerStyleRuleId_) {
-        result.set(mapLayerStyleRuleId, primitives);
+        auto pointList = JsValue::List();
+        for (auto const& [_, points] : primitives) {
+            for (auto const& pt : points) {
+                pointList.push(pt);
+            }
+        }
+        result.set(mapLayerStyleRuleId, pointList);
     }
     return *result;
 }
@@ -284,12 +302,22 @@ void FeatureLayerVisualization::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
-    if (!rule.selectable())
-        id = UnselectableId;
-
     // Combine the ID with the mapTileKey to create an
     // easy link from the geometry back to the feature.
-    auto tileFeatureId = makeTileFeatureId(id);
+    auto tileFeatureId = JsValue::Undefined();
+    if (rule.selectable()) {
+        switch (highlightMode_) {
+        case FeatureStyleRule::NoHighlight:
+            tileFeatureId = makeTileFeatureId(id);
+            break;
+        case FeatureStyleRule::HoverHighlight:
+            tileFeatureId = JsValue("hover-highlight");
+            break;
+        case FeatureStyleRule::SelectionHighlight:
+            tileFeatureId = JsValue("selection-highlight");
+            break;
+        }
+    }
 
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
@@ -407,25 +435,21 @@ void FeatureLayerVisualization::addMergedPointGeometry(
 
     // Add the $mergeCount variable to the evaluation context.
     // This variable indicates, how many features from other tiles have already been added
-    // for the given grid position.
+    // for the given grid position. We must sum both existing points in the point merge service
+    // from other tiles, and existing points from this tile.
+    auto& mergedPointVec = mergedPointsPerStyleRuleId_[mapLayerStyleRuleId][gridPositionHash];
+    auto mergedPointCount = featureMergeService_.call<int32_t>(
+        "count",
+        pointCartographic,
+        gridPositionHash,
+        tile_->tileId().z(),
+        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointVec.size());
     evalFun.context_.set(
         internalStringPoolCopy_->emplace("$mergeCount"),
-        simfil::Value(featureMergeService_.call<int32_t>(
-            "count",
-            pointCartographic,
-            gridPositionHash,
-            tile_->tileId().z(),
-            mapLayerStyleRuleId)));
-
-    // Ensure that there is a list of merged points for this mapLayerStyleRuleId.
-    auto [pointsForStyleRuleIdIt, wasInserted] =
-        mergedPointsPerStyleRuleId_.emplace(mapLayerStyleRuleId, JsValue());
-    if (wasInserted) {
-        pointsForStyleRuleIdIt->second = JsValue::List();
-    }
+        simfil::Value(mergedPointCount));
 
     // Add a MergedPointVisualization to the list.
-    pointsForStyleRuleIdIt->second.push(JsValue::Dict({
+    mergedPointVec.push_back(JsValue::Dict({
         {"position", JsValue(pointCartographic)},
         {"positionHash", JsValue(gridPositionHash)},
         {geomField, JsValue(makeGeomParams(evalFun))},

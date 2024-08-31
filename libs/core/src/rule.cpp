@@ -45,7 +45,7 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
 }
 }
 
-FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
+FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml, uint32_t index) : index_(index)
 {
     parse(yaml);
 }
@@ -677,6 +677,11 @@ std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const
 std::optional<bool> const& FeatureStyleRule::attributeValidityGeometry() const
 {
     return attributeValidityGeometry_;
+}
+
+uint32_t const& FeatureStyleRule::index() const
+{
+    return index_;
 }
 
 }
