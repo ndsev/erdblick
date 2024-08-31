@@ -248,11 +248,6 @@ export class TileVisualization {
             }
             this.hasHighDetailVisualization = true;
         }
-        else if (this.tile.numFeatures <= 0) {
-            for (let finishedCornerTile of this.pointMergeService.insertEmpty(this.tile.tileId, this.mapLayerStyleId())) {
-                finishedCornerTile.render(viewer);
-            }
-        }
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation

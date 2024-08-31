@@ -24,14 +24,13 @@ export interface MergedPointVisualization {
 /**
  * Container of MergedPointVisualizations, sitting at the corner point of
  * four surrounding tiles. It covers a quarter of the area of each surrounding
- * tile. The actual visualization is performed, once all contributions have been gathered.
- * Note: A MergedPointsTile is always unique for its NW corner tile ID and its Map-Layer-Style-Rule ID.
+ * tile. Note: A MergedPointsTile is always unique for its NW corner tile ID
+ *  and its Map-Layer-Style-Rule ID.
  */
 export class MergedPointsTile {
     tileId: bigint = 0n;  // NW tile ID
     mapLayerStyleRuleId: MapLayerStyleRule = "";
 
-    missingTiles: Array<bigint> = [];
     referencingTiles: Array<bigint> = [];
 
     pointPrimitives: PointPrimitiveCollection|null = null;
@@ -101,21 +100,13 @@ export class MergedPointsTile {
         }
     }
 
-    /** Remove a missing tile and add it to the references. */
-    notifyTileInserted(sourceTileId: bigint): boolean {
-        let newMissingTiles = this.missingTiles.filter(val => val != sourceTileId);
-
-        // Add the source tile ID to the referencing tiles,
-        // if it was removed from the missing tiles. This can only happen once.
-        // This way, we are prepared for the idea that a style sheet might
-        // re-insert some data.
-        if (newMissingTiles.length != this.missingTiles.length) {
+    /**
+     * Add a neighboring tile which keeps this corner tile alive
+     */
+    addReference(sourceTileId: bigint) {
+        if (this.referencingTiles.findIndex(v => v == sourceTileId) == -1) {
             this.referencingTiles.push(sourceTileId);
-            this.missingTiles = newMissingTiles;
         }
-
-        // Yield the corner tile as to-be-rendered, if it does not have any missing tiles.
-        return !this.missingTiles.length;
     }
 }
 
@@ -126,16 +117,6 @@ export class MergedPointsTile {
 export class PointMergeService
 {
     mergedPointsTiles: Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>>();
-    emptyTiles: Map<MapLayerStyleRule, Set<bigint>> = new Map<MapLayerStyleRule, Set<bigint>>();
-
-    /**
-     * Check if the corner tile at geoPos is interested in contributions from `tileId`.
-     * Returns true if respective corner has sourceTileId in its in missingTiles.
-     * __Note: This is called from WASM.__
-     */
-    wants(geoPos: Cartographic, sourceTileId: bigint, mapLayerStyleRuleId: MapLayerStyleRule): boolean {
-        return this.getCornerTileByPosition(geoPos, coreLib.getTileLevel(sourceTileId), mapLayerStyleRuleId).missingTiles.findIndex(v => v == sourceTileId) != -1;
-    }
 
     /**
      * Count how many points have been merged for the given position and style rule so far.
@@ -181,13 +162,6 @@ export class PointMergeService
             result = new MergedPointsTile();
             result.tileId = tileId;
             result.mapLayerStyleRuleId = mapLayerStyleRuleId;
-            result.missingTiles = [
-                tileId,
-                coreLib.getTileNeighbor(tileId, 1, 0),
-                coreLib.getTileNeighbor(tileId, 0, 1),
-                coreLib.getTileNeighbor(tileId, 1, 1),
-            ]
-            result.missingTiles = result.missingTiles.filter(tid => !this.isEmptyTile(tid, mapLayerStyleRuleId));
             styleRuleMap.set(tileId, result);
         }
         return result;
@@ -216,46 +190,9 @@ export class PointMergeService
         ];
         for (let cornerTileId of cornerTileIds) {
             let cornerTile = this.getCornerTileById(cornerTileId, mapLayerStyleRuleId);
-            if (cornerTile.notifyTileInserted(sourceTileId)) {
-                yield cornerTile;
-            }
+            cornerTile.addReference(sourceTileId);
+            yield cornerTile;
         }
-    }
-
-    /**
-     * Register a tile visualization as empty, meaning that no
-     * contributions to its corner tiles are to be expected.
-     */
-    *insertEmpty(sourceTileId: bigint, mapLayerStyleId: string): Generator<MergedPointsTile> {
-        // Calculate corner tile IDs for sourceTileId.
-        let cornerTileIds = [
-            sourceTileId,
-            coreLib.getTileNeighbor(sourceTileId, -1, 0),
-            coreLib.getTileNeighbor(sourceTileId, 0, -1),
-            coreLib.getTileNeighbor(sourceTileId, -1, -1),
-        ];
-
-        // Remove the tileId as a contributor from surrounding mergedPointsTiles.
-        for (let [mapLayerStyleRuleId, cornerTiles] of this.mergedPointsTiles) {
-            if (mapLayerStyleRuleId.startsWith(mapLayerStyleId)) {
-                for (const cornerTileId of cornerTileIds) {
-                    let cornerTile = cornerTiles.get(cornerTileId);
-                    if (cornerTile) {
-                        if (cornerTile.notifyTileInserted(sourceTileId)) {
-                            yield cornerTile;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Register the tile as empty.
-        let emptyTileSet = this.emptyTiles.get(mapLayerStyleId);
-        if (!emptyTileSet) {
-            emptyTileSet = new Set<bigint>();
-            this.emptyTiles.set(mapLayerStyleId, emptyTileSet);
-        }
-        emptyTileSet.add(sourceTileId);
     }
 
     /**
@@ -267,7 +204,7 @@ export class PointMergeService
         for (let [mapLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {
             if (mapLayerStyleRuleId.startsWith(mapLayerStyleId)) {
                 for (let [tileId, tile] of tiles) {
-                    // Yield the corner tile as to-be-rendered, if it does not have any referencing tiles.
+                    // Yield the corner tile as to-be-deleted, if it does not have any referencing tiles.
                     tile.referencingTiles = tile.referencingTiles.filter(val => val != sourceTileId);
                     if (!tile.referencingTiles.length) {
                         yield tile;
@@ -276,23 +213,5 @@ export class PointMergeService
                 }
             }
         }
-
-        let emptyTileSet = this.emptyTiles.get(mapLayerStyleId);
-        if (emptyTileSet && emptyTileSet.has(sourceTileId)) {
-            emptyTileSet.delete(sourceTileId);
-        }
-    }
-
-    /**
-     * Check if the tile for the given mapLayerStyle is already registered as empty,
-     * and therefore no contributions can be expected from it.
-     */
-    private isEmptyTile(tid: bigint, mapLayerStyleRuleId: MapLayerStyleRule): boolean {
-        for (let [mapLayerStyleId, tileIdSet] of this.emptyTiles) {
-            if (mapLayerStyleRuleId.startsWith(mapLayerStyleId)) {
-                return tileIdSet.has(tid);
-            }
-        }
-        return false;
     }
 }

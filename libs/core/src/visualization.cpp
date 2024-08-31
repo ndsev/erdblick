@@ -419,11 +419,6 @@ void FeatureLayerVisualization::addMergedPointGeometry(
     BoundEvalFun& evalFun,
     std::function<JsValue(BoundEvalFun&)> const& makeGeomParams)
 {
-    // Check if the corner tile for the cartographic position is still accepting
-    // contributions from this tile.
-    if (!featureMergeService_.call<bool>("wants", pointCartographic, tile_->tileId().value_, mapLayerStyleRuleId))
-        return;
-
     // Convert the cartographic point to an integer representation, based
     // on the grid cell size set in the style sheet.
     auto gridPosition = pointCartographic / *gridCellSize;
