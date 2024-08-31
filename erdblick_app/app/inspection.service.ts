@@ -29,13 +29,27 @@ export interface SelectedSourceData {
     tileId: number,
     layerId: string,
     address: bigint,
-    featureId: string,
+    featureIds: string,
 }
 
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
     if (!a || !b)
         return false;
-    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address && a.featureId === b.featureId));
+    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address && a.featureIds === b.featureIds));
+}
+
+export function selectedFeaturesEqualTo(a: FeatureWrapper[] | null, b: FeatureWrapper[] | null) {
+    if (!a || !b)
+        return false;
+    if (a.length !== b.length) {
+        return false
+    }
+    for (let i = 0; i < a.length; ++i) {
+        if (!a[i].equals(b[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 @Injectable({providedIn: 'root'})
@@ -46,8 +60,6 @@ export class InspectionService {
     isInspectionPanelVisible: boolean = false;
     selectedFeatureGeoJsonTexts: string[] = [];
     selectedFeatureInspectionModel: InspectionModelData[] = [];
-    selectedFeatureIdNames: string[] = [];
-    selectedMapIdName: string = "";
     selectedFeatures: FeatureWrapper[] = [];
     selectedFeatureGeometryType: any;
     selectedFeatureCenter: Cartesian3 | null = null;
@@ -67,43 +79,40 @@ export class InspectionService {
 
         this.keyboardService.registerShortcuts(["Ctrl+j", "Ctrl+J"], this.zoomToFeature.bind(this));
 
-        this.mapService.selectionTopic.pipe(distinctUntilChanged()).subscribe(selectedFeatures => {
-            if (!selectedFeatures.length) {
+        this.mapService.selectionTopic.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
+            if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
                 this.parametersService.unsetSelectedFeature();
+                this.selectedFeatures = [];
                 return;
             }
-            // TODO: Handle case where selected features are from different maps.
-            //  Atm, multiple features can merely come from merged feature points.
-            this.selectedMapIdName = selectedFeatures[0].featureTile.mapName;
             this.selectedFeatureInspectionModel = [];
-            this.selectedFeatureIdNames = [];
             this.selectedFeatureGeoJsonTexts = [];
+            this.selectedFeatures = selectedFeatures;
 
             selectedFeatures.forEach(selectedFeature => {
                 selectedFeature.peek((feature: Feature) => {
                     this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
                     this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-                    this.selectedFeatureIdNames.push(feature.id() as string);
+                    this.isInspectionPanelVisible = true;
                     const center = feature.center() as Cartesian3;
-                this.selectedFeatureCenter = center;
-                this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
-                let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
-                radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
-                this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
-                this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
+                    this.selectedFeatureCenter = center;
+                    this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
+                    let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
+                    radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
+                    this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
+                    this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
                     this.loadFeatureData();
                 });
             });
-            this.selectedFeatures = selectedFeatures;
-            this.parametersService.setSelectedFeature(this.selectedMapIdName, this.selectedFeatureIdNames[0]);
+            this.parametersService.setSelectedFeature(this.selectedFeatures[0].featureTile.mapName, this.selectedFeatures[0].featureId);
         });
 
         this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
             if (parameters.selected.length == 2) {
                 const [mapId, featureId] = parameters.selected;
-                if (!this.selectedFeatureIdNames.some(n => n == featureId)) {
+                if (!this.selectedFeatures.some(f => f.featureId == featureId)) {
                     this.jumpService.selectFeature(mapId, featureId);
                 }
             }

@@ -345,15 +345,15 @@ export class FeaturePanelComponent implements OnInit  {
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
-        const mapId = this.inspectionService.selectedMapIdName;
-        const featureId = this.inspectionService.selectedFeatureIdNames.join(", ");
+        const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
+        const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
             layerId: String(layerId),
             mapId: String(mapId),
             address: BigInt(address),
-            featureId: featureId,
+            featureIds: featureIds,
         })
     }
 
@@ -365,9 +365,12 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.selectFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
+            // TODO: Support features from varying maps here.
+            this.jumpService.selectFeature(
+                this.inspectionService.selectedFeatures[0].featureTile.mapName,
+                rowData["value"]).then();
         }
-        this.copyToClipboard(rowData["value"]);
+        // this.copyToClipboard(rowData["value"]);
     }
 
     highlightFeature(rowData: any) {

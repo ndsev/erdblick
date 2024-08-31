@@ -655,7 +655,7 @@ export class MapService {
     async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, focus: boolean=false) {
         const tile = await this.loadTileForSelection(tileKey);
         // TODO: Doing the stringification here sucks a bit.
-        const featureId = `${typeId}.${idParts.filter((_, index) => index % 2 === 0).join('.')}`;
+        const featureId = `${typeId}.${idParts.filter((_, index) => index % 2 === 1).join('.')}`;
 
         // Ensure that the feature really exists in the tile.
         if (!tile.has(featureId)) {
