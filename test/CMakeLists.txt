@@ -1,4 +1,5 @@
 project(test.erdblick)
+enable_testing()
 
 if (NOT TARGET Catch2)
   FetchContent_Declare(Catch2
