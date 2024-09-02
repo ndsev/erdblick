@@ -49,6 +49,10 @@ foreach (lib ${CESIUM_LIBS})
 endforeach()
 message(STATUS "cesium byproducts: ${CESIUM_BYPRODUCTS}")
 
+if (CMAKE_TOOLCHAIN_FILE)
+  list(cesium_extra_args "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+endif()
+
 ExternalProject_Add(cesiumnative
   SOURCE_DIR ${cesiumnative_src_SOURCE_DIR}
   CMAKE_ARGS
@@ -58,8 +62,8 @@ ExternalProject_Add(cesiumnative
     -DCESIUM_TRACING_ENABLED=OFF
     -DDRACO_JS_GLUE=OFF
     -DBUILD_SHARED_LIBS=OFF
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    ${cesium_extra_args}
   BUILD_BYPRODUCTS
     ${CESIUM_BYPRODUCTS}
   INSTALL_COMMAND ""
