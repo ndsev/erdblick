@@ -79,8 +79,7 @@ interface Column {
                                     />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
-                                            (click)="showSourceData(item)"
-
+                                            (click)="showSourceData($event, item)"
                                             [rounded]="true"
                                             severity="secondary"
                                             label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
@@ -230,8 +229,9 @@ export class FeaturePanelComponent implements OnInit  {
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
+            const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || hasSingleChild;
+            node.expanded = isTopLevelNode || isSection || hasSingleChild;
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
@@ -341,7 +341,9 @@ export class FeaturePanelComponent implements OnInit  {
         }
     }
 
-    showSourceData(sourceDataRef: any) {
+    showSourceData(event: any, sourceDataRef: any) {
+        event.stopPropagation();
+
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;

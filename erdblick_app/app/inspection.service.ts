@@ -154,6 +154,9 @@ export class InspectionService {
                 if (section.hasOwnProperty("info")) {
                     node.data["info"] = section.info;
                 }
+                if (section.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = section.sourceDataReferences;
+                }
                 node.children = convertToTreeTableNodes(section.children);
                 treeNodes.push(node);
             }
