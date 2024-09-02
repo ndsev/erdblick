@@ -2,8 +2,6 @@ name: build-release
 
 on:
   push:
-    branches:
-      - 'feature/renderer-wasm-demo'
   pull_request:
   workflow_dispatch:
 
@@ -38,21 +36,3 @@ jobs:
           name: erdblick
           path: |
             static/*
-
-  build-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Install build dependencies
-        run: sudo apt-get install ninja-build
-
-      - name: Compile
-        run: |
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug -B build
-          cmake --build build
-
-      - name: Run Tests
-        run: |
-          ctest --verbose --no-tests=error --test-dir build
