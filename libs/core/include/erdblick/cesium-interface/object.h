@@ -67,6 +67,11 @@ struct JsValue
      */
     static JsValue Float64Array(std::vector<double> const& coordinates);
 
+    /**
+     * Construct an undefined value.
+     */
+    static JsValue Undefined();
+
     /** Construct a JsValue from a variant with specific alternatives. */
     template<typename T>
     static JsValue fromVariant(T const& variant) {

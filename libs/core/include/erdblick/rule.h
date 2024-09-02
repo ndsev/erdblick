@@ -2,6 +2,7 @@
 
 #include "mapget/model/feature.h"
 #include "simfil/model/nodes.h"
+#include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
 
 #include "color.h"
@@ -12,14 +13,18 @@ namespace erdblick
 {
 
 /**
- * Simfil expression evaluation lambda, bound to a particular model node.
+ * Simfil expression evaluation lambda, bound to a particular context model node.
  */
-using BoundEvalFun = std::function<simfil::Value(std::string const& expr)>;
+struct BoundEvalFun
+{
+    simfil::OverlayNode context_;
+    std::function<simfil::Value(std::string const& expr)> eval_;
+};
 
 class FeatureStyleRule
 {
 public:
-    explicit FeatureStyleRule(YAML::Node const& yaml);
+    explicit FeatureStyleRule(YAML::Node const& yaml, uint32_t index=0);
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     enum Aspect {
@@ -28,9 +33,10 @@ public:
         Attribute
     };
 
-    enum Mode {
-        Normal,
-        Highlight
+    enum HighlightMode {
+        NoHighlight,
+        HoverHighlight,
+        SelectionHighlight
     };
 
     enum Arrow {
@@ -40,9 +46,9 @@ public:
         DoubleArrow
     };
 
-    FeatureStyleRule const* match(mapget::Feature& feature) const;
+    FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
     [[nodiscard]] Aspect aspect() const;
-    [[nodiscard]] Mode mode() const;
+    [[nodiscard]] HighlightMode mode() const;
     [[nodiscard]] bool selectable() const;
     [[nodiscard]] bool supports(mapget::GeomType const& g) const;
 
@@ -58,6 +64,7 @@ public:
     [[nodiscard]] float outlineWidth() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& nearFarScale() const;
     [[nodiscard]] glm::dvec3 const& offset() const;
+    [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
@@ -92,6 +99,8 @@ public:
     [[nodiscard]] std::optional<std::array<float, 4>> const& scaleByDistance() const;
     [[nodiscard]] std::optional<std::array<float, 4>> const& offsetScaleByDistance() const;
 
+    [[nodiscard]] uint32_t const& index() const;
+
 private:
     void parse(YAML::Node const& yaml);
 
@@ -100,7 +109,7 @@ private:
     }
 
     Aspect aspect_ = Feature;
-    Mode mode_ = Normal;
+    HighlightMode mode_ = NoHighlight;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::regex> type_;
@@ -119,6 +128,7 @@ private:
     float outlineWidth_ = .0;
     std::optional<std::array<float, 4>> nearFarScale_;
     glm::dvec3 offset_{.0, .0, .0};
+    std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules
     std::string labelFont_ = "24px Helvetica";
@@ -154,6 +164,9 @@ private:
     std::optional<bool> attributeValidityGeometry_;
 
     std::vector<FeatureStyleRule> firstOfRules_;
+
+    // Index of the rule within the style sheet
+    int32_t index_ = 0;
 };
 
 }

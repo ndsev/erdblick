@@ -29,17 +29,17 @@ interface Column {
                     class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </div>
             <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
-                            label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                            [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
+                          label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                          [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                     <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                 </p-button>
             </div>
             <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
-                            icon="pi pi-fw pi-copy" label=""
-                            [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                            pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonCollection())"
+                          icon="pi pi-fw pi-copy" label=""
+                          [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                          pTooltip="Copy GeoJSON" tooltipPosition="bottom">
                 </p-button>
             </div>
         </div>
@@ -79,8 +79,7 @@ interface Column {
                                     />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
-                                            (click)="showSourceData(item)"
-
+                                            (click)="showSourceData($event, item)"
                                             [rounded]="true"
                                             severity="secondary"
                                             label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
@@ -230,8 +229,9 @@ export class FeaturePanelComponent implements OnInit  {
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
+            const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || hasSingleChild;
+            node.expanded = isTopLevelNode || isSection || hasSingleChild;
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
@@ -341,12 +341,14 @@ export class FeaturePanelComponent implements OnInit  {
         }
     }
 
-    showSourceData(sourceDataRef: any) {
+    showSourceData(event: any, sourceDataRef: any) {
+        event.stopPropagation();
+
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
         const mapId = this.inspectionService.selectedMapIdName;
-        const featureId = this.inspectionService.selectedFeatureIdName;
+        const featureId = this.inspectionService.selectedFeatureIdNames.join(", ");
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
@@ -365,7 +367,7 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
+            this.jumpService.selectFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
         }
         this.copyToClipboard(rowData["value"]);
     }

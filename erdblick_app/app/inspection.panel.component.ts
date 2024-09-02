@@ -70,7 +70,7 @@ export class InspectionPanelComponent
             // TODO: Create a new FeaturePanelComponent instance for each unique selected feature
             //       then we can get rid of all the service's View Component logic/functions.
             //       reset() Would then completely clear the tabs.
-            const featureId = this.inspectionService.selectedFeatureIdName;
+            const featureId = this.inspectionService.selectedFeatureIdNames.join(", ");
             this.tabs[0].title = featureId;
 
             const selectedSourceData = parameterService.getSelectedSourceData()
@@ -81,8 +81,10 @@ export class InspectionPanelComponent
         });
 
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            if (selection)
+            if (selection) {
+                this.reset();
                 this.pushSourceDataInspector(selection);
+            }
         })
     }
 

@@ -12,13 +12,13 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
     if (arrowStr == "none") {
         return FeatureStyleRule::NoArrow;
     }
-    else if (arrowStr == "forward") {
+    if (arrowStr == "forward") {
         return FeatureStyleRule::ForwardArrow;
     }
-    else if (arrowStr == "backward") {
+    if (arrowStr == "backward") {
         return FeatureStyleRule::BackwardArrow;
     }
-    else if (arrowStr == "double") {
+    if (arrowStr == "double") {
         return FeatureStyleRule::DoubleArrow;
     }
 
@@ -30,13 +30,13 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
         return mapget::GeomType::Points;
     }
-    else if (enumStr == "mesh") {
+    if (enumStr == "mesh") {
         return mapget::GeomType::Mesh;
     }
-    else if (enumStr == "line") {
+    if (enumStr == "line") {
         return mapget::GeomType::Line;
     }
-    else if (enumStr == "polygon") {
+    if (enumStr == "polygon") {
         return mapget::GeomType::Polygon;
     }
 
@@ -45,7 +45,7 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
 }
 }
 
-FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml)
+FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml, uint32_t index) : index_(index)
 {
     parse(yaml);
 }
@@ -100,11 +100,14 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["mode"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto modeStr = yaml["mode"].as<std::string>();
-        if (modeStr == "normal") {
-            mode_ = Normal;
+        if (modeStr == "none") {
+            mode_ = NoHighlight;
         }
-        else if (modeStr == "highlight") {
-            mode_ = Highlight;
+        else if (modeStr == "hover") {
+            mode_ = HoverHighlight;
+        }
+        else if (modeStr == "selection") {
+            mode_ = SelectionHighlight;
         }
         else {
             std::cout << "Unsupported mode: " << modeStr << std::endl;
@@ -167,6 +170,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offset_.x = yaml["offset"][0].as<double>();
         offset_.y = yaml["offset"][1].as<double>();
         offset_.z = yaml["offset"][2].as<double>();
+    }
+    if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
+        pointMergeGridCellSize_ = glm::dvec3();
+        pointMergeGridCellSize_->x = yaml["point-merge-grid-cell"][0].as<double>();
+        pointMergeGridCellSize_->y = yaml["point-merge-grid-cell"][1].as<double>();
+        pointMergeGridCellSize_->z = yaml["point-merge-grid-cell"][2].as<double>();
     }
 
     /////////////////////////////////////
@@ -364,7 +373,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
 }
 
-FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
+FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
 {
     // Filter by feature type regular expression.
     if (type_) {
@@ -376,7 +385,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
 
     // Filter by simfil expression.
     if (!filter_.empty()) {
-        if (!feature.evaluate(filter_).as<simfil::ValueType::Bool>()) {
+        if (!evalFun.eval_(filter_).as<simfil::ValueType::Bool>()) {
             return nullptr;
         }
     }
@@ -384,7 +393,7 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature) const
     // Return matching sub-rule or this.
     if (!firstOfRules_.empty()) {
         for (auto const& rule : firstOfRules_) {
-            if (auto matchingRule = rule.match(feature)) {
+            if (auto matchingRule = rule.match(feature, evalFun)) {
                 return matchingRule;
             }
         }
@@ -402,7 +411,7 @@ bool FeatureStyleRule::supports(const mapget::GeomType& g) const
 glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 {
     if (!colorExpression_.empty()) {
-        auto colorVal = evalFun(colorExpression_);
+        auto colorVal = evalFun.eval_(colorExpression_);
         if (colorVal.isa(simfil::ValueType::Int)) {
             auto colorInt = colorVal.as<simfil::ValueType::Int>();
             auto a = static_cast<float>(colorInt & 0xff) / 255.;
@@ -458,7 +467,7 @@ int FeatureStyleRule::dashPattern() const
 FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) const
 {
     if (!arrowExpression_.empty()) {
-        auto arrowVal = evalFun(arrowExpression_);
+        auto arrowVal = evalFun.eval_(arrowExpression_);
         if (arrowVal.isa(simfil::ValueType::String)) {
             auto arrowStr = arrowVal.as<simfil::ValueType::String>();
             if (auto arrowMode = parseArrowMode(arrowStr))
@@ -526,7 +535,7 @@ bool FeatureStyleRule::selectable() const
     return selectable_;
 }
 
-FeatureStyleRule::Mode FeatureStyleRule::mode() const
+FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
 {
     return mode_;
 }
@@ -599,7 +608,7 @@ std::string const& FeatureStyleRule::labelTextExpression() const
 std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
-        auto resultVal = evalFun(labelTextExpression_);
+        auto resultVal = evalFun.eval_(labelTextExpression_);
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;
@@ -650,6 +659,11 @@ glm::dvec3 const& FeatureStyleRule::offset() const
     return offset_;
 }
 
+std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const
+{
+    return pointMergeGridCellSize_;
+}
+
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const
 {
     return attributeType_;
@@ -663,6 +677,11 @@ std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const
 std::optional<bool> const& FeatureStyleRule::attributeValidityGeometry() const
 {
     return attributeValidityGeometry_;
+}
+
+uint32_t const& FeatureStyleRule::index() const
+{
+    return index_;
 }
 
 }
