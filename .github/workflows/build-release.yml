@@ -50,12 +50,9 @@ jobs:
 
       - name: Compile
         run: |
-          mkdir build
-          cd build
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
-          cmake --build .
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug -B build
+          cmake --build build
 
       - name: Run Tests
         run: |
-          cd build
-          ctest --verbose
+          ctest --verbose --no-tests=error --test-dir=build
