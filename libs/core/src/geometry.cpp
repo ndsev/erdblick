@@ -118,11 +118,11 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
     return averageVectorPosition(intersectedTrianglePoints);
 }
 
-Point erdblick::boundingRadiusVector(const model_ptr<Geometry>& g)
+Point erdblick::boundingRadiusEndPoint(const model_ptr<Geometry>& g)
 {
     const Point center = erdblick::geometryCenter(g);
     if (!g) {
-        std::cerr << "Cannot obtain bounding radius of null geometry." << std::endl;
+        std::cerr << "Cannot obtain bounding radius vector end point of null geometry." << std::endl;
         return center;
     }
 
@@ -142,6 +142,10 @@ Point erdblick::boundingRadiusVector(const model_ptr<Geometry>& g)
     });
 
     return farPoint;
+}
+
+GeomType erdblick::getGeometryType(const model_ptr<Geometry>& g) {
+    return g->geomType();
 }
 
 double erdblick::pointSideOfLine(const Point& lineVector, const Point& lineStart, const Point& p)

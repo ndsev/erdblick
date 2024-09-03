@@ -8,6 +8,11 @@ import {coreLib, uint8ArrayFromWasm} from "./wasm";
 
 export const MAX_ZOOM_LEVEL = 15;
 
+export interface SearchResultPrimitiveId {
+    type: string,
+    index: number
+}
+
 function generateChildrenIds(parentTileId: bigint) {
     if (parentTileId == -1n) {
         return [0n, 4294967296n];
@@ -33,7 +38,7 @@ class FeatureSearchQuadTreeNode {
     level: number;
     children: Array<FeatureSearchQuadTreeNode>;
     count: number;
-    markers: Array<[number, SearchResultPosition]> = [];
+    markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
     rectangle: Rectangle;
     center: Cartesian3 | null;
 
@@ -42,7 +47,7 @@ class FeatureSearchQuadTreeNode {
                 level: number,
                 count: number,
                 children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<[number, SearchResultPosition]> = []) {
+                markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = []) {
         this.tileId = tileId;
         this.parentId = parentTileId;
         this.level = level;
@@ -59,19 +64,19 @@ class FeatureSearchQuadTreeNode {
        return Rectangle.contains(this.rectangle, point);
     }
 
-    contains(markers: Array<[number, SearchResultPosition]>) {
+    contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
         return markers.some(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    filterPointsForNode(markers: Array<[number, SearchResultPosition]>) {
+    filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
         return markers.filter(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    addChildren(markers: Array<[number, SearchResultPosition]> | Cartographic) {
+    addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> | Cartographic) {
         const existingIds = this.children.map(child => child.tileId);
         const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
         for (const id of missingIds) {
@@ -97,7 +102,7 @@ class FeatureSearchQuadTree {
         this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, 0);
     }
 
-    private calculateAveragePosition(markers: Array<[number, SearchResultPosition]>): Cartesian3 {
+    private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>): Cartesian3 {
         const sum = markers.reduce(
             (acc, marker) => {
                 acc.x += marker[1].cartesian.x;
@@ -111,7 +116,7 @@ class FeatureSearchQuadTree {
         return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
-    insert(tileId: bigint, markers: Array<[number, SearchResultPosition]>) {
+    insert(tileId: bigint, markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
         const markersCenter = this.calculateAveragePosition(markers);
         const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
         let currentLevel = 0;
@@ -399,7 +404,7 @@ export class FeatureSearchService {
                 }
                 result[2].cartographic = null;
                 const featureId = result[1];
-                const id = this.searchResults.length;
+                const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
                 this.searchResults.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
                 return [id, result[2]];
             }));

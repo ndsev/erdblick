@@ -26,12 +26,13 @@ import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
-import {FeatureSearchService, MAX_ZOOM_LEVEL} from "./feature.search.service";
+import {FeatureSearchService, MAX_ZOOM_LEVEL, SearchResultPrimitiveId} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 import {distinctUntilChanged} from "rxjs";
 import {SearchResultPosition} from "./featurefilter.worker";
 import {InspectionService} from "./inspection.service";
+import {KeyboardService} from "./keyboard.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -73,6 +74,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public parameterService: ParametersService,
                 public jumpService: JumpTargetService,
                 public inspectionService: InspectionService,
+                public keyboardService: KeyboardService,
                 public coordinatesService: CoordinatesService) {
 
         this.tileVisForPrimitive = new Map();
@@ -147,13 +149,13 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
             }
             let feature = this.viewer.scene.pick(position);
-            if (defined(feature) && feature.primitive instanceof Billboard) {
+            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
                 if (feature.primitive.id) {
-                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id];
+                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
                         this.jumpService.highlightFeature(featureInfo.mapId, featureInfo.featureId).then(() => {
                             if (this.inspectionService.selectedFeature) {
-                                this.mapService.focusOnFeature(this.inspectionService.selectedFeature);
+                                this.inspectionService.zoomToFeature();
                             }
                         });
                     }
@@ -243,8 +245,8 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         });
 
-        this.inspectionService.originNormalAndRadiusForFeatureZoom.subscribe(values => {
-            const [origin, normal, radius] = values;
+        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+            const [origin, normal] = values;
             // this.viewer.entities.add({
             //     position: origin,
             //     point: {
@@ -470,12 +472,12 @@ export class ErdblickViewComponent implements AfterViewInit {
     renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-        let markers: Array<[number, SearchResultPosition]> = [];
+        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
         const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
         for (const node of nodes) {
             if (node.markers.length) {
                 markers.push(...node.markers);
-            } else if (node.count > 0) {
+            } else if (node.count > 0 && node.center) {
                 this.featureSearchService.visualization.add({
                     position: node.center,
                     image: this.featureSearchService.getPinGraphics(node.count),

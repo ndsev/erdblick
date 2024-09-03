@@ -295,11 +295,24 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     return geometryCenter(self->firstGeometry());
                 }))
         .function(
-            "boundingRadiusVector",
+            "boundingRadiusEndPoint",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return boundingRadiusVector(self->firstGeometry());
+                    return boundingRadiusEndPoint(self->firstGeometry());
+                }))
+        .function(
+            "getGeometryType",
+            std::function<mapget::GeomType(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return getGeometryType(self->firstGeometry());
                 }));
+
+    ////////// GeomType
+    em::enum_<mapget::GeomType>("GeomType")
+        .value("Points", mapget::GeomType::Points)
+        .value("Line", mapget::GeomType::Line)
+        .value("Polygon", mapget::GeomType::Polygon)
+        .value("Mesh", mapget::GeomType::Mesh);
 
     ////////// TileFeatureLayer
     em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")

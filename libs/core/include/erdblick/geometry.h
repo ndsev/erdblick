@@ -33,11 +33,16 @@ bool isPointInsideTriangle(Point const& p, Point const& p0, Point const& p1, Poi
 Point geometryCenter(model_ptr<Geometry> const& g);
 
 /**
- * Calculate a reasonable bounding radius for the given geometry
+ * Calculate a point furthest from the center for the given geometry.
  * Used to properly scale the camera in the viewer
  * relative to the feature's bounding sphere.
  */
-Point boundingRadiusVector(model_ptr<Geometry> const& g);
+Point boundingRadiusEndPoint(model_ptr<Geometry> const& g);
+
+/**
+ * Get type of the geometry.
+ */
+GeomType getGeometryType(model_ptr<Geometry> const& g);
 
 /**
  * Calculate a local WGS84 coordinate system for the geometry.

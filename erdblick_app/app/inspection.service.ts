@@ -7,7 +7,7 @@ import {FeatureWrapper} from "./features.model";
 import {ParametersService} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
-import {Cartesian3, Cartographic, CesiumMath, Color, Matrix3} from "./cesium";
+import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
 import {Fetch} from "./fetch.model";
@@ -48,12 +48,12 @@ export class InspectionService {
     selectedFeatureInspectionModel: Array<InspectionModelData> | null = null;
     selectedFeatureIdName: string = "";
     selectedMapIdName: string = "";
-    selectedFeatureGeometryType: string = "";
+    selectedFeatureGeometryType: any;
     selectedFeatureCenter: Cartesian3 | null = null;
     selectedFeatureOrigin: Cartesian3 | null = null;
     selectedFeatureBoundingRadius: number = 0;
     selectedFeature: FeatureWrapper | null = null;
-    originNormalAndRadiusForFeatureZoom: Subject<[Cartesian3, Cartesian3, number]> = new Subject();
+    originAndNormalForFeatureZoom: Subject<[Cartesian3, Cartesian3]> = new Subject();
     selectedSourceData = new BehaviorSubject<SelectedSourceData | null>(null);
 
     // Event called when the active inspector of the inspection panel changed
@@ -83,10 +83,10 @@ export class InspectionService {
                 const center = feature.center() as Cartesian3;
                 this.selectedFeatureCenter = center;
                 this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
-                let radiusPoint = feature.boundingRadiusVector() as Cartesian3;
+                let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
                 radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
                 this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
-                this.selectedFeatureGeometryType = this.getGeometryType();
+                this.selectedFeatureGeometryType = feature.getGeometryType() as any;
                 this.isInspectionPanelVisible = true;
                 this.loadFeatureData();
             });
@@ -192,19 +192,6 @@ export class InspectionService {
         }
     }
 
-    getGeometryType() {
-        if (this.selectedFeatureInspectionModel) {
-        for (const section of this.selectedFeatureInspectionModel) {
-            if (section.key == "Geometry") {
-                const geometryType = section.children[0].value;
-                console.log(geometryType)
-                return geometryType;
-            }
-        }
-        }
-        return "";
-    }
-
     zoomToFeature() {
         if (!this.selectedFeature) {
             this.infoMessageService.showError("Could not zoom to feature: no feature is selected!");
@@ -215,7 +202,7 @@ export class InspectionService {
             return;
         }
 
-        if (this.selectedFeatureGeometryType.toLowerCase() == "mesh") {
+        if (this.selectedFeatureGeometryType === this.GeometryType.Mesh) {
             let triangle: Array<Cartesian3> = [];
             if (this.selectedFeatureInspectionModel) {
                 for (const section of this.selectedFeatureInspectionModel) {
@@ -238,14 +225,14 @@ export class InspectionService {
                 );
                 Cartesian3.negate(normal, normal);
                 Cartesian3.normalize(normal, normal);
-                Cartesian3.multiplyByScalar(normal, this.selectedFeatureBoundingRadius, normal);
-                this.originNormalAndRadiusForFeatureZoom.next([this.selectedFeatureOrigin, normal, this.selectedFeatureBoundingRadius]);
+                Cartesian3.multiplyByScalar(normal, 3 * this.selectedFeatureBoundingRadius, normal);
+                this.originAndNormalForFeatureZoom.next([this.selectedFeatureOrigin, normal]);
             }
         } else if (this.selectedFeatureCenter) {
             this.mapService.moveToWgs84PositionTopic.next({
                 x: this.selectedFeatureCenter.x,
                 y: this.selectedFeatureCenter.y,
-                z: this.selectedFeatureCenter.z + this.selectedFeatureBoundingRadius
+                z: this.selectedFeatureCenter.z + 3 * this.selectedFeatureBoundingRadius
             });
         }
     }
@@ -291,4 +278,5 @@ export class InspectionService {
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
+    protected readonly GeometryType = coreLib.GeomType;
 }
