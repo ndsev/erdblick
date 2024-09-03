@@ -11,24 +11,32 @@ import {coreLib} from "./wasm";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
+import {KeyboardService} from "./keyboard.service";
 
 
 @Component({
     selector: 'map-panel',
     template: `
-        <p-dialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false">
+        <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
+                  [position]="'topleft'" [draggable]="false" [resizable]="false" (onShow)="keyboardService.dialogOnShow($event)" 
+                  (onHide)="keyboardService.dialogOnHide($event)" [closeOnEscape]="false">
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
+                    <p-button onEnterClick (click)="openDatasources()" class="osm-button"
+                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"
+                              tooltipPosition="bottom" tabindex="0">
+                    </p-button>
+                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                     <span style="font-size: 0.9em">OSM Overlay:</span>
-                    <p-button (click)="toggleOSMOverlay()" class="osm-button"
+                    <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
                               icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom">
+                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
                     </p-button>
                     <div *ngIf="osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="osmOpacityString"
                                class="w-full slider-input"/>
-                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()" class="w-full">
+                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                                  class="w-full" tabindex="0">
                         </p-slider>
                     </div>
                 </div>
@@ -43,25 +51,26 @@ import {Menu} from "primeng/menu";
                             <div *ngIf="mapLayer.value.type != 'SourceData'" class="flex-container">
                                 <div class="font-bold white-space-nowrap"
                                     style="margin-left: 0.5em; display: flex; align-items: center;">
-                                    <span class="material-icons" style="font-size: 1.5em; cursor: pointer"
+                                    <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
+                                      tabindex="0"
                                         (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
                                     <span>
-                                        <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                        <p-checkbox onEnterClick [(ngModel)]="mapLayer.value.visible"
                                                     (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
-                                                    [label]="mapLayer.key" [binary]="true"/>
+                                                    [label]="mapLayer.key" [binary]="true" tabindex="0"/>
                                     </span>
                                 </div>
                                 <div class="layer-controls">
-                                    <p-button (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
+                                    <p-button onEnterClick (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
                                             label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
-                                            [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
                                         <span class="material-icons"
                                             style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
                                     </p-button>
-                                    <p-button *ngIf="mapLayer.value.coverage.length"
+                                    <p-button onEnterClick *ngIf="mapLayer.value.coverage.length"
                                             (click)="focus(mapLayer.value.coverage[0], $event)"
                                             label="" pTooltip="Focus on layer" tooltipPosition="bottom"
-                                            [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
                                         <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                                     </p-button>
                                     <p-inputNumber [(ngModel)]="mapLayer.value.level"
@@ -71,10 +80,11 @@ import {Menu} from "primeng/menu";
                                                 decrementButtonClass="p-button-secondary"
                                                 incrementButtonClass="p-button-secondary"
                                                 incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
-                                                pTooltip="Change zoom level" tooltipPosition="bottom">
+                                                pTooltip="Change zoom level" tooltipPosition="bottom" tabindex="0">
                                     </p-inputNumber>
                                 </div>
-                                <input class="level-indicator" type="text" pInputText [disabled]="true" [(ngModel)]="mapLayer.value.level" />
+                                <input class="level-indicator" type="text" pInputText [disabled]="true"
+                                   [(ngModel)]="mapLayer.value.level"/>
                             </div>
                         </div>
                     </div>
@@ -89,49 +99,51 @@ import {Menu} from "primeng/menu";
                         <div class="flex-container">
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span *ngIf="style.value.options.length" class="material-icons" [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
+                                <span onEnterClick *ngIf="style.value.options.length" class="material-icons"
+                                      [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
                                       style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
-                                      (click)="style.value.params.showOptions = !style.value.params.showOptions; applyStyleConfig(style.value, false)">
+                                      (click)="style.value.params.showOptions = !style.value.params.showOptions; applyStyleConfig(style.value, false)"
+                                      tabindex="0">
                                     expand_more
                                 </span>
-                                <span class="material-icons"
+                                <span onEnterClick class="material-icons"
                                       style="font-size: 1.5em; cursor: pointer"
-                                      (click)="showStylesToggleMenu($event, style.key)">more_vert</span>
+                                      (click)="showStylesToggleMenu($event, style.key)" tabindex="0">more_vert</span>
                                 <span>
-                                    <p-checkbox [(ngModel)]="style.value.params.visible"
+                                    <p-checkbox onEnterClick [(ngModel)]="style.value.params.visible"
                                                 (ngModelChange)="applyStyleConfig(style.value)"
-                                                [label]="style.key" [binary]="true"/>
+                                                [label]="style.key" [binary]="true" tabindex="0"/>
                                 </span>
                             </div>
-                            <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                            <p-button onEnterClick *ngIf="style.value.imported" (click)="removeStyle(style.key)"
                                       icon="pi pi-trash"
                                       label="" pTooltip="Remove style"
-                                      tooltipPosition="bottom">
+                                      tooltipPosition="bottom" tabindex="0">
                             </p-button>
                             <div class="layer-controls style-controls">
-                                <p-button *ngIf="style.value.imported" (click)="removeStyle(style.key)"
+                                <p-button onEnterClick *ngIf="style.value.imported" (click)="removeStyle(style.key)"
                                           icon="pi pi-trash"
                                           label="" pTooltip="Remove style"
-                                          tooltipPosition="bottom">
+                                          tooltipPosition="bottom" tabindex="0">
                                 </p-button>
-                                <p-button *ngIf="!style.value.imported" (click)="resetStyle(style.key)"
+                                <p-button onEnterClick *ngIf="!style.value.imported" (click)="resetStyle(style.key)"
                                           icon="pi pi-refresh"
                                           label="" pTooltip="Reload style from disk"
-                                          tooltipPosition="bottom">
+                                          tooltipPosition="bottom" tabindex="0">
                                 </p-button>
-                                <p-button (click)="showStyleEditor(style.key)"
+                                <p-button onEnterClick (click)="showStyleEditor(style.key)"
                                           icon="pi pi-file-edit"
                                           label="" pTooltip="Edit style"
-                                          tooltipPosition="bottom">
+                                          tooltipPosition="bottom" tabindex="0">
                                 </p-button>
                             </div>
                         </div>
                         <div *ngIf="style.value.options.length && style.value.params.showOptions">
                             <div *ngFor="let option of style.value.options"
                                  style="margin-left: 4.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
-                                <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
+                                <p-checkbox onEnterClick [(ngModel)]="style.value.params.options[option.id]"
                                             (ngModelChange)="applyStyleConfig(style.value)"
-                                            [label]="option.label" [binary]="true"/>
+                                            [label]="option.label" [binary]="true" tabindex="0"/>
                             </div>
                         </div>
                     </div>
@@ -146,12 +158,12 @@ import {Menu} from "primeng/menu";
                 </div>
                 <div class="styles-container">
                     <div class="styles-import">
-                        <p-fileUpload name="demo[]" mode="basic" chooseLabel="Import Style"
+                        <p-fileUpload onEnterClick name="demo[]" mode="basic" chooseLabel="Import Style"
                                       [customUpload]="true" [fileLimit]="1" [multiple]="false"
                                       accept=".yaml" [maxFileSize]="1048576"
                                       (uploadHandler)="importStyle($event)"
                                       pTooltip="Import style" tooltipPosition="bottom"
-                                      class="import-dialog" #styleUploader>
+                                      class="import-dialog" #styleUploader tabindex="0">
                         </p-fileUpload>
                     </div>
                 </div>
@@ -159,9 +171,9 @@ import {Menu} from "primeng/menu";
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <p-button (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
+        <p-button onEnterClick (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
-                  icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}">
+                  icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}" tabindex="0">
         </p-button>
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
                   class="editor-dialog">
@@ -211,11 +223,13 @@ export class MapPanelComponent {
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
+    @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public parameterService: ParametersService,
+                public keyboardService: KeyboardService,
                 private sidePanelService: SidePanelService)
     {
         this.parameterService.parameters.subscribe(parameters => {

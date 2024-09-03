@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./info.service";
-import {EnterSelectDirective, SearchPanelComponent} from "./search.panel.component";
+import {OnEnterClickDirective, SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
@@ -83,7 +83,7 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         AlertDialogComponent,
-        EnterSelectDirective,
+        OnEnterClickDirective,
         HighlightSearch,
         TreeTableFilterPatchDirective,
     ],

@@ -264,6 +264,21 @@ export class ErdblickViewComponent implements AfterViewInit {
                 }
             });
         });
+
+        // TODO: Introduce functionality to batch-add shortcuts
+        // TODO: Introduce functionality to add input exceptions
+        this.keyboardService.registerShortcut('q', this.zoomIn.bind(this));
+        this.keyboardService.registerShortcut('Q', this.zoomIn.bind(this));
+        this.keyboardService.registerShortcut('e', this.zoomOut.bind(this));
+        this.keyboardService.registerShortcut('E', this.zoomOut.bind(this));
+        this.keyboardService.registerShortcut('w', this.moveUp.bind(this));
+        this.keyboardService.registerShortcut('W', this.moveUp.bind(this));
+        this.keyboardService.registerShortcut('a', this.moveLeft.bind(this));
+        this.keyboardService.registerShortcut('A', this.moveLeft.bind(this));
+        this.keyboardService.registerShortcut('s', this.moveDown.bind(this));
+        this.keyboardService.registerShortcut('S', this.moveDown.bind(this));
+        this.keyboardService.registerShortcut('d', this.moveRight.bind(this));
+        this.keyboardService.registerShortcut('D', this.moveRight.bind(this));
     }
 
     /**
@@ -487,5 +502,29 @@ export class ErdblickViewComponent implements AfterViewInit {
                 });
             });
         }
+    }
+
+    moveUp() {
+        this.viewer.camera.moveUp(this.parameterService.CAMERA_MOVE_AMOUNT);
+    }
+
+    moveDown() {
+        this.viewer.camera.moveDown(this.parameterService.CAMERA_MOVE_AMOUNT);
+    }
+
+    moveLeft() {
+        this.viewer.camera.moveLeft(this.parameterService.CAMERA_MOVE_AMOUNT);
+    }
+
+    moveRight() {
+        this.viewer.camera.moveRight(this.parameterService.CAMERA_MOVE_AMOUNT);
+    }
+
+    zoomIn() {
+        this.viewer.camera.zoomIn(this.parameterService.CAMERA_ZOOM_AMOUNT);
+    }
+
+    zoomOut() {
+        this.viewer.camera.zoomOut(this.parameterService.CAMERA_ZOOM_AMOUNT);
     }
 }

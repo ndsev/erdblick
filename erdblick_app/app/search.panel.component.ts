@@ -16,9 +16,9 @@ interface ExtendedSearchTarget extends SearchTarget {
 }
 
 @Directive({
-    selector: '[appEnterSelect]'
+    selector: '[onEnterClick]'
 })
-export class EnterSelectDirective {
+export class OnEnterClickDirective {
     constructor(private el: ElementRef, private renderer: Renderer2) {}
 
     @HostListener('keydown', ['$event'])
@@ -48,7 +48,7 @@ export class EnterSelectDirective {
                           [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
-                            <div appEnterSelect (click)="targetToHistory(item.index)" class="search-option-wrapper"
+                            <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle {{ item.color }}">
                                     <i class="pi {{ item.icon }}"></i>
@@ -61,7 +61,7 @@ export class EnterSelectDirective {
                             </div>
                         </div>
                         <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
-                            <div appEnterSelect (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
+                            <div onEnterClick (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
                                 <div class="icon-circle violet">
                                     <i class="pi pi-history"></i>
                                 </div>
@@ -73,7 +73,7 @@ export class EnterSelectDirective {
                             </div>
                         </div>
                         <div class="search-menu" *ngFor="let item of inactiveSearchItems; let i = index">
-                            <div appEnterSelect (click)="targetToHistory(i)" class="search-option-wrapper"
+                            <div onEnterClick (click)="targetToHistory(i)" class="search-option-wrapper"
                                  [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle grey">
                                     <i class="pi {{ item.icon }}"></i>
@@ -123,53 +123,89 @@ export class SearchPanelComponent implements AfterViewInit {
     @ViewChild('actionsdialog') dialog!: Dialog;
     cursorPosition: number = 0;
 
-    staticTargets: Array<SearchTarget> = [
-        {
+    public get staticTargets() {
+        const targetsArray: Array<SearchTarget> = [];
+        const value = this.searchInputValue.trim();
+        let label = "tileId = ?";
+        if (this.validateMapgetTileId(value)) {
+            label = `tileId = ${value}`;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
             icon: "pi-table",
             color: "green",
-            name: "Tile ID",
-            label: "Jump to Tile by its Mapget ID",
+            name: "Mapget Tile ID",
+            label: label,
             enabled: false,
             jump: (value: string) => { return this.parseMapgetTileId(value) },
             validate: (value: string) => { return this.validateMapgetTileId(value) }
-        },
-        {
-            icon: "pi-map-marker",
-            color: "green",
-            name: "WGS84 Lat-Lon Coordinates",
-            label: "Jump to WGS84 Coordinates",
-            enabled: false,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        },
-        {
+        });
+        label = "lon = ? | lat = ? | (level = ?)"
+        if (this.validateWGS84(value, true)) {
+            const coords = this.parseWgs84Coordinates(value, true);
+            if (coords !== undefined) {
+                label = `lon = ${coords[0]} | lat = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
+            }
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
             icon: "pi-map-marker",
             color: "green",
             name: "WGS84 Lon-Lat Coordinates",
-            label: "Jump to WGS84 Coordinates",
+            label: label,
             enabled: false,
             jump: (value: string) => { return this.parseWgs84Coordinates(value, true) },
             validate: (value: string) => { return this.validateWGS84(value, true) }
-        },
-        {
+        });
+        label = "lat = ? | lon = ? | (level = ?)"
+        if (this.validateWGS84(value, false)) {
+            const coords = this.parseWgs84Coordinates(value, true);
+            if (coords !== undefined) {
+                label = `lat = ${coords[0]} | lon = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
+            }
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            icon: "pi-map-marker",
+            color: "green",
+            name: "WGS84 Lat-Lon Coordinates",
+            label: label,
+            enabled: false,
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
+            validate: (value: string) => { return this.validateWGS84(value, false) }
+        });
+        label = "lat = ? | lon = ?"
+        if (this.validateWGS84(value, false)) {
+            const coords = this.parseWgs84Coordinates(value, true);
+            if (coords !== undefined) {
+                label = `lat = ${coords[0]} | lon = ${coords[1]}`;
+            }
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
             icon: "pi-map-marker",
             color: "green",
             name: "Open WGS84 Lat-Lon in Google Maps",
-            label: "Open Location in External Map Service",
+            label: label,
             enabled: false,
             jump: (value: string) => { return this.openInGM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
-        },
-        {
+        });
+        targetsArray.push({
             icon: "pi-map-marker",
             color: "green",
             name: "Open WGS84 Lat-Lon in Open Street Maps",
-            label: "Open Location in External Map Service",
+            label: label,
             enabled: false,
             jump: (value: string) => { return this.openInOSM(value) },
             validate: (value: string) => { return this.validateWGS84(value, false) }
-        }
-    ];
+        });
+        return targetsArray;
+    }
 
     constructor(private renderer: Renderer2,
                 public mapService: MapService,
