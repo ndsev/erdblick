@@ -15,7 +15,7 @@ set(CESIUM_LIBS
   CesiumGltf
   CesiumGltfWriter)
 
-# Use fetch content for cloning the repository durring
+# Use fetch content for cloning the repository during
 # configure phase. We do not call `FetchContent_MakeAvailable`,
 # but instead use `ExternalProject_Add` to compile Cesium in
 # isolation.
@@ -23,7 +23,10 @@ FetchContent_Declare(cesiumnative_src
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/cesium-native.git"
   GIT_TAG "main"
   GIT_SUBMODULES_RECURSE YES
-  GIT_PROGRESS YES)
+  GIT_PROGRESS YES
+  PATCH_COMMAND git reset --hard HEAD && git -C extern/draco reset --hard HEAD && git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/draco.patch"
+  UPDATE_DISCONNECTED YES
+  UPDATE_COMMAND "")
 
 FetchContent_GetProperties(cesiumnative_src)
 if (NOT cesiumnative_src_POPULATED)
