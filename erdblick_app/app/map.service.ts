@@ -3,23 +3,14 @@ import {Fetch} from "./fetch.model";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
-import {ParametersService} from "./parameters.service";
+import {ParametersService, TileFeatureId} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
-
-/**
- * Combination of a tile id and a feature id, which may be resolved
- * to a feature object.
- */
-export interface TileFeatureId {
-    featureId: string,
-    mapTileKey: string,
-}
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Object {
@@ -67,6 +58,13 @@ type ViewportProperties = {
     height: number;
     camPosLat: number
 };
+
+/**
+ * Determine if two lists of feature wrappers have the same features.
+ */
+function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
+    return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
+}
 
 /**
  * Erdblick map service class. This class is responsible for keeping track
@@ -179,6 +177,10 @@ export class MapService {
             }
             this.update();
         })
+
+        this.parameterService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
+            this.highlightFeatures(parameters.selected).then();
+        });
 
         await this.reloadDataSources();
 
@@ -626,49 +628,110 @@ export class MapService {
         return this.loadedTileLayers.get(tileKey) || null;
     }
 
-    async loadTileForSelection(tileKey: string) {
-        if (this.loadedTileLayers.has(tileKey)) {
-            return this.loadedTileLayers.get(tileKey)!;
+    async loadTiles(tileKeys: Set<string|null>): Promise<Map<string, FeatureTile>> {
+        let result = new Map<string, FeatureTile>();
+
+        // TODO: Optimize this loop to make just a single update call.
+        for (let tileKey of tileKeys) {
+            if (!tileKey) {
+                continue;
+            }
+
+            let tile = this.loadedTileLayers.get(tileKey);
+            if (tile) {
+                result.set(tileKey, tile);
+                continue;
+            }
+
+            let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
+            this.selectionTileRequest = {
+                remoteRequest: {
+                    mapId: mapId,
+                    layerId: layerId,
+                    tileIds: [Number(tileId)],
+                },
+                tileKey: tileKey,
+                resolve: null,
+                reject: null,
+            }
+
+            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
+                this.selectionTileRequest!.resolve = resolve;
+                this.selectionTileRequest!.reject = reject;
+            })
+
+            this.update();
+            await selectionTilePromise;
         }
 
-        let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
-        this.selectionTileRequest = {
-            remoteRequest: {
-                mapId: mapId,
-                layerId: layerId,
-                tileIds: [Number(tileId)],
-            },
-            tileKey: tileKey,
-            resolve: null,
-            reject: null,
-        }
-
-        let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
-            this.selectionTileRequest!.resolve = resolve;
-            this.selectionTileRequest!.reject = reject;
-        })
-
-        this.update();
-        return selectionTilePromise;
+        return result;
     }
 
-    async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, focus: boolean=false) {
-        const tile = await this.loadTileForSelection(tileKey);
-        // TODO: Doing the stringification here sucks a bit.
-        const featureId = `${typeId}.${idParts.filter((_, index) => index % 2 === 1).join('.')}`;
+    async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+        if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT)
+            console.trace(tileFeatureIds)
+
+        // Load the tiles for the selection.
+        const tiles = await this.loadTiles(
+            new Set(tileFeatureIds.filter(s => typeof s !== "string").map(s => s?.mapTileKey || null)));
 
         // Ensure that the feature really exists in the tile.
-        if (!tile.has(featureId)) {
-            const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
-            this.messageService.showError(
-                `The feature ${featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
-            return;
+        let features = new Array<FeatureWrapper>();
+        for (let id of tileFeatureIds) {
+            if (typeof id == "string") {
+                // When clicking on geometry that respresents a highlight,
+                // this is reflected in the feature id. By processing this
+                // info here, a hover highlight can be turned into a selection.
+                if (id == "hover-highlight") {
+                    features = this.hoverTopic.getValue();
+                }
+                else if (id == "selection-highlight") {
+                    features = this.selectionTopic.getValue();
+                }
+                continue;
+            }
+
+            const tile = tiles.get(id?.mapTileKey || "");
+            if (!tile || !id?.featureId) {
+                continue;
+            }
+            if (!tile.has(id?.featureId || "")) {
+                const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(id?.mapTileKey || "");
+                this.messageService.showError(
+                    `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
+                continue;
+            }
+
+            features.push(new FeatureWrapper(id!.featureId, tile));
         }
 
-        const feature = new FeatureWrapper(featureId, tile);
-        this.selectionTopic.next([feature]);
-        if (focus) {
-            this.focusOnFeature(feature);
+        if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
+            if (features.length) {
+                if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
+                    return;
+                }
+            }
+            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
+                return;
+            }
+            this.hoverTopic.next(features);
+        }
+        else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+            if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
+                return;
+            }
+            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
+                this.hoverTopic.next([]);
+            }
+            this.selectionTopic.next(features);
+        }
+        else {
+            console.error(`Unsupported highlight mode!`);
+        }
+
+        // TODO: Focus on bounding box of all features?
+        if (focus && features.length) {
+            this.focusOnFeature(features[0]);
         }
     }
 
@@ -685,14 +748,6 @@ export class MapService {
             }
         }
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
-    }
-
-    resolveFeature(id: TileFeatureId|null) {
-        const tile = this.loadedTileLayers.get(id?.mapTileKey || "");
-        if (!tile || !id?.featureId) {
-            return null;
-        }
-        return new FeatureWrapper(id.featureId, tile);
     }
 
     private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>) {
@@ -719,7 +774,7 @@ export class MapService {
             return;
         }
 
-        // Apply additional highlight styles.
+        // Apply highlight styles.
         const featureTile = featureWrappers[0].featureTile;
         const featureIds = featureWrappers.map(fw => fw.featureId);
         for (let [_, styleData] of this.styleService.styles) {

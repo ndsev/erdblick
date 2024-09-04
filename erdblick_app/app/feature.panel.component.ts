@@ -18,15 +18,15 @@ interface Column {
     selector: 'feature-panel',
     template: `
         <div class="flex justify-content-end align-items-center"
-                style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
+             style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
             <div class="p-input-icon-left filter-container">
                 <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                 <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                        [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
-                        (keydown)="onKeydown($event)"
+                       [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
+                       (keydown)="onKeydown($event)"
                 />
                 <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
-                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                   class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </div>
             <div>
                 <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
@@ -49,14 +49,14 @@ interface Column {
                 <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
             </div>
             <p-treeTable #tt
-                filterMode="strict"
-                scrollHeight="flex"
-                [value]="filteredTree"
-                [columns]="cols"
-                [scrollable]="true"
-                [virtualScroll]="true"
-                [virtualScrollItemSize]="26"
-                [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
+                         filterMode="strict"
+                         scrollHeight="flex"
+                         [value]="filteredTree"
+                         [columns]="cols"
+                         [scrollable]="true"
+                         [virtualScroll]="true"
+                         [virtualScrollItemSize]="26"
+                         [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
             >
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode"
@@ -64,27 +64,28 @@ interface Column {
                         (click)="onRowClick(rowNode)">
                         <td>
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                 </p-treeTableToggler>
                                 <span (click)="onKeyClick($event, rowData)"
-                                    style="cursor: pointer">{{ rowData['key'] }}
+                                      style="cursor: pointer">{{ rowData['key'] }}
                                 </span>
-                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']" class="source-data-ref-container">
+                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
+                                               class="source-data-ref-container">
                                     <p-button icon="pi pi-database"
-                                                [rounded]="true"
-                                                severity="secondary"
-                                                disabled="true"
+                                              [rounded]="true"
+                                              severity="secondary"
+                                              disabled="true"
                                     />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
-                                            (click)="showSourceData($event, item)"
-                                            [rounded]="true"
-                                            severity="secondary"
-                                            label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                            pTooltip="Go to {{ item.qualifier }} Source Data"
-                                            tooltipPosition="bottom"
+                                                (click)="showSourceData($event, item)"
+                                                [rounded]="true"
+                                                severity="secondary"
+                                                label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                tooltipPosition="bottom"
                                         />
                                     </ng-template>
                                 </p-buttonGroup>
@@ -92,16 +93,16 @@ interface Column {
                         </td>
                         <td [class]="getStyleClassByType(rowData['type'])">
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <div (click)="onValueClick($event, rowData)"
-                                        (mouseover)="highlightFeature(rowData)"
-                                        (mouseout)="stopHighlight(rowData)">
+                                     (mouseover)="onValueHover($event, rowData)"
+                                     (mouseout)="onValueHoverExit($event, rowData)">
                                     {{ rowData['value'] }}
                                     <span *ngIf="rowData.hasOwnProperty('info')">
                                         <i class="pi pi-info-circle"
-                                            [pTooltip]="rowData['info'].toString()"
-                                            tooltipPosition="left">
+                                           [pTooltip]="rowData['info'].toString()"
+                                           tooltipPosition="left">
                                         </i>
                                     </span>
                                 </div>
@@ -367,19 +368,24 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            // TODO: Support features from varying maps here.
-            this.jumpService.selectFeature(
-                this.inspectionService.selectedFeatures[0].featureTile.mapName,
-                rowData["value"]).then();
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["value"].mapTileKey,
+                rowData["value"].featureId).then();
         }
-        // this.copyToClipboard(rowData["value"]);
     }
 
-    highlightFeature(rowData: any) {
-        return;
+    onValueHover(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["value"].mapTileKey,
+                rowData["value"].featureId,
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
-    stopHighlight(rowData: any) {
+    onValueHoverExit(event: any, rowData: any) {
+        event.stopPropagation();
         return;
     }
 

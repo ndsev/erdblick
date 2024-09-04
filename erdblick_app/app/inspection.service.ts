@@ -4,7 +4,7 @@ import {BehaviorSubject, distinctUntilChanged, Subject, distinctUntilKeyChanged,
 import {MapService} from "./map.service";
 import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
-import {ParametersService} from "./parameters.service";
+import {ParametersService, TileFeatureId} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
 import {Cartesian3} from "./cesium";
@@ -83,7 +83,7 @@ export class InspectionService {
             if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
-                this.parametersService.unsetSelectedFeature();
+                this.parametersService.setSelectedFeatures([]);
                 this.selectedFeatures = [];
                 return;
             }
@@ -106,16 +106,8 @@ export class InspectionService {
                     this.loadFeatureData();
                 });
             });
-            this.parametersService.setSelectedFeature(this.selectedFeatures[0].featureTile.mapName, this.selectedFeatures[0].featureId);
-        });
 
-        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-            if (parameters.selected.length == 2) {
-                const [mapId, featureId] = parameters.selected;
-                if (!this.selectedFeatures.some(f => f.featureId == featureId)) {
-                    this.jumpService.selectFeature(mapId, featureId);
-                }
-            }
+            this.parametersService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
         });
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {

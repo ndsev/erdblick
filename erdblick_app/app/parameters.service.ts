@@ -8,6 +8,15 @@ import {InspectionService, SelectedSourceData} from "./inspection.service";
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
+/**
+ * Combination of a tile id and a feature id, which may be resolved
+ * to a feature object.
+ */
+export interface TileFeatureId {
+    featureId: string,
+    mapTileKey: string,
+}
+
 export interface StyleParameters {
     visible: boolean,
     options: Record<string, string>,
@@ -18,7 +27,7 @@ interface ErdblickParameters extends Record<string, any> {
     search: [number, string] | [],
     marker: boolean,
     markedPosition: Array<number>,
-    selected: Array<string>,
+    selected: TileFeatureId[],
     heading: number,
     pitch: number,
     roll: number,
@@ -46,6 +55,22 @@ interface ParameterDescriptor {
     urlParam: boolean
 }
 
+/** Function to create an object validator given a key-typeof-value dictionary. */
+function validateObject(fields: Record<string, string>) {
+    return (o: object) => {
+        if (typeof o !== "object") {
+            return false;
+        }
+        for (let [key, value] of Object.entries(o)) {
+            let valueType = typeof value;
+            if (valueType !== fields[key]) {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 const erdblickParameters: Record<string, ParameterDescriptor> = {
     search: {
         converter: val => JSON.parse(val),
@@ -67,7 +92,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     selected: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        validator: val => Array.isArray(val) && val.every(validateObject({mapTileKey: "string", featureId: "string"})),
         default: [],
         urlParam: true
     },
@@ -127,8 +152,11 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     styles: {
         converter: val => JSON.parse(val),
-        validator: val => typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(([_, v]) => typeof v["visible"] === "boolean" && typeof v["showOptions"] === "boolean" && typeof v["options"] === "object"),
-        default: new Map<string, StyleParameters>(),
+        validator: val => {
+            return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
+                ([_, v]) => validateObject({visible: "boolean", showOptions: "boolean", options: "object"})(v));
+        },
+        default: {},
         urlParam: true
     },
     tilesLoadLimit: {
@@ -248,18 +276,27 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setSelectedFeature(mapId: string, featureId: string) {
+    setSelectedFeatures(newSelection: TileFeatureId[]) {
         const currentSelection = this.p().selected;
-        if (currentSelection && (currentSelection[0] != mapId || currentSelection[1] != featureId)) {
-            this.p().selected = [mapId, featureId];
-            this._replaceUrl = false;
-            this.parameters.next(this.p());
-        }
-    }
+        if (currentSelection.length == newSelection.length) {
+            let selectedFeaturesAreSame = true;
+            for (let i = 0; i < currentSelection.length; ++i) {
+                const a = currentSelection[i];
+                const b = newSelection[i];
+                if (a.featureId != b.featureId || a.mapTileKey != b.mapTileKey) {
+                    selectedFeaturesAreSame = false;
+                    break;
+                }
+            }
 
-    unsetSelectedFeature() {
-        this.p().selected = [];
+            if (selectedFeaturesAreSame) {
+                return false;
+            }
+        }
+
+        this.p().selected = newSelection;
         this.parameters.next(this.p());
+        return true;
     }
 
     setMarkerState(enabled: boolean) {
@@ -271,7 +308,7 @@ export class ParametersService {
         }
     }
 
-    setMarkerPosition(position: Cartographic | null) {
+    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean=false) {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
@@ -279,7 +316,9 @@ export class ParametersService {
         } else {
             this.p().markedPosition = [];
         }
-        this.parameters.next(this.p());
+        if (!delayUpdate) {
+            this.parameters.next(this.p());
+        }
     }
 
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {

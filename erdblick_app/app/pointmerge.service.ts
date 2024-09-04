@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {PointPrimitiveCollection, LabelCollection, Viewer} from "./cesium";
 import {coreLib} from "./wasm";
-import {TileFeatureId} from "./map.service";
+import {TileFeatureId} from "./parameters.service";
 
 type MapLayerStyleRule = string;
 type PositionHash = string;

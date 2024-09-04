@@ -2,6 +2,7 @@
 
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
+import {TileFeatureId} from "./parameters.service";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -184,10 +185,18 @@ export class FeatureWrapper {
         });
     }
 
+    /** Check if this wrapper wraps the same feature as another wrapper. */
     equals(other: FeatureWrapper | null): boolean {
         if (!other) {
             return false;
         }
         return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
+    }
+
+    key(): TileFeatureId {
+        return {
+            mapTileKey: this.featureTile.mapTileKey,
+            featureId: this.featureId
+        };
     }
 }

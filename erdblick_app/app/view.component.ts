@@ -33,16 +33,11 @@ import {distinctUntilChanged} from "rxjs";
 import {SearchResultPosition} from "./featurefilter.worker";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
+import {core} from "@angular/compiler";
+import {coreLib} from "./wasm";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
-
-/**
- * Determine if two lists of feature wrappers have the same features.
- */
-function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
-    return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
-}
 
 @Component({
     selector: 'erdblick-view',
@@ -139,9 +134,9 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-            if (coordinates !== undefined) {
-                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
-            }
+            // if (coordinates !== undefined) {
+            //     this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
+            // }
             let feature = this.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
                 if (feature.primitive.id) {
@@ -161,7 +156,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                     });
                 }
             }
-            this.setPickedCesiumFeature(feature);
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
         }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
@@ -172,7 +170,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
             }
             let feature = this.viewer.scene.pick(position);
-            this.setHoveredCesiumFeature(feature);
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
@@ -258,68 +259,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.keyboardService.registerShortcuts(['s', 'S'], this.moveDown.bind(this));
         this.keyboardService.registerShortcuts(['d', 'D'], this.moveRight.bind(this));
         this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
-    }
-
-    /**
-     * Set or re-set the hovered feature.
-     */
-    private setHoveredCesiumFeature(feature: any) {
-        // Get the actual mapget features for the picked Cesium feature.
-        let resolvedFeatures = this.resolveMapgetFeatures(feature);
-        if (!resolvedFeatures.length) {
-            this.mapService.hoverTopic.next([]);
-            return;
-        }
-
-        if (featureSetsEqual(this.mapService.selectionTopic.getValue(), resolvedFeatures)) {
-            return;
-        }
-        if (featureSetsEqual(this.mapService.hoverTopic.getValue(), resolvedFeatures)) {
-            return;
-        }
-
-        this.mapService.hoverTopic.next(resolvedFeatures);
-    }
-
-    /**
-     * Set or re-set the picked feature.
-     */
-    private setPickedCesiumFeature(feature: any) {
-        // Get the actual mapget features for the picked Cesium feature.
-        let resolvedFeatures = this.resolveMapgetFeatures(feature);
-        if (!resolvedFeatures.length) {
-            this.mapService.selectionTopic.next([]);
-            return;
-        }
-
-        if (featureSetsEqual(this.mapService.selectionTopic.getValue(), resolvedFeatures)) {
-            return;
-        }
-        if (featureSetsEqual(this.mapService.hoverTopic.getValue(), resolvedFeatures)) {
-            this.setHoveredCesiumFeature(null);
-        }
-
-        this.mapService.selectionTopic.next(resolvedFeatures);
-    }
-
-    /**
-     * Resolve a Cesium primitive feature ID to a list of mapget FeatureWrappers.
-     */
-    private resolveMapgetFeatures(feature: any) {
-        let resolvedFeatures: FeatureWrapper[] = [];
-        for (const fid of Array.isArray(feature?.id) ? feature.id : [feature?.id]) {
-            if (fid == "hover-highlight") {
-                return this.mapService.hoverTopic.getValue();
-            }
-            if (fid == "selection-highlight") {
-                return this.mapService.selectionTopic.getValue();
-            }
-            const resolvedFeature = this.mapService.resolveFeature(fid);
-            if (resolvedFeature) {
-                resolvedFeatures.push(resolvedFeature);
-            }
-        }
-        return resolvedFeatures;
     }
 
     /**
