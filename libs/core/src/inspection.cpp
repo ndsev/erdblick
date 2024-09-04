@@ -61,15 +61,15 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         push("layerId", "layerId", ValueType::String)->value_ = convertStringView(featurePtr->model().layerInfo()->layerId_);
 
         // TODO: Investigate and fix the issue for "index out of bounds" error.
-        //  Affects boundaries and lane connectors
-//        if (auto prefix = featurePtr->model().getIdPrefix()) {
-//            for (auto const& [k, v] : prefix->fields()) {
-//                convertField(k, v);
-//            }
-//        }
-//        for (auto const& [k, v] : featurePtr->id()->fields()) {
-//            convertField(k, v);
-//        }
+        //   Affects boundaries and lane connectors
+        //  if (auto prefix = featurePtr->model().getIdPrefix()) {
+        //      for (auto const& [k, v] : prefix->fields()) {
+        //          convertField(k, v);
+        //      }
+        //  }
+        //  for (auto const& [k, v] : featurePtr->id()->fields()) {
+        //      convertField(k, v);
+        //  }
 
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
@@ -241,7 +241,10 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     }
     auto relGroupScope = push(relGroup);
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
-    relScope->value_ = JsValue(r->target()->toString());
+    relScope->value_ = JsValue::Dict({
+        {"mapTileKey", JsValue(r->model().id().toString())},
+        {"featureId", JsValue(r->target()->toString())},
+    });
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (r->hasSourceValidity()) {

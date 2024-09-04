@@ -166,7 +166,7 @@ private:
     std::vector<FeatureStyleRule> firstOfRules_;
 
     // Index of the rule within the style sheet
-    int32_t index_ = 0;
+    uint32_t index_ = 0;
 };
 
 }

@@ -250,7 +250,7 @@ private:
      * Get a unique identifier for the map+layer+style+rule-id+highlight-mode.
      * In combination with a tile id, this uniquely identifiers a merged corner tile.
      */
-    std::string getMapLayerStyleRuleId(const uint32_t& ruleIndex) const;
+    std::string getMapLayerStyleRuleId(uint32_t ruleIndex) const;
 
     /// =========== Generic Members ===========
 

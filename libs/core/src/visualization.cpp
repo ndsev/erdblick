@@ -111,7 +111,7 @@ void FeatureLayerVisualization::run()
     }
 }
 
-std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t const& ruleIndex) const
+std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex) const
 {
     return fmt::format(
         "{}:{}:{}:{}:{}",

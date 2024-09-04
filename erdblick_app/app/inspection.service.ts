@@ -103,9 +103,9 @@ export class InspectionService {
                     radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
                     this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
                     this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
-                    this.loadFeatureData();
                 });
             });
+            this.loadFeatureData();
 
             this.parametersService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
         });
