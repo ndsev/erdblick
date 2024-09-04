@@ -134,6 +134,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            // TODO: FIXME before release: Reactivate. Currently, this leads to
+            //  a parameter update race condition, which undoes the subsequent selection.
             // if (coordinates !== undefined) {
             //     this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
             // }
@@ -170,10 +172,12 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
             }
             let feature = this.viewer.scene.pick(position);
-            this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? feature.id : [feature?.id],
-                false,
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            // TODO: FIXME before release: Reactivate.
+            // console.log("Mouse Move (Canvas)");
+            // this.mapService.highlightFeatures(
+            //     Array.isArray(feature?.id) ? feature.id : [feature?.id],
+            //     false,
+            //     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.

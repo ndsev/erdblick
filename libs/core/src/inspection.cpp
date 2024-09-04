@@ -241,10 +241,8 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     }
     auto relGroupScope = push(relGroup);
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
-    relScope->value_ = JsValue::Dict({
-        {"mapTileKey", JsValue(r->model().id().toString())},
-        {"featureId", JsValue(r->target()->toString())},
-    });
+    relScope->value_ = JsValue(r->target()->toString());
+    relScope->mapId_ = JsValue(r->model().mapId());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (r->hasSourceValidity()) {

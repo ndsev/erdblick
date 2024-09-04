@@ -136,7 +136,6 @@ export class JumpTargetService {
         ]);
     }
 
-    /** Select */
     async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);

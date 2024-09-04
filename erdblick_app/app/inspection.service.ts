@@ -11,6 +11,7 @@ import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
 import {Fetch} from "./fetch.model";
+import {core} from "@angular/compiler";
 
 
 interface InspectionModelData {
@@ -20,6 +21,7 @@ interface InspectionModelData {
     info?: string;
     hoverId?: string
     geoJsonPath?: string;
+    mapId?: string;
     sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
 }
@@ -124,9 +126,9 @@ export class InspectionService {
             for (const data of dataNodes) {
                 const node: TreeTableNode = {};
                 let value = data.value;
-                if (data.type == this.InspectionValueType.NULL.value && data.children === undefined) {
+                if (data.type == coreLib.ValueType.NULL.value && data.children === undefined) {
                     value = "NULL";
-                } else if ((data.type & 128) == 128 && (data.type - 128) == 1) {
+                } else if ((data.type & coreLib.ValueType.ARRAY.value) && (data.type & coreLib.ValueType.NUMBER.value)) {
                     for (let i = 0; i < value.length; i++) {
                         if (!Number.isInteger(value[i])) {
                             const strValue = String(value[i])
@@ -138,7 +140,7 @@ export class InspectionService {
                     }
                 }
 
-                if ((data.type & 128) == 128) {
+                if (data.type & coreLib.ValueType.ARRAY.value) {
                     value = value.join(", ");
                 }
 
@@ -152,6 +154,9 @@ export class InspectionService {
                 }
                 if (data.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
+                }
+                if (data.hasOwnProperty("mapId")) {
+                    node.data["mapId"] = data.value["mapId"];
                 }
                 if (data.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;

@@ -28,6 +28,7 @@ public:
     {
         JsValue key_;
         JsValue value_;
+        JsValue mapId_;
         ValueType type_ = ValueType::Null;
         std::string hoverId_;  // For highlight attribs/relations on hovering.
         std::string info_;

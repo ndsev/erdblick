@@ -395,7 +395,7 @@ export class MapService {
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         let evictTileLayer = (tileLayer: FeatureTile) => {
-            return !tileLayer.preventCulling && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
+            return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v => v.featureTile == tileLayer) && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
                 !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName) ||
                 tileLayer.level() != this.getMapLayerLevel(tileLayer.mapName, tileLayer.layerName))
         }
@@ -661,16 +661,14 @@ export class MapService {
             })
 
             this.update();
-            await selectionTilePromise;
+            tile = await selectionTilePromise;
+            result.set(tileKey, tile);
         }
 
         return result;
     }
 
     async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-        if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT)
-            console.trace(tileFeatureIds)
-
         // Load the tiles for the selection.
         const tiles = await this.loadTiles(
             new Set(tileFeatureIds.filter(s => typeof s !== "string").map(s => s?.mapTileKey || null)));
@@ -679,7 +677,7 @@ export class MapService {
         let features = new Array<FeatureWrapper>();
         for (let id of tileFeatureIds) {
             if (typeof id == "string") {
-                // When clicking on geometry that respresents a highlight,
+                // When clicking on geometry that represents a highlight,
                 // this is reflected in the feature id. By processing this
                 // info here, a hover highlight can be turned into a selection.
                 if (id == "hover-highlight") {
@@ -691,8 +689,13 @@ export class MapService {
                 continue;
             }
 
+            if (!id?.featureId) {
+                continue;
+            }
+
             const tile = tiles.get(id?.mapTileKey || "");
-            if (!tile || !id?.featureId) {
+            if (!tile) {
+                console.error(`Could not load tile ${id?.mapTileKey} for highlighting!`);
                 continue;
             }
             if (!tile.has(id?.featureId || "")) {
@@ -705,6 +708,7 @@ export class MapService {
             features.push(new FeatureWrapper(id!.featureId, tile));
         }
 
+        console.trace(`features: ${features}`)
         if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
             if (features.length) {
                 if (featureSetsEqual(this.selectionTopic.getValue(), features)) {

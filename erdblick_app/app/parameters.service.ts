@@ -295,6 +295,7 @@ export class ParametersService {
         }
 
         this.p().selected = newSelection;
+        this._replaceUrl = false;
         this.parameters.next(this.p());
         return true;
     }
@@ -317,6 +318,7 @@ export class ParametersService {
             this.p().markedPosition = [];
         }
         if (!delayUpdate) {
+            this._replaceUrl = false;
             this.parameters.next(this.p());
         }
     }

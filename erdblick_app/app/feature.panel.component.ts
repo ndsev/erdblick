@@ -369,8 +369,8 @@ export class FeaturePanelComponent implements OnInit  {
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
-                rowData["value"].mapTileKey,
-                rowData["value"].featureId).then();
+                rowData["mapId"],
+                rowData["value"]).then();
         }
     }
 
@@ -378,15 +378,17 @@ export class FeaturePanelComponent implements OnInit  {
         event.stopPropagation();
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
-                rowData["value"].mapTileKey,
-                rowData["value"].featureId,
+                rowData["mapId"],
+                rowData["value"],
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }
     }
 
     onValueHoverExit(event: any, rowData: any) {
         event.stopPropagation();
-        return;
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
     getStyleClassByType(valueType: number): string {
