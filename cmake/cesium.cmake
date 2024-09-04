@@ -24,7 +24,7 @@ FetchContent_Declare(cesiumnative_src
   GIT_TAG "main"
   GIT_SUBMODULES_RECURSE YES
   GIT_PROGRESS YES
-  PATCH_COMMAND git reset --hard HEAD && git -C extern/draco reset --hard HEAD && git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/draco.patch"
+  PATCH_COMMAND git reset --hard HEAD && git -C extern/draco reset --hard HEAD && git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cesium.patch"
   UPDATE_DISCONNECTED YES
   UPDATE_COMMAND "")
 
