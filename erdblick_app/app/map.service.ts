@@ -83,7 +83,7 @@ export class MapService {
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
     public loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
-    private currentFetch: any;
+    private currentFetch: Fetch|null = null;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
     private currentHighDetailTileIds: Set<bigint>;
@@ -395,7 +395,7 @@ export class MapService {
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         let evictTileLayer = (tileLayer: FeatureTile) => {
-            return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v => v.featureTile == tileLayer) && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
+            return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v => v.featureTile.mapTileKey == tileLayer.mapTileKey) && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
                 !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName) ||
                 tileLayer.level() != this.getMapLayerLevel(tileLayer.mapName, tileLayer.layerName))
         }
@@ -533,9 +533,8 @@ export class MapService {
             this.selectionTileRequest.resolve!(tileLayer);
             this.selectionTileRequest = null;
         }
-
         // Don't add a tile that is not supposed to be visible.
-        if (!preventCulling) {
+        else if (!preventCulling) {
             if (!this.currentVisibleTileIds.has(tileLayer.tileId))
                 return;
         }
@@ -543,7 +542,7 @@ export class MapService {
         // If this one replaces an older tile with the same key,
         // then first remove the older existing one.
         if (this.loadedTileLayers.has(tileLayer.mapTileKey)) {
-            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey));
+            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey)!);
         }
         this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
 
@@ -560,11 +559,11 @@ export class MapService {
         });
     }
 
-    private removeTileLayer(tileLayer: any) {
-        tileLayer.destroy()
+    private removeTileLayer(tileLayer: FeatureTile) {
+        tileLayer.destroy();
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
-                if (tileVisu.tile.mapTileKey === tileLayer.id) {
+                if (tileVisu.tile.mapTileKey === tileLayer.mapTileKey) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
@@ -577,9 +576,9 @@ export class MapService {
             }
         }
         this.tileVisualizationQueue = this.tileVisualizationQueue.filter(([_, tileVisu]) => {
-            return tileVisu.tile.mapTileKey !== tileLayer.id;
+            return tileVisu.tile.mapTileKey !== tileLayer.mapTileKey;
         });
-        this.loadedTileLayers.delete(tileLayer.id);
+        this.loadedTileLayers.delete(tileLayer.mapTileKey);
     }
 
     private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
@@ -609,7 +608,7 @@ export class MapService {
         }
     }
 
-    setViewport(viewport: any) {
+    setViewport(viewport: ViewportProperties) {
         this.currentViewport = viewport;
         this.setTileLevelForViewport();
         this.update();
@@ -708,7 +707,6 @@ export class MapService {
             features.push(new FeatureWrapper(id!.featureId, tile));
         }
 
-        console.trace(`features: ${features}`)
         if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
             if (features.length) {
                 if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
@@ -759,8 +757,7 @@ export class MapService {
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
                 if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
-                    this.sidePanelService.panel = SidePanelState.NONE
-;
+                    this.sidePanelService.panel = SidePanelState.NONE;
                 }
                 visualizationCollection = this.selectionVisualizations;
                 break;

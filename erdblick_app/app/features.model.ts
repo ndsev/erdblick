@@ -193,6 +193,7 @@ export class FeatureWrapper {
         return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
     }
 
+    /** Returns the cross-map-layer global ID for this feature. */
     key(): TileFeatureId {
         return {
             mapTileKey: this.featureTile.mapTileKey,

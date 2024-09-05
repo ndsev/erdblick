@@ -133,12 +133,6 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
-            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-            // TODO: FIXME before release: Reactivate. Currently, this leads to
-            //  a parameter update race condition, which undoes the subsequent selection.
-            // if (coordinates !== undefined) {
-            //     this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
-            // }
             let feature = this.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
                 if (feature.primitive.id) {
@@ -162,22 +156,32 @@ export class ErdblickViewComponent implements AfterViewInit {
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],
                 false,
                 coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
+            // Handle position update after highlighting, because otherwise
+            // there is a race condition between the parameter updates for
+            // feature selection and position update.
+            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            if (coordinates !== undefined) {
+                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
+            }
         }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
+            // Do not handle mouse move here, if the first element
+            // under the cursor is not the Cesium view.
+            if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
+                return;
+            }
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
             }
             let feature = this.viewer.scene.pick(position);
-            // TODO: FIXME before release: Reactivate.
-            // console.log("Mouse Move (Canvas)");
-            // this.mapService.highlightFeatures(
-            //     Array.isArray(feature?.id) ? feature.id : [feature?.id],
-            //     false,
-            //     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
