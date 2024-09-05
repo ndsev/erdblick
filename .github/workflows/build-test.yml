@@ -23,5 +23,5 @@ jobs:
 
       - name: Run Tests
         run: |
-          cd build-test
+          cd build-test/test
           ctest --verbose --no-tests=error
