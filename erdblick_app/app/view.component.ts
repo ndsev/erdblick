@@ -247,13 +247,6 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
             const [origin, normal] = values;
-            // this.viewer.entities.add({
-            //     position: origin,
-            //     point: {
-            //         pixelSize: 10,
-            //         color: Color.BLUE
-            //     }
-            // });
             const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
             const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
             Cartesian3.normalize(direction, direction);
@@ -263,14 +256,6 @@ export class ErdblickViewComponent implements AfterViewInit {
             Cartesian3.normalize(right, right);
             const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
             Cartesian3.normalize(cameraUp, cameraUp);
-            // this.viewer.entities.add({
-            //     position: endPoint,
-            //     point: {
-            //         pixelSize: 10,
-            //         color: Color.RED
-            //     }
-            // });
-            this.viewer.camera.flyToBoundingSphere(new BoundingSphere(origin, radius));
             this.viewer.camera.flyTo({
                 destination: endPoint,
                 orientation: {

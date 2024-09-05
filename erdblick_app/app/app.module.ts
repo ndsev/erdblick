@@ -52,7 +52,6 @@ import {FeatureSearchService} from "./feature.search.service";
 import {ClipboardService} from "./clipboard.service";
 import {MultiSelectModule} from "primeng/multiselect";
 import {ButtonGroupModule} from "primeng/buttongroup";
-import {TabViewModule} from "primeng/tabview";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
