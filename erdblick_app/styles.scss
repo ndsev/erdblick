@@ -493,6 +493,11 @@ body {
             font-size: 0.9em;
             padding: 0.5em 0.75em;
         }
+
+        .p-divider-vertical {
+            margin: 0;
+            padding: 0.5em 0;
+        }
     }
 
     .grid-controls {
@@ -907,6 +912,74 @@ body {
 
     .p-scroller {
         height: calc(100vh - 23em) !important;
+    }
+}
+
+.ds-config-dialog {
+    .p-dialog {
+        width: 50vw;
+        min-width: 25em;
+        margin: 0;
+    }
+
+    .p-dialog-content {
+        padding: 0 1em 1em 1em;
+    }
+
+    .p-dialog-header {
+        padding: 1em 1em 0 1em;
+
+        .p-dialog-title {
+            font-size: large;
+        }
+    }
+}
+
+.ds-fieldset {
+    .p-fieldset {
+        margin-bottom: 0.5em;
+
+        .p-fieldset-legend {
+            padding: 0.5em;
+            border: 1px solid #dee2e6;
+            color: #343a40;
+            background: #f8f9fa;
+            font-weight: 700;
+            border-radius: 6px;
+            font-size: 1em;
+        }
+
+        .p-fieldset-content {
+            padding: 0;
+            font-size: 0.9em;
+
+            formly-field {
+                width: 100%;
+            }
+
+            .p-field {
+                display: flex;
+                gap: 1em;
+                align-items: center;
+                margin-bottom: 0.25em;
+
+                label {
+                    width: 10em;
+                }
+
+                formly-field-primeng-input {
+                    width: 100%;
+                }
+
+                formly-field-primeng-select {
+                    width: 100%;
+                }
+
+                input {
+                    width: 100%;
+                }
+            }
+        }
     }
 }
 

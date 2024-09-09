@@ -555,8 +555,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     clickOnSearchToStart() {
-        this.setSearchValue("");
-        this.cursorPosition = 0;
+        // this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         this.textarea.nativeElement.click();
     }
 

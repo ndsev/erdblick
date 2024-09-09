@@ -47,7 +47,7 @@ export class StyleService {
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
-    selectedStyleIdForEditing: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    selectedStyleIdForEditing: string = "";
     styleBeingEdited: boolean = false;
     styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
     styleEditedSaveTriggered: Subject<boolean> = new Subject<boolean>();
