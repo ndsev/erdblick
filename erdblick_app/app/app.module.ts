@@ -72,6 +72,7 @@ import {FormlyFieldConfig, FormlyModule} from "@ngx-formly/core";
 import {ReactiveFormsModule} from '@angular/forms';
 import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
 import {DataSourcesService} from "./datasources.service";
+import {ProgressSpinnerModule} from "primeng/progressspinner";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -193,27 +194,28 @@ export function typeValidationMessage({ schemaType }: any) {
         FormlyPrimeNGModule,
         FormlyModule.forRoot({
             validationMessages: [
-                { name: 'required', message: 'This field is required' },
-                { name: 'type', message: typeValidationMessage },
-                { name: 'minLength', message: minLengthValidationMessage },
-                { name: 'maxLength', message: maxLengthValidationMessage },
-                { name: 'min', message: minValidationMessage },
-                { name: 'max', message: maxValidationMessage },
-                { name: 'multipleOf', message: multipleOfValidationMessage },
-                { name: 'exclusiveMinimum', message: exclusiveMinimumValidationMessage },
-                { name: 'exclusiveMaximum', message: exclusiveMaximumValidationMessage },
-                { name: 'minItems', message: minItemsValidationMessage },
-                { name: 'maxItems', message: maxItemsValidationMessage },
-                { name: 'uniqueItems', message: 'should NOT have duplicate items' },
-                { name: 'const', message: constValidationMessage },
-                { name: 'enum', message: `must be equal to one of the allowed values` },
+                {name: 'required', message: 'This field is required'},
+                {name: 'type', message: typeValidationMessage},
+                {name: 'minLength', message: minLengthValidationMessage},
+                {name: 'maxLength', message: maxLengthValidationMessage},
+                {name: 'min', message: minValidationMessage},
+                {name: 'max', message: maxValidationMessage},
+                {name: 'multipleOf', message: multipleOfValidationMessage},
+                {name: 'exclusiveMinimum', message: exclusiveMinimumValidationMessage},
+                {name: 'exclusiveMaximum', message: exclusiveMaximumValidationMessage},
+                {name: 'minItems', message: minItemsValidationMessage},
+                {name: 'maxItems', message: maxItemsValidationMessage},
+                {name: 'uniqueItems', message: 'should NOT have duplicate items'},
+                {name: 'const', message: constValidationMessage},
+                {name: 'enum', message: `must be equal to one of the allowed values`},
             ],
             types: [
-                { name: 'array', component: ArrayTypeComponent },
-                { name: 'object', component: ObjectTypeComponent },
-                { name: 'multischema', component: MultiSchemaTypeComponent }
+                {name: 'array', component: ArrayTypeComponent},
+                {name: 'object', component: ObjectTypeComponent},
+                {name: 'multischema', component: MultiSchemaTypeComponent}
             ],
-        })
+        }),
+        ProgressSpinnerModule
     ],
     providers: [
         {

@@ -99,7 +99,6 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     @Input() loadFun!: () => string;
     @Input() saveFun!: () => void;
-    @Input() updateFun!: (state: string) => void;
 
     @ViewChild('editor') private editorRef!: ElementRef;
 
@@ -140,7 +139,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 this.stopMouseWheelClipboard,
                 EditorState.tabSize.of(2),
                 EditorView.updateListener.of((e: ViewUpdate) => {
-                    this.updateFun(e.state.doc.toString());
+                    this.editorService.editedStateData.next(e.state.doc.toString());
                 })
             ]
         });

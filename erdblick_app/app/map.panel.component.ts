@@ -179,7 +179,7 @@ import {DataSourcesService} from "./datasources.service";
         </p-button>
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
                   class="editor-dialog">
-            <editor [loadFun]="loadEditedStyle" [saveFun]="triggerStyleSave" [updateFun]="trackStyleUpdates"></editor>
+            <editor [loadFun]="loadEditedStyle" [saveFun]="triggerStyleSave"></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
@@ -251,6 +251,9 @@ export class MapPanelComponent {
             if (activePanel != SidePanelState.MAPS) {
                 this.layerDialogVisible = false;
             }
+        });
+        this.editorService.editedStateData.subscribe(state => {
+            this.styleService.styleEditedStateData.next(state);
         });
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this));
         this.keyboardService.registerShortcut('M', this.showLayerDialog.bind(this));
@@ -521,10 +524,6 @@ export class MapPanelComponent {
         } else {
             return "";
         }
-    }
-
-    trackStyleUpdates(state: string) {
-        this.styleService.styleEditedStateData.next(state);
     }
 
     triggerStyleSave() {
