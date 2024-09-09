@@ -9,7 +9,6 @@ export class KeyboardService {
 
     constructor(rendererFactory: RendererFactory2) {
         this.renderer = rendererFactory.createRenderer(null, null);
-        this.initEscListener();
         this.listenToKeyboardEvents();
     }
 
@@ -21,24 +20,25 @@ export class KeyboardService {
         this.dialogStack = this.dialogStack.filter(dialog => event !== dialog);
     }
 
-    private initEscListener() {
-        window.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Escape' && this.dialogStack.length > 0) {
-                event.preventDefault();
-                const topDialog = this.dialogStack.pop();
-                if (topDialog) {
-                    topDialog.close(new MouseEvent("mousedown"));
-                }
-            }
-        });
-    }
-
     private listenToKeyboardEvents() {
         this.renderer.listen('window', 'keydown', (event: KeyboardEvent) => {
-            const key = this.getKeyCombination(event);
-            if (this.shortcuts.has(key)) {
-                event.preventDefault();
-                this.shortcuts.get(key)?.(event);
+            const target = event.target as HTMLElement;
+            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+            if (!isInput) {
+                const key = this.getKeyCombination(event);
+                if (key === 'Escape' || key === 'Esc') {
+                    if (this.dialogStack.length > 0) {
+                        event.preventDefault();
+                        const topDialog = this.dialogStack.pop();
+                        if (topDialog) {
+                            topDialog.close(new MouseEvent("mousedown"));
+                        }
+                    }
+                } else if (this.shortcuts.has(key)) {
+                    event.preventDefault();
+                    this.shortcuts.get(key)?.(event);
+                }
             }
         });
     }
@@ -50,6 +50,10 @@ export class KeyboardService {
         }
         key += event.key;
         return key;
+    }
+
+    registerShortcuts(keys: string[], callback: (event: KeyboardEvent) => void) {
+        keys.forEach(keys_ => this.registerShortcut(keys_, callback));
     }
 
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void) {

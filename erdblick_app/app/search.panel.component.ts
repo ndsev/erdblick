@@ -215,8 +215,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 private jumpToTargetService: JumpTargetService,
                 private sidePanelService: SidePanelService) {
 
-        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
-        this.keyboardService.registerShortcut("Ctrl+K", this.clickOnSearchToStart.bind(this));
+        this.keyboardService.registerShortcuts(["Ctrl+k", "Ctrl+K"], this.clickOnSearchToStart.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();

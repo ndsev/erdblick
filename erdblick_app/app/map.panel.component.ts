@@ -22,11 +22,6 @@ import {KeyboardService} from "./keyboard.service";
                   (onHide)="keyboardService.dialogOnHide($event)" [closeOnEscape]="false">
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
-                    <p-button onEnterClick (click)="openDatasources()" class="osm-button"
-                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
                               icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -232,6 +227,8 @@ export class MapPanelComponent {
                 public keyboardService: KeyboardService,
                 private sidePanelService: SidePanelService)
     {
+        this.keyboardService.registerShortcuts(['m', 'M'], this.showLayerDialog.bind(this));
+
         this.parameterService.parameters.subscribe(parameters => {
             this.osmEnabled = parameters.osm;
             this.osmOpacityValue = parameters.osmOpacity;
