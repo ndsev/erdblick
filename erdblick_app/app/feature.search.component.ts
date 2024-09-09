@@ -6,13 +6,15 @@ import {MapService} from "./map.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Listbox} from "primeng/listbox";
 import {InfoMessageService} from "./info.service";
+import {KeyboardService} from "./keyboard.service";
 
 @Component({
     selector: "feature-search",
     template: `
         <p-dialog class="side-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible"
                   style="padding: 0 0.5em 0.5em 0.5em"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false" (onHide)="searchService.clear()">
+                  [position]="'topleft'" [draggable]="false" [resizable]="false" [closeOnEscape]="false"
+                  (onShow)="keyboardService.dialogOnShow($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
                     <p-progressBar [value]="percentDone">
@@ -75,6 +77,7 @@ export class FeatureSearchComponent {
                 public mapService: MapService,
                 public inspectionService: InspectionService,
                 public sidePanelService: SidePanelService,
+                public keyboardService: KeyboardService,
                 private infoMessageService: InfoMessageService) {
         this.sidePanelService.observable().subscribe(panel=> {
             this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
@@ -138,5 +141,10 @@ export class FeatureSearchComponent {
                     Array.from(this.searchService.errors).join('\n'))
             }
         }
+    }
+
+    onHide(event: any) {
+        this.searchService.clear();
+        this.keyboardService.dialogOnHide(event);
     }
 }

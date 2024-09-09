@@ -176,6 +176,9 @@ export class ParametersService {
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
 
+    CAMERA_MOVE_AMOUNT = 1000.0;
+    CAMERA_ZOOM_AMOUNT = 5000.0;
+
     constructor(public router: Router) {
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
