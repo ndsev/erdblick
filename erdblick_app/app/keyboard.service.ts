@@ -1,5 +1,19 @@
-import {Injectable, Renderer2, RendererFactory2} from "@angular/core";
+import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFactory2} from "@angular/core";
 import {Dialog} from "primeng/dialog";
+
+@Directive({
+    selector: '[onEnterClick]'
+})
+export class OnEnterClickDirective {
+    constructor(private el: ElementRef, private renderer: Renderer2) {}
+
+    @HostListener('keydown', ['$event'])
+    handleKeyDown(event: KeyboardEvent) {
+        if (event.key === 'Enter') {
+            this.renderer.selectRootElement(this.el.nativeElement).click();
+        }
+    }
+}
 
 @Injectable({providedIn: 'root'})
 export class KeyboardService {

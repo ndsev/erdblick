@@ -15,20 +15,6 @@ interface ExtendedSearchTarget extends SearchTarget {
     index: number;
 }
 
-@Directive({
-    selector: '[onEnterClick]'
-})
-export class OnEnterClickDirective {
-    constructor(private el: ElementRef, private renderer: Renderer2) {}
-
-    @HostListener('keydown', ['$event'])
-    handleKeyDown(event: KeyboardEvent) {
-        if (event.key === 'Enter') {
-            this.renderer.selectRootElement(this.el.nativeElement).click();
-        }
-    }
-}
-
 @Component({
     selector: 'search-panel',
     template: `
