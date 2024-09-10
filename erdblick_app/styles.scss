@@ -728,6 +728,14 @@ body {
 }
 
 .editor-dialog {
+    .spinner {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        height: calc(100% - 4em);
+        align-items: center;
+    }
+
     .p-dialog {
         .p-dialog-content {
             padding: 0 1.5rem 1rem 1.5rem;

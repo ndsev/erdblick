@@ -1,16 +1,14 @@
-import {Component, Input, ViewChild} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
-import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
-import {config, first, firstValueFrom, Subscription} from "rxjs";
+import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {EditorService} from "./editor.service";
-import {HttpClient} from "@angular/common/http";
+import {JSONSchema7} from "json-schema";
+import {DataSourcesService} from "./datasources.service";
 import {FormGroup} from '@angular/forms';
 import {FormlyFormOptions, FormlyFieldConfig, FieldType, FieldArrayType} from '@ngx-formly/core';
 import {FormlyJsonschema} from '@ngx-formly/core/json-schema';
-import {JSONSchema7} from "json-schema";
-import {DataSourcesService} from "./datasources.service";
 
 @Component({
     selector: 'formly-multi-schema-type',
@@ -99,10 +97,12 @@ export class ArrayTypeComponent extends FieldArrayType {}
         <!--            </div>-->
         <!--        </p-dialog>-->
         <p-dialog header="DataSource Configuration Editor" [(visible)]="dsService.configDialogVisible" [modal]="false"
-                  #editorDialog class="editor-dialog" (onShow)="showConfigEditor()">
+                  #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()">
             <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>
-            <editor [loadFun]="loadEditedConfig" [saveFun]="saveEditedConfig"></editor>
-            <div *ngIf="dsService.loading" style="display: flex; justify-content: center">
+            <div [ngClass]="{'loading': dsService.loading || dsService.errorMessage }">
+                <editor [loadFun]="loadEditedConfig" [saveFun]="saveEditedConfig"></editor>
+            </div>
+            <div class="spinner" *ngIf="dsService.loading">
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
@@ -119,7 +119,11 @@ export class ArrayTypeComponent extends FieldArrayType {}
             </div>
         </p-dialog>
     `,
-    styles: [``]
+    styles: [`
+        .loading {
+            visibility: collapse;
+        }
+    `]
 })
 export class DatasourcesComponent {
 
@@ -163,10 +167,9 @@ export class DatasourcesComponent {
         });
     }
 
-    showConfigEditor() {
+    loadConfigEditor() {
         // this.datasourcesEditorDialogVisible = true;
         // this.editorService.updateEditorState.next(true);
-        this.dsService.loading = true;
         this.dsService.getConfig();
         this.editedConfigSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
             this.wasModified = editedStyleSource.replace(/\n+$/, '') !== this.dataSourcesConfig.replace(/\n+$/, '');

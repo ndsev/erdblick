@@ -1,9 +1,8 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {MapService} from "./map.service";
-import {FormGroup} from "@angular/forms";
-import {JSONSchema7} from "json-schema";
 import {BehaviorSubject} from "rxjs";
+import {InfoMessageService} from "./info.service";
 
 
 @Injectable()
@@ -14,29 +13,30 @@ export class DataSourcesService {
     errorMessage: string = "";
     dataSourcesConfigJson: BehaviorSubject<Object> = new BehaviorSubject<Object>({});
 
-    constructor(public mapService: MapService,
+    constructor(private messageService: InfoMessageService,
+                public mapService: MapService,
                 private http: HttpClient) {}
 
     postConfig(config: string) {
-        this.http.post("/config", config, { observe: 'response' }).subscribe({
+        this.loading = true;
+        this.http.post("/config", config, { observe: 'response', responseType: 'text' }).subscribe({
             next: (data: any) => {
-                console.log("POST", data);
-                alert("Successfully updated the DataSource configuration!");
-                this.loading = true;
+                this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
                     this.mapService.reloadDataSources().then(_ => this.mapService.update());
                 }, 2000);
             },
             error: error => {
-                console.log("POST", error);
-                alert(error);
+                this.loading = false;
+                alert(`Error: ${error.error}`);
             }
         });
     }
 
     getConfig() {
         this.errorMessage = "";
+        this.loading = true;
         this.http.get("/config").subscribe({
             next: (data: any) => {
                 if (!data) {
@@ -57,7 +57,8 @@ export class DataSourcesService {
                 this.dataSourcesConfigJson.next(data);
             },
             error: error => {
-                this.errorMessage = error.toString();
+                this.loading = false;
+                this.errorMessage = `Error: ${error.error}`;
             }
         });
     }
