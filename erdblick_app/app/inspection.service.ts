@@ -93,8 +93,10 @@ export class InspectionService {
             this.selectedFeatureGeoJsonTexts = [];
             this.selectedFeatures = selectedFeatures;
 
-            selectedFeatures.forEach(selectedFeature => {
-                selectedFeature.peek((feature: Feature) => {
+            // Currently only takes the first element for Jump to Feature functionality.
+            // TODO: Allow to use the whole set for Jump to Feature.
+            if (selectedFeatures.length) {
+                selectedFeatures[0].peek((feature: Feature) => {
                     this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
                     this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
                     this.isInspectionPanelVisible = true;
@@ -106,7 +108,16 @@ export class InspectionService {
                     this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
                     this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
                 });
-            });
+            }
+            if (selectedFeatures.length > 1) {
+                selectedFeatures.slice(1).forEach(selectedFeature => {
+                    selectedFeature.peek((feature: Feature) => {
+                        this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                        this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+                        this.isInspectionPanelVisible = true;
+                    });
+                });
+            }
             this.loadFeatureData();
 
             this.parametersService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
@@ -205,7 +216,7 @@ export class InspectionService {
     }
 
     zoomToFeature() {
-        if (!this.selectedFeature) {
+        if (!this.selectedFeatures) {
             this.infoMessageService.showError("Could not zoom to feature: no feature is selected!");
             return;
         }

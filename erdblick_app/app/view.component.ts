@@ -138,8 +138,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightFeature(featureInfo.mapId, featureInfo.featureId).then(() => {
-                            if (this.inspectionService.selectedFeature) {
+                        this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId, featureInfo.featureId).then(() => {
+                            if (this.inspectionService.selectedFeatures) {
                                 this.inspectionService.zoomToFeature();
                             }
                         });
