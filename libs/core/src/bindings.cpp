@@ -105,10 +105,15 @@ double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
 
 /** Get the center position for a mapget tile id in WGS84. */
 mapget::Point getTilePosition(uint64_t tileIdValue) {
-    mapget::TileId tid(tileIdValue);
-    return tid.center();
+    return mapget::TileId(tileIdValue).center();
 }
 
+/** Get the level for a mapget tile id. */
+uint16_t getTileLevel(uint64_t tileIdValue) {
+    return mapget::TileId(tileIdValue).z();
+}
+
+/** Get the tile ID for the given level and position. */
 uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
     return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
 }
@@ -124,10 +129,13 @@ em::val getTileBox(uint64_t tileIdValue) {
     });
 }
 
-/** Get the neighbor for a mapget tile id. */
+/**
+ * Get the neighbor for a mapget tile id. Tile row will be clamped to [0, maxForLevel],
+ * so a positive/negative wraparound is not possible. The tile id column will wrap at the
+ * antimeridian.
+ */
 uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
-    mapget::TileId tid(tileIdValue);
-    return mapget::TileId(tid.x() + offsetX, tid.y() + offsetY, tid.z()).value_;
+    return mapget::TileId(tileIdValue).neighbor(offsetX, offsetY).value_;
 }
 
 /** Get the full string key of a map tile feature layer. */
@@ -247,7 +255,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
-        .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
+        .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
+        .function("name", &FeatureLayerStyle::name);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
@@ -274,6 +283,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
     em::class_<FeaturePtr>("Feature")
+        .function(
+            "isNull",
+            std::function<bool(FeaturePtr& self)>(
+                [](FeaturePtr& self) { return !self; }))
         .function(
             "id",
             std::function<std::string(FeaturePtr&)>(
@@ -342,15 +355,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     return result;
                 }))
         .function(
-            "at",
+            "find",
             std::function<
-                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, int i)>(
-                [](mapget::TileFeatureLayer const& self, int i)
+                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, std::string const& id)>(
+                [](mapget::TileFeatureLayer const& self, std::string const& id)
                 {
-                    if (i < 0 || i >= self.numRoots()) {
-                        mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
-                    }
-                    return self.at(i);
+                    return self.find(id);
                 }))
         .function(
             "findFeatureIndex",
@@ -366,12 +376,19 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 }));
     em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
 
+    ////////// Highlight Modes
+    em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")
+        .value("NO_HIGHLIGHT", FeatureStyleRule::NoHighlight)
+        .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
+        .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
+
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, em::val, std::string>()
+        .constructor<std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
+        .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
@@ -422,9 +439,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
-
-    ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);
+    em::function("getTileLevel", &getTileLevel);
 
     ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);

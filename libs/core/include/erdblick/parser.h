@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mapget/model/stream.h"
+#include "mapget/model/featurelayer.h"
 #include "buffer.h"
 #include "cesium-interface/object.h"
 #include "mapget/model/featurelayer.h"

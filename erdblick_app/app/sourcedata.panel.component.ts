@@ -61,7 +61,7 @@ import {Menu} from "primeng/menu";
 
                     <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                         <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
-                            <td *ngFor="let col of columns; let i = index">
+                            <td *ngFor="let col of columns; let i = index" style="white-space: nowrap; text-overflow: ellipsis">
                                 <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
                                 <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
                                 <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>

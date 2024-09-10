@@ -1,15 +1,65 @@
 name: DefaultStyle
 version: 1.0
+options:
+  - label: Show Meshes/Polygons
+    id: showMesh
+  - label: Show Points
+    id: showPoint
+  - label: Show Lines
+    id: showLine
+
 rules:
+  # Normal styles
   - geometry: ["mesh", "polygon"]
+    filter: showMesh
     color: teal
     opacity: 0.8
-  - geometry: ["point", "line"]
+    offset: [0, 0, -0.4]
+  - geometry: ["line"]
+    filter: showLine
     color: moccasin
     opacity: 1.0
-    width: 1.0
-  - geometry: ["point", "line", "mesh", "polygon"]
+    width: 5.0
+    offset: [0, 0, -0.2]
+  - geometry: ["point"]
+    point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
+    filter: showPoint
+    color-expression: "$mergeCount > 1 and 'brown' or 'moccasin'"
+    opacity: 1.0
+    width: 15.0
+
+  # Hover/Selection styles
+  - geometry: ["mesh", "polygon"]
+    color: orange
+    opacity: 1.0
+    mode: hover
+    offset: [0, 0, -0.3]
+  - geometry: ["line"]
+    color: orange
+    opacity: 1.0
+    width: 10.0
+    mode: hover
+    offset: [0, 0, -0.1]
+  - geometry: ["point"]
+    color: orange
+    opacity: 1.0
+    width: 20.0
+    mode: hover
+    offset: [0, 0, 0.1]
+  - geometry: ["mesh", "polygon"]
     color: red
     opacity: 1.0
-    width: 4.0
-    mode: highlight
+    mode: selection
+    offset: [0, 0, -0.3]
+  - geometry: ["line"]
+    color: red
+    opacity: 1.0
+    width: 10.0
+    mode: selection
+    offset: [0, 0, -0.1]
+  - geometry: ["point"]
+    color: red
+    opacity: 1.0
+    width: 20.0
+    mode: selection
+    offset: [0, 0, 0.1]

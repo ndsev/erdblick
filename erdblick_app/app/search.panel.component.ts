@@ -218,6 +218,9 @@ export class SearchPanelComponent implements AfterViewInit {
             ];
         });
 
+        // TODO: Get rid of map selection, as soon as we support
+        //  multi-selection from different maps. Then we can
+        //  just search all maps simultaneously.
         jumpToTargetService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;

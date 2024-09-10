@@ -15,7 +15,7 @@ set(CESIUM_LIBS
   CesiumGltf
   CesiumGltfWriter)
 
-# Use fetch content for cloning the repository durring
+# Use fetch content for cloning the repository during
 # configure phase. We do not call `FetchContent_MakeAvailable`,
 # but instead use `ExternalProject_Add` to compile Cesium in
 # isolation.
@@ -23,7 +23,10 @@ FetchContent_Declare(cesiumnative_src
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/cesium-native.git"
   GIT_TAG "main"
   GIT_SUBMODULES_RECURSE YES
-  GIT_PROGRESS YES)
+  GIT_PROGRESS YES
+  PATCH_COMMAND git reset --hard HEAD && git -C extern/draco reset --hard HEAD && git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cesium.patch"
+  UPDATE_DISCONNECTED YES
+  UPDATE_COMMAND "")
 
 FetchContent_GetProperties(cesiumnative_src)
 if (NOT cesiumnative_src_POPULATED)
@@ -49,6 +52,11 @@ foreach (lib ${CESIUM_LIBS})
 endforeach()
 message(STATUS "cesium byproducts: ${CESIUM_BYPRODUCTS}")
 
+set(CESIUM_EXTRA_ARGS)
+if (CMAKE_TOOLCHAIN_FILE)
+  list(APPEND CESIUM_EXTRA_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+endif()
+
 ExternalProject_Add(cesiumnative
   SOURCE_DIR ${cesiumnative_src_SOURCE_DIR}
   CMAKE_ARGS
@@ -58,8 +66,8 @@ ExternalProject_Add(cesiumnative
     -DCESIUM_TRACING_ENABLED=OFF
     -DDRACO_JS_GLUE=OFF
     -DBUILD_SHARED_LIBS=OFF
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    ${CESIUM_EXTRA_ARGS}
   BUILD_BYPRODUCTS
     ${CESIUM_BYPRODUCTS}
   INSTALL_COMMAND ""

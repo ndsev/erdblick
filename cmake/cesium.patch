@@ -1,0 +1,47 @@
+index c928fdf..cf6a63b 100644
+--- a/extern/draco/src/draco/io/file_utils.h
++++ b/extern/draco/src/draco/io/file_utils.h
+@@ -17,6 +17,7 @@
+
+ #include <string>
+ #include <vector>
++#include <cstdint>
+
+ namespace draco {
+
+diff --git a/CesiumAsync/include/CesiumAsync/CacheItem.h b/CesiumAsync/include/CesiumAsync/CacheItem.h
+index 20d1ca80..bd47492b 100644
+--- a/CesiumAsync/include/CesiumAsync/CacheItem.h
++++ b/CesiumAsync/include/CesiumAsync/CacheItem.h
+@@ -9,6 +9,7 @@
+ #include <ctime>
+ #include <map>
+ #include <vector>
++#include <cstdint>
+
+ namespace CesiumAsync {
+
+diff --git a/CesiumAsync/include/CesiumAsync/IAssetResponse.h b/CesiumAsync/include/CesiumAsync/IAssetResponse.h
+index 10519057..0944b26b 100644
+--- a/CesiumAsync/include/CesiumAsync/IAssetResponse.h
++++ b/CesiumAsync/include/CesiumAsync/IAssetResponse.h
+@@ -8,6 +8,7 @@
+ #include <cstddef>
+ #include <map>
+ #include <string>
++#include <cstdint>
+
+ namespace CesiumAsync {
+
+diff --git a/CesiumIonClient/src/fillWithRandomBytes.h b/CesiumIonClient/src/fillWithRandomBytes.h
+index 55765c72..654d09df 100644
+--- a/CesiumIonClient/src/fillWithRandomBytes.h
++++ b/CesiumIonClient/src/fillWithRandomBytes.h
+@@ -1,6 +1,7 @@
+ #pragma once
+
+ #include <gsl/span>
++#include <cstdint>
+
+ namespace CesiumIonClient {
+

@@ -363,7 +363,6 @@ export class StyleService {
         if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
-        console.log(`${style.params.visible ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
     reapplyStyles(styleIds: Array<string>) {

@@ -19,16 +19,21 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 }
 
 FeatureLayerVisualization::FeatureLayerVisualization(
+    std::string const& mapTileKey,
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
-    std::string highlightFeatureId)
-    : coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
+    NativeJsValue const& rawFeatureMergeService,
+    FeatureStyleRule::HighlightMode const& highlightMode,
+    NativeJsValue const& rawFeatureIdSubset)
+    : mapTileKey_(mapTileKey),
+      coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
       coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
       coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
+      featureMergeService_(rawFeatureMergeService),
       style_(style),
-      highlightFeatureId_(std::move(highlightFeatureId)),
+      highlightMode_(highlightMode),
       externalRelationReferences_(JsValue::List())
 {
     // Convert option values dict to simfil values.
@@ -44,6 +49,12 @@ FeatureLayerVisualization::FeatureLayerVisualization(
         });
         optionValues_.emplace(option.id_, std::move(simfilValue));
     }
+
+    // Convert feature ID subset.
+    auto featureIdSubset = JsValue(rawFeatureIdSubset);
+    for (auto i = 0; i < featureIdSubset.size(); ++i) {
+        featureIdSubset_.insert(featureIdSubset.at(i).as<std::string>());
+    }
 }
 
 void FeatureLayerVisualization::addTileFeatureLayer(
@@ -52,7 +63,18 @@ void FeatureLayerVisualization::addTileFeatureLayer(
     if (!tile_) {
         tile_ = tile;
         internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile->strings());
+
+        // Pre-create empty merged point feature visualization lists.
+        for (auto&& rule : style_.rules()) {
+            if (rule.mode() != highlightMode_ || !rule.pointMergeGridCellSize()) {
+                continue;
+            }
+            mergedPointsPerStyleRuleId_.emplace(
+                getMapLayerStyleRuleId(rule.index()),
+                std::map<std::string, std::vector<JsValue>>());
+        }
     }
+
 
     // Ensure that the added aux tile and the primary tile use the same
     // field name encoding. So we transcode the aux tile into the same dict.
@@ -65,31 +87,39 @@ void FeatureLayerVisualization::addTileFeatureLayer(
 
 void FeatureLayerVisualization::run()
 {
-    uint32_t featureId = 0;
-
     for (auto&& feature : *tile_) {
-        if (!highlightFeatureId_.empty()) {
-            if (feature->id()->toString() != highlightFeatureId_) {
-                ++featureId;
-                continue;
-            }
-        }
+        auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
+        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
+        addOptionsToSimfilContext(evaluationContext);
+        auto boundEvalFun = BoundEvalFun{
+            evaluationContext,
+            [this, &evaluationContext](auto&& str)
+            {
+                return evaluateExpression(str, evaluationContext);
+            }};
 
         for (auto&& rule : style_.rules()) {
-            if (!highlightFeatureId_.empty()) {
-                if (rule.mode() != FeatureStyleRule::Highlight)
-                    continue;
-            }
-            else if (rule.mode() != FeatureStyleRule::Normal)
+            if (rule.mode() != highlightMode_) {
                 continue;
-
-            if (auto* matchingSubRule = rule.match(*feature)) {
-                addFeature(feature, featureId, *matchingSubRule);
+            }
+            auto mapLayerStyleRuleId = getMapLayerStyleRuleId(rule.index());
+            if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
+                addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
             }
         }
-        ++featureId;
     }
+}
+
+std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex) const
+{
+    return fmt::format(
+        "{}:{}:{}:{}:{}",
+        tile_->mapId(),
+        tile_->layerInfo()->layerId_,
+        style_.name(),
+        static_cast<uint32_t>(highlightMode_),
+        ruleIndex);
 }
 
 NativeJsValue FeatureLayerVisualization::primitiveCollection() const
@@ -128,6 +158,21 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
     if (!labelCollection_.empty())
         collection.call<void>("add", labelCollection_.toJsObject());
     return *collection;
+}
+
+NativeJsValue FeatureLayerVisualization::mergedPointFeatures() const
+{
+    auto result = JsValue::Dict();
+    for (auto const& [mapLayerStyleRuleId, primitives] : mergedPointsPerStyleRuleId_) {
+        auto pointList = JsValue::List();
+        for (auto const& [_, points] : primitives) {
+            for (auto const& pt : points) {
+                pointList.push(pt);
+            }
+        }
+        result.set(mapLayerStyleRuleId, pointList);
+    }
+    return *result;
 }
 
 NativeJsValue FeatureLayerVisualization::externalReferences()
@@ -187,23 +232,26 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
 
 void FeatureLayerVisualization::addFeature(
     model_ptr<Feature>& feature,
-    uint32_t id,
-    FeatureStyleRule const& rule)
+    BoundEvalFun& evalFun,
+    FeatureStyleRule const& rule,
+    std::string const& mapLayerStyleRuleId)
 {
+    auto featureId = feature->id()->toString();
+    if (!featureIdSubset_.empty()) {
+        if (featureIdSubset_.find(featureId) == featureIdSubset_.end()) {
+            return;
+        }
+    }
+
     auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
-        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
-        addOptionsToSimfilContext(evaluationContext);
-
-        auto boundEvalFun = [this, &evaluationContext](auto&& str){return evaluateExpression(str, evaluationContext);};
         feature->geom()->forEachGeometry(
-            [this, id, &rule, &boundEvalFun, &offset](auto&& geom)
+            [this, featureId, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
             {
                 if (rule.supports(geom->geomType()))
-                    addGeometry(geom, id, rule, boundEvalFun, offset);
+                    addGeometry(geom, featureId, rule, mapLayerStyleRuleId, evalFun, offset);
                 return true;
             });
         break;
@@ -232,8 +280,9 @@ void FeatureLayerVisualization::addFeature(
                     feature,
                     layerName,
                     attr,
-                    id, // TODO: Rethink, how an attribute link may be encoded in the id.
+                    featureId, // TODO: Rethink, how an attribute link may be encoded in the id.
                     rule,
+                    mapLayerStyleRuleId,
                     offsetFactor,
                     offset);
                 return true;
@@ -247,20 +296,35 @@ void FeatureLayerVisualization::addFeature(
 
 void FeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
-    uint32_t id,
+    std::string_view id,
     FeatureStyleRule const& rule,
-    BoundEvalFun const& evalFun,
+    std::string const& mapLayerStyleRuleId,
+    BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
-    if (!rule.selectable())
-        id = UnselectableId;
+    // Combine the ID with the mapTileKey to create an
+    // easy link from the geometry back to the feature.
+    auto tileFeatureId = JsValue::Undefined();
+    if (rule.selectable()) {
+        switch (highlightMode_) {
+        case FeatureStyleRule::NoHighlight:
+            tileFeatureId = makeTileFeatureId(id);
+            break;
+        case FeatureStyleRule::HoverHighlight:
+            tileFeatureId = JsValue("hover-highlight");
+            break;
+        case FeatureStyleRule::SelectionHighlight:
+            tileFeatureId = JsValue("selection-highlight");
+            break;
+        }
+    }
 
     std::vector<mapget::Point> vertsCartesian;
     vertsCartesian.reserve(geom->numPoints());
     geom->forEachPoint(
         [&vertsCartesian, &offset](auto&& vertex)
         {
-             vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
+            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
             return true;
         });
 
@@ -269,23 +333,43 @@ void FeatureLayerVisualization::addGeometry(
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsList(vertsCartesian);
             if (rule.flat())
-                coloredGroundMeshes_.addPolygon(jsVerts, rule, id, evalFun);
+                coloredGroundMeshes_.addPolygon(jsVerts, rule, tileFeatureId, evalFun);
             else
-                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, id, evalFun);
+                coloredNontrivialMeshes_.addPolygon(jsVerts, rule, tileFeatureId, evalFun);
         }
         break;
     case GeomType::Line:
-        addPolyLine(vertsCartesian, rule, id, evalFun);
+        addPolyLine(vertsCartesian, rule, tileFeatureId, evalFun);
         break;
     case GeomType::Mesh:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsFloat64Array(vertsCartesian);
-            coloredTrivialMeshes_.addTriangles(jsVerts, rule, id, evalFun);
+            coloredTrivialMeshes_.addTriangles(jsVerts, rule, tileFeatureId, evalFun);
         }
         break;
     case GeomType::Points:
+        auto pointIndex = 0;
         for (auto const& pt : vertsCartesian) {
-            coloredPoints_.addPoint(JsValue(pt), rule, id, evalFun);
+
+            // If a merge-grid cell size is set, then a merged feature representation was requested.
+            if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
+                addMergedPointGeometry(
+                    id,
+                    mapLayerStyleRuleId,
+                    gridCellSize,
+                    geom->pointAt(pointIndex),
+                    "pointParameters",
+                    evalFun,
+                    [&](auto& augmentedEvalFun)
+                    {
+                        return coloredPoints_
+                            .pointParams(JsValue(pt), rule, tileFeatureId, augmentedEvalFun);
+                    });
+            }
+            else
+                coloredPoints_.addPoint(JsValue(pt), rule, tileFeatureId, evalFun);
+
+            ++pointIndex;
         }
         break;
     }
@@ -293,14 +377,79 @@ void FeatureLayerVisualization::addGeometry(
     if (rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
-            labelCollection_.addLabel(
-                JsValue(wgsToCartesian<mapget::Point>(geometryCenter(geom), offset)),
-                text,
-                rule,
-                id,
-                evalFun);
+            auto wgsPos = geometryCenter(geom);
+            auto xyzPos = JsValue(wgsToCartesian<mapget::Point>(wgsPos, offset));
+
+            // If a merge-grid cell size is set, then a merged feature representation was requested.
+            if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
+                addMergedPointGeometry(
+                    id,
+                    mapLayerStyleRuleId,
+                    gridCellSize,
+                    wgsPos,
+                    "pointParameters",
+                    evalFun,
+                    [&](auto& augmentedEvalFun)
+                    {
+                        return labelCollection_.labelParams(
+                            xyzPos,
+                            text,
+                            rule,
+                            tileFeatureId,
+                            augmentedEvalFun);
+                    });
+            }
+            else
+                labelCollection_.addLabel(
+                    xyzPos,
+                    text,
+                    rule,
+                    tileFeatureId,
+                    evalFun);
         }
     }
+}
+
+void FeatureLayerVisualization::addMergedPointGeometry(
+    const std::string_view& id,
+    const std::string& mapLayerStyleRuleId,
+    const std::optional<glm::dvec3>& gridCellSize,
+    mapget::Point const& pointCartographic,
+    const char* geomField,
+    BoundEvalFun& evalFun,
+    std::function<JsValue(BoundEvalFun&)> const& makeGeomParams)
+{
+    // Convert the cartographic point to an integer representation, based
+    // on the grid cell size set in the style sheet.
+    auto gridPosition = pointCartographic / *gridCellSize;
+    auto gridPositionHash = fmt::format(
+        "{}:{}:{}",
+        static_cast<int64_t>(glm::floor(gridPosition.x)),
+        static_cast<int64_t>(glm::floor(gridPosition.y)),
+        static_cast<int64_t>(glm::floor(gridPosition.z)));
+
+    // Add the $mergeCount variable to the evaluation context.
+    // This variable indicates, how many features from other tiles have already been added
+    // for the given grid position. We must sum both existing points in the point merge service
+    // from other tiles, and existing points from this tile.
+    auto& mergedPointVec = mergedPointsPerStyleRuleId_[mapLayerStyleRuleId][gridPositionHash];
+    auto mergedPointCount = featureMergeService_.call<int32_t>(
+        "count",
+        pointCartographic,
+        gridPositionHash,
+        tile_->tileId().z(),
+        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointVec.size());
+    evalFun.context_.set(
+        internalStringPoolCopy_->emplace("$mergeCount"),
+        simfil::Value(mergedPointCount));
+
+    // Add a MergedPointVisualization to the list.
+    mergedPointVec.push_back(JsValue::Dict({
+        {"position", JsValue(pointCartographic)},
+        {"positionHash", JsValue(gridPositionHash)},
+        {geomField, JsValue(makeGeomParams(evalFun))},
+        {"featureIds", JsValue::List({makeTileFeatureId(id)})},
+    }));
 }
 
 JsValue
@@ -359,7 +508,7 @@ FeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Poin
 
 CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(
     const FeatureStyleRule& rule,
-    BoundEvalFun const& evalFun)
+    BoundEvalFun& evalFun)
 {
     const auto resolvedColor = rule.color(evalFun);
     const auto colorKey = fvec4ToInt(resolvedColor);
@@ -379,7 +528,7 @@ CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(
 
 CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
     const FeatureStyleRule& rule,
-    BoundEvalFun const& evalFun)
+    BoundEvalFun& evalFun)
 {
     const auto resolvedColor = rule.color(evalFun);
     const auto colorKey = fvec4ToInt(resolvedColor);
@@ -398,19 +547,23 @@ CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
 void erdblick::FeatureLayerVisualization::addLine(
     const Point& wgsA,
     const Point& wgsB,
-    uint32_t id,
+    std::string_view const& id,
     const erdblick::FeatureStyleRule& rule,
-    BoundEvalFun const& evalFun,
+    BoundEvalFun& evalFun,
     glm::dvec3 const& offset,
     double labelPositionHint)
 {
     auto cartA = wgsToCartesian<glm::dvec3>(wgsA, offset);
     auto cartB = wgsToCartesian<glm::dvec3>(wgsB, offset);
 
+    // Combine the ID with the mapTileKey to create an
+    // easy link from the geometry back to the feature.
+    auto tileFeatureId = makeTileFeatureId(id);
+
     addPolyLine(
         {cartA, cartB},
         rule,
-        id,
+        tileFeatureId,
         evalFun);
 
     if (rule.hasLabel()) {
@@ -420,7 +573,7 @@ void erdblick::FeatureLayerVisualization::addLine(
                 JsValue(mapget::Point(cartA + (cartB - cartA) * labelPositionHint)),
                 text,
                 rule,
-                id,
+                tileFeatureId,
                 evalFun);
         }
     }
@@ -429,8 +582,8 @@ void erdblick::FeatureLayerVisualization::addLine(
 void FeatureLayerVisualization::addPolyLine(
     std::vector<mapget::Point> const& vertsCartesian,
     const FeatureStyleRule& rule,
-    uint32_t id,
-    BoundEvalFun const& evalFun)
+    JsValue const& tileFeatureId,
+    BoundEvalFun& evalFun)
 {
     if (vertsCartesian.size() < 2)
         return;
@@ -440,27 +593,27 @@ void FeatureLayerVisualization::addPolyLine(
     if (arrowType == FeatureStyleRule::DoubleArrow) {
         auto jsVertsPair = encodeVerticesAsReversedSplitList(vertsCartesian);
         auto& primitive = getPrimitiveForArrowMaterial(rule, evalFun);
-        primitive.addPolyLine(jsVertsPair.first, rule, id, evalFun);
-        primitive.addPolyLine(jsVertsPair.second, rule, id, evalFun);
+        primitive.addPolyLine(jsVertsPair.first, rule, tileFeatureId, evalFun);
+        primitive.addPolyLine(jsVertsPair.second, rule, tileFeatureId, evalFun);
         return;
     }
 
     auto jsVerts = encodeVerticesAsList(vertsCartesian);
     if (arrowType == FeatureStyleRule::ForwardArrow) {
-        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (arrowType == FeatureStyleRule::BackwardArrow) {
         jsVerts.call<void>("reverse");
-        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForArrowMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (rule.isDashed()) {
-        getPrimitiveForDashMaterial(rule, evalFun).addPolyLine(jsVerts, rule, id, evalFun);
+        getPrimitiveForDashMaterial(rule, evalFun).addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else if (rule.flat()) {
-        coloredGroundLines_.addPolyLine(jsVerts, rule, id, evalFun);
+        coloredGroundLines_.addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
     else {
-        coloredLines_.addPolyLine(jsVerts, rule, id, evalFun);
+        coloredLines_.addPolyLine(jsVerts, rule, tileFeatureId, evalFun);
     }
 }
 
@@ -488,8 +641,9 @@ void FeatureLayerVisualization::addAttribute(
     model_ptr<Feature> const& feature,
     std::string_view const& layer,
     model_ptr<Attribute> const& attr,
-    uint32_t id,
+    std::string_view const& id,
     const FeatureStyleRule& rule,
+    std::string const& mapLayerStyleRuleId,
     uint32_t& offsetFactor,
     glm::dvec3 const& offset)
 {
@@ -530,10 +684,12 @@ void FeatureLayerVisualization::addAttribute(
         simfil::Value(layer));
 
     // Function which can evaluate a simfil expression in the attribute context.
-    auto boundEvalFun = [this, &attrEvaluationContext](auto&& str)
-    {
-        return evaluateExpression(str, attrEvaluationContext);
-    };
+    auto boundEvalFun = BoundEvalFun{
+        attrEvaluationContext,
+        [this, &attrEvaluationContext](auto&& str)
+        {
+            return evaluateExpression(str, attrEvaluationContext);
+        }};
 
     // Bump visual offset factor for next visualized attribute.
     ++offsetFactor;
@@ -544,6 +700,7 @@ void FeatureLayerVisualization::addAttribute(
         geom,
         id,
         rule,
+        mapLayerStyleRuleId,
         boundEvalFun,
         offset * static_cast<double>(offsetFactor));
 }
@@ -553,6 +710,14 @@ void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& c
     for (auto const& [key, value] : optionValues_) {
         context.set(internalStringPoolCopy_->emplace(key), value);
     }
+}
+
+JsValue FeatureLayerVisualization::makeTileFeatureId(const std::string_view& featureId) const
+{
+    return JsValue::Dict({
+        {"mapTileKey", mapTileKey_},
+        {"featureId", JsValue(std::string(featureId))}
+    });
 }
 
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
@@ -683,10 +848,12 @@ void RecursiveRelationVisualizationState::render(
         simfil::Value(r.twoway_));
 
     // Function which can evaluate a simfil expression in the relation context.
-    auto boundEvalFun = [this, &relationEvaluationContext](auto&& str)
-    {
-        return visu_.evaluateExpression(str, relationEvaluationContext);
-    };
+    auto boundEvalFun = BoundEvalFun{
+        relationEvaluationContext,
+        [this, &relationEvaluationContext](auto&& str)
+        {
+            return visu_.evaluateExpression(str, relationEvaluationContext);
+        }};
 
     // Obtain source/target geometries.
     auto sourceGeom = r.relation_->hasSourceValidity() ?
@@ -739,14 +906,14 @@ void RecursiveRelationVisualizationState::render(
     // Run source geometry visualization.
     if (sourceGeom && visualizedFeatures_.emplace(sourceId).second) {
         if (auto sourceRule = rule_.relationSourceStyle()) {
-            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, boundEvalFun, offsetBase * sourceRule->offset());
+            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, "", boundEvalFun, offsetBase * sourceRule->offset());
         }
     }
 
     // Run target geometry visualization.
     if (targetGeom && visualizedFeatures_.emplace(targetId).second) {
         if (auto targetRule = rule_.relationTargetStyle()) {
-            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, boundEvalFun, offsetBase * targetRule->offset());
+            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, "", boundEvalFun, offsetBase * targetRule->offset());
         }
     }
 

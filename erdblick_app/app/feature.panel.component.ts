@@ -18,28 +18,28 @@ interface Column {
     selector: 'feature-panel',
     template: `
         <div class="flex justify-content-end align-items-center"
-                style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
+             style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
             <div class="p-input-icon-left filter-container">
                 <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                 <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                        [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
-                        (keydown)="onKeydown($event)"
+                       [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
+                       (keydown)="onKeydown($event)"
                 />
                 <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
-                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                   class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </div>
             <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
-                            label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                            [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
+                          label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                          [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                     <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                 </p-button>
             </div>
             <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
-                            icon="pi pi-fw pi-copy" label=""
-                            [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                            pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonCollection())"
+                          icon="pi pi-fw pi-copy" label=""
+                          [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                          pTooltip="Copy GeoJSON" tooltipPosition="bottom">
                 </p-button>
             </div>
         </div>
@@ -49,14 +49,14 @@ interface Column {
                 <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
             </div>
             <p-treeTable #tt
-                filterMode="strict"
-                scrollHeight="flex"
-                [value]="filteredTree"
-                [columns]="cols"
-                [scrollable]="true"
-                [virtualScroll]="true"
-                [virtualScrollItemSize]="26"
-                [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
+                         filterMode="strict"
+                         scrollHeight="flex"
+                         [value]="filteredTree"
+                         [columns]="cols"
+                         [scrollable]="true"
+                         [virtualScroll]="true"
+                         [virtualScrollItemSize]="26"
+                         [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
             >
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode"
@@ -64,28 +64,28 @@ interface Column {
                         (click)="onRowClick(rowNode)">
                         <td>
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                 </p-treeTableToggler>
                                 <span (click)="onKeyClick($event, rowData)"
-                                    style="cursor: pointer">{{ rowData['key'] }}
+                                      style="cursor: pointer">{{ rowData['key'] }}
                                 </span>
-                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']" class="source-data-ref-container">
+                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
+                                               class="source-data-ref-container">
                                     <p-button icon="pi pi-database"
-                                                [rounded]="true"
-                                                severity="secondary"
-                                                disabled="true"
+                                              [rounded]="true"
+                                              severity="secondary"
+                                              disabled="true"
                                     />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
-                                            (click)="showSourceData(item)"
-
-                                            [rounded]="true"
-                                            severity="secondary"
-                                            label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                            pTooltip="Go to {{ item.qualifier }} Source Data"
-                                            tooltipPosition="bottom"
+                                                (click)="showSourceData($event, item)"
+                                                [rounded]="true"
+                                                severity="secondary"
+                                                label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                tooltipPosition="bottom"
                                         />
                                     </ng-template>
                                 </p-buttonGroup>
@@ -93,16 +93,16 @@ interface Column {
                         </td>
                         <td [class]="getStyleClassByType(rowData['type'])">
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <div (click)="onValueClick($event, rowData)"
-                                        (mouseover)="highlightFeature(rowData)"
-                                        (mouseout)="stopHighlight(rowData)">
+                                     (mouseover)="onValueHover($event, rowData)"
+                                     (mouseout)="onValueHoverExit($event, rowData)">
                                     {{ rowData['value'] }}
                                     <span *ngIf="rowData.hasOwnProperty('info')">
                                         <i class="pi pi-info-circle"
-                                            [pTooltip]="rowData['info'].toString()"
-                                            tooltipPosition="left">
+                                           [pTooltip]="rowData['info'].toString()"
+                                           tooltipPosition="left">
                                         </i>
                                     </span>
                                 </div>
@@ -230,8 +230,9 @@ export class FeaturePanelComponent implements OnInit  {
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
+            const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || hasSingleChild;
+            node.expanded = isTopLevelNode || isSection || hasSingleChild;
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
@@ -341,19 +342,21 @@ export class FeaturePanelComponent implements OnInit  {
         }
     }
 
-    showSourceData(sourceDataRef: any) {
+    showSourceData(event: any, sourceDataRef: any) {
+        event.stopPropagation();
+
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
-        const mapId = this.inspectionService.selectedMapIdName;
-        const featureId = this.inspectionService.selectedFeatureIdName;
+        const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
+        const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
             layerId: String(layerId),
             mapId: String(mapId),
             address: BigInt(address),
-            featureId: featureId,
+            featureIds: featureIds,
         })
     }
 
@@ -365,17 +368,27 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"]).then();
         }
-        this.copyToClipboard(rowData["value"]);
     }
 
-    highlightFeature(rowData: any) {
-        return;
+    onValueHover(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"],
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
-    stopHighlight(rowData: any) {
-        return;
+    onValueHoverExit(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
     getStyleClassByType(valueType: number): string {
