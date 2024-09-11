@@ -16,4 +16,7 @@ module.exports = {
     externals: {
         'cesium': 'Cesium'
     },
+    output: {
+        publicPath: 'auto'
+    }
 };
