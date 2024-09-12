@@ -52,7 +52,7 @@ import {KeyboardService} from "./keyboard.service";
             <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                        optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
                        [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
-                       emptyMessage="No features matched." [scrollHeight]="'calc(100vh - 23em)'"
+                       emptyMessage="No features matched."
                        #listbox
             />
         </p-dialog>
