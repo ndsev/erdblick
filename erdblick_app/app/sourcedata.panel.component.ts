@@ -41,7 +41,6 @@ import {Menu} from "primeng/menu";
                             />
                             <i *ngIf="filterString" (click)="clearFilter()"
                                class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerMenuItemsMenu.toggle($event)" />
                         </div>
                     </ng-template>
 
@@ -80,15 +79,13 @@ import {Menu} from "primeng/menu";
                 </div>
             </div>
         </ng-template>
-
-        <p-menu #layerMenuItemsMenu [model]="layerMenuItems" [popup]="true" appendTo="body" [style]="{'width': 'auto'}" />
     `
 })
 export class SourceDataPanelComponent implements OnInit {
     @Input() sourceData!: SelectedSourceData;
 
     @ViewChild('tt') table!: TreeTable;
-    @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
+    // @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -108,10 +105,10 @@ export class SourceDataPanelComponent implements OnInit {
     errorMessage = "";
     isExpanded = false;
 
-    layerMenuItems: any[] = [];
+    // layerMenuItems: any[] = [];
 
     /**
-     * Returns a human readable layer name for a layer id.
+     * Returns a human-readable layer name for a layer id.
      *
      * @param layerId Layer id to get the name for
      */
@@ -147,33 +144,9 @@ export class SourceDataPanelComponent implements OnInit {
                 this.loading = false;
             });
 
-        this.mapService.maps.subscribe(maps => {
-            const map = maps.get(this.sourceData.mapId);
-            if (map) {
-                this.layerMenuItems = [
-                    {
-                        label: "Switch Layer",
-                        items: Array.from(map.layers.values())
-                            .filter(item => item.type == "SourceData")
-                            .map(item => {
-                                return {
-                                    label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
-                                    disabled: item.layerId === this.sourceData.layerId,
-                                    command: () => {
-                                        let sourceData = {...this.sourceData};
-                                        sourceData.layerId = item.layerId;
-                                        sourceData.address = BigInt(0);
-
-                                        this.inspectionService.selectedSourceData.next(sourceData);
-                                    },
-                                };
-                            }),
-                    },
-                ];
-            } else {
-                this.layerMenuItems = [];
-            }
-        });
+        // this.mapService.maps.subscribe(maps => {
+        //
+        // });
     }
 
     /**

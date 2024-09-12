@@ -4,6 +4,7 @@ import {distinctUntilChanged} from "rxjs";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {ParametersService} from "./parameters.service";
+import {MapService} from "./map.service";
 
 interface InspectorTab {
     title: string,
@@ -13,11 +14,17 @@ interface InspectorTab {
     onClose?: any,
 }
 
+interface SourceLayerMenuItem {
+    label: string,
+    disabled: boolean,
+    command: () => void
+}
+
 @Component({
     selector: 'inspection-panel',
     template: `
         <p-accordion *ngIf="inspectionService.featureTree.value.length && inspectionService.isInspectionPanelVisible"
-                     class="w-full inspect-panel"
+                     class="w-full inspect-panel" [ngClass]="{'inspect-panel-small-header': activeIndex > 0}"
                      [activeIndex]="0" >
             <p-accordionTab>
                 <ng-template pTemplate="header">
@@ -25,6 +32,10 @@ interface InspectorTab {
                         <p-button icon="pi pi-chevron-left" *ngIf="activeIndex > 0" (click)="onGoBack($event)" />
                         
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
+                        
+                        <p-dropdown class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
+                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" 
+                                    (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" />
                     </span>
                 </ng-template>
 
@@ -47,12 +58,13 @@ interface InspectorTab {
                 align-items: center;
 
                 .p-button {
-                    width: 30px;
-                    height: 30px;
+                    width: 1.75em;
+                    height: 1.75em;
                     margin: 0;
                 }
             }
-        }`,
+        }
+        `,
     ]
 })
 export class InspectionPanelComponent
@@ -61,7 +73,12 @@ export class InspectionPanelComponent
     tabs: InspectorTab[] = [];
     activeIndex = 0;
 
-    constructor(public inspectionService: InspectionService, private parameterService: ParametersService) {
+    layerMenuItems: SourceLayerMenuItem[] = [];
+    selectedLayerItem?: SourceLayerMenuItem;
+
+    constructor(public inspectionService: InspectionService,
+                public mapService: MapService,
+                private parameterService: ParametersService) {
         this.pushFeatureInspector();
 
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
@@ -88,6 +105,25 @@ export class InspectionPanelComponent
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             if (selection) {
                 this.reset();
+                const map = this.mapService.maps.getValue().get(selection.mapId);
+                if (map) {
+                    this.layerMenuItems = Array.from(map.layers.values()).filter(item => item.type == "SourceData").map(item => {
+                        return {
+                            label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
+                            disabled: item.layerId === selection.layerId,
+                            command: () => {
+                                let sourceData = {...selection};
+                                sourceData.layerId = item.layerId;
+                                sourceData.address = BigInt(0);
+
+                                this.inspectionService.selectedSourceData.next(sourceData);
+                            },
+                        };
+                    });
+                    this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
+                } else {
+                    this.layerMenuItems = [];
+                }
                 this.pushSourceDataInspector(selection);
             }
         })
@@ -122,8 +158,8 @@ export class InspectionPanelComponent
 
     pushSourceDataInspector(data: SelectedSourceData) {
         let tab = {
-            title: SourceDataPanelComponent.layerNameForLayerId(data.layerId),
-            icon: "pi-database",
+            title: "Source Data",
+            icon: "",
             component: SourceDataPanelComponent,
             inputs: {
                 sourceData: data
@@ -154,5 +190,15 @@ export class InspectionPanelComponent
             if (this.tabs.length > 1)
                 this.tabs.pop();
         }
+    }
+
+    onSelectedLayerItem() {
+        if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
+            this.selectedLayerItem.command();
+        }
+    }
+
+    onDropdownClick(event: MouseEvent) {
+        event.stopPropagation();
     }
 }

@@ -60,6 +60,7 @@ import {InputTextareaModule} from "primeng/inputtextarea";
 import {FloatLabelModule} from "primeng/floatlabel";
 import {TabViewModule} from "primeng/tabview";
 import {OnEnterClickDirective} from "./keyboard.service";
+import {DropdownModule} from "primeng/dropdown";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -127,7 +128,8 @@ export function initializeServices(styleService: StyleService, mapService: MapSe
         ButtonGroupModule,
         TabViewModule,
         BreadcrumbModule,
-        TableModule
+        TableModule,
+        DropdownModule
     ],
     providers: [
         {

@@ -73,15 +73,9 @@ interface Column {
                                 </span>
                                 <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
                                                class="source-data-ref-container">
-                                    <p-button icon="pi pi-database"
-                                              [rounded]="true"
-                                              severity="secondary"
-                                              disabled="true"
-                                    />
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
                                         <p-button
                                                 (click)="showSourceData($event, item)"
-                                                [rounded]="true"
                                                 severity="secondary"
                                                 label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
                                                 pTooltip="Go to {{ item.qualifier }} Source Data"
@@ -155,10 +149,10 @@ interface Column {
 
         .source-data-ref-container {
             button {
-                width: 20px;
-                height: 20px;
-                padding: 3px;
-                margin-bottom: 0.5px;
+                width: 1.1em;
+                height: 1em;
+                padding: 0.1em;
+                margin-bottom: 0.2em;
             }
         }
 

@@ -1,6 +1,15 @@
 @import "primeicons/primeicons.css";
 @layer primeng, erdblick;
 
+.source-layer-dropdown {
+    margin-left: 0.25em;
+
+    .p-dropdown-label {
+        padding: 0.4em;
+        min-width: 13em;
+    }
+}
+
 body {
     overflow: hidden;
     height: 100vh !important;
@@ -112,6 +121,18 @@ body {
     right: 0.75rem;
 }
 
+.inspect-panel-small-header {
+    .p-accordion-header .p-accordion-header-link {
+        padding-top: 0.5em !important;
+        padding-bottom: 0.5em !important;
+    }
+
+    .resizable-container {
+        height: calc(100vh - 7.5em) !important;
+        max-height: calc(100vh - 7.5em) !important;
+    }
+}
+
 .inspect-panel {
     position: absolute;
     top: 0.5em;
@@ -120,7 +141,7 @@ body {
     z-index: 110;
 
     .p-accordion-header .p-accordion-header-link {
-        padding: 0.8em;
+        padding: 0.95em;
     }
 
     .p-accordion-content {
@@ -150,15 +171,15 @@ body {
     }
 
     .resizable-container {
-        width: 30em;
-        height: 30em;
+        width: 40em;
+        height: calc(100vh - 10.5em);
         min-width: 30em;
         min-height: 18em;
         resize: both;
         overflow: auto;
         direction: rtl;
-        max-width: calc(100vw - 27em);
-        max-height: calc(100vh - 8.5em);
+        max-width: calc(100vw - 28em);
+        max-height: calc(100vh - 10.5em);
 
         * {
             direction: ltr;
@@ -185,12 +206,13 @@ body {
             border-collapse: collapse;
 
             td {
-                padding: 0px;
+                padding: 0 0 0 0.5em;
                 height: 26px;
+                border-right: 1px solid #e5e7eb;
             }
 
             th {
-                padding: 0px;
+                padding: 0;
                 height: 26px;
             }
 
@@ -202,7 +224,12 @@ body {
 
             /* Style used for highlighting individual table rows. */
             tr.highlight {
-                background: hsl(105, 30%, 90%);
+                color: black;
+                background: var(--green-100);
+
+                td {
+                    border-color: darkgrey;
+                }
             }
         }
     }

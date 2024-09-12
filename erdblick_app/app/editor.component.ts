@@ -80,7 +80,9 @@ const completionsList = [
     {label: "relation", type: "keyword"},
     {label: "attribute", type: "keyword"},
     {label: "normal", type: "keyword"},
-    {label: "highlight", type: "keyword"},
+    {label: "none", type: "keyword"},
+    {label: "selection", type: "keyword"},
+    {label: "hover", type: "keyword"},
     {label: "Lane", type: "keyword"},
     {label: "Boundary", type: "keyword"}
 ]
