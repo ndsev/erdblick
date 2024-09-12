@@ -115,7 +115,6 @@ export class InspectionPanelComponent
                                 let sourceData = {...selection};
                                 sourceData.layerId = item.layerId;
                                 sourceData.address = BigInt(0);
-
                                 this.inspectionService.selectedSourceData.next(sourceData);
                             },
                         };
@@ -158,7 +157,7 @@ export class InspectionPanelComponent
 
     pushSourceDataInspector(data: SelectedSourceData) {
         let tab = {
-            title: "Source Data",
+            title: `${data.tileId}.`,
             icon: "",
             component: SourceDataPanelComponent,
             inputs: {
