@@ -460,8 +460,11 @@ export class ParametersService {
     }
 
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
-        if (value && saveHistory) {
-            this.saveHistoryStateValue(value);
+        if (value) {
+            value[1] = value[1].trim();
+            if (saveHistory) {
+                this.saveHistoryStateValue(value);
+            }
         }
         this.p().search = value ? value : [];
         this._replaceUrl = false;
@@ -472,9 +475,10 @@ export class ParametersService {
     private saveHistoryStateValue(value: [number, string]) {
         const searchHistoryString = localStorage.getItem("searchHistory");
         if (searchHistoryString) {
-            const searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+            let searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] == value[0] && entry[1] == value[1]));
             searchHistory.unshift(value);
-            let ldiff = searchHistory.length - 50;
+            let ldiff = searchHistory.length - 100;
             while (ldiff > 0) {
                 searchHistory.pop();
                 ldiff -= 1;

@@ -51,10 +51,13 @@ interface ExtendedSearchTarget extends SearchTarget {
                                 <div class="icon-circle violet">
                                     <i class="pi pi-history"></i>
                                 </div>
-                                <div class="search-option">
-                                    <span class="search-option-name">{{ item.input }}</span>
-                                    <br>
-                                    <span [innerHTML]="item.label"></span>
+                                <div class="search-option-container">
+                                    <div class="search-option">
+                                        <span class="search-option-name">{{ item.input }}</span>
+                                        <br>
+                                        <span [innerHTML]="item.label"></span>
+                                    </div>
+                                    <p-button (click)="removeSearchHistoryEntry(i)" icon="pi pi-times" tabindex="-1"></p-button>
                                 </div>
                             </div>
                         </div>
@@ -264,6 +267,13 @@ export class SearchPanelComponent implements AfterViewInit {
             });
             this.visibleSearchHistory = this.searchHistory;
         }
+    }
+
+    removeSearchHistoryEntry(index: number) {
+        this.searchHistory.splice(index, 1);
+        const searchHistory: [number, string][] = this.searchHistory.map(entry => [entry.index, entry.input]);
+        localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+        this.reloadSearchHistory();
     }
 
     parseMapgetTileId(value: string): number[] | undefined {

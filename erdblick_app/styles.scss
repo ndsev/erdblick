@@ -279,11 +279,11 @@ body {
         width: 100%;
         z-index: 150;
         position: relative;
+        line-height: 0;
 
         textarea {
             width: 100% !important;
             transition: all 0.3s;
-            overflow: scroll;
             resize: none;
             animation-duration: 0.1s !important;
             transition-duration: 0.1s !important;
@@ -335,6 +335,26 @@ body {
 
             &:hover {
                 background-color: var(--blue-100);
+            }
+        }
+
+        .search-option-container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            width: calc(100% - 2em);
+
+            button {
+                border: none;
+                background: none;
+                color: gray;
+                width: 2em;
+                height: 2em;
+
+                &:hover {
+                    background-color: var(--red-500);
+                    color: white;
+                }
             }
         }
 
