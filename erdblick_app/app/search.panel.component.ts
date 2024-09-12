@@ -514,8 +514,12 @@ export class SearchPanelComponent implements AfterViewInit {
             }
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            this.setSearchValue("");
-        }
+            if (this.searchInputValue) {
+                this.setSearchValue("");
+                return;
+            }
+            this.dialog.close(event);
+        }``
     }
 
     selectHistoryEntry(index: number) {
