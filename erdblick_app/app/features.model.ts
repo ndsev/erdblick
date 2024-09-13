@@ -139,7 +139,10 @@ export class FeatureTile {
 
     has(featureId: string) {
         return this.peek((tileFeatureLayer: TileFeatureLayer) => {
-            return !tileFeatureLayer.find(featureId).isNull();
+            let feature = tileFeatureLayer.find(featureId);
+            let result = !feature.isNull();
+            feature.delete();
+            return result;
         });
     }
 }
@@ -176,6 +179,7 @@ export class FeatureWrapper {
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature = tileFeatureLayer.find(this.featureId);
             if (feature.isNull()) {
+                feature.delete();
                 return null;
             }
             let result = null;

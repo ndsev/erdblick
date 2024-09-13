@@ -433,7 +433,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
-        .constructor<mapget::TileFeatureLayer&>()
+        .constructor<TileFeatureLayer&>()
         .function("filter", &FeatureLayerSearch::filter)
         .function("traceResults", &FeatureLayerSearch::traceResults);
 
