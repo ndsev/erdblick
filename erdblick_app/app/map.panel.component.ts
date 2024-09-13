@@ -19,7 +19,7 @@ import {KeyboardService} from "./keyboard.service";
     template: `
         <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'topleft'" [draggable]="false" [resizable]="false" (onShow)="keyboardService.dialogOnShow($event)" 
-                  (onHide)="keyboardService.dialogOnHide($event)" [closeOnEscape]="false">
+                  (onHide)="keyboardService.dialogOnHide($event)">
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
                     <span style="font-size: 0.9em">OSM Overlay:</span>

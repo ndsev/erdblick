@@ -42,13 +42,14 @@ export class KeyboardService {
             if (!isInput) {
                 const key = this.getKeyCombination(event);
                 if (key === 'Escape' || key === 'Esc') {
-                    if (this.dialogStack.length > 0) {
-                        event.preventDefault();
-                        const topDialog = this.dialogStack.pop();
-                        if (topDialog) {
-                            topDialog.close(new MouseEvent("mousedown"));
-                        }
-                    }
+                    // TODO: make this work!
+                    // if (this.dialogStack.length > 0) {
+                    //     event.preventDefault();
+                    //     const topDialog = this.dialogStack.pop();
+                    //     if (topDialog) {
+                    //         topDialog.close(new MouseEvent("mousedown"));
+                    //     }
+                    // }
                 } else if (this.shortcuts.has(key)) {
                     event.preventDefault();
                     this.shortcuts.get(key)?.(event);

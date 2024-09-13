@@ -14,7 +14,7 @@ import {KeyboardService} from "./keyboard.service";
         <div [ngClass]="{'z-index-low': sidePanelService.featureSearchOpen && sidePanelService.searchOpen}">
             <p-dialog class="side-menu-dialog" header="Search Loaded Features"
                       [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
-                      [position]="'topleft'" [draggable]="false" [resizable]="false" [closeOnEscape]="false"
+                      [position]="'topleft'" [draggable]="false" [resizable]="false"
                       (onShow)="onShow($event)" (onHide)="onHide($event)">
                 <div class="feature-search-controls">
                     <div class="progress-bar-container">
