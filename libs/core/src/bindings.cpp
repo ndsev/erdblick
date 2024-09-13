@@ -201,6 +201,25 @@ em::val getTileBox(uint64_t tileIdValue) {
 }
 
 /**
+ * Get the bounding box for a mapget corner tile id in WGS84.
+ * A corner tile box is the original tile box, shifted by half
+ * the width and height on both axes, so it sits squarely at
+ * the intersection point of four tiles.
+ */
+em::val getCornerTileBox(uint64_t tileIdValue) {
+    mapget::TileId tid(tileIdValue);
+    auto halfSize = tid.size() * mapget::Point(.5, -.5);
+    auto sw = tid.sw() + halfSize;
+    auto ne = tid.ne() + halfSize;
+    return *JsValue::List({
+        JsValue(sw.x),
+        JsValue(sw.y),
+        JsValue(ne.x),
+        JsValue(ne.y)
+    });
+}
+
+/**
  * Get the neighbor for a mapget tile id. Tile row will be clamped to [0, maxForLevel],
  * so a positive/negative wraparound is not possible. The tile id column will wrap at the
  * antimeridian.
@@ -460,6 +479,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
     em::function("getTileBox", &getTileBox);
+    em::function("getCornerTileBox", &getCornerTileBox);
     em::function("getTileLevel", &getTileLevel);
 
     ////////// Get/Parse full id of a TileFeatureLayer

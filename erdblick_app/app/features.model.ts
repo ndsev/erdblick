@@ -1,6 +1,6 @@
 "use strict";
 
-import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
+import {coreLib, logFreeMemory, uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "./parameters.service";
 
@@ -51,7 +51,7 @@ export class FeatureTile {
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasm((bufferToRead: any) => {
+        let result = uint8ArrayToWasm((bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             if (!deserializedLayer)
                 return null;
@@ -65,6 +65,7 @@ export class FeatureTile {
             deserializedLayer.delete();
             return result;
         }, this.tileFeatureLayerBlob);
+        return result;
     }
 
     /**
@@ -72,7 +73,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
+        let result = await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             if (!deserializedLayer)
                 return null;
@@ -86,6 +87,7 @@ export class FeatureTile {
             deserializedLayer.delete();
             return result;
         }, this.tileFeatureLayerBlob);
+        return result;
     }
 
     /**

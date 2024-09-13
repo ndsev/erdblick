@@ -1,5 +1,15 @@
 import {Injectable} from "@angular/core";
-import {PointPrimitiveCollection, LabelCollection, Viewer} from "./cesium";
+import {
+    PointPrimitiveCollection,
+    LabelCollection,
+    Viewer,
+    Color,
+    Cartesian2,
+    Cartesian3,
+    Rectangle,
+    Entity,
+    HeightReference
+} from "./cesium";
 import {coreLib} from "./wasm";
 import {TileFeatureId} from "./parameters.service";
 
@@ -35,6 +45,7 @@ export class MergedPointsTile {
 
     pointPrimitives: PointPrimitiveCollection|null = null;
     labelPrimitives: LabelCollection|null = null;
+    debugEntity: Entity|null = null;
 
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
 
@@ -74,12 +85,10 @@ export class MergedPointsTile {
             if (feature.pointParameters) {
                 feature.pointParameters["id"] = feature.featureIds;
                 this.pointPrimitives.add(feature.pointParameters);
-                feature.pointParameters = null;
             }
             if (feature.labelParameters) {
                 feature.labelParameters["id"] = feature.featureIds;
                 this.labelPrimitives.add(feature.labelParameters);
-                feature.labelParameters = null;
             }
         }
 
@@ -89,6 +98,33 @@ export class MergedPointsTile {
         if (this.labelPrimitives.length) {
             viewer.scene.primitives.add(this.labelPrimitives)
         }
+
+        // On-demand debug visualization:
+        // Adding debug bounding box and label for tile ID and feature count
+        // const tileBounds = coreLib.getCornerTileBox(this.tileId);
+        // this.debugEntity = viewer.entities.add({
+        //     rectangle: {
+        //         coordinates: Rectangle.fromDegrees(...tileBounds),
+        //         material: Color.BLUE.withAlpha(0.2),
+        //         outline: true,
+        //         outlineColor: Color.BLUE,
+        //         outlineWidth: 3,
+        //         height: HeightReference.CLAMP_TO_GROUND,
+        //     },
+        //     position: Cartesian3.fromDegrees(
+        //         (tileBounds[0]+tileBounds[2])*.5,
+        //         (tileBounds[1]+tileBounds[3])*.5
+        //     ),
+        //     label: {
+        //         text: `Tile ID: ${this.tileId.toString()}\nPoints: ${this.features.size}\nreferencingTiles: ${this.referencingTiles}`,
+        //         showBackground: true,
+        //         font: '14pt monospace',
+        //         eyeOffset: new Cartesian3(0, 0, -10), // Ensures label visibility at a higher altitude
+        //         fillColor: Color.YELLOW,
+        //         outlineColor: Color.BLACK,
+        //         outlineWidth: 2,
+        //     }
+        // });
     }
 
     remove(viewer: Viewer) {
@@ -97,6 +133,9 @@ export class MergedPointsTile {
         }
         if (this.labelPrimitives && this.labelPrimitives.length) {
             viewer.scene.primitives.remove(this.labelPrimitives)
+        }
+        if (this.debugEntity) {
+            viewer.entities.remove(this.debugEntity);
         }
     }
 

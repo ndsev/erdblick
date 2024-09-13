@@ -36,7 +36,7 @@ export class ErdblickDebugApi {
      *
      * @param cameraInfoStr A JSON-formatted string containing camera information.
      */
-    private setCamera(cameraInfoStr: string) {
+    setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
         this.parametersService.cameraViewData.next({
             destination: Cartesian3.fromArray(cameraInfo.position),
@@ -53,7 +53,7 @@ export class ErdblickDebugApi {
      *
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
-    private getCamera() {
+    getCamera() {
         const position = [
             this.parametersService.cameraViewData.getValue().destination.x,
             this.parametersService.cameraViewData.getValue().destination.y,
@@ -66,7 +66,7 @@ export class ErdblickDebugApi {
     /**
      * Generate a test TileFeatureLayer, and show it.
      */
-    private showTestTile() {
+    showTestTile() {
         let tile = uint8ArrayFromWasm((sharedArr: any) => {
             coreLib.generateTestTile(sharedArr, this.mapService.tileParser!);
         });
