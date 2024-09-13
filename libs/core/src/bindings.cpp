@@ -1,5 +1,21 @@
 #include <emscripten/bind.h>
+#include <emscripten/val.h>
+#include <emscripten/em_asm.h>
+#include <emscripten/emscripten.h>
+#include <malloc.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <cxxabi.h>
+
+#include <sanitizer/lsan_interface.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+const char *__lsan_default_options() {
+    return "verbosity=1:malloc_context_size=64";
+}
+#endif
+#endif
 
 #include "aabb.h"
 #include "buffer.h"
@@ -27,6 +43,61 @@ namespace em = emscripten;
 
 namespace
 {
+
+/**
+ * Check for memory leaks -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void reportMemoryLeaks() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_do_recoverable_leak_check." << std::endl;
+    __lsan_do_recoverable_leak_check();
+#endif
+#endif
+}
+
+/**
+ * DisableLeakCheck -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void disableLeakCheck() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_disable." << std::endl;
+    __lsan_disable();
+#endif
+#endif
+}
+
+/**
+ * Enable leak check -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void enableLeakCheck() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_enable." << std::endl;
+    __lsan_enable();
+#endif
+#endif
+}
+
+/**
+ * Memory debug utilities -
+ * see https://github.com/emscripten-core/emscripten/blob/main/test/core/test_mallinfo.c.
+ */
+size_t getTotalMemory() {
+    return (size_t)EM_ASM_PTR(return HEAP8.length);
+}
+
+/** Same link as above. */
+size_t getFreeMemory() {
+    struct mallinfo i = mallinfo();
+    uintptr_t totalMemory = getTotalMemory();
+    uintptr_t dynamicTop = (uintptr_t)sbrk(0);
+    return totalMemory - dynamicTop + i.fordblks;
+}
 
 /**
  * WGS84 Viewport Descriptor, which may be used with the
@@ -458,4 +529,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Validate SIMFIL query
     em::function("validateSimfilQuery", &validateSimfil);
+
+    ////////// Memory utilities
+    em::function("getTotalMemory", &getTotalMemory);
+    em::function("getFreeMemory", &getFreeMemory);
+    em::function("reportMemoryLeaks", &reportMemoryLeaks);
+    em::function("enableLeakCheck", &enableLeakCheck);
+    em::function("disableLeakCheck", &disableLeakCheck);
 }
