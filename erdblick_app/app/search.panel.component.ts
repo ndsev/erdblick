@@ -287,6 +287,9 @@ export class SearchPanelComponent implements AfterViewInit {
         const searchHistory: [number, string][] = this.searchHistory.map(entry => [entry.index, entry.input]);
         localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
         this.reloadSearchHistory();
+        if (index == 0) {
+            this.parametersService.resetSearchHistoryState();
+        }
     }
 
     parseMapgetTileId(value: string): number[] | undefined {

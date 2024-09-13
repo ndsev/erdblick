@@ -459,6 +459,11 @@ export class ParametersService {
         return false;
     }
 
+    resetSearchHistoryState() {
+        this.p().search = [];
+        this.parameters.next(this.p());
+    }
+
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
         if (value) {
             value[1] = value[1].trim();
