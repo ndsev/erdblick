@@ -6,6 +6,7 @@
 #include "cesium-interface/object.h"
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
+#include "layer.h"
 
 namespace erdblick
 {
@@ -31,12 +32,12 @@ public:
     /**
      * Parse a TileFeatureLayer from a buffer as returned by writeTileFeatureLayer.
      */
-    mapget::TileFeatureLayer::Ptr readTileFeatureLayer(SharedUint8Array const& buffer);
+    TileFeatureLayer readTileFeatureLayer(SharedUint8Array const& buffer);
 
     /**
      * Parse a TileSourceDataLayer from a buffer.
      */
-    mapget::TileSourceDataLayer::Ptr readTileSourceDataLayer(SharedUint8Array const& buffer);
+    TileSourceDataLayer readTileSourceDataLayer(SharedUint8Array const& buffer);
 
     /**
      * Parse only the stringified MapTileKey and tile id from the tile layer blob.

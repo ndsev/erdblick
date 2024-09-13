@@ -3,6 +3,8 @@
 #include "geometry.h"
 #include "cesium-interface/point-conversion.h"
 
+using namespace mapget;
+
 Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
 {
     if (!g) {

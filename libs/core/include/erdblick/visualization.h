@@ -8,6 +8,7 @@
 #include "cesium-interface/labels.h"
 #include "style.h"
 #include "simfil/overlay.h"
+#include "layer.h"
 
 namespace erdblick
 {
@@ -86,11 +87,16 @@ public:
         FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
         NativeJsValue const& rawFeatureIdSubset = {});
 
+     /**
+      * Destructor for memory diagnostics.
+      */
+     ~FeatureLayerVisualization();
+
     /**
      * Add a tile which is considered for visualization. All tiles added after
      * the first one are only considered to resolve external relations.
      */
-    void addTileFeatureLayer(std::shared_ptr<mapget::TileFeatureLayer> tile);
+    void addTileFeatureLayer(TileFeatureLayer const& tile);
 
     /**
      * Run visualization for the added tile feature layers.
@@ -272,7 +278,7 @@ private:
 
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
-    std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
+    std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
     std::set<std::string> featureIdSubset_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::map<std::string, simfil::Value> optionValues_;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mapget/model/featurelayer.h"
 #include "cesium-interface/object.h"
+#include "layer.h"
 
 namespace erdblick
 {
@@ -16,7 +16,7 @@ std::string anyWrap(std::string_view const& q);
 class FeatureLayerSearch
 {
 public:
-    explicit FeatureLayerSearch(mapget::TileFeatureLayer& tfl);
+    explicit FeatureLayerSearch(TileFeatureLayer& tfl);
 
     /** Returns a list of Tuples of (Map Tile Key, Feature ID). */
     NativeJsValue filter(std::string const& q);
@@ -25,7 +25,7 @@ public:
     NativeJsValue traceResults();
 
 private:
-    mapget::TileFeatureLayer& tfl_;
+    TileFeatureLayer& tfl_;
 };
 
 }

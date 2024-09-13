@@ -15,7 +15,7 @@ TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     auto style = TestDataProvider::style();
     FeatureLayerVisualization visualization("Features:Test:Test:0", style, {}, {});
-    visualization.addTileFeatureLayer(testLayer);
+    visualization.addTileFeatureLayer(TileFeatureLayer(testLayer));
     visualization.run();
     auto result = visualization.primitiveCollection();
     std::cout << result << std::endl;

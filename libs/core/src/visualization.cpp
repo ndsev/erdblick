@@ -57,12 +57,13 @@ FeatureLayerVisualization::FeatureLayerVisualization(
     }
 }
 
-void FeatureLayerVisualization::addTileFeatureLayer(
-    std::shared_ptr<mapget::TileFeatureLayer> tile)
+FeatureLayerVisualization::~FeatureLayerVisualization() = default;
+
+void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
 {
     if (!tile_) {
-        tile_ = tile;
-        internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile->strings());
+        tile_ = tile.model_;
+        internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile.model_->strings());
 
         // Pre-create empty merged point feature visualization lists.
         for (auto&& rule : style_.rules()) {
@@ -81,8 +82,8 @@ void FeatureLayerVisualization::addTileFeatureLayer(
     // However, the transcoding process changes the dictionary, as it might
     // add unknown field names. This would fork the dict state from the remote
     // node dict, which leads to undefined behavior. So we work on a copy of it.
-    tile->setStrings(internalStringPoolCopy_);
-    allTiles_.emplace_back(tile);
+    tile.model_->setStrings(internalStringPoolCopy_);
+    allTiles_.emplace_back(tile.model_);
 }
 
 void FeatureLayerVisualization::run()

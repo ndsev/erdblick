@@ -39,8 +39,6 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     }
 
     valid_ = true;
-
-    std::cout << "Parsed a style YAML!" << std::endl;
 }
 
 bool FeatureLayerStyle::isValid() const
