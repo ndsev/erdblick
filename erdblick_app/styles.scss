@@ -210,8 +210,9 @@ body {
             }
 
             th {
-                padding: 0;
+                padding: 0 0 0 0.5em;
                 height: 26px;
+                border-right: 1px solid lightgrey;
             }
 
             .p-treetable-toggler {
