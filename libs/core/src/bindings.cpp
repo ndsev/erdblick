@@ -30,7 +30,7 @@ const char *__lsan_default_options() {
 #include "inspection.h"
 #include "geometry.h"
 #include "search.h"
-#include "sourcedata.hpp"
+#include "layer.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -335,21 +335,10 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
 
     ////////// TileSourceDataLayer
-    em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
-        .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
-            "std::shared_ptr<mapget::TileSourceDataLayer>")
-        .function(
-            "addressFormat",
-            &mapget::TileSourceDataLayer::sourceDataAddressFormat)
-        .function(
-            "toJson",
-            std::function<std::string(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
-                return self.toJson().dump(2);
-            }))
-        .function(
-            "toObject", std::function<em::val(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
-                return *tileSourceDataLayerToObject(self);
-            }));
+    em::class_<TileSourceDataLayer>("TileSourceDataLayer")
+        .function("addressFormat", &TileSourceDataLayer::addressFormat)
+        .function("toJson", &TileSourceDataLayer::toJson)
+        .function("toObject", &TileSourceDataLayer::toObject);
 
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
@@ -399,53 +388,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("Mesh", mapget::GeomType::Mesh);
 
     ////////// TileFeatureLayer
-    em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
-        .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>(
-            "std::shared_ptr<mapget::TileFeatureLayer>")
-        .function(
-            "id",
-            std::function<std::string(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.id().toString(); }))
-        .function(
-            "tileId",
-            std::function<uint64_t(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.tileId().value_; }))
-        .function(
-            "numFeatures",
-            std::function<uint32_t(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.numRoots(); }))
-        .function(
-            "center",
-            std::function<em::val(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self)
-                {
-                    em::val result = em::val::object();
-                    result.set("x", self.tileId().center().x);
-                    result.set("y", self.tileId().center().y);
-                    result.set("z", self.tileId().z());
-                    return result;
-                }))
-        .function(
-            "find",
-            std::function<
-                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, std::string const& id)>(
-                [](mapget::TileFeatureLayer const& self, std::string const& id)
-                {
-                    return self.find(id);
-                }))
-        .function(
-            "findFeatureIndex",
-            std::function<
-
-                int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
-                [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
-                {
-                    auto idPartsKvp = JsValue(idParts).toKeyValuePairs();
-                    if (auto result = self.find(type, idPartsKvp))
-                        return result->addr().index();
-                    return -1;
-                }));
-    em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
+    em::class_<TileFeatureLayer>("TileFeatureLayer")
+        .function("id", &TileFeatureLayer::id)
+        .function("tileId", &TileFeatureLayer::tileId)
+        .function("numFeatures", &TileFeatureLayer::numFeatures)
+        .function("center", &TileFeatureLayer::center)
+        .function("find", &TileFeatureLayer::find)
+        .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
     ////////// Highlight Modes
     em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")

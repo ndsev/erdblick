@@ -1,4 +1,4 @@
-import {coreLib, uint8ArrayFromWasm} from "./wasm";
+import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./wasm";
 import {MapService} from "./map.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ParametersService} from "./parameters.service";
@@ -80,5 +80,12 @@ export class ErdblickDebugApi {
             featureLayerStyle: style,
             options: []
         }, "_builtin", true);
+    }
+
+    /**
+     * Check for memory leaks.
+     */
+    coreLib(): ErdblickCore_ {
+        return coreLib;
     }
 }
