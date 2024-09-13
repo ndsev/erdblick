@@ -10,6 +10,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
+import {distinctUntilChanged} from "rxjs";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -111,6 +112,7 @@ export class SearchPanelComponent implements AfterViewInit {
     @ViewChild('textarea') textarea!: ElementRef;
     @ViewChild('actionsdialog') dialog!: Dialog;
     cursorPosition: number = 0;
+    private clickListener: () => void;
 
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
@@ -197,6 +199,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     constructor(private renderer: Renderer2,
+                private elRef: ElementRef,
                 public mapService: MapService,
                 public parametersService: ParametersService,
                 private keyboardService: KeyboardService,
@@ -205,6 +208,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 private sidePanelService: SidePanelService) {
 
         this.keyboardService.registerShortcuts(["Ctrl+k", "Ctrl+K"], this.clickOnSearchToStart.bind(this));
+        this.clickListener = this.renderer.listen('document', 'click', this.handleClickOut.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
@@ -227,6 +231,15 @@ export class SearchPanelComponent implements AfterViewInit {
         jumpToTargetService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
+        });
+
+        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
+           if (parameters.search.length) {
+               const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
+               if (lastEntry && parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
+                   this.parametersService.lastSearchHistoryEntry.next(parameters.search);
+               }
+           }
         });
 
         this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
@@ -458,10 +471,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.inactiveSearchItems.push(this.searchItems[i]);
             }
         }
-        // this.activeSearchItems = [
-        //     ...this.jumpToTargetService.jumpTargets.getValue().filter(target => target.validate(value)),
-        //     ...this.staticTargets.filter(target => target.validate(value))
-        // ]
         this.visibleSearchHistory = Object.values(
             this.searchHistory.reduce((acc, obj) => {
                 if (obj.input.includes(value)) {
@@ -473,10 +482,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 return acc;
             }, {} as Record<string, typeof this.searchHistory[number]>)
         );
-        // this.inactiveSearchItems = [
-        //     ...this.jumpToTargetService.jumpTargets.getValue().filter(target => !target.validate(value)),
-        //     ...this.staticTargets.filter(target => !target.validate(value))
-        // ]
     }
 
     setSelectedMap(value: string|null) {
@@ -512,6 +517,7 @@ export class SearchPanelComponent implements AfterViewInit {
             } else {
                 this.parametersService.setSearchHistoryState(null);
             }
+            this.textarea.nativeElement.blur();
         } else if (event.key === 'Escape') {
             event.stopPropagation();
             if (this.searchInputValue) {
@@ -530,6 +536,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     expandTextarea() {
+        this.sidePanelService.searchOpen = true;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         this.textarea.nativeElement.focus();
@@ -540,11 +547,24 @@ export class SearchPanelComponent implements AfterViewInit {
         this.cursorPosition = this.textarea.nativeElement.selectionStart;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
+        this.sidePanelService.searchOpen = false;
     }
 
     clickOnSearchToStart() {
         this.setSearchValue("");
         this.cursorPosition = 0;
         this.textarea.nativeElement.click();
+    }
+
+    handleClickOut(event: MouseEvent): void {
+        if (!this.elRef.nativeElement.contains(event.target)) {
+            this.dialog.close(event);
+        }
+    }
+
+    ngOnDestroy(): void {
+        if (this.clickListener) {
+            this.clickListener();
+        }
     }
 }

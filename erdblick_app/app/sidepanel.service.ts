@@ -1,4 +1,4 @@
-import {Injectable} from "@angular/core";
+import {ElementRef, Injectable} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 
 export enum SidePanelState {
@@ -10,6 +10,9 @@ export enum SidePanelState {
 
 @Injectable({providedIn: 'root'})
 export class SidePanelService {
+
+    featureSearchOpen: boolean = false;
+    searchOpen: boolean = false;
     previousState: string = SidePanelState.NONE;
     private _activeSidePanel = new BehaviorSubject<string>(SidePanelState.NONE);
 

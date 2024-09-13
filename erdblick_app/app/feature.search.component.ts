@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, ElementRef, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
@@ -11,51 +11,54 @@ import {KeyboardService} from "./keyboard.service";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="side-menu-dialog" header="Search Loaded Features" [(visible)]="isPanelVisible"
-                  style="padding: 0 0.5em 0.5em 0.5em"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false" [closeOnEscape]="false"
-                  (onShow)="keyboardService.dialogOnShow($event)" (onHide)="onHide($event)">
-            <div class="feature-search-controls">
-                <div class="progress-bar-container">
-                    <p-progressBar [value]="percentDone">
-                        <ng-template pTemplate="content" let-percentDone>
-                            <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
-                        </ng-template>
-                    </p-progressBar>
+        <div [ngClass]="{'z-index-low': sidePanelService.featureSearchOpen && sidePanelService.searchOpen}">
+            <p-dialog class="side-menu-dialog" header="Search Loaded Features"
+                      [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
+                      [position]="'topleft'" [draggable]="false" [resizable]="false" [closeOnEscape]="false"
+                      (onShow)="onShow($event)" (onHide)="onHide($event)">
+                <div class="feature-search-controls">
+                    <div class="progress-bar-container">
+                        <p-progressBar [value]="percentDone">
+                            <ng-template pTemplate="content" let-percentDone>
+                                <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
+                            </ng-template>
+                        </p-progressBar>
+                    </div>
+                    <p-button (click)="pauseSearch()"
+                              [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
+                              label=""
+                              [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
+                              [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
+                    <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                              pTooltip="Stop search" tooltipPosition="bottom"></p-button>
                 </div>
-                <p-button (click)="pauseSearch()" [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
-                          label=""
-                          [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
-                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
-                          pTooltip="Stop search" tooltipPosition="bottom"></p-button>
-            </div>
-            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
-            </div>
-            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
-            </div>
-            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
-            </div>
-            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                <span>Highlight colour:</span>
-                <span><p-colorPicker [(ngModel)]="searchService.pointColor"
-                                     (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
-            </div>
-            <p-accordion *ngIf="traceResults.length" class="trace-entries" [multiple]="true">
-                <p-accordionTab [header]="trace.name" *ngFor="let trace of traceResults">
-                    <span>{{ trace.content }}</span>
-                </p-accordionTab>
-            </p-accordion>
-            <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
-                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
-                       [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
-                       emptyMessage="No features matched."
-                       #listbox
-            />
-        </p-dialog>
+                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                    <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
+                </div>
+                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                    <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
+                </div>
+                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                    <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
+                </div>
+                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                    <span>Highlight colour:</span>
+                    <span><p-colorPicker [(ngModel)]="searchService.pointColor"
+                                         (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
+                </div>
+                <p-accordion *ngIf="traceResults.length" class="trace-entries" [multiple]="true">
+                    <p-accordionTab [header]="trace.name" *ngFor="let trace of traceResults">
+                        <span>{{ trace.content }}</span>
+                    </p-accordionTab>
+                </p-accordion>
+                <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
+                           optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
+                           [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
+                           emptyMessage="No features matched."
+                           #listbox
+                />
+            </p-dialog>
+        </div>
         <div #alert></div>
     `,
     styles: [``]
@@ -145,6 +148,12 @@ export class FeatureSearchComponent {
 
     onHide(event: any) {
         this.searchService.clear();
+        this.sidePanelService.featureSearchOpen = false;
         this.keyboardService.dialogOnHide(event);
+    }
+
+    onShow(event: any) {
+        this.sidePanelService.featureSearchOpen = true;
+        this.keyboardService.dialogOnShow(event);
     }
 }
