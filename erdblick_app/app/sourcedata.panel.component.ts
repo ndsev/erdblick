@@ -1,4 +1,13 @@
-import {Component, OnInit, Input, ViewChild} from "@angular/core";
+import {
+    Component,
+    OnInit,
+    Input,
+    ViewChild,
+    AfterViewChecked,
+    AfterContentChecked,
+    OnChanges,
+    OnDestroy, SimpleChanges
+} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
 import {MapService} from "./map.service";
@@ -6,19 +15,24 @@ import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
 import {Menu} from "primeng/menu";
+import {InspectionContainerSize} from "./inspection.panel.component";
+import {ParametersService} from "./parameters.service";
+import {Subscription} from "rxjs";
 
 @Component({
     selector: 'sourcedata-panel',
     template: `
-        <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
+        <div class="flex resizable-container"
+             [style.width.px]="parameterService.inspectionContainerWidth"
+             [style.height.px]="parameterService.inspectionContainerHeight"
+             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             [ngClass]="{'resizable-container-expanded': isExpanded}">
             <div class="resize-handle" (click)="isExpanded = !isExpanded">
                 <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
                 <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
             </div>
             <ng-container *ngIf="errorMessage.length == 0; else errorTemplate">
-                <p-treeTable #tt
-                    class="panel-tree"
-                    scrollHeight="flex"
+                <p-treeTable #tt scrollHeight="flex" filterMode="strict"
                     [value]="treeData"
                     [loading]="loading"
                     [autoLayout]="true"
@@ -26,9 +40,7 @@ import {Menu} from "primeng/menu";
                     [resizableColumns]="true"
                     [virtualScroll]="true"
                     [virtualScrollItemSize]="26"
-                    [tableStyle]="{'min-width': '150px', 'min-height': '1px', 'padding': '0px'}"
-                    
-                    filterMode="strict"
+                    [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                     [globalFilterFields]="filterFields"
                 >
                     <ng-template pTemplate="caption">
@@ -81,7 +93,7 @@ import {Menu} from "primeng/menu";
         </ng-template>
     `
 })
-export class SourceDataPanelComponent implements OnInit {
+export class SourceDataPanelComponent implements OnInit, OnDestroy {
     @Input() sourceData!: SelectedSourceData;
 
     @ViewChild('tt') table!: TreeTable;
@@ -107,6 +119,10 @@ export class SourceDataPanelComponent implements OnInit {
 
     // layerMenuItems: any[] = [];
 
+    inspectionContainerWidth: number;
+    inspectionContainerHeight: number;
+    containerSizeSubscription: Subscription;
+
     /**
      * Returns a human-readable layer name for a layer id.
      *
@@ -119,7 +135,21 @@ export class SourceDataPanelComponent implements OnInit {
         return layerId;
     }
 
-    constructor(private inspectionService: InspectionService, public mapService: MapService) {}
+    constructor(private inspectionService: InspectionService,
+                public parameterService: ParametersService,
+                public mapService: MapService) {
+        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
+            if (parameter.panel.length == 2) {
+                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = parameter.panel[1] * this.parameterService.baseFontSize;
+            } else {
+                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+            }
+        });
+    }
 
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
@@ -143,10 +173,6 @@ export class SourceDataPanelComponent implements OnInit {
             .finally(() => {
                 this.loading = false;
             });
-
-        // this.mapService.maps.subscribe(maps => {
-        //
-        // });
     }
 
     /**
@@ -271,5 +297,9 @@ export class SourceDataPanelComponent implements OnInit {
         if (event.key === 'Escape') {
             this.clearFilter();
         }
+    }
+
+    ngOnDestroy() {
+        this.containerSizeSubscription.unsubscribe();
     }
 }

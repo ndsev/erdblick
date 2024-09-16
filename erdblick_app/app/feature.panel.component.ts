@@ -1,13 +1,24 @@
-import {Component, Input, OnInit, ViewChild} from "@angular/core";
+import {
+    AfterContentChecked,
+    AfterViewChecked,
+    Component,
+    Input,
+    OnChanges,
+    OnDestroy,
+    OnInit,
+    ViewChild
+} from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
 import {MapService} from "./map.service";
-import {distinctUntilChanged} from "rxjs";
+import {distinctUntilChanged, Subscription} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
 import {TreeTable} from "primeng/treetable";
+import {InspectionContainerSize} from "./inspection.panel.component";
+import {ParametersService} from "./parameters.service";
 
 interface Column {
     field: string;
@@ -43,14 +54,16 @@ interface Column {
                 </p-button>
             </div>
         </div>
-        <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
+        <div class="flex resizable-container"
+             [style.width.px]="inspectionContainerWidth"
+             [style.height.px]="inspectionContainerHeight"
+             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             [ngClass]="{'resizable-container-expanded': isExpanded}">
             <div class="resize-handle" (click)="isExpanded = !isExpanded">
                 <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
                 <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
             </div>
-            <p-treeTable #tt
-                         filterMode="strict"
-                         scrollHeight="flex"
+            <p-treeTable #tt filterMode="strict" scrollHeight="flex"
                          [value]="filteredTree"
                          [columns]="cols"
                          [scrollable]="true"
@@ -163,7 +176,7 @@ interface Column {
         }
     `]
 })
-export class FeaturePanelComponent implements OnInit  {
+export class FeaturePanelComponent implements OnInit, OnDestroy  {
 
     //jsonTree: string = "";
     filteredTree: TreeTableNode[] = [];
@@ -185,9 +198,14 @@ export class FeaturePanelComponent implements OnInit  {
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
 
+    inspectionContainerWidth: number;
+    inspectionContainerHeight: number;
+    containerSizeSubscription: Subscription;
+
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
+                public parameterService: ParametersService,
                 public mapService: MapService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
@@ -207,7 +225,19 @@ export class FeaturePanelComponent implements OnInit  {
                     scroller.calculateAutoSize();
                 }
             }, 0);
-        })
+        });
+
+        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
+            if (parameter.panel.length == 2) {
+                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = parameter.panel[1] * this.parameterService.baseFontSize;
+            } else {
+                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+            }
+        });
     }
 
     ngOnInit(): void {
@@ -407,5 +437,9 @@ export class FeaturePanelComponent implements OnInit  {
         if (event.key === 'Escape') {
             this.clearFilter();
         }
+    }
+
+    ngOnDestroy() {
+        this.containerSizeSubscription.unsubscribe();
     }
 }

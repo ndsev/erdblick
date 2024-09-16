@@ -20,6 +20,12 @@ interface SourceLayerMenuItem {
     command: () => void
 }
 
+export interface InspectionContainerSize {
+    height: number,
+    width: number,
+    type: string
+}
+
 @Component({
     selector: 'inspection-panel',
     template: `

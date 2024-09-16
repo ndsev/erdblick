@@ -4,6 +4,7 @@ import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 import {ErdblickStyle} from "./style.service";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
+import {InspectionContainerSize} from "./inspection.panel.component";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -42,6 +43,7 @@ interface ErdblickParameters extends Record<string, any> {
     tilesVisualizeLimit: number,
     enabledCoordsTileIds: Array<string>,
     selectedSourceData: Array<any>,
+    panel: Array<number>
 }
 
 interface ParameterDescriptor {
@@ -182,6 +184,12 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: Array.isArray,
         default: [],
         urlParam: true
+    },
+    panel: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && val.length == 2 && val.every(item => typeof item === 'number'),
+        default: [],
+        urlParam: true
     }
 };
 
@@ -204,10 +212,16 @@ export class ParametersService {
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
 
+    baseFontSize: number = 16;
+    inspectionContainerWidth: number = 40;
+    inspectionContainerHeight: number = 10.5;
+
     CAMERA_MOVE_AMOUNT = 1000.0;
     CAMERA_ZOOM_AMOUNT = 5000.0;
 
     constructor(public router: Router) {
+        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();
@@ -492,5 +506,42 @@ export class ParametersService {
         } else {
             localStorage.setItem("searchHistory", JSON.stringify(value));
         }
+    }
+
+    // resizeInspectionContainer() {
+    //     this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    //     const containerSize = localStorage.getItem('inspectContainerSize');
+    //     if (containerSize) {
+    //         const parsedContainerSize = JSON.parse(containerSize) as InspectionContainerSize;
+    //         this.inspectionContainerWidth = parsedContainerSize.width * this.baseFontSize;
+    //         this.inspectionContainerWidth = parsedContainerSize.height * this.baseFontSize;
+    //     } else {
+    //         this.inspectionContainerWidth = 40 * this.baseFontSize;
+    //         this.inspectionContainerWidth = (window.innerHeight - 10.5 * this.baseFontSize) * this.baseFontSize;
+    //     }
+    // }
+
+    onInspectionContainerResize(event: MouseEvent): void {
+        const element = event.target as HTMLElement;
+        if (!element.classList.contains("resizable-container")) {
+            return;
+        }
+        if (!element.offsetWidth || !element.offsetHeight) {
+            return;
+        }
+        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+        const currentEmWidth = element.offsetWidth / this.baseFontSize;
+        if (currentEmWidth < 40.0) {
+            this.inspectionContainerWidth = 40 * this.baseFontSize;
+        } else {
+            this.inspectionContainerWidth = element.offsetWidth;
+        }
+        this.inspectionContainerHeight = element.offsetHeight;
+
+        this.p().panel = [
+            this.inspectionContainerWidth / this.baseFontSize,
+            this.inspectionContainerHeight / this.baseFontSize
+        ];
+        this.parameters.next(this.p());
     }
 }
