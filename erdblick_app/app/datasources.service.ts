@@ -11,7 +11,7 @@ export class DataSourcesService {
     configDialogVisible = false;
     loading = false;
     errorMessage: string = "";
-    dataSourcesConfigJson: BehaviorSubject<Object> = new BehaviorSubject<Object>({});
+    dataSourcesConfigJson: BehaviorSubject<any> = new BehaviorSubject<any>({});
 
     constructor(private messageService: InfoMessageService,
                 public mapService: MapService,

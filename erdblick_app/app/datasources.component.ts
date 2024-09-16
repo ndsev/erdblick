@@ -132,7 +132,7 @@ export class DatasourcesComponent {
     wasModified: boolean = false;
     dataSourcesConfig: string = "";
     form: FormGroup | undefined;
-    model: Object = {};
+    model: any = {};
     options!: FormlyFormOptions;
     fields!: FormlyFieldConfig[];
     schema: JSONSchema7 = {};

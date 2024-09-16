@@ -13,17 +13,17 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
-export interface CoverageRectItem extends Object {
+export interface CoverageRectItem extends Record<string, any> {
     min: number,
     max: number
 }
 
 /** Expected structure of a list entry in the MapInfoItem's layer entry. */
-export interface LayerInfoItem extends Object {
+export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
     coverage: Array<number|CoverageRectItem>;
-    featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
+    featureTypes: Array<{name: string, uniqueIdCompositions: Array<any>}>;
     layerId: string;
     type: string;
     version: {major: number, minor: number, patch: number};
@@ -34,8 +34,8 @@ export interface LayerInfoItem extends Object {
 }
 
 /** Expected structure of a list entry in the /sources endpoint. */
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
+export interface MapInfoItem extends Record<string, any> {
+    extraJsonAttachment: any;
     layers: Map<string, LayerInfoItem>;
     mapId: string;
     maxParallelJobs: number;

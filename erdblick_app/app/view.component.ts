@@ -303,8 +303,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Handle the antimeridian.
         // TODO: Must also handle north pole.
-        if (west > -180 && sizeLon > 180.) {
-            sizeLon = 360. - sizeLon;
+        if (west > -180 && sizeLon > 180.0) {
+            sizeLon = 360.0 - sizeLon;
         }
 
         // Grow the viewport rectangle by 25%
