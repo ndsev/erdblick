@@ -529,7 +529,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 return;
             }
             this.dialog.close(event);
-        }``
+        }
     }
 
     selectHistoryEntry(index: number) {

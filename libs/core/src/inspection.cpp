@@ -384,6 +384,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
         newDict.set("children", childrenToJsValue());
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
+    if (mapId_)
+        newDict.set("mapId", *mapId_);
     if (!sourceDataRefs_.empty()) {
         auto list = JsValue::List();
         for (const auto& ref : sourceDataRefs_) {
