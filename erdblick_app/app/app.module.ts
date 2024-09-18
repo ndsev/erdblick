@@ -21,7 +21,7 @@ import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./info.service";
-import {OnEnterClickDirective, SearchPanelComponent} from "./search.panel.component";
+import {SearchPanelComponent} from "./search.panel.component";
 import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {InputSwitchModule} from "primeng/inputswitch";

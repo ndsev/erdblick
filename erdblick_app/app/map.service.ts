@@ -450,12 +450,21 @@ export class MapService {
         // TODO: Consider tile TTL.
         let requests = [];
         if (this.selectionTileRequest) {
-            requests.push(this.selectionTileRequest.remoteRequest);
-
-            if (this.currentFetch) {
-                // Disable the re-fetch filtering logic by setting the old
-                // fetches' body to null.
-                this.currentFetch.bodyJson = null;
+            // Do not go forward with the selection tile request, if it
+            // pertains to a map layer that is not available anymore.
+            const mapLayerItem = this.maps.getValue()
+                .get(this.selectionTileRequest.remoteRequest.mapId)?.layers
+                .get(this.selectionTileRequest.remoteRequest.layerId);
+            if (mapLayerItem) {
+                requests.push(this.selectionTileRequest.remoteRequest);
+                if (this.currentFetch) {
+                    // Disable the re-fetch filtering logic by setting the old
+                    // fetches' body to null.
+                    this.currentFetch.bodyJson = null;
+                }
+            }
+            else {
+                this.selectionTileRequest.reject!("Map layer is not available.");
             }
         }
 
