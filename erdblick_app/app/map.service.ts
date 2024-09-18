@@ -787,16 +787,18 @@ export class MapService {
         // Apply highlight styles.
         const featureTile = featureWrappers[0].featureTile;
         const featureIds = featureWrappers.map(fw => fw.featureId);
-        for (let [_, styleData] of this.styleService.styles) {
-            if (styleData.featureLayerStyle && styleData.params.visible) {
+        for (let [_, style] of this.styleService.styles) {
+            if (style.featureLayerStyle && style.params.visible) {
                 let visu = new TileVisualization(
                     featureTile,
                     this.pointMergeService,
                     (tileKey: string)=>this.getFeatureTile(tileKey),
-                    styleData.featureLayerStyle,
+                    style.featureLayerStyle,
                     true,
                     mode,
-                    featureIds);
+                    featureIds,
+                    false,
+                    style.params.options);
                 this.tileVisualizationTopic.next(visu);
                 visualizationCollection.push(visu);
             }
