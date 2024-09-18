@@ -101,7 +101,7 @@ export class Fetch
             requestOptions["body"] = this.bodyJson;
             headers["Content-Type"] = "application/json";
         }
-        requestOptions["headers"] = headers
+        requestOptions["headers"] = headers;
 
         return fetch(this.url, requestOptions)
             .then(response => {

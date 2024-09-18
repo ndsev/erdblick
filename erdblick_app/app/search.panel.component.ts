@@ -111,6 +111,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
     @ViewChild('textarea') textarea!: ElementRef;
     @ViewChild('actionsdialog') dialog!: Dialog;
+    @ViewChild('searchcontrols') container!: HTMLDivElement;
     cursorPosition: number = 0;
     private clickListener: () => void;
 
@@ -528,7 +529,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 return;
             }
             this.dialog.close(event);
-        }``
+        }
     }
 
     selectHistoryEntry(index: number) {
@@ -554,8 +555,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     clickOnSearchToStart() {
-        this.setSearchValue("");
-        this.cursorPosition = 0;
+        // this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         this.textarea.nativeElement.click();
     }
 

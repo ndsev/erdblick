@@ -13,17 +13,17 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
-export interface CoverageRectItem extends Object {
+export interface CoverageRectItem extends Record<string, any> {
     min: number,
     max: number
 }
 
 /** Expected structure of a list entry in the MapInfoItem's layer entry. */
-export interface LayerInfoItem extends Object {
+export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
     coverage: Array<number|CoverageRectItem>;
-    featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
+    featureTypes: Array<{name: string, uniqueIdCompositions: Array<any>}>;
     layerId: string;
     type: string;
     version: {major: number, minor: number, patch: number};
@@ -34,8 +34,8 @@ export interface LayerInfoItem extends Object {
 }
 
 /** Expected structure of a list entry in the /sources endpoint. */
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
+export interface MapInfoItem extends Record<string, any> {
+    extraJsonAttachment: any;
     layers: Map<string, LayerInfoItem>;
     mapId: string;
     maxParallelJobs: number;
@@ -450,12 +450,21 @@ export class MapService {
         // TODO: Consider tile TTL.
         let requests = [];
         if (this.selectionTileRequest) {
-            requests.push(this.selectionTileRequest.remoteRequest);
-
-            if (this.currentFetch) {
-                // Disable the re-fetch filtering logic by setting the old
-                // fetches' body to null.
-                this.currentFetch.bodyJson = null;
+            // Do not go forward with the selection tile request, if it
+            // pertains to a map layer that is not available anymore.
+            const mapLayerItem = this.maps.getValue()
+                .get(this.selectionTileRequest.remoteRequest.mapId)?.layers
+                .get(this.selectionTileRequest.remoteRequest.layerId);
+            if (mapLayerItem) {
+                requests.push(this.selectionTileRequest.remoteRequest);
+                if (this.currentFetch) {
+                    // Disable the re-fetch filtering logic by setting the old
+                    // fetches' body to null.
+                    this.currentFetch.bodyJson = null;
+                }
+            }
+            else {
+                this.selectionTileRequest.reject!("Map layer is not available.");
             }
         }
 
@@ -778,16 +787,18 @@ export class MapService {
         // Apply highlight styles.
         const featureTile = featureWrappers[0].featureTile;
         const featureIds = featureWrappers.map(fw => fw.featureId);
-        for (let [_, styleData] of this.styleService.styles) {
-            if (styleData.featureLayerStyle && styleData.params.visible) {
+        for (let [_, style] of this.styleService.styles) {
+            if (style.featureLayerStyle && style.params.visible) {
                 let visu = new TileVisualization(
                     featureTile,
                     this.pointMergeService,
                     (tileKey: string)=>this.getFeatureTile(tileKey),
-                    styleData.featureLayerStyle,
+                    style.featureLayerStyle,
                     true,
                     mode,
-                    featureIds);
+                    featureIds,
+                    false,
+                    style.params.options);
                 this.tileVisualizationTopic.next(visu);
                 visualizationCollection.push(visu);
             }

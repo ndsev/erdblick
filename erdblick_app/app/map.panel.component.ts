@@ -12,6 +12,8 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "./keyboard.service";
+import {EditorService} from "./editor.service";
+import {DataSourcesService} from "./datasources.service";
 
 
 @Component({
@@ -22,6 +24,11 @@ import {KeyboardService} from "./keyboard.service";
                   (onHide)="keyboardService.dialogOnHide($event)">
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
+                    <p-button onEnterClick (click)="openDatasources()" class="osm-button"
+                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"
+                              tooltipPosition="bottom" tabindex="0">
+                    </p-button>
+                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
                               icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -172,19 +179,20 @@ import {KeyboardService} from "./keyboard.service";
         </p-button>
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
                   class="editor-dialog">
-            <editor></editor>
+            <editor [loadFun]="loadEditedStyle" [saveFun]="triggerStyleSave"></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)" [label]='this.sourceWasModified ? "Discard" : "Cancel"'
+                    <p-button (click)="closeEditorDialog($event)"
+                              [label]='this.sourceWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
                         <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
                     </div>
                 </div>
-                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing.getValue())"
+                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
                           [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
                           [style]="{margin: '0 0.5em'}">
                 </p-button>
@@ -198,6 +206,7 @@ import {KeyboardService} from "./keyboard.service";
                 <p-button (click)="warningDialog.close($event)" label="No"></p-button>
             </div>
         </p-dialog>
+        <datasources></datasources>
     `,
     styles: [``]
 })
@@ -225,6 +234,8 @@ export class MapPanelComponent {
                 public styleService: StyleService,
                 public parameterService: ParametersService,
                 public keyboardService: KeyboardService,
+                public editorService: EditorService,
+                public dsService: DataSourcesService,
                 private sidePanelService: SidePanelService)
     {
         this.keyboardService.registerShortcuts(['m', 'M'], this.showLayerDialog.bind(this));
@@ -240,7 +251,12 @@ export class MapPanelComponent {
             if (activePanel != SidePanelState.MAPS) {
                 this.layerDialogVisible = false;
             }
-        })
+        });
+        this.editorService.editedStateData.subscribe(state => {
+            this.styleService.styleEditedStateData.next(state);
+        });
+        this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this));
+        this.keyboardService.registerShortcut('M', this.showLayerDialog.bind(this));
     }
 
     get osmOpacityString(): string {
@@ -440,7 +456,8 @@ export class MapPanelComponent {
     }
 
     showStyleEditor(styleId: string) {
-        this.styleService.selectedStyleIdForEditing.next(styleId);
+        this.styleService.selectedStyleIdForEditing = styleId;
+        this.editorService.updateEditorState.next(true);
         this.editorDialogVisible = true;
         this.editedStyleSourceSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleSource => {
             const originalStyleSource = this.styleService.styles.get(styleId)?.source!;
@@ -452,7 +469,7 @@ export class MapPanelComponent {
     }
 
     applyEditedStyle() {
-        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
+        const styleId = this.styleService.selectedStyleIdForEditing;
         const styleData = this.styleService.styleEditedStateData.getValue().replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
@@ -485,8 +502,7 @@ export class MapPanelComponent {
     }
 
     discardStyleEdits() {
-        const styleId = this.styleService.selectedStyleIdForEditing.getValue();
-        this.styleService.selectedStyleIdForEditing.next(styleId);
+        this.editorService.updateEditorState.next(false);
         this.warningDialogVisible = false;
     }
 
@@ -496,5 +512,21 @@ export class MapPanelComponent {
 
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
         return 0;
+    }
+
+    openDatasources() {
+        this.dsService.configDialogVisible = true;
+    }
+
+    loadEditedStyle() {
+        if (this.styleService.styles.has(this.styleService.selectedStyleIdForEditing)) {
+            return `${this.styleService.styles.get(this.styleService.selectedStyleIdForEditing)!.source}\n\n\n\n\n`;
+        } else {
+            return "";
+        }
+    }
+
+    triggerStyleSave() {
+        this.styleService.styleEditedSaveTriggered.next(true);
     }
 }

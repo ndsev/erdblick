@@ -26,8 +26,8 @@ type Cartographic = {x: number, y: number, z: number};
 export interface MergedPointVisualization {
     position: Cartographic,
     positionHash: PositionHash,
-    pointParameters?: Record<string, any>|null,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
-    labelParameters?: Record<string, any>|null,  // Label Visualization Parameters for call to LabelCollection.add().
+    pointParameters: any,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
+    labelParameters: any,  // Label Visualization Parameters for call to LabelCollection.add().
     featureIds: Array<TileFeatureId>
 }
 
@@ -60,10 +60,10 @@ export class MergedPointsTile {
                     existingPoint.featureIds.push(fid);
                 }
             }
-            if (point.pointParameters !== undefined) {
+            if (point.pointParameters) {
                 existingPoint.pointParameters = point.pointParameters;
             }
-            if (point.labelParameters !== undefined) {
+            if (point.labelParameters) {
                 existingPoint.labelParameters = point.labelParameters;
             }
         }
