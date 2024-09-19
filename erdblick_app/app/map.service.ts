@@ -679,7 +679,7 @@ export class MapService {
     async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Load the tiles for the selection.
         const tiles = await this.loadTiles(
-            new Set(tileFeatureIds.filter(s => typeof s !== "string").map(s => s?.mapTileKey || null)));
+            new Set(tileFeatureIds.filter(s => s && typeof s !== "string").map(s => (s as TileFeatureId).mapTileKey)));
 
         // Ensure that the feature really exists in the tile.
         let features = new Array<FeatureWrapper>();

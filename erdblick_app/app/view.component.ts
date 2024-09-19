@@ -91,18 +91,18 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
 
         this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number, z?: number}) => {
-            this.parameterService.cameraViewData.next({
-                // Convert lon/lat to Cartesian3 using current camera altitude.
-                destination: Cartesian3.fromDegrees(
+            // Convert lon/lat to Cartesian3 using current camera altitude.
+            this.parameterService.setView(
+                Cartesian3.fromDegrees(
                     pos.x,
                     pos.y,
                     pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
-                orientation: {
+                {
                     heading: CesiumMath.toRadians(0), // East, in radians.
                     pitch: CesiumMath.toRadians(-90), // Directly looking down.
                     roll: 0 // No rotation.
                 }
-            });
+            );
         });
     }
 
@@ -195,7 +195,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Remove fullscreen button as unnecessary
         this.viewer.fullscreenButton.destroy();
 
-        this.parameterService.cameraViewData.subscribe(cameraData => {
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
             this.viewer.camera.setView({
                 destination: cameraData.destination,
                 orientation: cameraData.orientation
@@ -389,27 +389,37 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     moveUp() {
-        this.viewer.camera.moveUp(this.parameterService.CAMERA_MOVE_AMOUNT);
+        this.moveCameraOnSurface(0, this.parameterService.cameraMoveUnits);
     }
 
     moveDown() {
-        this.viewer.camera.moveDown(this.parameterService.CAMERA_MOVE_AMOUNT);
+        this.moveCameraOnSurface(0, -this.parameterService.cameraMoveUnits);
     }
 
     moveLeft() {
-        this.viewer.camera.moveLeft(this.parameterService.CAMERA_MOVE_AMOUNT);
+        this.moveCameraOnSurface(-this.parameterService.cameraMoveUnits, 0);
     }
 
     moveRight() {
-        this.viewer.camera.moveRight(this.parameterService.CAMERA_MOVE_AMOUNT);
+        this.moveCameraOnSurface(this.parameterService.cameraMoveUnits, 0);
+    }
+
+    private moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
+        // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
+        const cameraPosition = this.viewer.camera.positionCartographic;
+        const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
+        const lat = cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset);
+        const alt = cameraPosition.height;
+        const newPosition = Cartesian3.fromRadians(lon, lat, alt);
+        this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
     }
 
     zoomIn() {
-        this.viewer.camera.zoomIn(this.parameterService.CAMERA_ZOOM_AMOUNT);
+        this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
     }
 
     zoomOut() {
-        this.viewer.camera.zoomOut(this.parameterService.CAMERA_ZOOM_AMOUNT);
+        this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
     }
 
     resetOrientation() {

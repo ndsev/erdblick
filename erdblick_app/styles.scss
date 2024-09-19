@@ -1,6 +1,14 @@
 @import "primeicons/primeicons.css";
 @layer primeng, erdblick;
 
+:root {
+    font-family: Inter, sans-serif;
+    font-feature-settings: 'liga' 1, 'calt' 1; /* fix for Chrome */
+}
+@supports (font-variation-settings: normal) {
+    :root { font-family: InterVariable, sans-serif; }
+}
+
 .source-layer-dropdown {
     .p-dropdown-label {
         padding: 0.4em;
@@ -183,10 +191,6 @@ body {
             direction: ltr;
         }
 
-        .resize-handle {
-            display: none;
-        }
-
         .p-tree {
             border: none;
             padding: 0;
@@ -288,20 +292,6 @@ body {
         max-height: calc(100vh - 10.8em) !important;
     }
 
-    .p-tabview-nav li {
-        width: 50%;
-    }
-
-    .p-tabview-nav-link {
-        padding: 0.5em 1em;
-        font-size: 0.9em;
-        width: 100%;
-    }
-
-    .p-tabview-title {
-        margin: 0 auto;
-    }
-
     .search-input {
         width: 100%;
         position: relative;
@@ -316,6 +306,7 @@ body {
         }
 
         textarea.single-line {
+            min-height: 3em;
             width: 22em !important;
             white-space: nowrap;
             text-overflow: ellipsis;
@@ -361,6 +352,11 @@ body {
 
             &:hover {
                 background-color: var(--blue-100);
+            }
+
+            &:focus-visible {
+                background-color: var(--blue-100);
+                outline: none;
             }
         }
 
@@ -441,8 +437,8 @@ body {
 
 .map-layer-dialog, .side-menu-dialog {
     .p-dialog {
-        width: 25em;
-        min-width: 25em;
+        width: 25.5em;
+        min-width: 25.5em;
         margin: 0;
         position: absolute;
         top: 4em;
@@ -472,6 +468,22 @@ body {
     .p-dialog-content {
         border-top-right-radius: 6px;
         border-top-left-radius: 6px;
+
+        *:focus-visible {
+            outline: 2px solid var(--blue-500);
+        }
+    }
+
+    .p-checkbox-box {
+        .p-checkbox-icon {
+            transition-duration: 0.1s;
+            font-size: 1em;
+        }
+
+        .p-icon {
+            width: 1em;
+            height: 1em;
+        }
     }
 }
 
@@ -651,13 +663,6 @@ body {
                 box-shadow: none;
             }
 
-            .p-fileupload {
-                span {
-                    box-shadow: none;
-                    min-width: 6.4em;
-                }
-            }
-
             input {
                 margin: 0;
             }
@@ -681,12 +686,17 @@ body {
         justify-content: center;
         align-items: center;
         display: flex;
+        padding-top: 0.5em;
 
         .p-fileupload {
-            span {
+            .p-fileupload-choose {
+                padding: 0.5em 1em 0.5em 1em;
+            }
+
+            .p-button-label {
                 box-shadow: none;
                 min-width: 6.4em;
-                font-size: 0.9em;
+                font-size: 0.8em;
             }
         }
     }
@@ -1028,19 +1038,66 @@ body {
         }
     }
 
-    .search-input {
-        width: calc(100vw - 3em);
-        height: 3em;
+    .search-wrapper {
         position: absolute;
         top: 0;
         left: 3em;
+        min-width: 100%;
+        min-height: 3.5em;
+        max-width: 100%;
+        max-height: calc(100vh - 5em);
+        z-index: 150;
 
-        input {
-            width: 100%;
-            height: 100%;
-            padding-left: 2em;
+        .resizable-container {
+            min-width: 100%;
+            min-height: 0;
+            overflow: auto;
+            max-width: 100%;
+            max-height: calc(100vh - 11.5em);
             border-radius: 0;
-            border: none;
+            margin-left: -3em;
+            resize: none;
+        }
+
+        .p-dialog {
+            max-height: calc(100vh - 11.5em);
+            border-radius: 0;
+
+            .p-dialog-content:last-of-type {
+                border-bottom-right-radius: 0;
+                border-bottom-left-radius: 0;
+            }
+
+            .p-dialog-content:first-of-type {
+                border-top-right-radius: 0;
+                border-top-left-radius: 0;
+            }
+        }
+
+        .search-input {
+            width: calc(100vw - 3em);
+            height: 3em;
+            position: relative;
+            top: 0;
+            left: 0;
+
+            textarea {
+                width: 100%;
+                height: 100%;
+                border-radius: 0;
+                border: none;
+            }
+
+            textarea.single-line {
+                width: 100% !important;
+                height: 100%;
+                padding-left: 2em;
+                border-radius: 0;
+                border: none;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                overflow: hidden;
+            }
         }
     }
 
@@ -1067,6 +1124,7 @@ body {
             margin: 0;
             top: 3em;
             left: 0;
+            border-radius: 0;
         }
 
         .p-dialog-header {

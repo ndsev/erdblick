@@ -258,13 +258,13 @@ export class SearchPanelComponent implements AfterViewInit {
         this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
-            }, 0);
+            }, 10);
         });
 
         this.dialog.onHide.subscribe(() => {
             setTimeout(() => {
                 this.shrinkTextarea();
-            }, 0);
+            }, 10);
         });
     }
 
@@ -543,8 +543,10 @@ export class SearchPanelComponent implements AfterViewInit {
         this.sidePanelService.searchOpen = true;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
-        this.textarea.nativeElement.focus();
-        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
+        setTimeout(() => {
+            this.textarea.nativeElement.focus();
+            this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
+        }, 100)
     }
 
     shrinkTextarea() {
@@ -569,5 +571,9 @@ export class SearchPanelComponent implements AfterViewInit {
         if (this.clickListener) {
             this.clickListener();
         }
+    }
+
+    onFileSelected($event: any) {
+        alert($event)
     }
 }

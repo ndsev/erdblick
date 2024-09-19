@@ -38,14 +38,14 @@ export class ErdblickDebugApi {
      */
     setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.parametersService.cameraViewData.next({
-            destination: Cartesian3.fromArray(cameraInfo.position),
-            orientation: {
+        this.parametersService.setView(
+            Cartesian3.fromArray(cameraInfo.position),
+            {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
                 roll: cameraInfo.orientation.roll
             }
-        });
+        );
     }
 
     /**
@@ -54,12 +54,13 @@ export class ErdblickDebugApi {
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
     getCamera() {
+        const destination = this.parametersService.getCameraPosition();
         const position = [
-            this.parametersService.cameraViewData.getValue().destination.x,
-            this.parametersService.cameraViewData.getValue().destination.y,
-            this.parametersService.cameraViewData.getValue().destination.z,
+           destination.x,
+           destination.y,
+           destination.z,
         ];
-        const orientation = this.parametersService.cameraViewData.getValue().orientation;
+        const orientation = this.parametersService.getCameraOrientation();
         return JSON.stringify({position, orientation});
     }
 

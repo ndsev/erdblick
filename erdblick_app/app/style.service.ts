@@ -377,11 +377,16 @@ export class StyleService {
         if (!this.styles.has(styleId)) {
             return;
         }
-        let style = this.styles.get(styleId)!;
+        const style = this.styles.get(styleId)!;
         style.params.visible = enabled !== undefined ? enabled : !style.params.visible;
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
         this.parameterService.setStyleConfig(styleId, style.params);
+    }
+
+    toggleOption(styleId: string, optionId: string, enabled: boolean) {
+        const style = this.styles.get(styleId)!;
+        style.params.options[optionId] = enabled;
     }
 }

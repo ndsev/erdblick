@@ -20,7 +20,7 @@ export interface TileFeatureId {
 
 export interface StyleParameters {
     visible: boolean,
-    options: Record<string, string>,
+    options: Record<string, boolean>,
     showOptions: boolean,
 }
 
@@ -214,10 +214,11 @@ export class ParametersService {
 
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
-    inspectionContainerHeight: number = 10.5;
+    inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
 
-    CAMERA_MOVE_AMOUNT = 1000.0;
-    CAMERA_ZOOM_AMOUNT = 5000.0;
+    private baseCameraMoveM = 100.0;
+    private baseCameraZoomM = 100.0;
+    private scalingFactor = 1;
 
     constructor(public router: Router) {
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
@@ -227,9 +228,18 @@ export class ParametersService {
         this.saveParameters();
         this.parameters.subscribe(parameters => {
             if (parameters) {
+                this.scalingFactor = Math.pow(parameters.alt / 1000, 1.1) / 2;
                 this.saveParameters();
             }
         });
+    }
+
+    get cameraMoveUnits() {
+        return this.baseCameraMoveM * this.scalingFactor / 75000;
+    }
+
+    get cameraZoomUnits() {
+        return this.baseCameraZoomM * this.scalingFactor;
     }
 
     get replaceUrl() {
@@ -382,6 +392,11 @@ export class ParametersService {
         this.p().pitch = camera.pitch;
         this.p().roll = camera.roll;
         this.parameters.next(this.p());
+        this.setView(Cartesian3.fromDegrees(this.p().lon, this.p().lat, this.p().alt), {
+            heading: this.p().heading,
+            pitch: this.p().pitch,
+            roll: this.p().roll
+        });
     }
 
     loadSavedParameters(): ErdblickParameters | null {
@@ -507,19 +522,6 @@ export class ParametersService {
             localStorage.setItem("searchHistory", JSON.stringify(value));
         }
     }
-
-    // resizeInspectionContainer() {
-    //     this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-    //     const containerSize = localStorage.getItem('inspectContainerSize');
-    //     if (containerSize) {
-    //         const parsedContainerSize = JSON.parse(containerSize) as InspectionContainerSize;
-    //         this.inspectionContainerWidth = parsedContainerSize.width * this.baseFontSize;
-    //         this.inspectionContainerWidth = parsedContainerSize.height * this.baseFontSize;
-    //     } else {
-    //         this.inspectionContainerWidth = 40 * this.baseFontSize;
-    //         this.inspectionContainerWidth = (window.innerHeight - 10.5 * this.baseFontSize) * this.baseFontSize;
-    //     }
-    // }
 
     onInspectionContainerResize(event: MouseEvent): void {
         const element = event.target as HTMLElement;

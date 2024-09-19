@@ -1,4 +1,4 @@
-import {Component, ViewChild, Pipe, PipeTransform} from "@angular/core";
+import {Component, ViewChild, Pipe, PipeTransform, AfterViewInit, ElementRef} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {CoverageRectItem, MapInfoItem, MapService} from "./map.service";
 import {ErdblickStyle, StyleService} from "./style.service";
@@ -20,8 +20,7 @@ import {DataSourcesService} from "./datasources.service";
     selector: 'map-panel',
     template: `
         <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false" (onShow)="keyboardService.dialogOnShow($event)" 
-                  (onHide)="keyboardService.dialogOnHide($event)">
+                  [position]="'topleft'" [draggable]="false" [resizable]="false">
             <p-fieldset class="map-tab" legend="Maps and Layers">
                 <div class="osm-controls">
                     <p-button onEnterClick (click)="openDatasources()" class="osm-button"
@@ -36,9 +35,9 @@ import {DataSourcesService} from "./datasources.service";
                     </p-button>
                     <div *ngIf="osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="osmOpacityString"
-                               class="w-full slider-input"/>
+                               class="w-full slider-input" tabindex="0"/>
                         <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                                  class="w-full" tabindex="0">
+                                  class="w-full" tabindex="-1">
                         </p-slider>
                     </div>
                 </div>
@@ -104,13 +103,14 @@ import {DataSourcesService} from "./datasources.service";
                                 <span onEnterClick *ngIf="style.value.options.length" class="material-icons"
                                       [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
                                       style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
-                                      (click)="style.value.params.showOptions = !style.value.params.showOptions; applyStyleConfig(style.value, false)"
-                                      tabindex="0">
+                                      (click)="expandStyle(style.key)" tabindex="0">
                                     expand_more
                                 </span>
                                 <span onEnterClick class="material-icons"
                                       style="font-size: 1.5em; cursor: pointer"
-                                      (click)="showStylesToggleMenu($event, style.key)" tabindex="0">more_vert</span>
+                                      (click)="showStylesToggleMenu($event, style.key)" tabindex="0">
+                                    more_vert
+                                </span>
                                 <span>
                                     <p-checkbox onEnterClick [(ngModel)]="style.value.params.visible"
                                                 (ngModelChange)="applyStyleConfig(style.value)"
@@ -140,12 +140,19 @@ import {DataSourcesService} from "./datasources.service";
                                 </p-button>
                             </div>
                         </div>
-                        <div *ngIf="style.value.options.length && style.value.params.showOptions">
+                        <div *ngIf="style.value.options.length && style.value.params.showOptions && style.value.params.visible">
                             <div *ngFor="let option of style.value.options"
-                                 style="margin-left: 4.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
-                                <p-checkbox onEnterClick [(ngModel)]="style.value.params.options[option.id]"
-                                            (ngModelChange)="applyStyleConfig(style.value)"
-                                            [label]="option.label" [binary]="true" tabindex="0"/>
+                                 style="margin-left: 2.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
+                                <span onEnterClick class="material-icons"
+                                      style="font-size: 1.5em; cursor: pointer"
+                                      (click)="showOptionsToggleMenu($event, style.value, option.id)" tabindex="0">
+                                    more_vert
+                                </span>
+                                <span style="font-style: oblique">
+                                    <p-checkbox onEnterClick [(ngModel)]="style.value.params.options[option.id]"
+                                                (ngModelChange)="applyStyleConfig(style.value)"
+                                                [label]="option.label" [binary]="true" tabindex="0"/>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -160,13 +167,11 @@ import {DataSourcesService} from "./datasources.service";
                 </div>
                 <div class="styles-container">
                     <div class="styles-import">
-                        <p-fileUpload onEnterClick name="demo[]" mode="basic" chooseLabel="Import Style"
-                                      [customUpload]="true" [fileLimit]="1" [multiple]="false"
-                                      accept=".yaml" [maxFileSize]="1048576"
-                                      (uploadHandler)="importStyle($event)"
-                                      pTooltip="Import style" tooltipPosition="bottom"
-                                      class="import-dialog" #styleUploader tabindex="0">
-                        </p-fileUpload>
+                        <p-fileUpload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
+                            accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
+                            customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                            class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
+                            chooseLabel="Import Style" tabindex="0" />
                     </div>
                 </div>
             </p-fieldset>
@@ -236,8 +241,7 @@ export class MapPanelComponent {
                 public keyboardService: KeyboardService,
                 public editorService: EditorService,
                 public dsService: DataSourcesService,
-                private sidePanelService: SidePanelService)
-    {
+                private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcuts(['m', 'M'], this.showLayerDialog.bind(this));
 
         this.parameterService.parameters.subscribe(parameters => {
@@ -255,12 +259,57 @@ export class MapPanelComponent {
         this.editorService.editedStateData.subscribe(state => {
             this.styleService.styleEditedStateData.next(state);
         });
-        this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this));
-        this.keyboardService.registerShortcut('M', this.showLayerDialog.bind(this));
     }
 
     get osmOpacityString(): string {
         return 'Opacity: ' + this.osmOpacityValue;
+    }
+
+    // TODO: Refactor these into a generic solution
+    showOptionsToggleMenu(event: MouseEvent, style: ErdblickStyle, optionId: string) {
+        this.toggleMenu.toggle(event);
+        this.toggleMenuItems = [
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    for (const id in style.params.options) {
+                        this.styleService.toggleOption(style.id, id, id == optionId);
+                    }
+                    this.applyStyleConfig(style);
+                    // this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    for (const id in style.params.options) {
+                        this.styleService.toggleOption(style.id, id, id != optionId);
+                    }
+                    this.applyStyleConfig(style);
+                    // this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    for (const id in style.params.options) {
+                        this.styleService.toggleOption(style.id, id, false);
+                    }
+                    this.applyStyleConfig(style);
+                    // this.mapService.update();
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    for (const id in style.params.options) {
+                        this.styleService.toggleOption(style.id, id, true);
+                    }
+                    this.applyStyleConfig(style);
+                    // this.mapService.update();
+                }
+            }
+        ];
     }
 
     showStylesToggleMenu(event: MouseEvent, styleId: string) {
@@ -410,6 +459,12 @@ export class MapPanelComponent {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
     }
 
+    expandStyle(styleId: string) {
+        const style = this.styleService.styles.get(styleId)!;
+        style.params.showOptions = !style.params.showOptions;
+        this.applyStyleConfig(style, false);
+    }
+
     applyStyleConfig(style: ErdblickStyle, redraw: boolean=true) {
         if (redraw) {
             this.styleService.reapplyStyle(style.id);
@@ -429,6 +484,7 @@ export class MapPanelComponent {
     }
 
     importStyle(event: any) {
+        console.log(event)
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
             let styleId = file.name;

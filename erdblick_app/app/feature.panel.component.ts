@@ -59,10 +59,6 @@ interface Column {
              [style.height.px]="inspectionContainerHeight"
              (mouseup)="parameterService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
-            <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-            </div>
             <p-treeTable #tt filterMode="strict" scrollHeight="flex"
                          [value]="filteredTree"
                          [columns]="cols"
@@ -178,7 +174,6 @@ interface Column {
 })
 export class FeaturePanelComponent implements OnInit, OnDestroy  {
 
-    //jsonTree: string = "";
     filteredTree: TreeTableNode[] = [];
     cols: Column[] = [];
     isExpanded: boolean = false;
@@ -228,7 +223,7 @@ export class FeaturePanelComponent implements OnInit, OnDestroy  {
         });
 
         this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
         this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
             if (parameter.panel.length == 2) {
                 this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;

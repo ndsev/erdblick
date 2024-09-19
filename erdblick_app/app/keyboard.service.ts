@@ -5,12 +5,12 @@ import {Dialog} from "primeng/dialog";
     selector: '[onEnterClick]'
 })
 export class OnEnterClickDirective {
-    constructor(private el: ElementRef, private renderer: Renderer2) {}
+    constructor(private el: ElementRef) {}
 
     @HostListener('keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
-            this.renderer.selectRootElement(this.el.nativeElement).click();
+            this.el.nativeElement.click();
         }
     }
 }
@@ -38,9 +38,9 @@ export class KeyboardService {
         this.renderer.listen('window', 'keydown', (event: KeyboardEvent) => {
             const target = event.target as HTMLElement;
             const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+            const key = this.getKeyCombination(event);
 
-            if (!isInput) {
-                const key = this.getKeyCombination(event);
+            if (!isInput || key.includes("Ctrl")) {
                 if (key === 'Escape' || key === 'Esc') {
                     // TODO: make this work!
                     // if (this.dialogStack.length > 0) {

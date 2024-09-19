@@ -14,8 +14,6 @@ import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
-import {Menu} from "primeng/menu";
-import {InspectionContainerSize} from "./inspection.panel.component";
 import {ParametersService} from "./parameters.service";
 import {Subscription} from "rxjs";
 
@@ -23,14 +21,10 @@ import {Subscription} from "rxjs";
     selector: 'sourcedata-panel',
     template: `
         <div class="flex resizable-container"
-             [style.width.px]="parameterService.inspectionContainerWidth"
-             [style.height.px]="parameterService.inspectionContainerHeight"
+             [style.width.px]="inspectionContainerWidth"
+             [style.height.px]="inspectionContainerHeight"
              (mouseup)="parameterService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
-            <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-            </div>
             <ng-container *ngIf="errorMessage.length == 0; else errorTemplate">
                 <p-treeTable #tt scrollHeight="flex" filterMode="strict"
                     [value]="treeData"
@@ -45,8 +39,8 @@ import {Subscription} from "rxjs";
                 >
                     <ng-template pTemplate="caption">
                         <div class="p-input-icon-left ml-auto filter-container">
-                            <i class="pi pi-search"></i>
-                            <input class="filter-input" type="text" pInputText placeholder="Filter data"
+                            <i class="pi pi-filter"></i>
+                            <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
                                    [(ngModel)]="filterString"
                                    (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
                                    (input)="tt.filterGlobal($any($event.target).value, 'contains')"
@@ -93,11 +87,10 @@ import {Subscription} from "rxjs";
         </ng-template>
     `
 })
-export class SourceDataPanelComponent implements OnInit, OnDestroy {
-    @Input() sourceData!: SelectedSourceData;
+export class SourceDataPanelComponent implements OnInit, OnChanges, OnDestroy {
 
+    @Input() sourceData!: SelectedSourceData;
     @ViewChild('tt') table!: TreeTable;
-    // @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -116,8 +109,6 @@ export class SourceDataPanelComponent implements OnInit, OnDestroy {
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     errorMessage = "";
     isExpanded = false;
-
-    // layerMenuItems: any[] = [];
 
     inspectionContainerWidth: number;
     inspectionContainerHeight: number;
@@ -139,15 +130,18 @@ export class SourceDataPanelComponent implements OnInit, OnDestroy {
                 public parameterService: ParametersService,
                 public mapService: MapService) {
         this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
+        console.log("New params", "Constructor", this.inspectionContainerWidth, this.inspectionContainerHeight);
         this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
+            console.log("Old params", "Subscription", this.inspectionContainerWidth, this.inspectionContainerHeight);
             if (parameter.panel.length == 2) {
                 this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = parameter.panel[1] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (parameter.panel[1] + 3) * this.parameterService.baseFontSize;
             } else {
                 this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (window.innerHeight - (this.parameterService.inspectionContainerHeight + 3) * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
             }
+            console.log("New params", "Subscription", this.inspectionContainerWidth, this.inspectionContainerHeight);
         });
     }
 
@@ -173,6 +167,18 @@ export class SourceDataPanelComponent implements OnInit, OnDestroy {
             .finally(() => {
                 this.loading = false;
             });
+
+        console.log("Old params", "OnInit", this.inspectionContainerWidth, this.inspectionContainerHeight);
+        // this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        // this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
+        console.log("New params", "OnInit", this.inspectionContainerWidth, this.inspectionContainerHeight);
+    }
+
+    ngOnChanges() {
+        console.log("Old params", "OnChanges", this.inspectionContainerWidth, this.inspectionContainerHeight);
+        // this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        // this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
+        console.log("New params", "OnChanges", this.inspectionContainerWidth, this.inspectionContainerHeight);
     }
 
     /**
