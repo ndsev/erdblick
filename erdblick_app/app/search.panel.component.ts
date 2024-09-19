@@ -241,6 +241,7 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
+            // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
             if (entry) {
                 const query = entry[1]
                     .replace(/ä/g, "ae")

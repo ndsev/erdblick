@@ -171,31 +171,43 @@ export class StyleService {
         }
     }
 
-    exportStyleYamlFile(styleId: string) {
-        const content = this.styles.get(styleId)!;
-        if (content === undefined) {
-            return false;
-        }
-        try {
-            // Create a blob from the content
-            const blob = new Blob([content.source], { type: 'text/plain;charset=utf-8' });
-            // Create a URL for the blob
-            const url = window.URL.createObjectURL(blob);
-            // Create a temporary anchor tag to trigger the download
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${styleId}.yaml`;
-            // Append the anchor to the body, trigger the download, and remove the anchor
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            // Revoke the blob URL to free up resources
-            window.URL.revokeObjectURL(url);
-        } catch (e) {
-            console.error(e);
+    exportStyleYamlFile(styleId: string): boolean {
+        const content = this.styles.get(styleId);
+        if (!content || !content.source) {
+            console.error('No content found or invalid content structure.');
             return false;
         }
 
+        try {
+            // Ensure content.source is a string or convert to string if needed
+            const blobContent = typeof content.source === 'string' ? content.source : JSON.stringify(content.source);
+            // Create a blob from the content
+            const blob = new Blob([blobContent], { type: 'application/x-yaml;charset=utf-8' });
+            // Create a URL for the blob
+            const url = window.URL.createObjectURL(blob);
+            // Check if URL creation was successful
+            if (!url) {
+                console.error('Failed to create object URL for the blob.');
+                return false;
+            }
+            // Create a temporary anchor tag to trigger the download.
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${styleId}.yaml`;
+            // Trigger the download.
+            const event = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+            });
+            a.dispatchEvent(event);
+
+            // Revoke the blob URL to free up resources.
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error('Error while exporting YAML file:', e);
+            return false;
+        }
         return true;
     }
 
