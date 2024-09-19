@@ -212,8 +212,7 @@ export class StyleService {
     }
 
     async importStyleYamlFile(event: any, file: File, styleId: string, fileUploader: FileUpload | undefined): Promise<boolean> {
-        // Prevent the default upload behavior
-        // Dummy XHR, as we handle the file ourselves
+        // Prevent the default upload behavior Dummy XHR, as we handle the file ourselves
         event.xhr = new XMLHttpRequest();
         const fileReader = new FileReader();
         const loadFilePromise = new Promise<string|ArrayBuffer|null>((resolve, reject) => {

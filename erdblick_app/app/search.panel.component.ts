@@ -204,7 +204,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
                 private sidePanelService: SidePanelService) {
-
         this.keyboardService.registerShortcuts(["Ctrl+k", "Ctrl+K"], this.clickOnSearchToStart.bind(this));
         this.clickListener = this.renderer.listen('document', 'click', this.handleClickOut.bind(this));
 
@@ -568,7 +567,14 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     handleClickOut(event: MouseEvent): void {
-        if (!this.elRef.nativeElement.contains(event.target)) {
+        const clickedInsideComponent = this.elRef.nativeElement.contains(event.target);
+
+        // Check if the clicked element is a button or a file input
+        const clickedOnButton = event.target instanceof HTMLElement && event.target.tagName === 'BUTTON';
+        const clickedOnUploader = event.target instanceof HTMLElement &&
+            (event.target.tagName === 'INPUT' && event.target.getAttribute('type') === 'file');
+
+        if (!clickedInsideComponent && !clickedOnButton && !clickedOnUploader) {
             this.dialog.close(event);
         }
     }

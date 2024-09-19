@@ -409,11 +409,11 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     getStyleClassByType(valueType: number): string {
         switch (valueType) {
             case this.InspectionValueType.SECTION.value:
-                return "section-style"
+                return "section-style";
             case this.InspectionValueType.FEATUREID.value:
-                return "feature-id-style"
+                return "feature-id-style";
             default:
-                return "standard-style"
+                return "standard-style";
         }
     }
 

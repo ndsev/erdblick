@@ -118,11 +118,6 @@ import {DataSourcesService} from "./datasources.service";
                                                 [label]="style.key" [binary]="true" tabindex="0"/>
                                 </span>
                             </div>
-                            <p-button onEnterClick *ngIf="style.value.imported" (click)="removeStyle(style.key)"
-                                      icon="pi pi-trash"
-                                      label="" pTooltip="Remove style"
-                                      tooltipPosition="bottom" tabindex="0">
-                            </p-button>
                             <div class="layer-controls style-controls">
                                 <p-button onEnterClick *ngIf="style.value.imported" (click)="removeStyle(style.key)"
                                           icon="pi pi-trash"

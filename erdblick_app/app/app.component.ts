@@ -33,9 +33,8 @@ import {filter} from "rxjs";
 })
 export class AppComponent {
 
-    title: string = 'erdblick';
-    version: string = "v0.3.0";
-    searchValue: string = ""
+    title: string = "erdblick";
+    version: string = "";
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
