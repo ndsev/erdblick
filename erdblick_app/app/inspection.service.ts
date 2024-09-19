@@ -166,7 +166,7 @@ export class InspectionService {
                     node.data["hoverId"] = data.hoverId;
                 }
                 if (data.hasOwnProperty("mapId")) {
-                    node.data["mapId"] = data.value["mapId"];
+                    node.data["mapId"] = data.mapId;
                 }
                 if (data.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;
