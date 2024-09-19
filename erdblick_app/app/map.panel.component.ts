@@ -101,7 +101,8 @@ import {DataSourcesService} from "./datasources.service";
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
                                 <span onEnterClick *ngIf="style.value.options.length" class="material-icons"
-                                      [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
+                                      [ngClass]="{'rotated-icon': !style.value.params.showOptions || !style.value.params.visible, 
+                                                  'disabled': !style.value.params.visible}"
                                       style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
                                       (click)="expandStyle(style.key)" tabindex="0">
                                     expand_more
@@ -213,7 +214,12 @@ import {DataSourcesService} from "./datasources.service";
         </p-dialog>
         <datasources></datasources>
     `,
-    styles: [``]
+    styles: [`
+        .disabled {
+            pointer-events: none;
+            opacity: 0.5;
+        }
+    `]
 })
 export class MapPanelComponent {
     editorDialogVisible: boolean = false;

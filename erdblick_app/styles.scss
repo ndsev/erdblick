@@ -195,6 +195,21 @@ body {
       direction: ltr;
     }
 
+    .source-data-ref-container {
+      button {
+        width: 1.1em;
+        height: 1em;
+        padding: 0.1em;
+        margin-bottom: 0.2em;
+        font-family: monospace;
+        font-size: 1em;
+      }
+
+      span {
+        font-family: monospace;
+      }
+    }
+
     .p-tree {
       border: none;
       padding: 0;

@@ -97,7 +97,7 @@ export class ArrayTypeComponent extends FieldArrayType {}
         <!--            </div>-->
         <!--        </p-dialog>-->
         <p-dialog header="DataSource Configuration Editor" [(visible)]="dsService.configDialogVisible" [modal]="false"
-                  #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()">
+                  #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
             <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>
             <div [ngClass]="{'loading': dsService.loading || dsService.errorMessage }">
                 <editor [loadFun]="loadEditedConfig" [saveFun]="saveEditedConfig"></editor>
@@ -105,8 +105,9 @@ export class ArrayTypeComponent extends FieldArrayType {}
             <div class="spinner" *ngIf="dsService.loading">
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between; bottom: 1em; 
+                                position: fixed; ">
+                <div *ngIf="!dsService.errorMessage" style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
                               [disabled]="!wasModified"></p-button>
                     <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Cancel"'
@@ -115,6 +116,9 @@ export class ArrayTypeComponent extends FieldArrayType {}
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
                         <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
                     </div>
+                </div>
+                <div *ngIf="dsService.errorMessage" style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                    <p-button (click)="closeEditorDialog($event)" label="Close" icon="pi pi-times"></p-button>
                 </div>
             </div>
         </p-dialog>

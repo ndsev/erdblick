@@ -260,7 +260,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
         }
 
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
-        let firstHighlightedItemIndex : number | undefined;
+        let firstHighlightedItemIndex: number | undefined;
 
         let select = (node: TreeTableNode, parents: TreeTableNode[], highlight: boolean, virtualRowIndex: number) => {
             if (!node.data) {
