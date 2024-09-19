@@ -9,7 +9,7 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
-import {FeatureLayerStyle, FeatureStyleOption, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
 
@@ -61,7 +61,7 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient, private parameterService: ParametersService)
     {
-        this.parameterService.parameters.subscribe(params => {
+        this.parameterService.parameters.subscribe(_ => {
             // This subscription exists specifically to catch the values of the query parameters.
             if (this.parameterService.initialQueryParamsSet) {
                 return;

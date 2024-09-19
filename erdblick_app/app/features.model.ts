@@ -1,6 +1,4 @@
-"use strict";
-
-import {coreLib, logFreeMemory, uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
+import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "./parameters.service";
 

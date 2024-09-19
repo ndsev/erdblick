@@ -1,6 +1,3 @@
-"use strict";
-
-import {FeatureWrapper} from "./features.model";
 import {TileVisualization} from "./visualization.model"
 import {
     Cartesian2,
@@ -8,7 +5,6 @@ import {
     Cartographic,
     CesiumMath,
     Color,
-    ColorGeometryInstanceAttribute,
     Entity,
     ImageryLayer,
     ScreenSpaceEventHandler,
@@ -17,8 +13,6 @@ import {
     Viewer,
     HeightReference,
     Billboard,
-    BoundingSphere,
-    HeadingPitchRange,
     defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
@@ -33,7 +27,6 @@ import {distinctUntilChanged} from "rxjs";
 import {SearchResultPosition} from "./featurefilter.worker";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
-import {core} from "@angular/compiler";
 import {coreLib} from "./wasm";
 
 // Redeclare window with extended interface

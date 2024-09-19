@@ -1,4 +1,4 @@
-import {Component, ViewChild, Pipe, PipeTransform, AfterViewInit, ElementRef} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "./info.service";
 import {CoverageRectItem, MapInfoItem, MapService} from "./map.service";
 import {ErdblickStyle, StyleService} from "./style.service";

@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, Directive, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, Renderer2, ViewChild} from "@angular/core";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
@@ -6,8 +6,6 @@ import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {FeatureSearchService} from "./feature.search.service";
-import {FeatureSearchComponent} from "./feature.search.component";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
 import {distinctUntilChanged} from "rxjs";
@@ -111,7 +109,6 @@ export class SearchPanelComponent implements AfterViewInit {
 
     @ViewChild('textarea') textarea!: ElementRef;
     @ViewChild('actionsdialog') dialog!: Dialog;
-    @ViewChild('searchcontrols') container!: HTMLDivElement;
     cursorPosition: number = 0;
     private clickListener: () => void;
 
@@ -245,7 +242,15 @@ export class SearchPanelComponent implements AfterViewInit {
 
         this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
             if (entry) {
-                this.searchInputValue = entry[1];
+                const query = entry[1]
+                    .replace(/ä/g, "ae")
+                    .replace(/ö/g, "oe")
+                    .replace(/ü/g, "ue")
+                    .replace(/ß/g, "ss")
+                    .replace(/Ä/g, "Ae")
+                    .replace(/Ö/g, "Oe")
+                    .replace(/Ü/g, "Ue");
+                this.searchInputValue = query;
                 this.runTarget(entry[0]);
             }
             this.reloadSearchHistory();

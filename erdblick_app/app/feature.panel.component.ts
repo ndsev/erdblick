@@ -1,11 +1,8 @@
 import {
-    AfterContentChecked,
-    AfterViewChecked,
-    Component,
-    Input,
-    OnChanges,
+    AfterViewInit,
+    Component, ElementRef,
     OnDestroy,
-    OnInit,
+    OnInit, Renderer2,
     ViewChild
 } from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
@@ -17,7 +14,6 @@ import {distinctUntilChanged, Subscription} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
 import {TreeTable} from "primeng/treetable";
-import {InspectionContainerSize} from "./inspection.panel.component";
 import {ParametersService} from "./parameters.service";
 
 interface Column {
@@ -54,11 +50,15 @@ interface Column {
                 </p-button>
             </div>
         </div>
-        <div class="flex resizable-container"
+        <div class="flex resizable-container" #resizeableContainer
              [style.width.px]="inspectionContainerWidth"
              [style.height.px]="inspectionContainerHeight"
              (mouseup)="parameterService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
+<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+<!--            </div>-->
             <p-treeTable #tt filterMode="strict" scrollHeight="flex"
                          [value]="filteredTree"
                          [columns]="cols"
@@ -167,12 +167,12 @@ interface Column {
 
         @media only screen and (max-width: 56em) {
             .resizable-container-expanded {
-                height: calc(100vh - 3em);;
+                height: calc(100vh - 3em);
             }
         }
     `]
 })
-export class FeaturePanelComponent implements OnInit, OnDestroy  {
+export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  {
 
     filteredTree: TreeTableNode[] = [];
     cols: Column[] = [];
@@ -189,6 +189,7 @@ export class FeaturePanelComponent implements OnInit, OnDestroy  {
 
     @ViewChild('tt') table!: TreeTable;
 
+    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
@@ -201,6 +202,7 @@ export class FeaturePanelComponent implements OnInit, OnDestroy  {
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
                 public parameterService: ParametersService,
+                private renderer: Renderer2,
                 public mapService: MapService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
@@ -240,6 +242,10 @@ export class FeaturePanelComponent implements OnInit, OnDestroy  {
             { field: 'key', header: 'Key' },
             { field: 'value', header: 'Value' }
         ];
+    }
+
+    ngAfterViewInit() {
+        this.detectSafari();
     }
 
     copyToClipboard(text: string) {
@@ -436,5 +442,13 @@ export class FeaturePanelComponent implements OnInit, OnDestroy  {
 
     ngOnDestroy() {
         this.containerSizeSubscription.unsubscribe();
+    }
+
+    detectSafari() {
+        console.log(navigator.userAgent)
+        const isSafari = /Safari/i.test(navigator.userAgent);
+        if (isSafari) {
+            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
+        }
     }
 }

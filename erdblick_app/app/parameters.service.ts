@@ -1,10 +1,8 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
-import {ErdblickStyle} from "./style.service";
-import {InspectionService, SelectedSourceData} from "./inspection.service";
-import {InspectionContainerSize} from "./inspection.panel.component";
+import {SelectedSourceData} from "./inspection.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -369,13 +367,15 @@ export class ParametersService {
     }
 
     styleConfig(styleId: string): StyleParameters {
-        if (this.p().styles.hasOwnProperty(styleId))
-            return this.p().styles[styleId]
+        if (this.p().styles.hasOwnProperty(styleId)) {
+            console.log(this.p().styles[styleId])
+            return this.p().styles[styleId];
+        }
         return {
             visible: !Object.entries(this.p().styles).length,
             options: {},
             showOptions: true,
-        }
+        };
     }
 
     setStyleConfig(styleId: string, params: StyleParameters) {

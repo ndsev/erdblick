@@ -1,4 +1,4 @@
-import {Component, OnInit} from "@angular/core";
+import {Component} from "@angular/core";
 import {InspectionService, SelectedSourceData, selectedSourceDataEqualTo} from "./inspection.service";
 import {distinctUntilChanged} from "rxjs";
 import {FeaturePanelComponent} from "./feature.panel.component";

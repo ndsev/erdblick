@@ -3,10 +3,10 @@ import {
     OnInit,
     Input,
     ViewChild,
-    AfterViewChecked,
-    AfterContentChecked,
-    OnChanges,
-    OnDestroy, SimpleChanges
+    OnDestroy,
+    AfterViewInit,
+    ElementRef,
+    Renderer2
 } from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
@@ -20,11 +20,15 @@ import {Subscription} from "rxjs";
 @Component({
     selector: 'sourcedata-panel',
     template: `
-        <div class="flex resizable-container"
+        <div class="flex resizable-container" #resizeableContainer
              [style.width.px]="inspectionContainerWidth"
              [style.height.px]="inspectionContainerHeight"
              (mouseup)="parameterService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
+<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+<!--            </div>-->
             <ng-container *ngIf="errorMessage.length == 0; else errorTemplate">
                 <p-treeTable #tt scrollHeight="flex" filterMode="strict"
                     [value]="treeData"
@@ -85,12 +89,20 @@ import {Subscription} from "rxjs";
                 </div>
             </div>
         </ng-template>
-    `
+    `,
+    styles: [`
+        @media only screen and (max-width: 56em) {
+            .resizable-container-expanded {
+                height: calc(100vh - 3em);
+            }
+        }
+    `]
 })
-export class SourceDataPanelComponent implements OnInit, OnChanges, OnDestroy {
+export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
     @Input() sourceData!: SelectedSourceData;
     @ViewChild('tt') table!: TreeTable;
+    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -128,6 +140,7 @@ export class SourceDataPanelComponent implements OnInit, OnChanges, OnDestroy {
 
     constructor(private inspectionService: InspectionService,
                 public parameterService: ParametersService,
+                private renderer: Renderer2,
                 public mapService: MapService) {
         this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
         this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
@@ -167,18 +180,10 @@ export class SourceDataPanelComponent implements OnInit, OnChanges, OnDestroy {
             .finally(() => {
                 this.loading = false;
             });
-
-        console.log("Old params", "OnInit", this.inspectionContainerWidth, this.inspectionContainerHeight);
-        // this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        // this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        console.log("New params", "OnInit", this.inspectionContainerWidth, this.inspectionContainerHeight);
     }
 
-    ngOnChanges() {
-        console.log("Old params", "OnChanges", this.inspectionContainerWidth, this.inspectionContainerHeight);
-        // this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        // this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        console.log("New params", "OnChanges", this.inspectionContainerWidth, this.inspectionContainerHeight);
+    ngAfterViewInit() {
+        this.detectSafari();
     }
 
     /**
@@ -307,5 +312,13 @@ export class SourceDataPanelComponent implements OnInit, OnChanges, OnDestroy {
 
     ngOnDestroy() {
         this.containerSizeSubscription.unsubscribe();
+    }
+
+    detectSafari() {
+        console.log(navigator.userAgent)
+        const isSafari = /Safari/i.test(navigator.userAgent);
+        if (isSafari) {
+            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
+        }
     }
 }

@@ -1,4 +1,4 @@
-import {ElementRef, Injectable} from "@angular/core";
+import {Injectable} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 
 export enum SidePanelState {

@@ -1,5 +1,4 @@
 import MainModuleFactory, {MainModule as ErdblickCore, SharedUint8Array} from '../../build/libs/core/erdblick-core';
-import {core} from "@angular/compiler";
 
 export interface ErdblickCore_ extends ErdblickCore {
     HEAPU8: Uint8Array

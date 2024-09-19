@@ -3,12 +3,7 @@ import {
     PointPrimitiveCollection,
     LabelCollection,
     Viewer,
-    Color,
-    Cartesian2,
-    Cartesian3,
-    Rectangle,
-    Entity,
-    HeightReference
+    Entity
 } from "./cesium";
 import {coreLib} from "./wasm";
 import {TileFeatureId} from "./parameters.service";

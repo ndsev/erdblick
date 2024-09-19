@@ -1,17 +1,16 @@
 import {EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {BehaviorSubject, distinctUntilChanged, Subject, distinctUntilKeyChanged, filter, ReplaySubject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
 import {MapService} from "./map.service";
 import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "./features.model";
-import {ParametersService, TileFeatureId} from "./parameters.service";
+import {ParametersService} from "./parameters.service";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {JumpTargetService} from "./jump.service";
 import {Fetch} from "./fetch.model";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
-import {core} from "@angular/compiler";
 
 
 interface InspectionModelData {

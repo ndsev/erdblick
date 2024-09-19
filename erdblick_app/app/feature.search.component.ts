@@ -1,4 +1,4 @@
-import {Component, ElementRef, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
