@@ -239,4 +239,9 @@ NativeJsValue TileSourceDataLayer::toObject() const
     return *visit(JsValue("root"), *model_->root(0));
 }
 
+std::string TileSourceDataLayer::getError() const
+{
+    return model_->error() ? *model_->error() : "";
+}
+
 } // namespace erdblick

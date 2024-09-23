@@ -79,16 +79,16 @@ import {Subscription} from "rxjs";
                     </ng-template>
                 </p-treeTable>
             </ng-container>
-        </div>
-    
-        <ng-template #errorTemplate>
-            <div class="error">
-                <div>
-                    <strong>Error</strong><br>
-                    {{ errorMessage }}
+
+            <ng-template #errorTemplate>
+                <div class="error">
+                    <div>
+                        <strong>Error</strong><br>
+                        {{ errorMessage }}
+                    </div>
                 </div>
-            </div>
-        </ng-template>
+            </ng-template>
+        </div>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -144,9 +144,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 public mapService: MapService) {
         this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
         this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        console.log("New params", "Constructor", this.inspectionContainerWidth, this.inspectionContainerHeight);
         this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
-            console.log("Old params", "Subscription", this.inspectionContainerWidth, this.inspectionContainerHeight);
             if (parameter.panel.length == 2) {
                 this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
                 this.inspectionContainerHeight = (parameter.panel[1] + 3) * this.parameterService.baseFontSize;
@@ -154,7 +152,6 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
                 this.inspectionContainerHeight = (window.innerHeight - (this.parameterService.inspectionContainerHeight + 3) * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
             }
-            console.log("New params", "Subscription", this.inspectionContainerWidth, this.inspectionContainerHeight);
         });
     }
 
@@ -315,7 +312,6 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     }
 
     detectSafari() {
-        console.log(navigator.userAgent)
         const isSafari = /Safari/i.test(navigator.userAgent);
         if (isSafari) {
             this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');

@@ -83,6 +83,9 @@ struct TileSourceDataLayer
      */
     std::string toJson() const;
 
+    /** Obtain the error string of the layer, if there is one. */
+    std::string getError() const;
+
     /**
      * Converts the `SourceDataLayer` hierarchy to a tree model compatible structure.
      *

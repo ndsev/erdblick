@@ -22,7 +22,7 @@ export type FeatureStyleOptionWithStringType = {
     label: string,
     id: string,
     type: FeatureStyleOptionType,
-    defaultValue: string,
+    defaultValue: any,
     description: string
 };
 
@@ -344,8 +344,15 @@ export class StyleService {
                     style.options = [];
                     // Transport FeatureStyleOptions from WASM array to JS.
                     let options = style.featureLayerStyle.options();
-                    for (let i = 0; i < options.size(); ++i)
-                        style.options.push(options.get(i)! as FeatureStyleOptionWithStringType);
+                    for (let i = 0; i < options.size(); ++i) {
+                        const option = options.get(i)! as FeatureStyleOptionWithStringType;
+                        style.options.push(option);
+
+                        // Apply the default value for the option, if no value is stored yet.
+                        if (!style.params.options.hasOwnProperty(option.id)) {
+                            style.params.options[option.id] = option.defaultValue;
+                        }
+                    }
                     options.delete();
                     return true;
                 }
