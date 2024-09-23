@@ -294,7 +294,12 @@ export class InspectionService {
         return fetch.go()
             .then(_ => {
                 if (!layer)
-                    throw new Error(`Error loading layer.`);
+                    throw new Error(`Unknown error while loading layer.`);
+                const error = layer.getError();
+                if (error) {
+                    layer.delete();
+                    throw new Error(`Error while loading layer: ${error}`);
+                }
                 return layer;
             });
     }

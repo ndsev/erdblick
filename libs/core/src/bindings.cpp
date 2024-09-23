@@ -357,7 +357,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileSourceDataLayer>("TileSourceDataLayer")
         .function("addressFormat", &TileSourceDataLayer::addressFormat)
         .function("toJson", &TileSourceDataLayer::toJson)
-        .function("toObject", &TileSourceDataLayer::toObject);
+        .function("toObject", &TileSourceDataLayer::toObject)
+        .function("getError", &TileSourceDataLayer::getError);
 
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
