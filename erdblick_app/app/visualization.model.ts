@@ -90,6 +90,7 @@ export class TileVisualization {
     showTileBorder: boolean = false;
 
     private readonly style: StyleWithIsDeleted;
+    private readonly styleName: string;
     private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
@@ -133,6 +134,7 @@ export class TileVisualization {
     {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
+        this.styleName = this.style.name();
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlightMode = highlightMode;
@@ -319,6 +321,6 @@ export class TileVisualization {
      * if this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
     private mapLayerStyleId() {
-        return `${this.tile.mapName}:${this.tile.layerName}:${this.style.name()}:${this.highlightMode.value}`;
+        return `${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
     }
 }
