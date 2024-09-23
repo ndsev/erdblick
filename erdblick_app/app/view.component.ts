@@ -260,6 +260,12 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.keyboardService.registerShortcuts(['s', 'S'], this.moveDown.bind(this));
         this.keyboardService.registerShortcuts(['d', 'D'], this.moveRight.bind(this));
         this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
+
+        // Hide the global loading spinner.
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
     }
 
     /**
