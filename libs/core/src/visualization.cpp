@@ -439,7 +439,7 @@ void FeatureLayerVisualization::addMergedPointGeometry(
         pointCartographic,
         gridPositionHash,
         tile_->tileId().z(),
-        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointVec.size());
+        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointVec.size()) + 1;
     evalFun.context_.set(
         internalStringPoolCopy_->emplace("$mergeCount"),
         simfil::Value(mergedPointCount));
