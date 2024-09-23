@@ -368,7 +368,6 @@ export class ParametersService {
 
     styleConfig(styleId: string): StyleParameters {
         if (this.p().styles.hasOwnProperty(styleId)) {
-            console.log(this.p().styles[styleId])
             return this.p().styles[styleId];
         }
         return {

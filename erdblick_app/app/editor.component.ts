@@ -61,6 +61,7 @@ const completionsList = [
     {label: "first-of", type: "property"},
     {label: "attribute-type", type: "property"},
     {label: "attribute-layer-type", type: "property"},
+    {label: "point-merge-grid-cell", type: "property"},
     {label: "FILL", type: "keyword"},
     {label: "OUTLINE", type: "keyword"},
     {label: "FILL_AND_OUTLINE", type: "keyword"},
@@ -80,7 +81,6 @@ const completionsList = [
     {label: "feature", type: "keyword"},
     {label: "relation", type: "keyword"},
     {label: "attribute", type: "keyword"},
-    {label: "normal", type: "keyword"},
     {label: "none", type: "keyword"},
     {label: "selection", type: "keyword"},
     {label: "hover", type: "keyword"},
@@ -97,16 +97,12 @@ const completionsList = [
 })
 export class EditorComponent implements AfterViewInit, OnDestroy {
 
-    @Input() loadFun!: () => string;
-    @Input() saveFun!: () => void;
-
     @ViewChild('editor') private editorRef!: ElementRef;
 
     private editorView?: EditorView;
     private editedSource: string = "";
 
-    constructor(public styleService: StyleService,
-                public editorService: EditorService,
+    constructor(public editorService: EditorService,
                 public renderer: Renderer2) {}
 
     ngAfterViewInit(): void {
@@ -125,7 +121,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     }
 
     createEditorState() {
-        this.editedSource = this.loadFun();
+        this.editedSource = this.editorService.editableData;
         return EditorState.create({
             doc: this.editedSource,
             extensions: [
@@ -138,6 +134,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 this.yamlLinter,
                 this.stopMouseWheelClipboard,
                 EditorState.tabSize.of(2),
+                EditorState.readOnly.of(this.editorService.readOnly),
                 EditorView.updateListener.of((e: ViewUpdate) => {
                     this.editorService.editedStateData.next(e.state.doc.toString());
                 })
@@ -196,7 +193,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         return {
             key: 'Mod-s',
             run: () => {
-                this.saveFun();
+                this.editorService.editedSaveTriggered.next(true);
                 return true;
             }
         };

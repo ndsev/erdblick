@@ -435,7 +435,6 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     }
 
     detectSafari() {
-        console.log(navigator.userAgent)
         const isSafari = /Safari/i.test(navigator.userAgent);
         if (isSafari) {
             this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');

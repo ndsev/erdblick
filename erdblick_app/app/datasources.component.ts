@@ -100,25 +100,35 @@ export class ArrayTypeComponent extends FieldArrayType {}
                   #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
             <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>
             <div [ngClass]="{'loading': dsService.loading || dsService.errorMessage }">
-                <editor [loadFun]="loadEditedConfig" [saveFun]="saveEditedConfig"></editor>
+                <editor></editor>
+                <div *ngIf="!dsService.errorMessage && !dsService.readOnly" 
+                     style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; 
+                     justify-content: space-between;">
+                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                        <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
+                                  [disabled]="!wasModified"></p-button>
+                        <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Cancel"'
+                                  icon="pi pi-times"></p-button>
+                        <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
+                            <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                            <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="spinner" *ngIf="dsService.loading">
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between; bottom: 1em; 
-                                position: fixed; ">
-                <div *ngIf="!dsService.errorMessage" style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
-                              [disabled]="!wasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)" [label]='this.wasModified ? "Discard" : "Cancel"'
-                              icon="pi pi-times"></p-button>
-                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
-                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                        <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
-                    </div>
-                </div>
-                <div *ngIf="dsService.errorMessage" style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+            <div *ngIf="dsService.errorMessage || dsService.readOnly"
+                 style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; 
+                     justify-content: space-between;">
+                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="closeEditorDialog($event)" label="Close" icon="pi pi-times"></p-button>
+                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
+                        <div style="color: orange">
+                            {{ dsService.errorMessage ? dsService.errorMessage : "Data Source configuration is set to read-only!" }}
+                        </div>
+                    </div>
                 </div>
             </div>
         </p-dialog>
@@ -161,6 +171,7 @@ export class DatasourcesComponent {
                 this.schema = config["schema"];
                 this.model = config["model"];
                 this.dataSourcesConfig = JSON.stringify(this.model, null, 2);
+                this.editorService.readOnly = config.hasOwnProperty("readOnly") ? config["readOnly"] : true;
                 this.editorService.editableData = this.dataSourcesConfig;
                 this.form = new FormGroup({});
                 this.options = {};
@@ -169,6 +180,7 @@ export class DatasourcesComponent {
                 this.editorService.updateEditorState.next(true);
             }
         });
+
     }
 
     loadConfigEditor() {
@@ -208,14 +220,6 @@ export class DatasourcesComponent {
 
     discardConfigEdits() {
         this.editorService.updateEditorState.next(false);
-    }
-
-    loadEditedConfig() {
-        return `${this.editorService.editableData}\n\n\n\n\n`;
-    }
-
-    saveEditedConfig() {
-        this.editorService.editedSaveTriggered.next(true);
     }
 
     closeDatasources() {

@@ -180,7 +180,7 @@ import {DataSourcesService} from "./datasources.service";
         </p-button>
         <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
                   class="editor-dialog">
-            <editor [loadFun]="loadEditedStyle" [saveFun]="triggerStyleSave"></editor>
+            <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
@@ -257,9 +257,7 @@ export class MapPanelComponent {
                 this.layerDialogVisible = false;
             }
         });
-        this.editorService.editedStateData.subscribe(state => {
-            this.styleService.styleEditedStateData.next(state);
-        });
+        this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
     }
 
     get osmOpacityString(): string {
@@ -485,7 +483,6 @@ export class MapPanelComponent {
     }
 
     importStyle(event: any) {
-        console.log(event)
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
             let styleId = file.name;
@@ -516,9 +513,10 @@ export class MapPanelComponent {
         this.styleService.selectedStyleIdForEditing = styleId;
         this.editorService.updateEditorState.next(true);
         this.editorDialogVisible = true;
-        this.editedStyleSourceSubscription = this.styleService.styleEditedStateData.subscribe(editedStyleSource => {
-            const originalStyleSource = this.styleService.styles.get(styleId)?.source!;
-            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == originalStyleSource.replace(/\n+$/, ''));
+        this.editorService.readOnly = false;
+        this.editorService.editableData = this.styleService.styles.get(styleId)?.source!;
+        this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
+            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
         });
         this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
             this.applyEditedStyle();
@@ -527,7 +525,7 @@ export class MapPanelComponent {
 
     applyEditedStyle() {
         const styleId = this.styleService.selectedStyleIdForEditing;
-        const styleData = this.styleService.styleEditedStateData.getValue().replace(/\n+$/, '');
+        const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
             return;
@@ -573,17 +571,5 @@ export class MapPanelComponent {
 
     openDatasources() {
         this.dsService.configDialogVisible = true;
-    }
-
-    loadEditedStyle() {
-        if (this.styleService.styles.has(this.styleService.selectedStyleIdForEditing)) {
-            return `${this.styleService.styles.get(this.styleService.selectedStyleIdForEditing)!.source}\n\n\n\n\n`;
-        } else {
-            return "";
-        }
-    }
-
-    triggerStyleSave() {
-        this.styleService.styleEditedSaveTriggered.next(true);
     }
 }

@@ -9,6 +9,7 @@ export class EditorService {
     editedSaveTriggered: Subject<boolean> = new Subject<boolean>();
     editedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
     editableData: string = "";
+    readOnly: boolean = false;
 
     constructor() {}
 }

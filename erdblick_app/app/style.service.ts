@@ -48,8 +48,6 @@ export class StyleService {
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
     selectedStyleIdForEditing: string = "";
-    styleBeingEdited: boolean = false;
-    styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
     styleEditedSaveTriggered: Subject<boolean> = new Subject<boolean>();
 
     builtinStylesCount = 0;

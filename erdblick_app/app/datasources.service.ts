@@ -11,6 +11,7 @@ export class DataSourcesService {
     configDialogVisible = false;
     loading = false;
     errorMessage: string = "";
+    readOnly: boolean = true;
     dataSourcesConfigJson: BehaviorSubject<any> = new BehaviorSubject<any>({});
 
     constructor(private messageService: InfoMessageService,
@@ -35,6 +36,7 @@ export class DataSourcesService {
     }
 
     getConfig() {
+        this.readOnly = true;
         this.errorMessage = "";
         this.loading = true;
         this.http.get("/config").subscribe({
@@ -54,6 +56,7 @@ export class DataSourcesService {
                     this.dataSourcesConfigJson.next({});
                     return;
                 }
+                this.readOnly = data["readOnly"];
                 this.dataSourcesConfigJson.next(data);
             },
             error: error => {
