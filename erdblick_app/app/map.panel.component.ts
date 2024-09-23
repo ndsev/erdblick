@@ -511,10 +511,10 @@ export class MapPanelComponent {
 
     showStyleEditor(styleId: string) {
         this.styleService.selectedStyleIdForEditing = styleId;
+        this.editorService.editableData = this.styleService.styles.get(styleId)?.source!;
+        this.editorService.readOnly = false;
         this.editorService.updateEditorState.next(true);
         this.editorDialogVisible = true;
-        this.editorService.readOnly = false;
-        this.editorService.editableData = this.styleService.styles.get(styleId)?.source!;
         this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
             this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
         });
