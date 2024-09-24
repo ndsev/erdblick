@@ -169,16 +169,16 @@ export class TileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let visualization = new coreLib.FeatureLayerVisualization(
+                let wasmVisualization = new coreLib.FeatureLayerVisualization(
                     this.tile.mapTileKey,
                     this.style,
                     this.options,
                     this.pointMergeService,
                     this.highlightMode,
                     this.featureIdSubset);
-                visualization.addTileFeatureLayer(tileFeatureLayer);
+                wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
-                    visualization.run();
+                    wasmVisualization.run();
                 }
                 catch (e) {
                     console.error(`Exception while rendering: ${e}`);
@@ -186,7 +186,7 @@ export class TileVisualization {
                 }
 
                 // Try to resolve externally referenced auxiliary tiles.
-                let extRefs = {requests: visualization.externalReferences()};
+                let extRefs = {requests: wasmVisualization.externalReferences()};
                 if (extRefs.requests && extRefs.requests.length > 0) {
                     let response = await fetch("/locate", {
                         body: JSON.stringify(extRefs, (_, value) =>
@@ -225,10 +225,10 @@ export class TileVisualization {
                     // add them to the visualization, and let it process them.
                     await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
                         for (let auxTile of tileFeatureLayers)
-                            visualization.addTileFeatureLayer(auxTile);
+                            wasmVisualization.addTileFeatureLayer(auxTile);
 
                         try {
-                            visualization.processResolvedExternalReferences(extRefsResolved.responses);
+                            wasmVisualization.processResolvedExternalReferences(extRefsResolved.responses);
                         }
                         catch (e) {
                             console.error(`Exception while rendering: ${e}`);
@@ -236,13 +236,16 @@ export class TileVisualization {
                     });
                 }
 
-                this.primitiveCollection = visualization.primitiveCollection();
-                for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(visualization.mergedPointFeatures())) {
-                    for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
-                        finishedCornerTile.render(viewer);
+
+                if (!this.deleted) {
+                    this.primitiveCollection = wasmVisualization.primitiveCollection();
+                    for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                            finishedCornerTile.render(viewer);
+                        }
                     }
                 }
-                visualization.delete();
+                wasmVisualization.delete();
                 return true;
             });
             if (this.primitiveCollection) {

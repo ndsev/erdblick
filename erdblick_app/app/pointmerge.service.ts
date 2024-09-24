@@ -53,13 +53,17 @@ export class MergedPointsTile {
             for (let fid of point.featureIds) {
                 if (existingPoint.featureIds.findIndex(v => v.featureId == fid.featureId) == -1) {
                     existingPoint.featureIds.push(fid);
+                    if (point.pointParameters) {
+                        existingPoint.pointParameters = point.pointParameters;
+                    }
+                    if (point.labelParameters) {
+                        existingPoint.labelParameters = point.labelParameters;
+                    }
+
+                    // We count on exactly one new feature-id being added. If no
+                    // new feature id is added, then the visualization shall not be updated.
+                    break;
                 }
-            }
-            if (point.pointParameters) {
-                existingPoint.pointParameters = point.pointParameters;
-            }
-            if (point.labelParameters) {
-                existingPoint.labelParameters = point.labelParameters;
             }
         }
     }
