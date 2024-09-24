@@ -8,7 +8,6 @@ import {InfoMessageService} from "./info.service";
 @Injectable()
 export class DataSourcesService {
 
-    configDialogVisible = false;
     loading = false;
     errorMessage: string = "";
     readOnly: boolean = true;

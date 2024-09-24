@@ -178,7 +178,7 @@ import {DataSourcesService} from "./datasources.service";
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}" tabindex="0">
         </p-button>
-        <p-dialog header="Style Editor" [(visible)]="editorDialogVisible" [modal]="false" #editorDialog
+        <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
                   class="editor-dialog">
             <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
@@ -188,16 +188,18 @@ import {DataSourcesService} from "./datasources.service";
                     <p-button (click)="closeEditorDialog($event)"
                               [label]='this.sourceWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
-                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; font-size: medium;">
+                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
                         <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
                     </div>
                 </div>
-                <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                          [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
-                          [style]="{margin: '0 0.5em'}">
-                </p-button>
-                <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
+                    <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
+                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
+                              [style]="{margin: '0 0.5em'}">
+                    </p-button>
+                    <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                </div>
             </div>
         </p-dialog>
         <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
@@ -217,7 +219,6 @@ import {DataSourcesService} from "./datasources.service";
     `]
 })
 export class MapPanelComponent {
-    editorDialogVisible: boolean = false;
     layerDialogVisible: boolean = false;
     warningDialogVisible: boolean = false;
     mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
@@ -511,10 +512,11 @@ export class MapPanelComponent {
 
     showStyleEditor(styleId: string) {
         this.styleService.selectedStyleIdForEditing = styleId;
-        this.editorService.editableData = this.styleService.styles.get(styleId)?.source!;
+        this.editorService.datasourcesEditorVisible = false;
+        this.editorService.editableData = `${this.styleService.styles.get(styleId)?.source!}\n\n\n\n\n`
         this.editorService.readOnly = false;
         this.editorService.updateEditorState.next(true);
-        this.editorDialogVisible = true;
+        this.editorService.styleEditorVisible = true;
         this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
             this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
         });
@@ -525,6 +527,7 @@ export class MapPanelComponent {
 
     applyEditedStyle() {
         const styleId = this.styleService.selectedStyleIdForEditing;
+        this.editorService.editableData = this.editorService.editedStateData.getValue();
         const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
@@ -570,6 +573,7 @@ export class MapPanelComponent {
     }
 
     openDatasources() {
-        this.dsService.configDialogVisible = true;
+        this.editorService.styleEditorVisible = false;
+        this.editorService.datasourcesEditorVisible = true;
     }
 }

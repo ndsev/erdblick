@@ -96,7 +96,7 @@ export class ArrayTypeComponent extends FieldArrayType {}
         <!--                <p-progressSpinner ariaLabel="loading"/>-->
         <!--            </div>-->
         <!--        </p-dialog>-->
-        <p-dialog header="DataSource Configuration Editor" [(visible)]="dsService.configDialogVisible" [modal]="false"
+        <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
                   #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
             <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>
             <div [ngClass]="{'loading': dsService.loading || dsService.errorMessage }">
@@ -140,8 +140,6 @@ export class ArrayTypeComponent extends FieldArrayType {}
     `]
 })
 export class DatasourcesComponent {
-
-    datasourcesEditorDialogVisible: boolean = false;
     datasourceWasModified: boolean = false;
     wasModified: boolean = false;
     dataSourcesConfig: string = "";
@@ -171,8 +169,10 @@ export class DatasourcesComponent {
                 this.schema = config["schema"];
                 this.model = config["model"];
                 this.dataSourcesConfig = JSON.stringify(this.model, null, 2);
+                this.editorService.styleEditorVisible = false;
                 this.editorService.readOnly = config.hasOwnProperty("readOnly") ? config["readOnly"] : true;
-                this.editorService.editableData = this.dataSourcesConfig;
+                this.editorService.editableData = `${this.dataSourcesConfig}\n\n\n\n\n`;
+                this.editorService.datasourcesEditorVisible = true;
                 this.form = new FormGroup({});
                 this.options = {};
                 this.fields = [this.formlyJsonSchema.toFieldConfig(this.schema)];
@@ -196,6 +196,7 @@ export class DatasourcesComponent {
     }
 
     applyEditedDatasourceConfig() {
+        this.editorService.editableData = this.editorService.editedStateData.getValue();
         const configData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
         if (!configData) {
             this.messageService.showError(`Cannot apply an empty configuration definition!`);
@@ -207,6 +208,7 @@ export class DatasourcesComponent {
     }
 
     closeEditorDialog(event: any) {
+        console.log(event);
         if (this.editorDialog !== undefined) {
             if (this.wasModified) {
                 event.stopPropagation();
@@ -223,7 +225,7 @@ export class DatasourcesComponent {
     }
 
     closeDatasources() {
-        this.dsService.configDialogVisible = false;
+        this.editorService.datasourcesEditorVisible = false;
     }
 
     submitForm() {
