@@ -67,7 +67,7 @@ body {
   bottom: 0;
   justify-content: center;
   display: flex;
-  font-size: smaller;
+  font-size: 0.8em;
   background-color: rgba(#fff, 0.25);
   color: black;
   padding-right: 0.5em;
@@ -86,6 +86,27 @@ body {
   .p-button {
     border-radius: 50%;
     padding: 0.8em 0;
+  }
+}
+
+.pref-button {
+  width: 3em;
+  height: 3em;
+  margin-left: 0.5em;
+  margin-bottom: 0.5em;
+
+  .p-button {
+    border-radius: 50%;
+    padding: 0.8em 0;
+    width: 3em;
+    height: 3em;
+  }
+}
+
+.controls-button {
+  .p-button {
+    background: none;
+    border: none;
   }
 }
 
@@ -223,8 +244,8 @@ body {
 
     table {
       direction: ltr;
-      font-size: smaller;
       border-collapse: collapse;
+      font-size: 0.9em !important;
 
       td {
         padding: 0 0 0 0.5em;
