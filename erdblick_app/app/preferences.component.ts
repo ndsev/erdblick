@@ -126,17 +126,15 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
         }
         
         .keyboard-dialog {
-            width: 400px;
-            padding: 20px;
+            width: 25em;
             text-align: center;
             background-color: white;
-            border-radius: 12px;
         }
 
         h2 {
-            font-size: 24px;
+            font-size: 1.5em;
             color: #333;
-            margin-bottom: 20px;
+            margin-bottom: 1em;
             font-weight: bold;
         }
 
@@ -149,59 +147,42 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
+            margin-bottom: 1em;
         }
 
         .keyboard-list li span {
             display: inline-block;
             background-color: #eef1f7;
-            padding: 8px 12px;
-            border-radius: 8px;
+            padding: 0.5em 0.75em;
+            border-radius: 0.5em;
             color: #333;
             font-weight: bold;
-            min-width: 50px;
+            min-width: 4em;
             text-align: center;
         }
 
         .control-desc {
             color: #666;
-            font-size: 14px;
-        }
-
-        /* Alegria / Corporate Memphis style - Bold colors and geometric shapes */
-        .dialog-header {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 0;
-            border-radius: 8px 8px 0 0;
-        }
-
-        .icon {
-            width: 50px;
-            height: 50px;
-            margin-right: 10px;
+            font-size: 0.9em;
         }
 
         /* Keyboard key styling */
         .key {
-            border-radius: 8px;
+            border-radius: 0.5em;
             background-color: #ffcc00;
-            font-size: 18px;
-            padding: 8px 12px;
+            font-size: 1em;
+            padding: 0.5em 0.75em;
             color: #333;
         }
 
         .key-multi {
             display: flex;
-            gap: 5px;
+            gap: 0.25em;
         }
 
         .key-multi .key {
             background-color: #00bcd4;
-            padding: 6px 10px;
+            padding: 0.3em 0.6em;
         }
 
         .highlight {
