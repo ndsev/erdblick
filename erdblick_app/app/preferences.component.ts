@@ -13,7 +13,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
                       tooltipPosition="right"></p-button>
             <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
                       pTooltip="Preferences" tooltipPosition="right"></p-button>
-            <p-button (click)="showControlsDialog()" label="" class="pref-button controls-button"
+            <p-button (click)="showControlsDialog()" label="" class="pref-button"
                       pTooltip="Controls" tooltipPosition="right">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
             </p-button>
