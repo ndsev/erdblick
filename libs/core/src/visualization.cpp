@@ -388,7 +388,7 @@ void FeatureLayerVisualization::addGeometry(
                     mapLayerStyleRuleId,
                     gridCellSize,
                     wgsPos,
-                    "pointParameters",
+                    "labelParameters",
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
