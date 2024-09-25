@@ -2,6 +2,7 @@
 
 #include <map>
 #include <vector>
+#include <unordered_set>
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
@@ -273,7 +274,12 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumLabelCollection labelCollection_;
-    std::map<std::string, std::map<std::string, std::vector<JsValue>>> mergedPointsPerStyleRuleId_;
+
+    // Map from map-layer-style-rule-id to map from grid-position-hash
+    // to pair of feature-id-set and MergedPointVisualization.
+    std::map<std::string,
+        std::map<std::string,
+            std::pair<std::unordered_set<std::string>, std::optional<JsValue>>>> mergedPointsPerStyleRuleId_;
     JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;

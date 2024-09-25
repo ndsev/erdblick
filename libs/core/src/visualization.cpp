@@ -72,7 +72,7 @@ void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile
             }
             mergedPointsPerStyleRuleId_.emplace(
                 getMapLayerStyleRuleId(rule.index()),
-                std::map<std::string, std::vector<JsValue>>());
+                std::map<std::string, std::pair<std::unordered_set<std::string>, std::optional<JsValue>>>());
         }
     }
 
@@ -166,9 +166,9 @@ NativeJsValue FeatureLayerVisualization::mergedPointFeatures() const
     auto result = JsValue::Dict();
     for (auto const& [mapLayerStyleRuleId, primitives] : mergedPointsPerStyleRuleId_) {
         auto pointList = JsValue::List();
-        for (auto const& [_, points] : primitives) {
-            for (auto const& pt : points) {
-                pointList.push(pt);
+        for (auto const& [_, featureIdsAndPoint] : primitives) {
+            if (auto const& pt = featureIdsAndPoint.second) {
+                pointList.push(*pt);
             }
         }
         result.set(mapLayerStyleRuleId, pointList);
@@ -433,24 +433,34 @@ void FeatureLayerVisualization::addMergedPointGeometry(
     // This variable indicates, how many features from other tiles have already been added
     // for the given grid position. We must sum both existing points in the point merge service
     // from other tiles, and existing points from this tile.
-    auto& mergedPointVec = mergedPointsPerStyleRuleId_[mapLayerStyleRuleId][gridPositionHash];
+    auto& [mergedPointFeatureSet, mergedPointVisu] =
+        mergedPointsPerStyleRuleId_[mapLayerStyleRuleId][gridPositionHash];
+    auto [_, featureIdIsNew] = mergedPointFeatureSet.emplace(id);
     auto mergedPointCount = featureMergeService_.call<int32_t>(
         "count",
         pointCartographic,
         gridPositionHash,
         tile_->tileId().z(),
-        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointVec.size()) + 1;
+        mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointFeatureSet.size());
     evalFun.context_.set(
         internalStringPoolCopy_->emplace("$mergeCount"),
         simfil::Value(mergedPointCount));
 
     // Add a MergedPointVisualization to the list.
-    mergedPointVec.push_back(JsValue::Dict({
-        {"position", JsValue(pointCartographic)},
-        {"positionHash", JsValue(gridPositionHash)},
-        {geomField, JsValue(makeGeomParams(evalFun))},
-        {"featureIds", JsValue::List({makeTileFeatureId(id)})},
-    }));
+    if (!mergedPointVisu) {
+        mergedPointVisu = JsValue::Dict({
+            {"position", JsValue(pointCartographic)},
+            {"positionHash", JsValue(gridPositionHash)},
+            {geomField, JsValue(makeGeomParams(evalFun))},
+            {"featureIds", JsValue::List({makeTileFeatureId(id)})},
+        });
+    }
+    else {
+        mergedPointVisu->set(geomField, JsValue(makeGeomParams(evalFun)));
+        if (featureIdIsNew) {
+            (*mergedPointVisu)["featureIds"].push(makeTileFeatureId(id));
+        }
+    }
 }
 
 JsValue
