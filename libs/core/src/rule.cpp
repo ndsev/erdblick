@@ -613,8 +613,6 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
         if (!resultText.empty()) {
             return resultText;
         }
-        std::cout << "Empty return value for the label text expression: " << labelTextExpression_
-                  << ": " << resultVal.toString() << std::endl;
         return labelText_;
     }
     return labelText_;

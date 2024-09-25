@@ -171,9 +171,6 @@ export class FeatureWrapper {
      * @returns The value returned by the callback.
      */
     peek(callback: any) {
-        if (this.featureTile.disposed) {
-            throw new Error(`Unable to access feature of deleted layer ${this.featureTile.mapTileKey}!`);
-        }
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature = tileFeatureLayer.find(this.featureId);
             if (feature.isNull()) {

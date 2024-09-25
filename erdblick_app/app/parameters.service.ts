@@ -185,7 +185,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     panel: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.length == 2 && val.every(item => typeof item === 'number'),
+        validator: val => Array.isArray(val) && (!val.length || val.length == 2 && val.every(item => typeof item === 'number')),
         default: [],
         urlParam: true
     }

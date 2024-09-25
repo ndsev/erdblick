@@ -159,8 +159,8 @@ export class TileVisualization {
         this.destroy(viewer);
         this.deleted = false;
 
-        // Do not try to render if the underlying data is disposed.
-        if (this.tile.disposed || this.style.isDeleted()) {
+        // Do not continue if the style was deleted while we were waiting.
+        if (this.style.isDeleted()) {
             return false;
         }
 
@@ -200,9 +200,8 @@ export class TileVisualization {
                     }
 
                     let extRefsResolved = await response.json() as LocateResponse;
-                    if (this.tile.disposed || this.style.isDeleted()) {
-                        // Do not continue if any of the tiles or the style
-                        // were deleted while we were waiting.
+                    if (this.style.isDeleted()) {
+                        // Do not continue if the style was deleted while we were waiting.
                         return false;
                     }
 

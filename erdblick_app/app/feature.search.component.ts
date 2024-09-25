@@ -109,7 +109,7 @@ export class FeatureSearchComponent {
     }
 
     selectResult(event: any) {
-        if (event.value.mapId && event.value.featureId) {
+        if (event.value && event.value.mapId && event.value.featureId) {
             this.jumpService.highlightByJumpTargetFilter(event.value.mapId, event.value.featureId).then(() => {
                 if (this.inspectionService.selectedFeatures.length) {
                     this.mapService.focusOnFeature(this.inspectionService.selectedFeatures[0]);

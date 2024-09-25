@@ -178,11 +178,11 @@ export class MapService {
             this.update();
         })
 
+        await this.reloadDataSources();
+
         this.parameterService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
             this.highlightFeatures(parameters.selected).then();
         });
-
-        await this.reloadDataSources();
 
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
@@ -753,7 +753,7 @@ export class MapService {
 
     setTileLevelForViewport() {
         for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-            if (coreLib.getNumTileIds(this.currentViewport, level) >= 15) {
+            if (coreLib.getNumTileIds(this.currentViewport, level) >= 48) {
                 this.zoomLevel.next(level);
                 return;
             }
