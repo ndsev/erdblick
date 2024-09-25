@@ -3,13 +3,10 @@ version: 1.0
 options:
   - label: Show Meshes/Polygons
     id: showMesh
-    default: false
   - label: Show Points
     id: showPoint
-    default: true
   - label: Show Lines
     id: showLine
-    default: true
 
 rules:
   # Normal styles
@@ -27,7 +24,10 @@ rules:
   - geometry: ["point"]
     point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
     filter: showPoint
-    color-expression: "$mergeCount > 1 and 'brown' or 'moccasin'"
+    color-expression: "$mergeCount > 1 and 'red' or 'moccasin'"
+    label-text-expression: "$mergeCount > 1 and ($mergeCount as string) or ''"
+    label-color: black
+    label-font: "12px Helvetica"
     opacity: 1.0
     width: 15.0
 
