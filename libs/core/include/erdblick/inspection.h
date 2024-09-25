@@ -7,6 +7,7 @@
 #include "sfl/small_vector.hpp"
 #include <unordered_map>
 #include <cstdint>
+#include <deque>
 
 namespace erdblick
 {
@@ -28,10 +29,11 @@ public:
     {
         JsValue key_;
         JsValue value_;
+        std::optional<JsValue> mapId_;
         ValueType type_ = ValueType::Null;
-        std::string hoverId_;
+        std::string hoverId_;  // For highlight attribs/relations on hovering.
         std::string info_;
-        std::vector<InspectionNode> children_;
+        std::deque<InspectionNode> children_;
         JsValue direction_;
         std::string geoJsonPath_;
 

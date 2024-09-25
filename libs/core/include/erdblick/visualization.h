@@ -2,12 +2,14 @@
 
 #include <map>
 #include <vector>
+#include <unordered_set>
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
 #include "cesium-interface/labels.h"
 #include "style.h"
 #include "simfil/overlay.h"
+#include "layer.h"
 
 namespace erdblick
 {
@@ -18,7 +20,7 @@ class FeatureLayerVisualization;
  * Feature ID which is used when the rendered representation is not
  * supposed to be selectable.
  */
-static constexpr uint32_t UnselectableId = 0xffffffff;
+static std::string UnselectableId;
 
 /**
  * Covers the state for the visualization of a single Relation-Style+Feature
@@ -79,15 +81,23 @@ public:
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
      */
      FeatureLayerVisualization(
+        std::string const& mapTileKey,
         const FeatureLayerStyle& style,
-        NativeJsValue const& optionValues,
-        std::string highlightFeatureIndex = "");
+        NativeJsValue const& rawOptionValues,
+        NativeJsValue const& rawFeatureMergeService,
+        FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
+        NativeJsValue const& rawFeatureIdSubset = {});
+
+     /**
+      * Destructor for memory diagnostics.
+      */
+     ~FeatureLayerVisualization();
 
     /**
      * Add a tile which is considered for visualization. All tiles added after
      * the first one are only considered to resolve external relations.
      */
-    void addTileFeatureLayer(std::shared_ptr<mapget::TileFeatureLayer> tile);
+    void addTileFeatureLayer(TileFeatureLayer const& tile);
 
     /**
      * Run visualization for the added tile feature layers.
@@ -124,14 +134,21 @@ public:
      */
     [[nodiscard]] NativeJsValue primitiveCollection() const;
 
+    /**
+     * Returns all merged point features as a dict form mapLayerStyleRuleId
+     * to MergedPointVisualization primitives.
+     */
+    [[nodiscard]] NativeJsValue mergedPointFeatures() const;
+
 private:
     /**
      * Add all geometry of some feature which is compatible with the given rule.
      */
     void addFeature(
         mapget::model_ptr<mapget::Feature>& feature,
-        uint32_t id,
-        FeatureStyleRule const& rule);
+        BoundEvalFun& evalFun,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId);
 
     /**
      * Visualize an attribute.
@@ -140,8 +157,9 @@ private:
         mapget::model_ptr<mapget::Feature> const& feature,
         std::string_view const& layer,
         mapget::model_ptr<mapget::Attribute> const& attr,
-        uint32_t id,
+        std::string_view const& id,
         const FeatureStyleRule& rule,
+        std::string const& mapLayerStyleRuleId,
         uint32_t& offsetFactor,
         glm::dvec3 const& offset);
 
@@ -151,9 +169,10 @@ private:
      */
     void addGeometry(
         mapget::model_ptr<mapget::Geometry> const& geom,
-        uint32_t id,
+        std::string_view id,
         FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
         glm::dvec3 const& offset = {.0, .0, .0});
 
     /**
@@ -164,9 +183,9 @@ private:
     void addLine(
         mapget::Point const& wgsA,
         mapget::Point const& wgsB,
-        uint32_t id,
+        std::string_view const& id,
         FeatureStyleRule const& rule,
-        BoundEvalFun const& evalFun,
+        BoundEvalFun& evalFun,
         glm::dvec3 const& offset,
         double labelPositionHint=0.5);
 
@@ -176,10 +195,22 @@ private:
     void addPolyLine(
         std::vector<mapget::Point> const& vertsCartesian,
         const FeatureStyleRule& rule,
-        uint32_t id,
-        BoundEvalFun const& evalFun);
+        JsValue const& id,
+        BoundEvalFun& evalFun);
 
-        /**
+    /**
+     * Add a merged point feature.
+     */
+    void addMergedPointGeometry(
+        const std::string_view& id,
+        const std::string& mapLayerStyleRuleId,
+        const std::optional<glm::dvec3>& gridCellSize,
+        mapget::Point const& pointCartographic,
+        const char* geomField,
+        BoundEvalFun& evalFun,
+        std::function<JsValue(BoundEvalFun&)> const& makeGeomParams);
+
+    /**
      * Get some cartesian points as a list of Cesium Cartesian points.
      */
     static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
@@ -199,13 +230,13 @@ private:
      * Get an initialised primitive for a particular PolylineDashMaterialAppearance.
      */
     CesiumPrimitive&
-    getPrimitiveForDashMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
+    getPrimitiveForDashMaterial(const FeatureStyleRule& rule, BoundEvalFun& evalFun);
 
     /**
      * Get an initialised primitive for a particular PolylineArrowMaterialAppearance.
      */
     CesiumPrimitive&
-    getPrimitiveForArrowMaterial(const FeatureStyleRule& rule, BoundEvalFun const& evalFun);
+    getPrimitiveForArrowMaterial(const FeatureStyleRule& rule, BoundEvalFun& evalFun);
 
     /**
      * Simfil expression evaluation function for the tile which this visualization belongs to.
@@ -217,8 +248,20 @@ private:
      */
     void addOptionsToSimfilContext(simfil::OverlayNode& context);
 
+    /**
+     * Create a feature primitive ID struct from the mapTileKey_ and the given feature ID.
+     */
+    JsValue makeTileFeatureId(std::string_view const& featureId) const;
+
+    /**
+     * Get a unique identifier for the map+layer+style+rule-id+highlight-mode.
+     * In combination with a tile id, this uniquely identifiers a merged corner tile.
+     */
+    std::string getMapLayerStyleRuleId(uint32_t ruleIndex) const;
+
     /// =========== Generic Members ===========
 
+    JsValue mapTileKey_;
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
     std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
@@ -230,14 +273,22 @@ private:
     std::map<uint32_t, CesiumPrimitive> arrowGroundLines_;
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
-    CesiumPrimitiveLabelsCollection labelCollection_;
+    CesiumLabelCollection labelCollection_;
+
+    // Map from map-layer-style-rule-id to map from grid-position-hash
+    // to pair of feature-id-set and MergedPointVisualization.
+    std::map<std::string,
+        std::map<std::string,
+            std::pair<std::unordered_set<std::string>, std::optional<JsValue>>>> mergedPointsPerStyleRuleId_;
+    JsValue featureMergeService_;
 
     FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
-    std::vector<std::shared_ptr<mapget::TileFeatureLayer>> allTiles_;
-    std::string highlightFeatureId_;
+    std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
+    std::set<std::string> featureIdSubset_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::map<std::string, simfil::Value> optionValues_;
+    FeatureStyleRule::HighlightMode highlightMode_;
 
     /// ===== Relation Processing Members =====
 

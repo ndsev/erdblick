@@ -20,7 +20,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "main"
+  GIT_TAG        "v2024.4.0"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
@@ -33,17 +33,15 @@ FetchContent_MakeAvailable(yaml-cpp)
 include(cmake/cesium.cmake)
 
 # Erdblick Core Library
-
 add_subdirectory(libs/core)
 
 if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_subdirectory(test)
+else()
+  # Angular Build
+  add_custom_target(erdblick-ui ALL
+    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    DEPENDS erdblick-core)
 endif()
 
-# Angular Build
-
-add_custom_target(erdblick-ui ALL
-  COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
-  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  DEPENDS erdblick-core
-)

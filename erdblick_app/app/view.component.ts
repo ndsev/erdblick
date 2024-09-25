@@ -1,6 +1,3 @@
-"use strict";
-
-import {FeatureWrapper} from "./features.model";
 import {TileVisualization} from "./visualization.model"
 import {
     Cartesian2,
@@ -8,25 +5,29 @@ import {
     Cartographic,
     CesiumMath,
     Color,
-    ColorGeometryInstanceAttribute,
     Entity,
     ImageryLayer,
     ScreenSpaceEventHandler,
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
-    HeightReference
+    HeightReference,
+    Billboard,
+    defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
-import {FeatureSearchService, MAX_ZOOM_LEVEL} from "./feature.search.service";
+import {FeatureSearchService, MAX_ZOOM_LEVEL, SearchResultPrimitiveId} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 import {distinctUntilChanged} from "rxjs";
 import {SearchResultPosition} from "./featurefilter.worker";
+import {InspectionService} from "./inspection.service";
+import {KeyboardService} from "./keyboard.service";
+import {coreLib} from "./wasm";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -47,12 +48,10 @@ declare let window: DebugWindow;
 })
 export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;
-    private hoveredFeature: any = null;
-    private hoveredFeatureOrigColor: Color | null = null;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
-    private tileVisForPrimitive: Map<any, TileVisualization>;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
@@ -67,45 +66,36 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public featureSearchService: FeatureSearchService,
                 public parameterService: ParametersService,
                 public jumpService: JumpTargetService,
+                public inspectionService: InspectionService,
+                public keyboardService: KeyboardService,
                 public coordinatesService: CoordinatesService) {
-
-        this.tileVisForPrimitive = new Map();
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
                 if (wasRendered) {
-                    tileVis.forEachPrimitive((primitive: any) => {
-                        this.tileVisForPrimitive.set(primitive, tileVis);
-                    })
                     this.viewer.scene.requestRender();
                 }
             });
         });
 
         this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-            if (this.hoveredFeature && this.tileVisForPrimitive.get(this.hoveredFeature.primitive) === tileVis) {
-                this.setHoveredCesiumFeature(null);
-            }
-            tileVis.forEachPrimitive((primitive: any) => {
-                this.tileVisForPrimitive.delete(primitive);
-            })
             tileVis.destroy(this.viewer);
             this.viewer.scene.requestRender();
         });
 
-        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number}) => {
-            this.parameterService.cameraViewData.next({
-                // Convert lon/lat to Cartesian3 using current camera altitude.
-                destination: Cartesian3.fromDegrees(
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number, z?: number}) => {
+            // Convert lon/lat to Cartesian3 using current camera altitude.
+            this.parameterService.setView(
+                Cartesian3.fromDegrees(
                     pos.x,
                     pos.y,
-                    Cartographic.fromCartesian(this.viewer.camera.position).height),
-                orientation: {
+                    pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
+                {
                     heading: CesiumMath.toRadians(0), // East, in radians.
                     pitch: CesiumMath.toRadians(-90), // Directly looking down.
                     roll: 0 // No rotation.
                 }
-            });
+            );
         });
     }
 
@@ -136,31 +126,55 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
+            let feature = this.viewer.scene.pick(position);
+            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
+                if (feature.primitive.id) {
+                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
+                    if (featureInfo.mapId && featureInfo.featureId) {
+                        this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId, featureInfo.featureId).then(() => {
+                            if (this.inspectionService.selectedFeatures) {
+                                this.inspectionService.zoomToFeature();
+                            }
+                        });
+                    }
+                } else {
+                    this.mapService.moveToWgs84PositionTopic.next({
+                        x: feature.primitive.position.x,
+                        y: feature.primitive.position.y,
+                        z: feature.primitive.position.z + 1000
+                    });
+                }
+            }
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
+            // Handle position update after highlighting, because otherwise
+            // there is a race condition between the parameter updates for
+            // feature selection and position update.
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
-            }
-            let feature = this.viewer.scene.pick(position);
-            if (this.isKnownCesiumFeature(feature)) {
-                this.setPickedCesiumFeature(feature);
-            } else {
-                this.setPickedCesiumFeature(null);
             }
         }, ScreenSpaceEventType.LEFT_CLICK);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
+            // Do not handle mouse move here, if the first element
+            // under the cursor is not the Cesium view.
+            if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
+                return;
+            }
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
             }
             let feature = this.viewer.scene.pick(position);
-            if (this.isKnownCesiumFeature(feature)) {
-                this.setHoveredCesiumFeature(feature);
-            } else {
-                this.setHoveredCesiumFeature(null);
-            }
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
@@ -174,7 +188,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Remove fullscreen button as unnecessary
         this.viewer.fullscreenButton.destroy();
 
-        this.parameterService.cameraViewData.subscribe(cameraData => {
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
             this.viewer.camera.setView({
                 destination: cameraData.destination,
                 orientation: cameraData.orientation
@@ -218,110 +232,40 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
             }
         });
-    }
 
-    /**
-     * Check if two cesium features are equal. A cesium feature is a
-     * combination of a feature id and a primitive which contains it.
-     */
-    private cesiumFeaturesAreEqual(f1: any, f2: any) {
-        return (!f1 && !f2) || (f1 && f2 && f1.id === f2.id && f1.primitive === f1.primitive);
-    }
+        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+            const [origin, normal] = values;
+            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+            Cartesian3.normalize(direction, direction);
+            Cartesian3.negate(direction, direction);
+            const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(endPoint, new Cartesian3());
+            const right = Cartesian3.cross(direction, up, new Cartesian3());
+            Cartesian3.normalize(right, right);
+            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+            Cartesian3.normalize(cameraUp, cameraUp);
+            this.viewer.camera.flyTo({
+                destination: endPoint,
+                orientation: {
+                    direction: direction,
+                    up: cameraUp,
+                }
+            });
+        });
 
-    /** Check if the given feature is known and can be selected. */
-    isKnownCesiumFeature(f: any) {
-        return f && f.id !== undefined && f.primitive !== undefined && (
-            this.tileVisForPrimitive.has(f.primitive) ||
-            this.tileVisForPrimitive.has(f.primitive._pointPrimitiveCollection))
-    }
+        this.keyboardService.registerShortcuts(['q', 'Q'], this.zoomIn.bind(this));
+        this.keyboardService.registerShortcuts(['e', 'E'], this.zoomOut.bind(this));
+        this.keyboardService.registerShortcuts(['w', 'W'], this.moveUp.bind(this));
+        this.keyboardService.registerShortcuts(['a', 'A'], this.moveLeft.bind(this));
+        this.keyboardService.registerShortcuts(['s', 'S'], this.moveDown.bind(this));
+        this.keyboardService.registerShortcuts(['d', 'D'], this.moveRight.bind(this));
+        this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
 
-    /**
-     * Set or re-set the hovered feature.
-     */
-    private setHoveredCesiumFeature(feature: any) {
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
-            return;
+        // Hide the global loading spinner.
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
         }
-        // Restore the previously hovered feature to its original color.
-        if (this.hoveredFeature && this.hoveredFeatureOrigColor) {
-            this.setFeatureColor(this.hoveredFeature, this.hoveredFeatureOrigColor);
-        }
-        this.hoveredFeature = null;
-        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
-        if (resolvedFeature && !resolvedFeature?.equals(this.mapService.selectionTopic.getValue())) {
-            // Highlight the new hovered feature and remember its original color.
-            this.hoveredFeatureOrigColor = this.getFeatureColor(feature);
-            this.setFeatureColor(feature, Color.YELLOW);
-            this.hoveredFeature = feature;
-        }
-    }
-
-    /**
-     * Set or re-set the picked feature.
-     */
-    private setPickedCesiumFeature(feature: any) {
-        // Get the actual mapget feature for the picked Cesium feature.
-        let resolvedFeature = feature ? this.resolveFeature(feature.primitive, feature.id) : null;
-        if (!resolvedFeature) {
-            this.mapService.selectionTopic.next(null);
-            return;
-        }
-
-        if (resolvedFeature.equals(this.mapService.selectionTopic.getValue())) {
-            return;
-        }
-
-        // Make sure that if the hovered feature is picked, we don't
-        // remember the hover color as the original color.
-        if (this.cesiumFeaturesAreEqual(feature, this.hoveredFeature)) {
-            this.setHoveredCesiumFeature(null);
-        }
-        this.mapService.selectionTopic.next(resolvedFeature);
-    }
-
-    /** Set the color of a cesium feature through its associated primitive. */
-    private setFeatureColor(feature: any, color: Color) {
-        if (feature.primitive.color !== undefined) {
-            // Special treatment for point primitives.
-            feature.primitive.color = color;
-            this.viewer.scene.requestRender();
-            return;
-        }
-        if (feature.primitive.isDestroyed()) {
-            return;
-        }
-        const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        attributes.color = ColorGeometryInstanceAttribute.toValue(color);
-        this.viewer.scene.requestRender();
-    }
-
-    /** Read the color of a cesium feature through its associated primitive. */
-    private getFeatureColor(feature: any): Color | null {
-        if (feature.primitive.color !== undefined) {
-            // Special treatment for point primitives.
-            return feature.primitive.color.clone();
-        }
-        if (feature.primitive.isDestroyed()) {
-            return null;
-        }
-        const attributes = feature.primitive.getGeometryInstanceAttributes(feature.id);
-        if (attributes.color === undefined) {
-            return null;
-        }
-        return Color.fromBytes(...attributes.color);
-    }
-
-    /** Get a mapget feature from a cesium feature. */
-    private resolveFeature(primitive: any, index: number) {
-        let tileVis = this.tileVisForPrimitive.get(primitive);
-        if (!tileVis) {
-            tileVis = this.tileVisForPrimitive.get(primitive._pointPrimitiveCollection);
-            if (!tileVis) {
-                console.error("Failed find tileLayer for primitive!");
-                return null;
-            }
-        }
-        return new FeatureWrapper(index, tileVis.tile);
     }
 
     /**
@@ -358,8 +302,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Handle the antimeridian.
         // TODO: Must also handle north pole.
-        if (west > -180 && sizeLon > 180.) {
-            sizeLon = 360. - sizeLon;
+        if (west > -180 && sizeLon > 180.0) {
+            sizeLon = 360.0 - sizeLon;
         }
 
         // Grow the viewport rectangle by 25%
@@ -411,12 +355,12 @@ export class ErdblickViewComponent implements AfterViewInit {
     renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-        let markers: Array<SearchResultPosition> = [];
+        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
         const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
         for (const node of nodes) {
             if (node.markers.length) {
                 markers.push(...node.markers);
-            } else if (node.count > 0) {
+            } else if (node.count > 0 && node.center) {
                 this.featureSearchService.visualization.add({
                     position: node.center,
                     image: this.featureSearchService.getPinGraphics(node.count),
@@ -428,9 +372,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         }
 
         if (markers.length) {
-            markers.forEach(position => {
+            markers.forEach(marker => {
                 this.featureSearchService.visualization.add({
-                    position: position.cartesian as Cartesian3,
+                    id: marker[0],
+                    position: marker[1].cartesian as Cartesian3,
                     image: this.featureSearchService.markerGraphics(),
                     width: 32,
                     height: 32,
@@ -440,5 +385,47 @@ export class ErdblickViewComponent implements AfterViewInit {
                 });
             });
         }
+    }
+
+    moveUp() {
+        this.moveCameraOnSurface(0, this.parameterService.cameraMoveUnits);
+    }
+
+    moveDown() {
+        this.moveCameraOnSurface(0, -this.parameterService.cameraMoveUnits);
+    }
+
+    moveLeft() {
+        this.moveCameraOnSurface(-this.parameterService.cameraMoveUnits, 0);
+    }
+
+    moveRight() {
+        this.moveCameraOnSurface(this.parameterService.cameraMoveUnits, 0);
+    }
+
+    private moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
+        // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
+        const cameraPosition = this.viewer.camera.positionCartographic;
+        const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
+        const lat = cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset);
+        const alt = cameraPosition.height;
+        const newPosition = Cartesian3.fromRadians(lon, lat, alt);
+        this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
+    }
+
+    zoomIn() {
+        this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
+    }
+
+    zoomOut() {
+        this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
+    }
+
+    resetOrientation() {
+        this.parameterService.setView(this.parameterService.getCameraPosition(), {
+            heading: CesiumMath.toRadians(0.0),
+            pitch: CesiumMath.toRadians(-90.0),
+            roll: 0.0
+        });
     }
 }

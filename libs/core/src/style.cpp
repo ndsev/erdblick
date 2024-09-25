@@ -17,14 +17,20 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     // Convert char vector to YAML node.
     auto styleYaml = YAML::Load(styleSpec);
 
+    if (auto name = styleYaml["name"]) {
+        if (name.IsScalar())
+            name_ = name.Scalar();
+    }
+
     if (!styleYaml["rules"] || !(styleYaml["rules"].IsSequence())) {
         std::cout << "YAML stylesheet error: Spec does not contain any rules?" << std::endl;
         return;
     }
 
+    uint32_t ruleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
         // Create FeatureStyleRule object.
-        rules_.emplace_back(rule);
+        rules_.emplace_back(rule, ruleIndex++);
     }
 
     for (auto const& option : styleYaml["options"]) {
@@ -33,8 +39,6 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     }
 
     valid_ = true;
-
-    std::cout << "Parsed a style YAML!" << std::endl;
 }
 
 bool FeatureLayerStyle::isValid() const
@@ -50,6 +54,10 @@ const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
 {
     return options_;
+}
+
+std::string const& FeatureLayerStyle::name() const {
+    return name_;
 }
 
 FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)

@@ -1,4 +1,4 @@
-import {Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2} from '@angular/core';
+import {Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, Renderer2, Input} from '@angular/core';
 import {basicSetup} from 'codemirror';
 import {EditorState, Extension} from '@codemirror/state';
 import {yaml} from '@codemirror/lang-yaml';
@@ -8,6 +8,7 @@ import {linter, Diagnostic, lintGutter} from '@codemirror/lint';
 import {syntaxHighlighting, defaultHighlightStyle} from "@codemirror/language"
 import {StyleService} from "./style.service";
 import * as jsyaml from 'js-yaml';
+import {EditorService} from "./editor.service";
 
 const completionsList = [
     {label: "version", type: "property"},
@@ -60,6 +61,7 @@ const completionsList = [
     {label: "first-of", type: "property"},
     {label: "attribute-type", type: "property"},
     {label: "attribute-layer-type", type: "property"},
+    {label: "point-merge-grid-cell", type: "property"},
     {label: "FILL", type: "keyword"},
     {label: "OUTLINE", type: "keyword"},
     {label: "FILL_AND_OUTLINE", type: "keyword"},
@@ -79,8 +81,9 @@ const completionsList = [
     {label: "feature", type: "keyword"},
     {label: "relation", type: "keyword"},
     {label: "attribute", type: "keyword"},
-    {label: "normal", type: "keyword"},
-    {label: "highlight", type: "keyword"},
+    {label: "none", type: "keyword"},
+    {label: "selection", type: "keyword"},
+    {label: "hover", type: "keyword"},
     {label: "Lane", type: "keyword"},
     {label: "Boundary", type: "keyword"}
 ]
@@ -97,34 +100,30 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
     @ViewChild('editor') private editorRef!: ElementRef;
 
     private editorView?: EditorView;
-    private styleSource: string = "";
+    private editedSource: string = "";
 
-    constructor(public styleService: StyleService,
+    constructor(public editorService: EditorService,
                 public renderer: Renderer2) {}
 
     ngAfterViewInit(): void {
-        this.styleService.selectedStyleIdForEditing.subscribe(styleId => {
-            if (styleId) {
+        this.editorService.updateEditorState.subscribe(state => {
+            if (state) {
                 const childElements = this.editorRef.nativeElement.childNodes;
                 for (let child of childElements) {
                     this.renderer.removeChild(this.editorRef.nativeElement, child);
                 }
                 this.editorView = new EditorView({
-                    state: this.createEditorState(styleId),
+                    state: this.createEditorState(),
                     parent: this.editorRef.nativeElement
                 });
             }
         });
     }
 
-    createEditorState(styleId: string) {
-        if (this.styleService.styles.has(styleId)) {
-            this.styleSource = `${this.styleService.styles.get(styleId)!.source}\n\n\n\n\n`;
-        } else {
-            this.styleSource = "";
-        }
+    createEditorState() {
+        this.editedSource = this.editorService.editableData;
         return EditorState.create({
-            doc: this.styleSource,
+            doc: this.editedSource,
             extensions: [
                 basicSetup,
                 yaml(),
@@ -135,8 +134,9 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 this.yamlLinter,
                 this.stopMouseWheelClipboard,
                 EditorState.tabSize.of(2),
+                EditorState.readOnly.of(this.editorService.readOnly),
                 EditorView.updateListener.of((e: ViewUpdate) => {
-                    this.styleService.styleEditedStateData.next(e.state.doc.toString());
+                    this.editorService.editedStateData.next(e.state.doc.toString());
                 })
             ]
         });
@@ -193,7 +193,7 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
         return {
             key: 'Mod-s',
             run: () => {
-                this.styleService.styleEditedSaveTriggered.next(true);
+                this.editorService.editedSaveTriggered.next(true);
                 return true;
             }
         };

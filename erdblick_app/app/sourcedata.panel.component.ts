@@ -1,24 +1,36 @@
-import {Component, OnInit, Input, ViewChild} from "@angular/core";
+import {
+    Component,
+    OnInit,
+    Input,
+    ViewChild,
+    OnDestroy,
+    AfterViewInit,
+    ElementRef,
+    Renderer2
+} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
 import {MapService} from "./map.service";
 import {coreLib} from "./wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
-import {Menu} from "primeng/menu";
+import {ParametersService} from "./parameters.service";
+import {Subscription} from "rxjs";
 
 @Component({
     selector: 'sourcedata-panel',
     template: `
-        <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
-            <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-            </div>
+        <div class="flex resizable-container" #resizeableContainer
+             [style.width.px]="inspectionContainerWidth"
+             [style.height.px]="inspectionContainerHeight"
+             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             [ngClass]="{'resizable-container-expanded': isExpanded}">
+<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+<!--            </div>-->
             <ng-container *ngIf="errorMessage.length == 0; else errorTemplate">
-                <p-treeTable #tt
-                    class="panel-tree"
-                    scrollHeight="flex"
+                <p-treeTable #tt scrollHeight="flex" filterMode="strict"
                     [value]="treeData"
                     [loading]="loading"
                     [autoLayout]="true"
@@ -26,22 +38,19 @@ import {Menu} from "primeng/menu";
                     [resizableColumns]="true"
                     [virtualScroll]="true"
                     [virtualScrollItemSize]="26"
-                    [tableStyle]="{'min-width': '150px', 'min-height': '1px', 'padding': '0px'}"
-                    
-                    filterMode="strict"
+                    [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                     [globalFilterFields]="filterFields"
                 >
                     <ng-template pTemplate="caption">
                         <div class="p-input-icon-left ml-auto filter-container">
-                            <i class="pi pi-search"></i>
-                            <input class="filter-input" type="text" pInputText placeholder="Filter data"
+                            <i class="pi pi-filter"></i>
+                            <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
                                    [(ngModel)]="filterString"
                                    (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
                                    (input)="tt.filterGlobal($any($event.target).value, 'contains')"
                             />
                             <i *ngIf="filterString" (click)="clearFilter()"
                                class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                            <p-button icon="pi pi-ellipsis-v" tooltip="Select Layer" (click)="layerMenuItemsMenu.toggle($event)" />
                         </div>
                     </ng-template>
 
@@ -61,7 +70,7 @@ import {Menu} from "primeng/menu";
 
                     <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                         <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
-                            <td *ngFor="let col of columns; let i = index">
+                            <td *ngFor="let col of columns; let i = index" style="white-space: nowrap; text-overflow: ellipsis">
                                 <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
                                 <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
                                 <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>
@@ -70,25 +79,30 @@ import {Menu} from "primeng/menu";
                     </ng-template>
                 </p-treeTable>
             </ng-container>
-        </div>
-    
-        <ng-template #errorTemplate>
-            <div class="error">
-                <div>
-                    <strong>Error</strong><br>
-                    {{ errorMessage }}
+
+            <ng-template #errorTemplate>
+                <div class="error">
+                    <div>
+                        <strong>Error</strong><br>
+                        {{ errorMessage }}
+                    </div>
                 </div>
-            </div>
-        </ng-template>
-
-        <p-menu #layerMenuItemsMenu [model]="layerMenuItems" [popup]="true" appendTo="body" [style]="{'width': 'auto'}" />
-    `
+            </ng-template>
+        </div>
+    `,
+    styles: [`
+        @media only screen and (max-width: 56em) {
+            .resizable-container-expanded {
+                height: calc(100vh - 3em);
+            }
+        }
+    `]
 })
-export class SourceDataPanelComponent implements OnInit {
-    @Input() sourceData!: SelectedSourceData;
+export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
+    @Input() sourceData!: SelectedSourceData;
     @ViewChild('tt') table!: TreeTable;
-    @ViewChild('layerMenuItemsMenu') layerListMenu!: Menu;
+    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
 
     treeData: TreeTableNode[] = [];
     filterFields = [
@@ -108,10 +122,12 @@ export class SourceDataPanelComponent implements OnInit {
     errorMessage = "";
     isExpanded = false;
 
-    layerMenuItems: any[] = [];
+    inspectionContainerWidth: number;
+    inspectionContainerHeight: number;
+    containerSizeSubscription: Subscription;
 
     /**
-     * Returns a human readable layer name for a layer id.
+     * Returns a human-readable layer name for a layer id.
      *
      * @param layerId Layer id to get the name for
      */
@@ -122,7 +138,22 @@ export class SourceDataPanelComponent implements OnInit {
         return layerId;
     }
 
-    constructor(private inspectionService: InspectionService, public mapService: MapService) {}
+    constructor(private inspectionService: InspectionService,
+                public parameterService: ParametersService,
+                private renderer: Renderer2,
+                public mapService: MapService) {
+        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
+        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
+            if (parameter.panel.length == 2) {
+                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (parameter.panel[1] + 3) * this.parameterService.baseFontSize;
+            } else {
+                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (window.innerHeight - (this.parameterService.inspectionContainerHeight + 3) * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+            }
+        });
+    }
 
     ngOnInit(): void {
         this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
@@ -146,34 +177,10 @@ export class SourceDataPanelComponent implements OnInit {
             .finally(() => {
                 this.loading = false;
             });
+    }
 
-        this.mapService.maps.subscribe(maps => {
-            const map = maps.get(this.sourceData.mapId);
-            if (map) {
-                this.layerMenuItems = [
-                    {
-                        label: "Switch Layer",
-                        items: Array.from(map.layers.values())
-                            .filter(item => item.type == "SourceData")
-                            .map(item => {
-                                return {
-                                    label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
-                                    disabled: item.layerId === this.sourceData.layerId,
-                                    command: () => {
-                                        let sourceData = {...this.sourceData};
-                                        sourceData.layerId = item.layerId;
-                                        sourceData.address = BigInt(0);
-
-                                        this.inspectionService.selectedSourceData.next(sourceData);
-                                    },
-                                };
-                            }),
-                    },
-                ];
-            } else {
-                this.layerMenuItems = [];
-            }
-        });
+    ngAfterViewInit() {
+        this.detectSafari();
     }
 
     /**
@@ -250,7 +257,7 @@ export class SourceDataPanelComponent implements OnInit {
         }
 
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
-        let firstHighlightedItemIndex : number | undefined;
+        let firstHighlightedItemIndex: number | undefined;
 
         let select = (node: TreeTableNode, parents: TreeTableNode[], highlight: boolean, virtualRowIndex: number) => {
             if (!node.data) {
@@ -297,6 +304,17 @@ export class SourceDataPanelComponent implements OnInit {
 
         if (event.key === 'Escape') {
             this.clearFilter();
+        }
+    }
+
+    ngOnDestroy() {
+        this.containerSizeSubscription.unsubscribe();
+    }
+
+    detectSafari() {
+        const isSafari = /Safari/i.test(navigator.userAgent);
+        if (isSafari) {
+            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
         }
     }
 }

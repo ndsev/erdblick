@@ -6,12 +6,44 @@
     <base href="/">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="preconnect" href="https://rsms.me/">
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+    <style>
+        #global-spinner-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            background-color: black;
+        }
 
+        #global-spinner {
+            position: absolute;
+            top: calc(50vh - 5em);
+            left: calc(50vw - 5em);
+            transform: translate(-50%, -50%);
+            border: 1em solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 1em solid var(--blue-500);
+            width: 10em;
+            height: 10em;
+            animation: spin 1s linear infinite;
+            z-index: 9999;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
     <script src="/bundle/cesium/Cesium.js"></script>
 </head>
 <body>
-
+<div id="global-spinner-container">
+    <div id="global-spinner"></div>
+</div>
 <app-root></app-root>
-
 </body>
 </html>

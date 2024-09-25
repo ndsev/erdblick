@@ -69,7 +69,7 @@ Each rule within the YAML `rules` array can have the following fields:
 |-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|--------------------------------------|
 | `geometry`                    | List of geometry type(s) or single type the rule applies to.                                                                                                                                                | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]`, `line`          |
 | `aspect`                      | Specifies the aspect to which the rule applies: `"feature"`, `"relation"`, or `"attribute"`.                                                                                                                | String                                                     | `"feature"`, `"relation"`            |
-| `mode`                        | Specifies the mode: `"normal"` or `"highlight"`.                                                                                                                                                            | String                                                     | `"normal"`, `"highlight"`            |
+| `mode`                        | Specifies the highlight mode: `"none"` or `"hover"` or `"selection"`.                                                                                                                                       | String                                                     | `"none"`, `"hover"`                  |
 | `type`                        | A regular expression to match against a feature type.                                                                                                                                                       | String                                                     | `"Lane\|Boundary"`                   |
 | `filter`                      | A [simfil](https://github.com/klebert-engineering/simfil) filter expression over the feature's JSON representation.                                                                                         | String                                                     | `*roadClass == 4`                    |
 | `selectable`                  | Indicates if the feature is selectable.                                                                                                                                                                     | Boolean                                                    | `true`, `false`                      |
@@ -80,6 +80,7 @@ Each rule within the YAML `rules` array can have the following fields:
 | `flat`                        | Clamps the feature to the ground (Does not work for meshes).                                                                                                                                                | Boolean                                                    | `true`, `false`                      |
 | `outline-color`               | Point outline color.                                                                                                                                                                                        | String                                                     | `green`, `#fff`                      |
 | `outline-width`               | Point outline width in px.                                                                                                                                                                                  | Float                                                      | `3.6`                                |
+| `point-merge-grid-cell`       | WGS84/altutide meter tolerance for merging point visualizations.                                                                                                                                            | Array of three Floats.                                     | `[0.000000084, 0.000000084, 0.01]`   |
 | `near-far-scale`              | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).                                                                                                                      | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]`                 |
 | `offset`                      | Apply a fixed offset to each shape-point in meters. Can be used for z-ordering.                                                                                                                             | Array of three Floats.                                     | `[0, 0, 5]`                          |
 | `arrow`                       | For arrow-heads: One of `none`, `forward`, `backward`, `double`. Not compatible with `dashed`.                                                                                                              | String                                                     | `single`                             |
@@ -229,6 +230,17 @@ For attributes, style expressions (e.g. `color-expression`) are evaluated in a c
 **Note:** To avoid colliding geometries when multiple attributes are visualized for the same feature,
 set the `offset` field. The spatial `offset` will be multiplied, so it is possible to "stack" attributes
 over a feature.
+
+### About Merged Point Visualizations
+
+By setting `point-merge-grid-cell`, a tolerance may be defined which allows merging the visual representations
+of point features which share the same 3D spatial cell, map, layer, and style rule. This has two advantages:
+
+* **Multi-Selection**: When selecting the merged representation, a multi-selection of all merged features happens.
+* **Logical Evaluation using `$mergeCount`**: In some map formats, it may be desirable to apply a style based on the number of merged points.
+  This may be done to display a warning, or to check a matching requirement.
+  To this end, the `$mergeCount` variable is injected into each simfil evaluation context of a merged-point style rule.
+  Check out the default style for an example.
 
 ### About `first-of`
 

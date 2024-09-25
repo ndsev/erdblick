@@ -2,16 +2,16 @@
 #include "geometry.h"
 #include "cesium-interface/point-conversion.h"
 
-erdblick::FeatureLayerSearch::FeatureLayerSearch(mapget::TileFeatureLayer& tfl) : tfl_(tfl)
+erdblick::FeatureLayerSearch::FeatureLayerSearch(TileFeatureLayer& tfl) : tfl_(tfl)
 {}
 
 erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& q)
 {
     auto results = JsValue::List();
-    auto mapTileKey = tfl_.id().toString();
+    auto mapTileKey = tfl_.id();
 
-    for (const auto& feature : tfl_) {
-        auto evalResult = tfl_.evaluate(anyWrap(q), *feature);
+    for (const auto& feature : *tfl_.model_) {
+        auto evalResult = tfl_.model_->evaluate(anyWrap(q), *feature);
         if (evalResult.empty())
             continue;
         auto& firstEvalResult = evalResult[0];
@@ -42,3 +42,4 @@ std::string erdblick::anyWrap(const std::string_view& q)
 {
     return fmt::format("any({})", q);
 }
+

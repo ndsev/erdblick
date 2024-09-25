@@ -13,7 +13,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/geometry.h
   include/erdblick/inspection.h
   include/erdblick/search.h
-  include/erdblick/sourcedata.hpp
+  include/erdblick/layer.h
 
   include/erdblick/cesium-interface/object.h
   include/erdblick/cesium-interface/primitive.h
@@ -32,7 +32,7 @@ set(ERDBLICK_SOURCE_FILES
   src/geometry.cpp
   src/inspection.cpp
   src/search.cpp
-  src/sourcedata.cpp
+  src/layer.cpp
 
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp
@@ -45,8 +45,10 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
-  # target_compile_options(erdblick-core PRIVATE -fwasm-exceptions)
-  # target_link_options(erdblick-core PRIVATE -fwasm-exceptions)
+  # For Address Sanitization, uncomment the next line and
+  #  add sanitize-address to the LINK_FLAGS.
+  # target_compile_options(erdblick-core PRIVATE -fsanitize=address)
+  # -fsanitize=address \
   set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
     --bind \
     --profiling \

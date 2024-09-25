@@ -1,4 +1,4 @@
-import {coreLib, uint8ArrayFromWasm} from "./wasm";
+import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./wasm";
 import {MapService} from "./map.service";
 import {ErdblickViewComponent} from "./view.component";
 import {ParametersService} from "./parameters.service";
@@ -36,16 +36,16 @@ export class ErdblickDebugApi {
      *
      * @param cameraInfoStr A JSON-formatted string containing camera information.
      */
-    private setCamera(cameraInfoStr: string) {
+    setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.parametersService.cameraViewData.next({
-            destination: Cartesian3.fromArray(cameraInfo.position),
-            orientation: {
+        this.parametersService.setView(
+            Cartesian3.fromArray(cameraInfo.position),
+            {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
                 roll: cameraInfo.orientation.roll
             }
-        });
+        );
     }
 
     /**
@@ -53,20 +53,21 @@ export class ErdblickDebugApi {
      *
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
-    private getCamera() {
+    getCamera() {
+        const destination = this.parametersService.getCameraPosition();
         const position = [
-            this.parametersService.cameraViewData.getValue().destination.x,
-            this.parametersService.cameraViewData.getValue().destination.y,
-            this.parametersService.cameraViewData.getValue().destination.z,
+           destination.x,
+           destination.y,
+           destination.z,
         ];
-        const orientation = this.parametersService.cameraViewData.getValue().orientation;
+        const orientation = this.parametersService.getCameraOrientation();
         return JSON.stringify({position, orientation});
     }
 
     /**
      * Generate a test TileFeatureLayer, and show it.
      */
-    private showTestTile() {
+    showTestTile() {
         let tile = uint8ArrayFromWasm((sharedArr: any) => {
             coreLib.generateTestTile(sharedArr, this.mapService.tileParser!);
         });
@@ -80,5 +81,12 @@ export class ErdblickDebugApi {
             featureLayerStyle: style,
             options: []
         }, "_builtin", true);
+    }
+
+    /**
+     * Check for memory leaks.
+     */
+    coreLib(): ErdblickCore_ {
+        return coreLib;
     }
 }

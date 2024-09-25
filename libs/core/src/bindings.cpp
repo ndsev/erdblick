@@ -1,5 +1,21 @@
 #include <emscripten/bind.h>
+#include <emscripten/val.h>
+#include <emscripten/em_asm.h>
+#include <emscripten/emscripten.h>
+#include <malloc.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <cxxabi.h>
+
+#include <sanitizer/lsan_interface.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+const char *__lsan_default_options() {
+    return "verbosity=1:malloc_context_size=64";
+}
+#endif
+#endif
 
 #include "aabb.h"
 #include "buffer.h"
@@ -14,7 +30,7 @@
 #include "inspection.h"
 #include "geometry.h"
 #include "search.h"
-#include "sourcedata.hpp"
+#include "layer.h"
 
 #include "cesium-interface/point-conversion.h"
 #include "cesium-interface/primitive.h"
@@ -27,6 +43,61 @@ namespace em = emscripten;
 
 namespace
 {
+
+/**
+ * Check for memory leaks -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void reportMemoryLeaks() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_do_recoverable_leak_check." << std::endl;
+    __lsan_do_recoverable_leak_check();
+#endif
+#endif
+}
+
+/**
+ * DisableLeakCheck -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void disableLeakCheck() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_disable." << std::endl;
+    __lsan_disable();
+#endif
+#endif
+}
+
+/**
+ * Enable leak check -
+ * see https://emscripten.org/docs/debugging/Sanitizers.html#memory-leaks
+ */
+void enableLeakCheck() {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    std::cout << "Running __lsan_enable." << std::endl;
+    __lsan_enable();
+#endif
+#endif
+}
+
+/**
+ * Memory debug utilities -
+ * see https://github.com/emscripten-core/emscripten/blob/main/test/core/test_mallinfo.c.
+ */
+size_t getTotalMemory() {
+    return (size_t)EM_ASM_PTR(return HEAP8.length);
+}
+
+/** Same link as above. */
+size_t getFreeMemory() {
+    struct mallinfo i = mallinfo();
+    uintptr_t totalMemory = getTotalMemory();
+    uintptr_t dynamicTop = (uintptr_t)sbrk(0);
+    return totalMemory - dynamicTop + i.fordblks;
+}
 
 /**
  * WGS84 Viewport Descriptor, which may be used with the
@@ -105,10 +176,15 @@ double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
 
 /** Get the center position for a mapget tile id in WGS84. */
 mapget::Point getTilePosition(uint64_t tileIdValue) {
-    mapget::TileId tid(tileIdValue);
-    return tid.center();
+    return mapget::TileId(tileIdValue).center();
 }
 
+/** Get the level for a mapget tile id. */
+uint16_t getTileLevel(uint64_t tileIdValue) {
+    return mapget::TileId(tileIdValue).z();
+}
+
+/** Get the tile ID for the given level and position. */
 uint64_t getTileIdFromPosition(double longitude, double latitude, uint16_t level) {
     return mapget::TileId::fromWgs84(longitude, latitude, level).value_;
 }
@@ -124,10 +200,32 @@ em::val getTileBox(uint64_t tileIdValue) {
     });
 }
 
-/** Get the neighbor for a mapget tile id. */
-uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
+/**
+ * Get the bounding box for a mapget corner tile id in WGS84.
+ * A corner tile box is the original tile box, shifted by half
+ * the width and height on both axes, so it sits squarely at
+ * the intersection point of four tiles.
+ */
+em::val getCornerTileBox(uint64_t tileIdValue) {
     mapget::TileId tid(tileIdValue);
-    return mapget::TileId(tid.x() + offsetX, tid.y() + offsetY, tid.z()).value_;
+    auto halfSize = tid.size() * mapget::Point(.5, -.5);
+    auto sw = tid.sw() + halfSize;
+    auto ne = tid.ne() + halfSize;
+    return *JsValue::List({
+        JsValue(sw.x),
+        JsValue(sw.y),
+        JsValue(ne.x),
+        JsValue(ne.y)
+    });
+}
+
+/**
+ * Get the neighbor for a mapget tile id. Tile row will be clamped to [0, maxForLevel],
+ * so a positive/negative wraparound is not possible. The tile id column will wrap at the
+ * antimeridian.
+ */
+uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY) {
+    return mapget::TileId(tileIdValue).neighbor(offsetX, offsetY).value_;
 }
 
 /** Get the full string key of a map tile feature layer. */
@@ -247,7 +345,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
-        .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers());
+        .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
+        .function("name", &FeatureLayerStyle::name);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
@@ -255,25 +354,19 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
 
     ////////// TileSourceDataLayer
-    em::class_<mapget::TileSourceDataLayer>("TileSourceDataLayer")
-        .smart_ptr<std::shared_ptr<mapget::TileSourceDataLayer>>(
-            "std::shared_ptr<mapget::TileSourceDataLayer>")
-        .function(
-            "addressFormat",
-            &mapget::TileSourceDataLayer::sourceDataAddressFormat)
-        .function(
-            "toJson",
-            std::function<std::string(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
-                return self.toJson().dump(2);
-            }))
-        .function(
-            "toObject", std::function<em::val(const mapget::TileSourceDataLayer&)>([](const mapget::TileSourceDataLayer& self) {
-                return *tileSourceDataLayerToObject(self);
-            }));
+    em::class_<TileSourceDataLayer>("TileSourceDataLayer")
+        .function("addressFormat", &TileSourceDataLayer::addressFormat)
+        .function("toJson", &TileSourceDataLayer::toJson)
+        .function("toObject", &TileSourceDataLayer::toObject)
+        .function("getError", &TileSourceDataLayer::getError);
 
     ////////// Feature
     using FeaturePtr = mapget::model_ptr<mapget::Feature>;
     em::class_<FeaturePtr>("Feature")
+        .function(
+            "isNull",
+            std::function<bool(FeaturePtr& self)>(
+                [](FeaturePtr& self) { return !self; }))
         .function(
             "id",
             std::function<std::string(FeaturePtr&)>(
@@ -293,72 +386,55 @@ EMSCRIPTEN_BINDINGS(erdblick)
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
                     return geometryCenter(self->firstGeometry());
+                }))
+        .function(
+            "boundingRadiusEndPoint",
+            std::function<mapget::Point(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return boundingRadiusEndPoint(self->firstGeometry());
+                }))
+        .function(
+            "getGeometryType",
+            std::function<mapget::GeomType(FeaturePtr&)>(
+                [](FeaturePtr& self){
+                    return getGeometryType(self->firstGeometry());
                 }));
+
+    ////////// GeomType
+    em::enum_<mapget::GeomType>("GeomType")
+        .value("Points", mapget::GeomType::Points)
+        .value("Line", mapget::GeomType::Line)
+        .value("Polygon", mapget::GeomType::Polygon)
+        .value("Mesh", mapget::GeomType::Mesh);
 
     ////////// TileFeatureLayer
-    em::class_<mapget::TileFeatureLayer>("TileFeatureLayer")
-        .smart_ptr<std::shared_ptr<mapget::TileFeatureLayer>>(
-            "std::shared_ptr<mapget::TileFeatureLayer>")
-        .function(
-            "id",
-            std::function<std::string(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.id().toString(); }))
-        .function(
-            "tileId",
-            std::function<uint64_t(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.tileId().value_; }))
-        .function(
-            "numFeatures",
-            std::function<uint32_t(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self) { return self.numRoots(); }))
-        .function(
-            "center",
-            std::function<em::val(mapget::TileFeatureLayer const&)>(
-                [](mapget::TileFeatureLayer const& self)
-                {
-                    em::val result = em::val::object();
-                    result.set("x", self.tileId().center().x);
-                    result.set("y", self.tileId().center().y);
-                    result.set("z", self.tileId().z());
-                    return result;
-                }))
-        .function(
-            "at",
-            std::function<
-                mapget::model_ptr<mapget::Feature>(mapget::TileFeatureLayer const&, int i)>(
-                [](mapget::TileFeatureLayer const& self, int i)
-                {
-                    if (i < 0 || i >= self.numRoots()) {
-                        mapget::log().error("TileFeatureLayer::at(): Index {} is oob.", i);
-                    }
-                    return self.at(i);
-                }))
-        .function(
-            "findFeatureIndex",
-            std::function<
+    em::class_<TileFeatureLayer>("TileFeatureLayer")
+        .function("id", &TileFeatureLayer::id)
+        .function("tileId", &TileFeatureLayer::tileId)
+        .function("numFeatures", &TileFeatureLayer::numFeatures)
+        .function("center", &TileFeatureLayer::center)
+        .function("find", &TileFeatureLayer::find)
+        .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
-                int32_t(mapget::TileFeatureLayer const&, std::string, em::val)>(
-                [](mapget::TileFeatureLayer const& self, std::string type, em::val idParts) -> int32_t
-                {
-                    auto idPartsKvp = JsValue(idParts).toKeyValuePairs();
-                    if (auto result = self.find(type, idPartsKvp))
-                        return result->addr().index();
-                    return -1;
-                }));
-    em::register_vector<std::shared_ptr<mapget::TileFeatureLayer>>("TileFeatureLayers");
+    ////////// Highlight Modes
+    em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")
+        .value("NO_HIGHLIGHT", FeatureStyleRule::NoHighlight)
+        .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
+        .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<FeatureLayerStyle const&, em::val, std::string>()
+        .constructor<std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
+        .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
-        .constructor<mapget::TileFeatureLayer&>()
+        .constructor<TileFeatureLayer&>()
         .function("filter", &FeatureLayerSearch::filter)
         .function("traceResults", &FeatureLayerSearch::traceResults);
 
@@ -403,9 +479,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);
-
-    ////////// Return coordinates for a rectangle representing the bounding box of the tile
     em::function("getTileBox", &getTileBox);
+    em::function("getCornerTileBox", &getCornerTileBox);
+    em::function("getTileLevel", &getTileLevel);
 
     ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
@@ -423,4 +499,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Validate SIMFIL query
     em::function("validateSimfilQuery", &validateSimfil);
+
+    ////////// Memory utilities
+    em::function("getTotalMemory", &getTotalMemory);
+    em::function("getFreeMemory", &getFreeMemory);
+    em::function("reportMemoryLeaks", &reportMemoryLeaks);
+    em::function("enableLeakCheck", &enableLeakCheck);
+    em::function("disableLeakCheck", &disableLeakCheck);
 }

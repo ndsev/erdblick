@@ -13,7 +13,7 @@ import {filter} from "rxjs";
         <erdblick-view></erdblick-view>
         <map-panel></map-panel>
         <p-toast position="top-center" key="tc"></p-toast>
-        <search-panel #searchoverlay></search-panel>
+        <search-panel></search-panel>
         <inspection-panel></inspection-panel>
         <pref-components></pref-components>
         <coordinates-panel></coordinates-panel>
@@ -33,9 +33,8 @@ import {filter} from "rxjs";
 })
 export class AppComponent {
 
-    title: string = 'erdblick';
-    version: string = "v0.3.0";
-    searchValue: string = ""
+    title: string = "erdblick";
+    version: string = "";
 
     constructor(private httpClient: HttpClient,
                 private router: Router,

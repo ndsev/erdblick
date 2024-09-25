@@ -10,6 +10,9 @@ export enum SidePanelState {
 
 @Injectable({providedIn: 'root'})
 export class SidePanelService {
+
+    featureSearchOpen: boolean = false;
+    searchOpen: boolean = false;
     previousState: string = SidePanelState.NONE;
     private _activeSidePanel = new BehaviorSubject<string>(SidePanelState.NONE);
 

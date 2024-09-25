@@ -1,13 +1,20 @@
-import {Component, Input, OnInit, ViewChild} from "@angular/core";
+import {
+    AfterViewInit,
+    Component, ElementRef,
+    OnDestroy,
+    OnInit, Renderer2,
+    ViewChild
+} from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "./jump.service";
 import {Menu} from "primeng/menu";
 import {MapService} from "./map.service";
-import {distinctUntilChanged} from "rxjs";
+import {distinctUntilChanged, Subscription} from "rxjs";
 import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
 import {TreeTable} from "primeng/treetable";
+import {ParametersService} from "./parameters.service";
 
 interface Column {
     field: string;
@@ -18,45 +25,47 @@ interface Column {
     selector: 'feature-panel',
     template: `
         <div class="flex justify-content-end align-items-center"
-                style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
+             style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
             <div class="p-input-icon-left filter-container">
                 <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
                 <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                        [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
-                        (keydown)="onKeydown($event)"
+                       [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
+                       (keydown)="onKeydown($event)"
                 />
                 <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
-                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                   class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </div>
             <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeature!)"
-                            label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                            [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
+                          label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                          [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                     <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                 </p-button>
             </div>
             <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonText)"
-                            icon="pi pi-fw pi-copy" label=""
-                            [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                            pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonCollection())"
+                          icon="pi pi-fw pi-copy" label=""
+                          [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                          pTooltip="Copy GeoJSON" tooltipPosition="bottom">
                 </p-button>
             </div>
         </div>
-        <div class="flex resizable-container" [ngClass]="{'resizable-container-expanded': isExpanded}">
-            <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-            </div>
-            <p-treeTable #tt
-                filterMode="strict"
-                scrollHeight="flex"
-                [value]="filteredTree"
-                [columns]="cols"
-                [scrollable]="true"
-                [virtualScroll]="true"
-                [virtualScrollItemSize]="26"
-                [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
+        <div class="flex resizable-container" #resizeableContainer
+             [style.width.px]="inspectionContainerWidth"
+             [style.height.px]="inspectionContainerHeight"
+             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             [ngClass]="{'resizable-container-expanded': isExpanded}">
+<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+<!--            </div>-->
+            <p-treeTable #tt filterMode="strict" scrollHeight="flex"
+                         [value]="filteredTree"
+                         [columns]="cols"
+                         [scrollable]="true"
+                         [virtualScroll]="true"
+                         [virtualScrollItemSize]="26"
+                         [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
             >
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode"
@@ -64,45 +73,38 @@ interface Column {
                         (click)="onRowClick(rowNode)">
                         <td>
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                 </p-treeTableToggler>
                                 <span (click)="onKeyClick($event, rowData)"
-                                    style="cursor: pointer">{{ rowData['key'] }}
+                                      style="cursor: pointer">{{ rowData['key'] }}
                                 </span>
-                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']" class="source-data-ref-container">
-                                    <p-button icon="pi pi-database"
-                                                [rounded]="true"
-                                                severity="secondary"
-                                                disabled="true"
-                                    />
+                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
+                                               class="source-data-ref-container">
                                     <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
-                                        <p-button
-                                            (click)="showSourceData(item)"
-
-                                            [rounded]="true"
-                                            severity="secondary"
-                                            label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                            pTooltip="Go to {{ item.qualifier }} Source Data"
-                                            tooltipPosition="bottom"
-                                        />
+                                        <p-button class="source-data-button"
+                                                (click)="showSourceData($event, item)"
+                                                severity="secondary"
+                                                label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                tooltipPosition="bottom" />
                                     </ng-template>
                                 </p-buttonGroup>
                             </div>
                         </td>
                         <td [class]="getStyleClassByType(rowData['type'])">
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                    [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
-                                    [tooltipOptions]="tooltipOptions">
+                                 [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
+                                 [tooltipOptions]="tooltipOptions">
                                 <div (click)="onValueClick($event, rowData)"
-                                        (mouseover)="highlightFeature(rowData)"
-                                        (mouseout)="stopHighlight(rowData)">
+                                     (mouseover)="onValueHover($event, rowData)"
+                                     (mouseout)="onValueHoverExit($event, rowData)">
                                     {{ rowData['value'] }}
                                     <span *ngIf="rowData.hasOwnProperty('info')">
                                         <i class="pi pi-info-circle"
-                                            [pTooltip]="rowData['info'].toString()"
-                                            tooltipPosition="left">
+                                           [pTooltip]="rowData['info'].toString()"
+                                           tooltipPosition="left">
                                         </i>
                                     </span>
                                 </div>
@@ -153,25 +155,15 @@ interface Column {
             font-style: italic;
         }
 
-        .source-data-ref-container {
-            button {
-                width: 20px;
-                height: 20px;
-                padding: 3px;
-                margin-bottom: 0.5px;
-            }
-        }
-
         @media only screen and (max-width: 56em) {
             .resizable-container-expanded {
-                height: calc(100vh - 3em);;
+                height: calc(100vh - 3em);
             }
         }
     `]
 })
-export class FeaturePanelComponent implements OnInit  {
+export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  {
 
-    //jsonTree: string = "";
     filteredTree: TreeTableNode[] = [];
     cols: Column[] = [];
     isExpanded: boolean = false;
@@ -187,13 +179,20 @@ export class FeaturePanelComponent implements OnInit  {
 
     @ViewChild('tt') table!: TreeTable;
 
+    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
     inspectionMenuVisible: boolean = false;
 
+    inspectionContainerWidth: number;
+    inspectionContainerHeight: number;
+    containerSizeSubscription: Subscription;
+
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
+                public parameterService: ParametersService,
+                private renderer: Renderer2,
                 public mapService: MapService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
@@ -213,7 +212,19 @@ export class FeaturePanelComponent implements OnInit  {
                     scroller.calculateAutoSize();
                 }
             }, 0);
-        })
+        });
+
+        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
+        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
+            if (parameter.panel.length == 2) {
+                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = parameter.panel[1] * this.parameterService.baseFontSize;
+            } else {
+                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+            }
+        });
     }
 
     ngOnInit(): void {
@@ -223,6 +234,10 @@ export class FeaturePanelComponent implements OnInit  {
         ];
     }
 
+    ngAfterViewInit() {
+        this.detectSafari();
+    }
+
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
     }
@@ -230,8 +245,9 @@ export class FeaturePanelComponent implements OnInit  {
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
+            const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || hasSingleChild;
+            node.expanded = isTopLevelNode || isSection || hasSingleChild;
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
@@ -341,19 +357,21 @@ export class FeaturePanelComponent implements OnInit  {
         }
     }
 
-    showSourceData(sourceDataRef: any) {
+    showSourceData(event: any, sourceDataRef: any) {
+        event.stopPropagation();
+
         const layerId = sourceDataRef.layerId;
         const tileId = sourceDataRef.tileId;
         const address = sourceDataRef.address;
-        const mapId = this.inspectionService.selectedMapIdName;
-        const featureId = this.inspectionService.selectedFeatureIdName;
+        const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
+        const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
 
         this.inspectionService.selectedSourceData.next({
             tileId: Number(tileId),
             layerId: String(layerId),
             mapId: String(mapId),
             address: BigInt(address),
-            featureId: featureId,
+            featureIds: featureIds,
         })
     }
 
@@ -365,27 +383,37 @@ export class FeaturePanelComponent implements OnInit  {
         }
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightFeature(this.inspectionService.selectedMapIdName, rowData["value"]).then();
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"]).then();
         }
-        this.copyToClipboard(rowData["value"]);
     }
 
-    highlightFeature(rowData: any) {
-        return;
+    onValueHover(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"],
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
-    stopHighlight(rowData: any) {
-        return;
+    onValueHoverExit(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
     getStyleClassByType(valueType: number): string {
         switch (valueType) {
             case this.InspectionValueType.SECTION.value:
-                return "section-style"
+                return "section-style";
             case this.InspectionValueType.FEATUREID.value:
-                return "feature-id-style"
+                return "feature-id-style";
             default:
-                return "standard-style"
+                return "standard-style";
         }
     }
 
@@ -399,6 +427,17 @@ export class FeaturePanelComponent implements OnInit  {
     onKeydown(event: KeyboardEvent) {
         if (event.key === 'Escape') {
             this.clearFilter();
+        }
+    }
+
+    ngOnDestroy() {
+        this.containerSizeSubscription.unsubscribe();
+    }
+
+    detectSafari() {
+        const isSafari = /Safari/i.test(navigator.userAgent);
+        if (isSafari) {
+            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
         }
     }
 }

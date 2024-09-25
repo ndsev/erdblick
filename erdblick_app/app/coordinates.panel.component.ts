@@ -5,6 +5,7 @@ import {ParametersService} from "./parameters.service";
 import {CesiumMath} from "./cesium";
 import {ClipboardService} from "./clipboard.service";
 import {coreLib} from "./wasm";
+import {InspectionService} from "./inspection.service";
 
 interface PanelOption {
     name: string,
@@ -14,7 +15,7 @@ interface PanelOption {
 @Component({
     selector: "coordinates-panel",
     template: `
-        <div class="coordinates-container">
+        <div class="coordinates-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
             <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
                       [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
@@ -73,6 +74,13 @@ interface PanelOption {
             text-align: right;
             font-family: monospace;
         }
+
+        @media only screen and (max-width: 56em) {
+            .elevated {
+                bottom: 4em;
+                padding-bottom: 0;
+            }
+        }
     `]
 })
 export class CoordinatesPanelComponent {
@@ -92,6 +100,7 @@ export class CoordinatesPanelComponent {
     constructor(public mapService: MapService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
+                public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
         for (let level = 0; level < 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});

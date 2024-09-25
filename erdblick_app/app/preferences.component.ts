@@ -9,10 +9,14 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
     selector: 'pref-components',
     template: `
         <div class="bttn-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
-            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="help-button" pTooltip="Help"
+            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="pref-button" pTooltip="Help"
                       tooltipPosition="right"></p-button>
             <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
                       pTooltip="Preferences" tooltipPosition="right"></p-button>
+            <p-button (click)="showControlsDialog()" label="" class="pref-button"
+                      pTooltip="Controls" tooltipPosition="right">
+                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
+            </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">
@@ -50,8 +54,60 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
-
-        
+        <p-dialog header="Keyboard Controls" [(visible)]="controlsDialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="true" #controls class="pref-dialog">
+            <div class="keyboard-dialog">
+                <ul class="keyboard-list">
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">K</span>
+                        </div>
+                        <div class="control-desc">Open Search</div>
+                    </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">J</span>
+                        </div>
+                        <div class="control-desc">Zoom to Target Feature</div>
+                    </li>
+                    <li>
+                        <span class="key">M</span>
+                        <div class="control-desc">Open Maps & Styles Panel</div>
+                    </li>
+                    <li>
+                        <span class="key">W</span>
+                        <div class="control-desc">Move Camera Up</div>
+                    </li>
+                    <li>
+                        <span class="key">A</span>
+                        <div class="control-desc">Move Camera Left</div>
+                    </li>
+                    <li>
+                        <span class="key">S</span>
+                        <div class="control-desc">Move Camera Down</div>
+                    </li>
+                    <li>
+                        <span class="key">D</span>
+                        <div class="control-desc">Move Camera Right</div>
+                    </li>
+                    <li>
+                        <span class="key">Q</span>
+                        <div class="control-desc">Zoom In</div>
+                    </li>
+                    <li>
+                        <span class="key">E</span>
+                        <div class="control-desc">Zoom Out</div>
+                    </li>
+                    <li>
+                        <span class="key">R</span>
+                        <div class="control-desc">Reset Camera Orientation</div>
+                    </li>
+                </ul>
+            </div>
+            <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
+        </p-dialog>
     `,
     styles: [`
         .slider-container {
@@ -69,6 +125,71 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             padding: 0.5em;
         }
         
+        .keyboard-dialog {
+            width: 25em;
+            text-align: center;
+            background-color: white;
+        }
+
+        h2 {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 1em;
+            font-weight: bold;
+        }
+
+        .keyboard-list {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .keyboard-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1em;
+        }
+
+        .keyboard-list li span {
+            display: inline-block;
+            background-color: #eef1f7;
+            padding: 0.5em 0.75em;
+            border-radius: 0.5em;
+            color: #333;
+            font-weight: bold;
+            min-width: 4em;
+            text-align: center;
+        }
+
+        .control-desc {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        /* Keyboard key styling */
+        .key {
+            border-radius: 0.5em;
+            background-color: #ffcc00;
+            font-size: 1em;
+            padding: 0.5em 0.75em;
+            color: #333;
+        }
+
+        .key-multi {
+            display: flex;
+            gap: 0.25em;
+        }
+
+        .key-multi .key {
+            background-color: #00bcd4;
+            padding: 0.3em 0.6em;
+        }
+
+        .highlight {
+            background-color: #ff5722;
+            color: white;
+        }
+        
         @media only screen and (max-width: 56em) {
             .elevated {
                 bottom: 3.5em;
@@ -81,6 +202,8 @@ export class PreferencesComponent {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
+
+    controlsDialogVisible = false;
 
     constructor(private messageService: InfoMessageService,
                 public mapService: MapService,
@@ -110,6 +233,10 @@ export class PreferencesComponent {
     dialogVisible: boolean = false;
     showPreferencesDialog() {
         this.dialogVisible = true;
+    }
+
+    showControlsDialog() {
+        this.controlsDialogVisible = true;
     }
 
     openHelp() {

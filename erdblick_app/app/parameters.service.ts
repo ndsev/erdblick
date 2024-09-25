@@ -1,23 +1,32 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
-import {ErdblickStyle} from "./style.service";
-import {InspectionService, SelectedSourceData} from "./inspection.service";
+import {SelectedSourceData} from "./inspection.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
+/**
+ * Combination of a tile id and a feature id, which may be resolved
+ * to a feature object.
+ */
+export interface TileFeatureId {
+    featureId: string,
+    mapTileKey: string,
+}
+
 export interface StyleParameters {
     visible: boolean,
-    options: Record<string, string>,
+    options: Record<string, boolean>,
     showOptions: boolean,
 }
 
 interface ErdblickParameters extends Record<string, any> {
+    search: [number, string] | [],
     marker: boolean,
     markedPosition: Array<number>,
-    selected: Array<string>,
+    selected: TileFeatureId[],
     heading: number,
     pitch: number,
     roll: number,
@@ -32,6 +41,7 @@ interface ErdblickParameters extends Record<string, any> {
     tilesVisualizeLimit: number,
     enabledCoordsTileIds: Array<string>,
     selectedSourceData: Array<any>,
+    panel: Array<number>
 }
 
 interface ParameterDescriptor {
@@ -45,7 +55,29 @@ interface ParameterDescriptor {
     urlParam: boolean
 }
 
+/** Function to create an object validator given a key-typeof-value dictionary. */
+function validateObject(fields: Record<string, string>) {
+    return (o: object) => {
+        if (typeof o !== "object") {
+            return false;
+        }
+        for (let [key, value] of Object.entries(o)) {
+            let valueType = typeof value;
+            if (valueType !== fields[key]) {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 const erdblickParameters: Record<string, ParameterDescriptor> = {
+    search: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
+        default: [],
+        urlParam: true
+    },
     marker: {
         converter: val => val === 'true',
         validator: val => typeof val === 'boolean',
@@ -60,7 +92,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     selected: {
         converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+        validator: val => Array.isArray(val) && val.every(validateObject({mapTileKey: "string", featureId: "string"})),
         default: [],
         urlParam: true
     },
@@ -120,8 +152,11 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     },
     styles: {
         converter: val => JSON.parse(val),
-        validator: val => typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(([_, v]) => typeof v["visible"] === "boolean" && typeof v["showOptions"] === "boolean" && typeof v["options"] === "object"),
-        default: new Map<string, StyleParameters>(),
+        validator: val => {
+            return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
+                ([_, v]) => validateObject({visible: "boolean", showOptions: "boolean", options: "object"})(v));
+        },
+        default: {},
         urlParam: true
     },
     tilesLoadLimit: {
@@ -147,6 +182,12 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         validator: Array.isArray,
         default: [],
         urlParam: true
+    },
+    panel: {
+        converter: val => JSON.parse(val),
+        validator: val => Array.isArray(val) && (!val.length || val.length == 2 && val.every(item => typeof item === 'number')),
+        default: [],
+        urlParam: true
     }
 };
 
@@ -167,15 +208,36 @@ export class ParametersService {
             }
         });
 
+    lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
+
+    baseFontSize: number = 16;
+    inspectionContainerWidth: number = 40;
+    inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
+
+    private baseCameraMoveM = 100.0;
+    private baseCameraZoomM = 100.0;
+    private scalingFactor = 1;
+
     constructor(public router: Router) {
+        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
         this.saveParameters();
         this.parameters.subscribe(parameters => {
             if (parameters) {
+                this.scalingFactor = Math.pow(parameters.alt / 1000, 1.1) / 2;
                 this.saveParameters();
             }
         });
+    }
+
+    get cameraMoveUnits() {
+        return this.baseCameraMoveM * this.scalingFactor / 75000;
+    }
+
+    get cameraZoomUnits() {
+        return this.baseCameraZoomM * this.scalingFactor;
     }
 
     get replaceUrl() {
@@ -194,7 +256,7 @@ export class ParametersService {
             selection.layerId,
             selection.mapId,
             selection.address.toString(),
-            selection.featureId,
+            selection.featureIds,
         ];
         this.parameters.next(this.p());
     }
@@ -214,7 +276,7 @@ export class ParametersService {
             layerId: sd[1],
             mapId: sd[2],
             address: BigInt(sd[3] || '0'),
-            featureId: sd[4],
+            featureIds: sd[4],
         };
     }
 
@@ -236,18 +298,28 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setSelectedFeature(mapId: string, featureId: string) {
+    setSelectedFeatures(newSelection: TileFeatureId[]) {
         const currentSelection = this.p().selected;
-        if (currentSelection && (currentSelection[0] != mapId || currentSelection[1] != featureId)) {
-            this.p().selected = [mapId, featureId];
-            this._replaceUrl = false;
-            this.parameters.next(this.p());
-        }
-    }
+        if (currentSelection.length == newSelection.length) {
+            let selectedFeaturesAreSame = true;
+            for (let i = 0; i < currentSelection.length; ++i) {
+                const a = currentSelection[i];
+                const b = newSelection[i];
+                if (a.featureId != b.featureId || a.mapTileKey != b.mapTileKey) {
+                    selectedFeaturesAreSame = false;
+                    break;
+                }
+            }
 
-    unsetSelectedFeature() {
-        this.p().selected = [];
+            if (selectedFeaturesAreSame) {
+                return false;
+            }
+        }
+
+        this.p().selected = newSelection;
+        this._replaceUrl = false;
         this.parameters.next(this.p());
+        return true;
     }
 
     setMarkerState(enabled: boolean) {
@@ -259,7 +331,7 @@ export class ParametersService {
         }
     }
 
-    setMarkerPosition(position: Cartographic | null) {
+    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean=false) {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
@@ -267,7 +339,10 @@ export class ParametersService {
         } else {
             this.p().markedPosition = [];
         }
-        this.parameters.next(this.p());
+        if (!delayUpdate) {
+            this._replaceUrl = false;
+            this.parameters.next(this.p());
+        }
     }
 
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
@@ -292,13 +367,14 @@ export class ParametersService {
     }
 
     styleConfig(styleId: string): StyleParameters {
-        if (this.p().styles.hasOwnProperty(styleId))
-            return this.p().styles[styleId]
+        if (this.p().styles.hasOwnProperty(styleId)) {
+            return this.p().styles[styleId];
+        }
         return {
             visible: !Object.entries(this.p().styles).length,
             options: {},
             showOptions: true,
-        }
+        };
     }
 
     setStyleConfig(styleId: string, params: StyleParameters) {
@@ -315,6 +391,11 @@ export class ParametersService {
         this.p().pitch = camera.pitch;
         this.p().roll = camera.roll;
         this.parameters.next(this.p());
+        this.setView(Cartesian3.fromDegrees(this.p().lon, this.p().lat, this.p().alt), {
+            heading: this.p().heading,
+            pitch: this.p().pitch,
+            roll: this.p().roll
+        });
     }
 
     loadSavedParameters(): ErdblickParameters | null {
@@ -404,5 +485,64 @@ export class ParametersService {
             return erdblickParameters[name].urlParam;
         }
         return false;
+    }
+
+    resetSearchHistoryState() {
+        this.p().search = [];
+        this.parameters.next(this.p());
+    }
+
+    setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
+        if (value) {
+            value[1] = value[1].trim();
+            if (saveHistory) {
+                this.saveHistoryStateValue(value);
+            }
+        }
+        this.p().search = value ? value : [];
+        this._replaceUrl = false;
+        this.parameters.next(this.p())
+        this.lastSearchHistoryEntry.next(value);
+    }
+
+    private saveHistoryStateValue(value: [number, string]) {
+        const searchHistoryString = localStorage.getItem("searchHistory");
+        if (searchHistoryString) {
+            let searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
+            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] == value[0] && entry[1] == value[1]));
+            searchHistory.unshift(value);
+            let ldiff = searchHistory.length - 100;
+            while (ldiff > 0) {
+                searchHistory.pop();
+                ldiff -= 1;
+            }
+            localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
+        } else {
+            localStorage.setItem("searchHistory", JSON.stringify(value));
+        }
+    }
+
+    onInspectionContainerResize(event: MouseEvent): void {
+        const element = event.target as HTMLElement;
+        if (!element.classList.contains("resizable-container")) {
+            return;
+        }
+        if (!element.offsetWidth || !element.offsetHeight) {
+            return;
+        }
+        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+        const currentEmWidth = element.offsetWidth / this.baseFontSize;
+        if (currentEmWidth < 40.0) {
+            this.inspectionContainerWidth = 40 * this.baseFontSize;
+        } else {
+            this.inspectionContainerWidth = element.offsetWidth;
+        }
+        this.inspectionContainerHeight = element.offsetHeight;
+
+        this.p().panel = [
+            this.inspectionContainerWidth / this.baseFontSize,
+            this.inspectionContainerHeight / this.baseFontSize
+        ];
+        this.parameters.next(this.p());
     }
 }

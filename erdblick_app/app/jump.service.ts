@@ -7,8 +7,11 @@ import {InfoMessageService} from "./info.service";
 import {coreLib} from "./wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
+import {HighlightMode} from "build/libs/core/erdblick-core";
 
 export interface SearchTarget {
+    icon: string;
+    color: string;
     name: string;
     label: string;
     enabled: boolean;
@@ -90,6 +93,8 @@ export class JumpTargetService {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
         return {
+            icon: "pi-bolt",
+            color: "blue",
             name: "Search Loaded Features",
             label: label,
             enabled: false,
@@ -113,10 +118,12 @@ export class JumpTargetService {
                     label += `<br><span class="search-option-warning">${fjt.error}</span>`;
                 }
                 return {
+                    icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
+                    color: "orange",
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    execute: (_: string) => { this.jumpToFeature(fjt).then(); },
+                    execute: (_: string) => { this.highlightByJumpTarget(fjt).then(); },
                     validate: (_: string) => { return !fjt.error; },
                 }
             });
@@ -129,17 +136,17 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightFeature(mapId: string, featureId: string) {
+    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.jumpToFeature(featureJumpTargets[validIndex], false, mapId);
+        await this.highlightByJumpTarget(featureJumpTargets[validIndex], false, mapId, mode);
     }
 
-    async jumpToFeature(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null) {
+    async highlightByJumpTarget(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -178,10 +185,10 @@ export class JumpTargetService {
         let selectThisFeature = extRefsResolved.responses[0][0];
 
         // Set feature-to-select on MapService.
-        await this.mapService.selectFeature(
-            selectThisFeature.tileId,
-            selectThisFeature.typeId,
-            selectThisFeature.featureId,
-            moveCamera);
+        const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
+        await this.mapService.highlightFeatures([{
+            mapTileKey: selectThisFeature.tileId,
+            featureId: featureId
+        }], moveCamera, mode).then();
     }
 }

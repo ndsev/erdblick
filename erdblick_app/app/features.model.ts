@@ -1,7 +1,6 @@
-"use strict";
-
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "./wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
+import {TileFeatureId} from "./parameters.service";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -10,7 +9,7 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
  * WASM TileFeatureLayer, use the peek()-function.
  */
 export class FeatureTile {
-    id: string;
+    mapTileKey: string;
     nodeId: string;
     mapName: string;
     layerName: string;
@@ -31,7 +30,7 @@ export class FeatureTile {
         let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
-        this.id = mapTileMetadata.id;
+        this.mapTileKey = mapTileMetadata.id;
         this.nodeId = mapTileMetadata.nodeId;
         this.mapName = mapTileMetadata.mapName;
         this.layerName = mapTileMetadata.layerName;
@@ -50,7 +49,7 @@ export class FeatureTile {
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return uint8ArrayToWasm((bufferToRead: any) => {
+        let result = uint8ArrayToWasm((bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             if (!deserializedLayer)
                 return null;
@@ -64,6 +63,7 @@ export class FeatureTile {
             deserializedLayer.delete();
             return result;
         }, this.tileFeatureLayerBlob);
+        return result;
     }
 
     /**
@@ -71,7 +71,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
+        let result = await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             if (!deserializedLayer)
                 return null;
@@ -85,6 +85,7 @@ export class FeatureTile {
             deserializedLayer.delete();
             return result;
         }, this.tileFeatureLayerBlob);
+        return result;
     }
 
     /**
@@ -133,25 +134,34 @@ export class FeatureTile {
     level() {
         return Number(this.tileId & BigInt(0xffff));
     }
+
+    has(featureId: string) {
+        return this.peek((tileFeatureLayer: TileFeatureLayer) => {
+            let feature = tileFeatureLayer.find(featureId);
+            let result = !feature.isNull();
+            feature.delete();
+            return result;
+        });
+    }
 }
 
 /**
- * Wrapper which combines a FeatureTile and the index of
- * a feature within the tileset. Using the peek-function, it is
- * possible to access the WASM feature view in a memory-safe way.
+ * Wrapper which combines a FeatureTile and feature id.
+ * Using the peek-function, it is possible to access the
+ * WASM feature view in a memory-safe way.
  */
 export class FeatureWrapper {
-    public readonly index: number;
+    public readonly featureId: string;
     public featureTile: FeatureTile;
 
     /**
      * Construct a feature wrapper from a featureTile and a feature index
      * within that tile.
-     * @param index The index of the feature within the tile.
+     * @param featureId The feature-id of the feature.
      * @param featureTile {FeatureTile} The feature tile container.
      */
-    constructor(index: number, featureTile: FeatureTile) {
-        this.index = index;
+    constructor(featureId: string, featureTile: FeatureTile) {
+        this.featureId = featureId;
         this.featureTile = featureTile;
     }
 
@@ -161,11 +171,12 @@ export class FeatureWrapper {
      * @returns The value returned by the callback.
      */
     peek(callback: any) {
-        if (this.featureTile.disposed) {
-            throw new Error(`Unable to access feature of deleted layer ${this.featureTile.id}!`);
-        }
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
-            let feature = tileFeatureLayer.at(this.index);
+            let feature = tileFeatureLayer.find(this.featureId);
+            if (feature.isNull()) {
+                feature.delete();
+                return null;
+            }
             let result = null;
             if (callback) {
                 result = callback(feature);
@@ -175,10 +186,19 @@ export class FeatureWrapper {
         });
     }
 
+    /** Check if this wrapper wraps the same feature as another wrapper. */
     equals(other: FeatureWrapper | null): boolean {
         if (!other) {
             return false;
         }
-        return this.featureTile.id == other.featureTile.id && this.index == other.index;
+        return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
+    }
+
+    /** Returns the cross-map-layer global ID for this feature. */
+    key(): TileFeatureId {
+        return {
+            mapTileKey: this.featureTile.mapTileKey,
+            featureId: this.featureId
+        };
     }
 }

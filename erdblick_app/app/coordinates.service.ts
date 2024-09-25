@@ -9,8 +9,8 @@ import {HttpClient} from "@angular/common/http";
 export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
-    auxiliaryCoordinatesFun: Function | null = null;
-    auxiliaryTileIdsFun: Function | null = null;
+    auxiliaryCoordinatesFun: ((x: number, y: number)=>any) | null = null;
+    auxiliaryTileIdsFun: ((x: number, y: number, level: number)=>any) | null = null;
 
     constructor(private httpClient: HttpClient,
                 public parametersService: ParametersService) {

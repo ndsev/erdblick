@@ -3,24 +3,27 @@ import {Fetch} from "./fetch.model";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
-import {FeatureLayerStyle, TileLayerParser, Feature} from '../../build/libs/core/erdblick-core';
-import {ParametersService} from "./parameters.service";
+import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
+import {ParametersService, TileFeatureId} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
+import {PointMergeService} from "./pointmerge.service";
 
-export interface CoverageRectItem extends Object {
+/** Expected structure of a LayerInfoItem's coverage entry. */
+export interface CoverageRectItem extends Record<string, any> {
     min: number,
     max: number
 }
 
-export interface LayerInfoItem extends Object {
+/** Expected structure of a list entry in the MapInfoItem's layer entry. */
+export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
     coverage: Array<number|CoverageRectItem>;
-    featureTypes: Array<{name: string, uniqueIdCompositions: Array<Object>}>;
+    featureTypes: Array<{name: string, uniqueIdCompositions: Array<any>}>;
     layerId: string;
     type: string;
     version: {major: number, minor: number, patch: number};
@@ -30,8 +33,9 @@ export interface LayerInfoItem extends Object {
     tileBorders: boolean;
 }
 
-export interface MapInfoItem extends Object {
-    extraJsonAttachment: Object;
+/** Expected structure of a list entry in the /sources endpoint. */
+export interface MapInfoItem extends Record<string, any> {
+    extraJsonAttachment: any;
     layers: Map<string, LayerInfoItem>;
     mapId: string;
     maxParallelJobs: number;
@@ -44,6 +48,7 @@ export interface MapInfoItem extends Object {
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
 
+/** Redefinition of coreLib.Viewport. TODO: Check if needed. */
 type ViewportProperties = {
     orientation: number;
     camPosLon: number;
@@ -53,6 +58,13 @@ type ViewportProperties = {
     height: number;
     camPosLat: number
 };
+
+/**
+ * Determine if two lists of feature wrappers have the same features.
+ */
+function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
+    return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
+}
 
 /**
  * Erdblick map service class. This class is responsible for keeping track
@@ -71,20 +83,21 @@ export class MapService {
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
     public loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
-    private currentFetch: any;
+    private currentFetch: Fetch|null = null;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
     private currentHighDetailTileIds: Set<bigint>;
     private tileStreamParsingQueue: any[];
     private tileVisualizationQueue: [string, TileVisualization][];
     private selectionVisualizations: TileVisualization[];
+    private hoverVisualizations: TileVisualization[];
 
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    moveToWgs84PositionTopic: Subject<{x: number, y: number}>;
-    allViewportTileIds: Map<number, number> = new Map<number, number>();
-    selectionTopic: BehaviorSubject<FeatureWrapper|null> = new BehaviorSubject<FeatureWrapper|null>(null);
+    moveToWgs84PositionTopic: Subject<{x: number, y: number, z?: number}>;
+    selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+    hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     selectionTileRequest: {
         remoteRequest: {
             mapId: string,
@@ -100,7 +113,9 @@ export class MapService {
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
                 private sidePanelService: SidePanelService,
-                private messageService: InfoMessageService) {
+                private messageService: InfoMessageService,
+                private pointMergeService: PointMergeService)
+    {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -118,6 +133,7 @@ export class MapService {
         this.tileStreamParsingQueue = [];
         this.tileVisualizationQueue = [];
         this.selectionVisualizations = [];
+        this.hoverVisualizations = [];
 
         // Triggered when a tile layer is freshly rendered and should be added to the frontend.
         this.tileVisualizationTopic = new Subject<any>(); // {FeatureTile}
@@ -164,29 +180,15 @@ export class MapService {
 
         await this.reloadDataSources();
 
-        this.selectionTopic.subscribe(selectedFeatureWrapper => {
-            this.selectionVisualizations.forEach(visu => this.tileVisualizationDestructionTopic.next(visu));
-            this.selectionVisualizations = [];
+        this.parameterService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
+            this.highlightFeatures(parameters.selected).then();
+        });
 
-            if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
-                this.sidePanelService.panel = SidePanelState.NONE;
-            }
-            if (!selectedFeatureWrapper)
-                return;
-
-            // Apply additional highlight styles.
-            for (let [_, styleData] of this.styleService.styles) {
-                if (styleData.featureLayerStyle && styleData.params.visible) {
-                    let visu = new TileVisualization(
-                        selectedFeatureWrapper!.featureTile,
-                        (tileKey: string)=>this.getFeatureTile(tileKey),
-                        styleData.featureLayerStyle,
-                        true,
-                        selectedFeatureWrapper.peek((f: Feature) => f.id()));
-                    this.tileVisualizationTopic.next(visu);
-                    this.selectionVisualizations.push(visu);
-                }
-            }
+        this.selectionTopic.subscribe(selectedFeatureWrappers => {
+            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
+        });
+        this.hoverTopic.subscribe(hoveredFeatureWrappers => {
+            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
     }
 
@@ -393,7 +395,7 @@ export class MapService {
         // Evict present non-required tile layers.
         let newTileLayers = new Map();
         let evictTileLayer = (tileLayer: FeatureTile) => {
-            return !tileLayer.preventCulling && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
+            return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v => v.featureTile.mapTileKey == tileLayer.mapTileKey) && (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
                 !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName) ||
                 tileLayer.level() != this.getMapLayerLevel(tileLayer.mapName, tileLayer.layerName))
         }
@@ -401,7 +403,7 @@ export class MapService {
             if (evictTileLayer(tileLayer)) {
                 tileLayer.destroy();
             } else {
-                newTileLayers.set(tileLayer.id, tileLayer);
+                newTileLayers.set(tileLayer.mapTileKey, tileLayer);
             }
         }
         this.loadedTileLayers = newTileLayers;
@@ -448,12 +450,21 @@ export class MapService {
         // TODO: Consider tile TTL.
         let requests = [];
         if (this.selectionTileRequest) {
-            requests.push(this.selectionTileRequest.remoteRequest);
-
-            if (this.currentFetch) {
-                // Disable the re-fetch filtering logic by setting the old
-                // fetches' body to null.
-                this.currentFetch.bodyJson = null;
+            // Do not go forward with the selection tile request, if it
+            // pertains to a map layer that is not available anymore.
+            const mapLayerItem = this.maps.getValue()
+                .get(this.selectionTileRequest.remoteRequest.mapId)?.layers
+                .get(this.selectionTileRequest.remoteRequest.layerId);
+            if (mapLayerItem) {
+                requests.push(this.selectionTileRequest.remoteRequest);
+                if (this.currentFetch) {
+                    // Disable the re-fetch filtering logic by setting the old
+                    // fetches' body to null.
+                    this.currentFetch.bodyJson = null;
+                }
+            }
+            else {
+                this.selectionTileRequest.reject!("Map layer is not available.");
             }
         }
 
@@ -527,23 +538,22 @@ export class MapService {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
 
         // Consider, if this tile is a selection tile request.
-        if (this.selectionTileRequest && tileLayer.id == this.selectionTileRequest.tileKey) {
+        if (this.selectionTileRequest && tileLayer.mapTileKey == this.selectionTileRequest.tileKey) {
             this.selectionTileRequest.resolve!(tileLayer);
             this.selectionTileRequest = null;
         }
-
         // Don't add a tile that is not supposed to be visible.
-        if (!preventCulling) {
+        else if (!preventCulling) {
             if (!this.currentVisibleTileIds.has(tileLayer.tileId))
                 return;
         }
 
         // If this one replaces an older tile with the same key,
         // then first remove the older existing one.
-        if (this.loadedTileLayers.has(tileLayer.id)) {
-            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.id));
+        if (this.loadedTileLayers.has(tileLayer.mapTileKey)) {
+            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey)!);
         }
-        this.loadedTileLayers.set(tileLayer.id, tileLayer);
+        this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
 
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
@@ -558,11 +568,11 @@ export class MapService {
         });
     }
 
-    private removeTileLayer(tileLayer: any) {
-        tileLayer.destroy()
+    private removeTileLayer(tileLayer: FeatureTile) {
+        tileLayer.destroy();
         for (const styleId of this.visualizedTileLayers.keys()) {
             const tileVisus = this.visualizedTileLayers.get(styleId)?.filter(tileVisu => {
-                if (tileVisu.tile.id === tileLayer.id) {
+                if (tileVisu.tile.mapTileKey === tileLayer.mapTileKey) {
                     this.tileVisualizationDestructionTopic.next(tileVisu);
                     return false;
                 }
@@ -575,9 +585,9 @@ export class MapService {
             }
         }
         this.tileVisualizationQueue = this.tileVisualizationQueue.filter(([_, tileVisu]) => {
-            return tileVisu.tile.id !== tileLayer.id;
+            return tileVisu.tile.mapTileKey !== tileLayer.mapTileKey;
         });
-        this.loadedTileLayers.delete(tileLayer.id);
+        this.loadedTileLayers.delete(tileLayer.mapTileKey);
     }
 
     private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
@@ -591,10 +601,12 @@ export class MapService {
         const layerName = tileLayer.layerName;
         let visu = new TileVisualization(
             tileLayer,
+            this.pointMergeService,
             (tileKey: string)=>this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
-            "",
+            coreLib.HighlightMode.NO_HIGHLIGHT,
+            [],
             this.getMapLayerBorderState(mapName, layerName),
             (style as ErdblickStyle).params !== undefined ? (style as ErdblickStyle).params.options : {});
         this.tileVisualizationQueue.push([styleId, visu]);
@@ -605,7 +617,7 @@ export class MapService {
         }
     }
 
-    setViewport(viewport: any) {
+    setViewport(viewport: ViewportProperties) {
         this.currentViewport = viewport;
         this.setTileLevelForViewport();
         this.update();
@@ -624,62 +636,172 @@ export class MapService {
         return this.loadedTileLayers.get(tileKey) || null;
     }
 
-    async loadTileForSelection(tileKey: string) {
-        if (this.loadedTileLayers.has(tileKey)) {
-            return this.loadedTileLayers.get(tileKey)!;
+    async loadTiles(tileKeys: Set<string|null>): Promise<Map<string, FeatureTile>> {
+        let result = new Map<string, FeatureTile>();
+
+        // TODO: Optimize this loop to make just a single update call.
+        for (let tileKey of tileKeys) {
+            if (!tileKey) {
+                continue;
+            }
+
+            let tile = this.loadedTileLayers.get(tileKey);
+            if (tile) {
+                result.set(tileKey, tile);
+                continue;
+            }
+
+            let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
+            this.selectionTileRequest = {
+                remoteRequest: {
+                    mapId: mapId,
+                    layerId: layerId,
+                    tileIds: [Number(tileId)],
+                },
+                tileKey: tileKey,
+                resolve: null,
+                reject: null,
+            }
+
+            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
+                this.selectionTileRequest!.resolve = resolve;
+                this.selectionTileRequest!.reject = reject;
+            })
+
+            this.update();
+            tile = await selectionTilePromise;
+            result.set(tileKey, tile);
         }
 
-        let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
-        this.selectionTileRequest = {
-            remoteRequest: {
-                mapId: mapId,
-                layerId: layerId,
-                tileIds: [Number(tileId)],
-            },
-            tileKey: tileKey,
-            resolve: null,
-            reject: null,
-        }
-
-        let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
-            this.selectionTileRequest!.resolve = resolve;
-            this.selectionTileRequest!.reject = reject;
-        })
-
-        this.update();
-        return selectionTilePromise;
+        return result;
     }
 
-    async selectFeature(tileKey: string, typeId: string, idParts: Array<string|number>, focus: boolean=false) {
-        let tile = await this.loadTileForSelection(tileKey);
-        let feature = new FeatureWrapper(
-            tile.peek(layer => layer.findFeatureIndex(typeId, idParts)),
-            tile);
-        if (feature.index < 0) {
-            let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
-            this.messageService.showError(
-                `The feature ${typeId+idParts.map((val, n)=>((n%2)==1?val:".")).join("")}`+
-                `does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
-            return;
+    async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+        // Load the tiles for the selection.
+        const tiles = await this.loadTiles(
+            new Set(tileFeatureIds.filter(s => s && typeof s !== "string").map(s => (s as TileFeatureId).mapTileKey)));
+
+        // Ensure that the feature really exists in the tile.
+        let features = new Array<FeatureWrapper>();
+        for (let id of tileFeatureIds) {
+            if (typeof id == "string") {
+                // When clicking on geometry that represents a highlight,
+                // this is reflected in the feature id. By processing this
+                // info here, a hover highlight can be turned into a selection.
+                if (id == "hover-highlight") {
+                    features = this.hoverTopic.getValue();
+                }
+                else if (id == "selection-highlight") {
+                    features = this.selectionTopic.getValue();
+                }
+                continue;
+            }
+
+            if (!id?.featureId) {
+                continue;
+            }
+
+            const tile = tiles.get(id?.mapTileKey || "");
+            if (!tile) {
+                console.error(`Could not load tile ${id?.mapTileKey} for highlighting!`);
+                continue;
+            }
+            if (!tile.has(id?.featureId || "")) {
+                const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(id?.mapTileKey || "");
+                this.messageService.showError(
+                    `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
+                continue;
+            }
+
+            features.push(new FeatureWrapper(id!.featureId, tile));
         }
-        this.selectionTopic.next(feature);
-        if (focus) {
-            this.focusOnFeature(feature);
+
+        if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
+            if (features.length) {
+                if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
+                    return;
+                }
+            }
+            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
+                return;
+            }
+            this.hoverTopic.next(features);
+        }
+        else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+            if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
+                return;
+            }
+            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
+                this.hoverTopic.next([]);
+            }
+            this.selectionTopic.next(features);
+        }
+        else {
+            console.error(`Unsupported highlight mode!`);
+        }
+
+        // TODO: Focus on bounding box of all features?
+        if (focus && features.length) {
+            this.focusOnFeature(features[0]);
         }
     }
 
     focusOnFeature(feature: FeatureWrapper) {
         const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
-        this.moveToWgs84PositionTopic.next(position);
+        this.moveToWgs84PositionTopic.next({x: position.x, y: position.y});
     }
 
     setTileLevelForViewport() {
         for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-            if (coreLib.getNumTileIds(this.currentViewport, level) >= 15) {
+            if (coreLib.getNumTileIds(this.currentViewport, level) >= 48) {
                 this.zoomLevel.next(level);
                 return;
             }
         }
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
+    }
+
+    private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>) {
+        let visualizationCollection = null;
+        switch (mode) {
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
+                if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
+                    this.sidePanelService.panel = SidePanelState.NONE;
+                }
+                visualizationCollection = this.selectionVisualizations;
+                break;
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT:
+                visualizationCollection = this.hoverVisualizations; break;
+            default:
+                console.error(`Bad visualization mode ${mode}!`);
+                return;
+        }
+
+        while (visualizationCollection.length) {
+            this.tileVisualizationDestructionTopic.next(visualizationCollection.pop());
+        }
+        if (!featureWrappers.length) {
+            return;
+        }
+
+        // Apply highlight styles.
+        const featureTile = featureWrappers[0].featureTile;
+        const featureIds = featureWrappers.map(fw => fw.featureId);
+        for (let [_, style] of this.styleService.styles) {
+            if (style.featureLayerStyle && style.params.visible) {
+                let visu = new TileVisualization(
+                    featureTile,
+                    this.pointMergeService,
+                    (tileKey: string)=>this.getFeatureTile(tileKey),
+                    style.featureLayerStyle,
+                    true,
+                    mode,
+                    featureIds,
+                    false,
+                    style.params.options);
+                this.tileVisualizationTopic.next(visu);
+                visualizationCollection.push(visu);
+            }
+        }
     }
 }

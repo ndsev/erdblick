@@ -9,7 +9,7 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FileUpload} from "primeng/fileupload";
-import {FeatureLayerStyle, FeatureStyleOption, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
 
@@ -22,7 +22,7 @@ export type FeatureStyleOptionWithStringType = {
     label: string,
     id: string,
     type: FeatureStyleOptionType,
-    defaultValue: string,
+    defaultValue: any,
     description: string
 };
 
@@ -47,9 +47,7 @@ export class StyleService {
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
-    selectedStyleIdForEditing: BehaviorSubject<string> = new BehaviorSubject<string>("");
-    styleBeingEdited: boolean = false;
-    styleEditedStateData: BehaviorSubject<string> = new BehaviorSubject<string>("");
+    selectedStyleIdForEditing: string = "";
     styleEditedSaveTriggered: Subject<boolean> = new Subject<boolean>();
 
     builtinStylesCount = 0;
@@ -61,7 +59,7 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient, private parameterService: ParametersService)
     {
-        this.parameterService.parameters.subscribe(params => {
+        this.parameterService.parameters.subscribe(_ => {
             // This subscription exists specifically to catch the values of the query parameters.
             if (this.parameterService.initialQueryParamsSet) {
                 return;
@@ -171,37 +169,48 @@ export class StyleService {
         }
     }
 
-    exportStyleYamlFile(styleId: string) {
-        const content = this.styles.get(styleId)!;
-        if (content === undefined) {
-            return false;
-        }
-        try {
-            // Create a blob from the content
-            const blob = new Blob([content.source], { type: 'text/plain;charset=utf-8' });
-            // Create a URL for the blob
-            const url = window.URL.createObjectURL(blob);
-            // Create a temporary anchor tag to trigger the download
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${styleId}.yaml`;
-            // Append the anchor to the body, trigger the download, and remove the anchor
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            // Revoke the blob URL to free up resources
-            window.URL.revokeObjectURL(url);
-        } catch (e) {
-            console.error(e);
+    exportStyleYamlFile(styleId: string): boolean {
+        const content = this.styles.get(styleId);
+        if (!content || !content.source) {
+            console.error('No content found or invalid content structure.');
             return false;
         }
 
+        try {
+            // Ensure content.source is a string or convert to string if needed
+            const blobContent = typeof content.source === 'string' ? content.source : JSON.stringify(content.source);
+            // Create a blob from the content
+            const blob = new Blob([blobContent], { type: 'application/x-yaml;charset=utf-8' });
+            // Create a URL for the blob
+            const url = window.URL.createObjectURL(blob);
+            // Check if URL creation was successful
+            if (!url) {
+                console.error('Failed to create object URL for the blob.');
+                return false;
+            }
+            // Create a temporary anchor tag to trigger the download.
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${styleId}.yaml`;
+            // Trigger the download.
+            const event = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+            });
+            a.dispatchEvent(event);
+
+            // Revoke the blob URL to free up resources.
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error('Error while exporting YAML file:', e);
+            return false;
+        }
         return true;
     }
 
     async importStyleYamlFile(event: any, file: File, styleId: string, fileUploader: FileUpload | undefined): Promise<boolean> {
-        // Prevent the default upload behavior
-        // Dummy XHR, as we handle the file ourselves
+        // Prevent the default upload behavior Dummy XHR, as we handle the file ourselves
         event.xhr = new XMLHttpRequest();
         const fileReader = new FileReader();
         const loadFilePromise = new Promise<string|ArrayBuffer|null>((resolve, reject) => {
@@ -333,8 +342,15 @@ export class StyleService {
                     style.options = [];
                     // Transport FeatureStyleOptions from WASM array to JS.
                     let options = style.featureLayerStyle.options();
-                    for (let i = 0; i < options.size(); ++i)
-                        style.options.push(options.get(i)! as FeatureStyleOptionWithStringType);
+                    for (let i = 0; i < options.size(); ++i) {
+                        const option = options.get(i)! as FeatureStyleOptionWithStringType;
+                        style.options.push(option);
+
+                        // Apply the default value for the option, if no value is stored yet.
+                        if (!style.params.options.hasOwnProperty(option.id)) {
+                            style.params.options[option.id] = option.defaultValue;
+                        }
+                    }
                     options.delete();
                     return true;
                 }
@@ -363,7 +379,6 @@ export class StyleService {
         if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
-        console.log(`${style.params.visible ? 'Activated' : 'Deactivated'} style: ${styleId}.`);
     }
 
     reapplyStyles(styleIds: Array<string>) {
@@ -378,11 +393,16 @@ export class StyleService {
         if (!this.styles.has(styleId)) {
             return;
         }
-        let style = this.styles.get(styleId)!;
+        const style = this.styles.get(styleId)!;
         style.params.visible = enabled !== undefined ? enabled : !style.params.visible;
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
         this.parameterService.setStyleConfig(styleId, style.params);
+    }
+
+    toggleOption(styleId: string, optionId: string, enabled: boolean) {
+        const style = this.styles.get(styleId)!;
+        style.params.options[optionId] = enabled;
     }
 }

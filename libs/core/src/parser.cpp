@@ -84,47 +84,39 @@ NativeJsValue TileLayerParser::getFieldDictOffsets()
 
 void TileLayerParser::reset()
 {
+    // Note: The reader is only ever used to read field dict updates.
+    // For this, it does not need a layer info provider or onParsedLayer callback.
     reader_ = std::make_unique<TileLayerStream::Reader>(
-        [this](auto&& mapId, auto&& layerId)
-        {
-            return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
-        },
-        [this](auto&& layer){
-            const auto type = layer->layerInfo()->type_;
-            if (type != LayerType::Features)
-                return;
-
-            if (tileParsedFun_)
-                tileParsedFun_(std::static_pointer_cast<TileFeatureLayer>(layer));
-        },
+        [](auto&& mapId, auto&& layerId){return nullptr;},
+        [](auto&& layer){},
         cachedStrings_);
 }
 
-mapget::TileFeatureLayer::Ptr TileLayerParser::readTileFeatureLayer(const SharedUint8Array& buffer)
+TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& buffer)
 {
     std::stringstream inputStream;
     inputStream << buffer.toString();
-    auto result = std::make_shared<TileFeatureLayer>(
+    auto result = TileFeatureLayer(std::make_shared<mapget::TileFeatureLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); });
+        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
     return result;
 }
 
-mapget::TileSourceDataLayer::Ptr TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
+TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
     std::stringstream inputStream;
     inputStream << buffer.toString();
-    auto result = std::make_shared<TileSourceDataLayer>(
+    auto result = TileSourceDataLayer(std::make_shared<mapget::TileSourceDataLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         },
-        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); });
+        [this](auto&& nodeId) { return cachedStrings_->getStringPool(nodeId); }));
     return result;
 }
 

@@ -3,6 +3,8 @@
 #include "geometry.h"
 #include "cesium-interface/point-conversion.h"
 
+using namespace mapget;
+
 Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
 {
     if (!g) {
@@ -116,6 +118,36 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
         return averagePoint;
 
     return averageVectorPosition(intersectedTrianglePoints);
+}
+
+Point erdblick::boundingRadiusEndPoint(const model_ptr<Geometry>& g)
+{
+    const Point center = erdblick::geometryCenter(g);
+    if (!g) {
+        std::cerr << "Cannot obtain bounding radius vector end point of null geometry." << std::endl;
+        return center;
+    }
+
+    float maxDistanceSquared = 0.0f;
+    Point farPoint = center;
+    g->forEachPoint([&center, &maxDistanceSquared, &farPoint](const auto& p)
+    {
+        float dx = p.x - center.x;
+        float dy = p.y - center.y;
+        float dz = p.z - center.z;
+        float distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (distanceSquared > maxDistanceSquared) {
+            farPoint = p;
+            maxDistanceSquared = distanceSquared;
+        }
+        return true;
+    });
+
+    return farPoint;
+}
+
+GeomType erdblick::getGeometryType(const model_ptr<Geometry>& g) {
+    return g->geomType();
 }
 
 double erdblick::pointSideOfLine(const Point& lineVector, const Point& lineStart, const Point& p)

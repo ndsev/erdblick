@@ -1,6 +1,6 @@
 import MainModuleFactory, {MainModule as ErdblickCore, SharedUint8Array} from '../../build/libs/core/erdblick-core';
 
-interface ErdblickCore_ extends ErdblickCore {
+export interface ErdblickCore_ extends ErdblickCore {
     HEAPU8: Uint8Array
 }
 
@@ -66,4 +66,11 @@ export async function uint8ArrayToWasmAsync(fun: (d: SharedUint8Array)=>any, inp
     let result = await fun(sharedGlbArray);
     sharedGlbArray.delete();
     return (result === false) ? null : result;
+}
+
+/** Memory usage log. */
+export function logFreeMemory() {
+    let avail = coreLib!.getFreeMemory()/1024/1024;
+    let total = coreLib!.getTotalMemory()/1024/1024;
+    console.log(`Free memory: ${Math.round(avail*1000)/1000} MiB (${avail/total}%)`)
 }

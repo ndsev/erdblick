@@ -2,8 +2,6 @@ name: build-release
 
 on:
   push:
-    branches:
-      - 'feature/renderer-wasm-demo'
   pull_request:
   workflow_dispatch:
 

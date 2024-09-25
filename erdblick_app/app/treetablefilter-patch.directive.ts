@@ -1,7 +1,6 @@
 import {AfterContentInit, Directive} from "@angular/core";
-import {TreeTable, TreeTableFilterEvent, TreeTableFilterOptions} from "primeng/treetable";
+import {TreeTable} from "primeng/treetable";
 import {TreeTableNode} from "primeng/api";
-import {ObjectUtils} from "primeng/utils";
 
 /**
  * This is a monkey-patched version of PrimNG's findFilteredNodes with the following changes:

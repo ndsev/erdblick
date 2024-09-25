@@ -46,6 +46,11 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
 
+    // Top-Level Feature Item
+    auto featureScope = push("Feature", "", ValueType::Section);
+    featureScope->value_ = JsValue(featurePtr->id()->toString());
+    convertSourceDataReferences(featurePtr->sourceDataReferences(), *featureScope);
+
     // Identifiers section.
     {
         auto scope = push(convertStringView("Identifiers"), "", ValueType::Section);
@@ -56,15 +61,15 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         push("layerId", "layerId", ValueType::String)->value_ = convertStringView(featurePtr->model().layerInfo()->layerId_);
 
         // TODO: Investigate and fix the issue for "index out of bounds" error.
-        //  Affects boundaries and lane connectors
-//        if (auto prefix = featurePtr->model().getIdPrefix()) {
-//            for (auto const& [k, v] : prefix->fields()) {
-//                convertField(k, v);
-//            }
-//        }
-//        for (auto const& [k, v] : featurePtr->id()->fields()) {
-//            convertField(k, v);
-//        }
+        //   Affects boundaries and lane connectors
+        //  if (auto prefix = featurePtr->model().getIdPrefix()) {
+        //      for (auto const& [k, v] : prefix->fields()) {
+        //          convertField(k, v);
+        //      }
+        //  }
+        //  for (auto const& [k, v] : featurePtr->id()->fields()) {
+        //      convertField(k, v);
+        //  }
 
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
@@ -237,6 +242,7 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     auto relGroupScope = push(relGroup);
     auto relScope = push(JsValue(relGroup->children_.size()), nextRelationIndex_, ValueType::FeatureId);
     relScope->value_ = JsValue(r->target()->toString());
+    relScope->mapId_ = JsValue(r->model().mapId());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
     if (r->hasSourceValidity()) {
@@ -378,6 +384,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
         newDict.set("children", childrenToJsValue());
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
+    if (mapId_)
+        newDict.set("mapId", *mapId_);
     if (!sourceDataRefs_.empty()) {
         auto list = JsValue::List();
         for (const auto& ref : sourceDataRefs_) {

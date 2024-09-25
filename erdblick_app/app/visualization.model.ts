@@ -9,7 +9,8 @@ import {
     CallbackProperty,
     HeightReference
 } from "./cesium";
-import {FeatureLayerStyle, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
+import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
@@ -89,19 +90,23 @@ export class TileVisualization {
     showTileBorder: boolean = false;
 
     private readonly style: StyleWithIsDeleted;
+    private readonly styleName: string;
     private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
-    private readonly highlight: string;
+    private readonly highlightMode: HighlightMode;
+    private readonly featureIdSubset: string[];
     private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
-    private readonly options: Record<string, string>;
+    private readonly options: Record<string, boolean>;
+    private readonly pointMergeService: PointMergeService;
 
     /**
      * Create a tile visualization.
-     * @param tile {FeatureTile} The tile to visualize.
+     * @param tile The tile to visualize.
+     * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
      *  for relation visualization.
      * @param style The style to use for visualization.
@@ -109,27 +114,41 @@ export class TileVisualization {
      *  a low-detail representation is indicated by `false`, and
      *  will result in a dot representation. A high-detail representation
      *  based on the style can be triggered using `true`.
-     * @param highlight Controls whether the visualization will run rules that
-     *  have `mode: highlight` set, otherwise, only rules with the default
-     *  `mode: normal` are executed.
+     * @param highlightMode Controls whether the visualization will run rules that
+     *  have a specific highlight mode.
+     * @param featureIdSubset Subset of feature IDs for visualization. If not set,
+     *  all features in the tile will be visualized.
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile, auxTileFun: (key: string)=>FeatureTile|null, style: FeatureLayerStyle, highDetail: boolean, highlight: string = "", boxGrid?: boolean, options?: Record<string, string>) {
+    constructor(
+        tile: FeatureTile,
+        pointMergeService: PointMergeService,
+        auxTileFun: (key: string) => FeatureTile | null,
+        style: FeatureLayerStyle,
+        highDetail: boolean,
+        highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+        featureIdSubset?: string[],
+        boxGrid?: boolean,
+        options?: Record<string, boolean>)
+    {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
+        this.styleName = this.style.name();
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
-        this.highlight = highlight;
+        this.highlightMode = highlightMode;
+        this.featureIdSubset = featureIdSubset || [];
         this.deleted = false;
         this.auxTileFun = auxTileFun;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
+        this.pointMergeService = pointMergeService;
     }
 
     /**
      * Actually create the visualization.
-     * @param viewer {Cesium.Viewer} The viewer to add the rendered entity to.
+     * @param viewer {Viewer} The viewer to add the rendered entity to.
      * @return True if anything was rendered, false otherwise.
      */
     async render(viewer: Viewer) {
@@ -140,8 +159,8 @@ export class TileVisualization {
         this.destroy(viewer);
         this.deleted = false;
 
-        // Do not try to render if the underlying data is disposed.
-        if (this.tile.disposed || this.style.isDeleted()) {
+        // Do not continue if the style was deleted while we were waiting.
+        if (this.style.isDeleted()) {
             return false;
         }
 
@@ -150,13 +169,16 @@ export class TileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let visualization = new coreLib.FeatureLayerVisualization(
+                let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                    this.tile.mapTileKey,
                     this.style,
                     this.options,
-                    this.highlight!);
-                visualization.addTileFeatureLayer(tileFeatureLayer);
+                    this.pointMergeService,
+                    this.highlightMode,
+                    this.featureIdSubset);
+                wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
-                    visualization.run();
+                    wasmVisualization.run();
                 }
                 catch (e) {
                     console.error(`Exception while rendering: ${e}`);
@@ -164,7 +186,7 @@ export class TileVisualization {
                 }
 
                 // Try to resolve externally referenced auxiliary tiles.
-                let extRefs = {requests: visualization.externalReferences()};
+                let extRefs = {requests: wasmVisualization.externalReferences()};
                 if (extRefs.requests && extRefs.requests.length > 0) {
                     let response = await fetch("/locate", {
                         body: JSON.stringify(extRefs, (_, value) =>
@@ -178,9 +200,8 @@ export class TileVisualization {
                     }
 
                     let extRefsResolved = await response.json() as LocateResponse;
-                    if (this.tile.disposed || this.style.isDeleted()) {
-                        // Do not continue if any of the tiles or the style
-                        // were deleted while we were waiting.
+                    if (this.style.isDeleted()) {
+                        // Do not continue if the style was deleted while we were waiting.
                         return false;
                     }
 
@@ -203,18 +224,27 @@ export class TileVisualization {
                     // add them to the visualization, and let it process them.
                     await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
                         for (let auxTile of tileFeatureLayers)
-                            visualization.addTileFeatureLayer(auxTile);
+                            wasmVisualization.addTileFeatureLayer(auxTile);
 
                         try {
-                            visualization.processResolvedExternalReferences(extRefsResolved.responses);
+                            wasmVisualization.processResolvedExternalReferences(extRefsResolved.responses);
                         }
                         catch (e) {
                             console.error(`Exception while rendering: ${e}`);
                         }
                     });
                 }
-                this.primitiveCollection = visualization.primitiveCollection();
-                visualization.delete();
+
+
+                if (!this.deleted) {
+                    this.primitiveCollection = wasmVisualization.primitiveCollection();
+                    for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                            finishedCornerTile.render(viewer);
+                        }
+                    }
+                }
+                wasmVisualization.delete();
                 return true;
             });
             if (this.primitiveCollection) {
@@ -237,12 +267,20 @@ export class TileVisualization {
 
     /**
      * Destroy any current visualization.
-     * @param viewer {Cesium.Viewer} The viewer to remove the rendered entity from.
+     * @param viewer {Viewer} The viewer to remove the rendered entity from.
      */
     destroy(viewer: Viewer) {
         this.deleted = true;
         if (this.renderingInProgress) {
             return;
+        }
+
+        // Remove point-merge contributions that were made by this map-layer+style visualization combo.
+        let removedCornerTiles = this.pointMergeService.remove(
+            this.tile.tileId,
+            this.mapLayerStyleId());
+        for (let removedCornerTile of removedCornerTiles) {
+            removedCornerTile.remove(viewer);
         }
 
         if (this.primitiveCollection) {
@@ -257,17 +295,6 @@ export class TileVisualization {
         }
         this.hasHighDetailVisualization = false;
         this.hasTileBorder = false;
-    }
-
-    /**
-     * Iterate over all Cesium primitives of this visualization.
-     */
-    forEachPrimitive(callback: any) {
-        if (this.primitiveCollection) {
-            for (let i = 0; i < this.primitiveCollection.length; ++i) {
-                callback(this.primitiveCollection.get(i));
-            }
-        }
     }
 
     /**
@@ -288,5 +315,14 @@ export class TileVisualization {
             (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
             (this.showTileBorder != this.hasTileBorder)
         );
+    }
+
+    /**
+     * Combination of map name, layer name, style name and highlight mode which
+     * (in combination with the tile id) uniquely identifies that rendered contents
+     * if this TileVisualization as expected by the surrounding MergedPointsTiles.
+     */
+    private mapLayerStyleId() {
+        return `${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
     }
 }
