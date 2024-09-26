@@ -4,7 +4,7 @@ import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params, Router} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
 
-export const MAX_NUM_TILES_TO_LOAD = 2048;
+export const MAX_NUM_TILES_TO_LOAD = 512;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
 /**
