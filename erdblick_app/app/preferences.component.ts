@@ -104,6 +104,13 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
                         <span class="key">R</span>
                         <div class="control-desc">Reset Camera Orientation</div>
                     </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">X</span>
+                        </div>
+                        <div class="control-desc">Open Viewport Statistics</div>
+                    </li>
                 </ul>
             </div>
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>

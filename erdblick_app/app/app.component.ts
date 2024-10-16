@@ -17,6 +17,7 @@ import {filter} from "rxjs";
         <inspection-panel></inspection-panel>
         <pref-components></pref-components>
         <coordinates-panel></coordinates-panel>
+        <stats-dialog></stats-dialog>
         <div id="info">
             {{ title }} {{ version }}
         </div>

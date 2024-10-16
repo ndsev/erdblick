@@ -176,6 +176,8 @@ export class TileVisualization {
                     this.pointMergeService,
                     this.highlightMode,
                     this.featureIdSubset);
+
+                let startTime = performance.now();
                 wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
                     wasmVisualization.run();
@@ -245,6 +247,8 @@ export class TileVisualization {
                     }
                 }
                 wasmVisualization.delete();
+                let endTime = performance.now();
+                this.tile.stats.get(FeatureTile.statRenderTime)!.push(endTime - startTime);
                 return true;
             });
             if (this.primitiveCollection) {

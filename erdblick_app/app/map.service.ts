@@ -11,6 +11,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
+import {KeyboardService} from "./keyboard.service";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -109,12 +110,14 @@ export class MapService {
         reject: null|((why: any)=>void),
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
+    statsDialogVisible: boolean = false;
 
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
-                private pointMergeService: PointMergeService)
+                private pointMergeService: PointMergeService,
+                private keyboardService: KeyboardService)
     {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
@@ -190,6 +193,8 @@ export class MapService {
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
+
+        this.keyboardService.registerShortcuts(["Ctrl+x", "Ctrl+X"], ()=>{this.statsDialogVisible = true;});
     }
 
     private processTileStream() {

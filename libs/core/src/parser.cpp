@@ -134,10 +134,12 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         }
     );
-    auto numFeatures = -1;
+    int32_t numFeatures = -1;
+    uint32_t fillTime = 0;
     auto layerInfo = tileLayer.info();
     if (layerInfo.is_object()) {
         numFeatures = layerInfo.value<int32_t>("num-features", -1);
+        fillTime = layerInfo.value<uint32_t>("fill-time", -1);
     }
     return {
         tileLayer.id().toString(),
@@ -145,7 +147,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
-        numFeatures
+        numFeatures,
+        fillTime
     };
 }
 

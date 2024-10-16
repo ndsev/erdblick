@@ -72,6 +72,7 @@ import {ReactiveFormsModule} from '@angular/forms';
 import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
 import {DataSourcesService} from "./datasources.service";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
+import {StatsDialogComponent} from "./stats.component";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -147,6 +148,7 @@ export function typeValidationMessage({ schemaType }: any) {
         MultiSchemaTypeComponent,
         HighlightSearch,
         TreeTableFilterPatchDirective,
+        StatsDialogComponent
     ],
     bootstrap: [
         AppComponent
