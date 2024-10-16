@@ -315,9 +315,8 @@ export class TileVisualization {
      */
     isDirty() {
         return (
-            (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
-            (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
-            (this.showTileBorder != this.hasTileBorder)
+            this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
+            this.showTileBorder != this.hasTileBorder
         );
     }
 

@@ -390,7 +390,7 @@ export class MapService {
                     ...new Set<bigint>(allViewportTileIds)
                 ]);
                 this.currentHighDetailTileIds = new Set([
-                    ...this.currentVisibleTileIds,
+                    ...this.currentHighDetailTileIds,
                     ...new Set<bigint>(
                         allViewportTileIds.slice(0, this.parameterService.parameters.getValue().tilesVisualizeLimit))
                 ])
