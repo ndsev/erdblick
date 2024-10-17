@@ -51,6 +51,7 @@
     "@ngx-formly/primeng": "^6.3.9",
     "@types/jasmine": "~5.1.4",
     "@types/js-yaml": "^4.0.9",
+    "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.2.0",
     "@typescript-eslint/parser": "^8.2.0",
     "eslint": "^9.9.0",

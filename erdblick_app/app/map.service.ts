@@ -12,6 +12,7 @@ import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
+import * as uuid from 'uuid';
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -85,6 +86,7 @@ export class MapService {
     public loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: Fetch|null = null;
+    private currentFetchId: number = 0;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
     private currentHighDetailTileIds: Set<bigint>;
@@ -111,6 +113,7 @@ export class MapService {
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     statsDialogVisible: boolean = false;
+    clientId: string = "";
 
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
@@ -146,6 +149,10 @@ export class MapService {
 
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{x: number, y: number}>();
+
+        // Unique client ID which ensures that tile fetch requests from this map-service
+        // are de-duplicated on the mapget server.
+        this.clientId = uuid.v4();
     }
 
     public async initialize() {
@@ -503,15 +510,15 @@ export class MapService {
             }
         }
 
-        // Abort previous fetch operation, if it is different from the new one.
+        // Ensure that the new fetch operation is different from the previous one.
         let newRequestBody = JSON.stringify({
             requests: requests,
-            stringPoolOffsets: this.tileParser!.getFieldDictOffsets()
+            stringPoolOffsets: this.tileParser!.getFieldDictOffsets(),
+            clientId: this.clientId
         });
         if (this.currentFetch) {
             if (this.currentFetch.bodyJson === newRequestBody)
                 return;
-            this.currentFetch.abort();
             this.currentFetch = null;
             // Clear any unparsed messages from the previous stream.
             this.tileStreamParsingQueue = [];
@@ -526,15 +533,18 @@ export class MapService {
         this.tileParser!.reset();
 
         // Launch the new fetch operation
+        let myFetchId = ++this.currentFetchId;
         this.currentFetch = new Fetch(tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
             .withBody(newRequestBody)
             .withBufferCallback((message: any, messageType: any) => {
-                // Schedule the parsing of the newly arrived tile layer,
-                // but don't do it synchronously to avoid stalling the ongoing
-                // fetch operation.
-                this.tileStreamParsingQueue.push([message, messageType]);
+                // Schedule the parsing of the newly arrived tile layer.
+                // Ignore the new data, if this fetch operation is not
+                // the most recent one anymore.
+                if (myFetchId == this.currentFetchId) {
+                    this.tileStreamParsingQueue.push([message, messageType]);
+                }
             });
         this.currentFetch.go();
     }
