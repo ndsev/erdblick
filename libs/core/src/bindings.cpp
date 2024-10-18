@@ -445,7 +445,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
-        .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures);
+        .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
+        .field("fillTime", &TileLayerParser::TileLayerMetadata::fillTime);
 
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
