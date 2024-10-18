@@ -2,7 +2,6 @@ name: build-release
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -25,7 +24,7 @@ jobs:
       - name: Install npm dependencies
         run: npm -g install --force --include=dev
 
-      - name: Build demo with Emscripten
+      - name: Build with Emscripten
         run: |
           $GITHUB_WORKSPACE/ci/00_linux_setup.bash
           $GITHUB_WORKSPACE/ci/10_linux_build.bash
