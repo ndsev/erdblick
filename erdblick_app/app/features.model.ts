@@ -21,11 +21,8 @@ export class FeatureTile {
     disposed: boolean;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
-    static statFeatureCount = "Feature Count";
-    static statTileSize = "Tile Size (kiB)";
-    static statFillTime = "Fill Time (ms)";
-    static statParseTime = "Parse Time (ms)";
-    static statRenderTime = "Render Time (ms)";
+    static statTileSize = "tile-size-kb";
+    static statParseTime = "parse-time-ms";
 
     /**
      * Construct a FeatureTile object.
@@ -43,11 +40,11 @@ export class FeatureTile {
         this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
         this.numFeatures = mapTileMetadata.numFeatures;
-        this.stats.set(FeatureTile.statFeatureCount, [mapTileMetadata.numFeatures]);
         this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
-        this.stats.set(FeatureTile.statFillTime, [mapTileMetadata.fillTime]);
+        for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
+            this.stats.set(k, [v as number]);
+        }
         this.stats.set(FeatureTile.statParseTime, []);
-        this.stats.set(FeatureTile.statRenderTime, []);
         this.parser = parser;
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;

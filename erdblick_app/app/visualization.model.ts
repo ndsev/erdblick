@@ -237,7 +237,6 @@ export class TileVisualization {
                     });
                 }
 
-
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
@@ -248,7 +247,15 @@ export class TileVisualization {
                 }
                 wasmVisualization.delete();
                 let endTime = performance.now();
-                this.tile.stats.get(FeatureTile.statRenderTime)!.push(endTime - startTime);
+
+                // Add the render time for this style sheet as a statistic to the tile.
+                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingList = this.tile.stats.get(timingListKey);
+                if (!timingList) {
+                    timingList = [];
+                    this.tile.stats.set(timingListKey, timingList);
+                }
+                timingList.push(endTime - startTime);
                 return true;
             });
             if (this.primitiveCollection) {

@@ -17,6 +17,7 @@ import {MapService} from "./map.service";
                         [style]="{'width': '100%'}">
                 </p-multiSelect>
                 <p-checkbox label="Consider Empty Tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"></p-checkbox>
+                <div>Total number of considered tiles: {{ consideredTilesCount }}</div>
                 <table class="stats-table">
                     <thead>
                     <tr>
@@ -65,9 +66,11 @@ export class StatsDialogComponent {
     public availableMapLayers: { label: string }[] = [];
     public selectedMapLayers: { label: string }[] = [];
     public considerEmptyTiles: boolean = false;
+    public consideredTilesCount: number = 0;
 
     constructor(public mapService: MapService) {
         this.update();
+        this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.update());
     }
 
     update(): void {
@@ -89,6 +92,7 @@ export class StatsDialogComponent {
         const statsAccumulator: Map<string, number[]> = new Map();
 
         // Accumulate statistics from all tiles
+        this.consideredTilesCount = 0;
         this.mapService.loadedTileLayers.forEach(tile => {
             if (!this.considerEmptyTiles && tile.numFeatures <= 0) {
                 return;
@@ -96,6 +100,7 @@ export class StatsDialogComponent {
             if (this.selectedMapLayers.findIndex(entry => entry.label == `${tile.mapName} - ${tile.layerName}`) < 0) {
                 return;
             }
+            this.consideredTilesCount++;
             const stats = tile.stats;
             for (let [key, value] of stats.entries()) {
                 if (!statsAccumulator.has(key)) {
@@ -110,6 +115,6 @@ export class StatsDialogComponent {
             const peak = Math.max(...values);
             const average = values.reduce((sum, val) => sum + val, 0) / values.length;
             return { name: statKey, peak, average };
-        });
+        }).sort((a, b) => a.name.localeCompare(b.name));
     }
 }

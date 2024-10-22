@@ -115,6 +115,7 @@ export class MapService {
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     statsDialogVisible: boolean = false;
+    statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
     clientId: string = "";
 
     constructor(public styleService: StyleService,
@@ -203,7 +204,10 @@ export class MapService {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
 
-        this.keyboardService.registerShortcuts(["Ctrl+x", "Ctrl+X"], ()=>{this.statsDialogVisible = true;});
+        this.keyboardService.registerShortcuts(["Ctrl+x", "Ctrl+X"], ()=>{
+            this.statsDialogVisible = true;
+            this.statsDialogNeedsUpdate.next();
+        });
     }
 
     private processTileStream() {
