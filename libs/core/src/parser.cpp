@@ -135,11 +135,15 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         }
     );
     int32_t numFeatures = -1;
-    uint32_t fillTime = 0;
     auto layerInfo = tileLayer.info();
+    auto allScalarFields = JsValue::Dict();
     if (layerInfo.is_object()) {
         numFeatures = layerInfo.value<int32_t>("num-features", -1);
-        fillTime = layerInfo.value<uint32_t>("fill-time", -1);
+        for (auto const& [k, v] : layerInfo.items()) {
+            if (v.is_number()) {
+                allScalarFields.set(k, JsValue(v.get<double>()));
+            }
+        }
     }
     return {
         tileLayer.id().toString(),
@@ -148,7 +152,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
         numFeatures,
-        fillTime
+        *allScalarFields
     };
 }
 

@@ -126,7 +126,7 @@ private:
     JsValue material_;
 
     /** Flag which enables the direct triangle display required for addTriangles. */
-    bool flatAndSynchronous_ = false;
+    bool synchronous_ = false;
 
     /** Flags to clamp geometries to ground. */
     bool clampToGround_ = false;
