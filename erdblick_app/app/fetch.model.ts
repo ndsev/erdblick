@@ -13,6 +13,7 @@ export class Fetch
     private url: string;
     private method: string;
     public bodyJson: string | null;
+    public done: Promise<boolean>|boolean = false;
     private abortController: AbortController;
     private processChunks: boolean;
     private jsonCallback: any;
@@ -90,10 +91,12 @@ export class Fetch
      * Method to start the fetch request and process the response.
      */
     async go() {
+        let resolve: (v: boolean)=>void;
+        this.done = new Promise<boolean>(resolveFun => resolve = resolveFun);
+
         let requestOptions: Record<string, any> = {
             method: this.method,
             signal: this.abortController.signal,
-            keepalive: false,
             mode: "same-origin"
         };
         let headers: Record<string, any> = {};
@@ -103,22 +106,24 @@ export class Fetch
         }
         requestOptions["headers"] = headers;
 
-        return fetch(this.url, requestOptions)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+        try {
+            let response = await fetch(this.url, requestOptions);
+            if (response.ok) {
+                if (this.jsonCallback) {
+                    console.assert(!this.processChunks)
+                    await this.handleJsonResponse(response);
+                } else if (this.processChunks) {
+                    await this.handleChunkedResponse(response);
                 } else {
-                    if (this.jsonCallback) {
-                        console.assert(!this.processChunks)
-                        return this.handleJsonResponse(response);
-                    } else if (this.processChunks) {
-                        return this.handleChunkedResponse(response).then(_ => {}).catch(e => this.handleError(e));
-                    } else {
-                        return this.handleBlobResponse(response);
-                    }
+                    await this.handleBlobResponse(response);
                 }
-            })
-            .catch(e => this.handleError(e));
+            }
+        }
+        catch (e) {
+            this.handleError(e);
+        }
+
+        resolve!(true);
     }
 
     /**
@@ -126,10 +131,8 @@ export class Fetch
      * @param {Response} response - The fetch response.
      */
     private async handleBlobResponse(response: Response) {
-        return response.blob()
-            .then(blob => {
-                this.processBlob(blob);
-            });
+        const blob = await response.blob();
+        this.processBlob(blob);
     }
 
     /**
@@ -195,18 +198,15 @@ export class Fetch
      * @param {Response} response - The fetch response.
      */
     private async handleJsonResponse(response: Response) {
-        return response.json()
-            .then(jsonData => {
-                // Serialize the JSON before it is passed to the callback, so that
-                // any manipulations to it will not side-effect a later buffer callback.
-                let jsonString = JSON.stringify(jsonData);
-                if (this.jsonCallback) {
-                    this.jsonCallback(jsonData);
-                }
-
-                let uint8Array = new TextEncoder().encode(jsonString);
-                this.runBufferCallback(uint8Array)
-            });
+        const jsonData = await response.json();
+        // Serialize the JSON before it is passed to the callback, so that
+        // any manipulations to it will not side-effect a later buffer callback.
+        let jsonString = JSON.stringify(jsonData);
+        if (this.jsonCallback) {
+            this.jsonCallback(jsonData);
+        }
+        let uint8Array = new TextEncoder().encode(jsonString);
+        this.runBufferCallback(uint8Array)
     }
 
     /**

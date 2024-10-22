@@ -24,7 +24,7 @@ export class DataSourcesService {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
-                    this.mapService.reloadDataSources().then(_ => this.mapService.update());
+                    this.mapService.reloadDataSources().then(_ => this.mapService.update().then());
                 }, 2000);
             },
             error: error => {

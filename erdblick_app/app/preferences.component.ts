@@ -233,7 +233,7 @@ export class PreferencesComponent {
         parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
         parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.parametersService.parameters.next(parameters);
-        this.mapService.update();
+        this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
 

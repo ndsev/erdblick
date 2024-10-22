@@ -49,6 +49,7 @@ export interface MapInfoItem extends Record<string, any> {
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
+const abortUrl = "/abort";
 
 /** Redefinition of coreLib.Viewport. TODO: Check if needed. */
 type ViewportProperties = {
@@ -86,6 +87,7 @@ export class MapService {
     public loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: Fetch|null = null;
+    private currentFetchAbort: Fetch|null = null;
     private currentFetchId: number = 0;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
@@ -185,7 +187,7 @@ export class MapService {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
                 }
             }
-            this.update();
+            this.update().then();
         })
 
         await this.reloadDataSources();
@@ -331,7 +333,7 @@ export class MapService {
                 this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
             });
         }
-        this.update();
+        this.update().then();
     }
 
     toggleLayerTileBorderVisibility(mapId: string, layerId: string) {
@@ -343,7 +345,7 @@ export class MapService {
             const hasTileBorders = !layer.tileBorders;
             mapItem.layers.get(layerId)!.tileBorders = hasTileBorders;
             this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
-            this.update();
+            this.update().then();
         }
     }
 
@@ -355,7 +357,7 @@ export class MapService {
             const layer = mapItem.layers.get(layerId)!;
             this.parameterService.setMapLayerConfig(mapId, layerId, level, layer.visible, layer.tileBorders);
         }
-        this.update();
+        this.update().then();
     }
 
     *allLevels() {
@@ -379,7 +381,7 @@ export class MapService {
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.tileBorders : false;
     }
 
-    update() {
+    async update() {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
@@ -458,8 +460,21 @@ export class MapService {
             });
         }
 
-        // Request non-present required tile layers.
-        // TODO: Consider tile TTL.
+        // Rest of this function: Request non-present required tile layers.
+        // Only do this, if there is no ongoing effort to do so.
+        //  Reason: This is an async function, so multiple "instances" of it
+        //  may be running simultaneously. But we only ever want one function to
+        //  execute the /abort-and-/tiles fetch combo.
+        let myFetchId = ++this.currentFetchId;
+        let abortAwaited = false;
+        if (this.currentFetchAbort) {
+            await this.currentFetchAbort.done;
+            abortAwaited = true;
+            if (myFetchId != this.currentFetchId) {
+                return;
+            }
+        }
+
         let requests = [];
         if (this.selectionTileRequest) {
             // Do not go forward with the selection tile request, if it
@@ -510,15 +525,31 @@ export class MapService {
             }
         }
 
-        // Ensure that the new fetch operation is different from the previous one.
         let newRequestBody = JSON.stringify({
             requests: requests,
             stringPoolOffsets: this.tileParser!.getFieldDictOffsets(),
             clientId: this.clientId
         });
         if (this.currentFetch) {
-            if (this.currentFetch.bodyJson === newRequestBody)
+            // Ensure that the new fetch operation is different from the previous one.
+            if (this.currentFetch.bodyJson === newRequestBody) {
                 return;
+            }
+            // Abort any ongoing requests for this clientId.
+            if (!abortAwaited) {
+                this.currentFetch.abort();
+                this.currentFetchAbort = new Fetch(abortUrl)
+                    .withMethod("POST")
+                    .withBody(JSON.stringify({clientId: this.clientId}));
+                await this.currentFetchAbort.go();
+                this.currentFetchAbort = null;
+            }
+            // Wait for the current Fetch operation to end.
+            await this.currentFetch.done;
+            // Do not proceed with this update, if a newer one was started.
+            if (myFetchId != this.currentFetchId) {
+                return;
+            }
             this.currentFetch = null;
             // Clear any unparsed messages from the previous stream.
             this.tileStreamParsingQueue = [];
@@ -533,20 +564,15 @@ export class MapService {
         this.tileParser!.reset();
 
         // Launch the new fetch operation
-        let myFetchId = ++this.currentFetchId;
         this.currentFetch = new Fetch(tileUrl)
             .withChunkProcessing()
             .withMethod("POST")
             .withBody(newRequestBody)
             .withBufferCallback((message: any, messageType: any) => {
                 // Schedule the parsing of the newly arrived tile layer.
-                // Ignore the new data, if this fetch operation is not
-                // the most recent one anymore.
-                if (myFetchId == this.currentFetchId) {
-                    this.tileStreamParsingQueue.push([message, messageType]);
-                }
+                this.tileStreamParsingQueue.push([message, messageType]);
             });
-        this.currentFetch.go();
+        await this.currentFetch.go();
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
@@ -635,7 +661,7 @@ export class MapService {
     setViewport(viewport: ViewportProperties) {
         this.currentViewport = viewport;
         this.setTileLevelForViewport();
-        this.update();
+        this.update().then();
     }
 
     getPrioritisedTiles() {
@@ -683,7 +709,7 @@ export class MapService {
                 this.selectionTileRequest!.reject = reject;
             })
 
-            this.update();
+            this.update().then();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
         }
