@@ -233,26 +233,28 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
         }
     }
 
-    selectItemWithAddress(address: bigint) {
+    selectItemWithAddress(address?: bigint) {
         let addressInRange: any;
-        if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
-            const searchAddress = {
-                offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
-                size: address & BigInt(0xFFFFFFFF),
-            }
+        if (address) {
+            if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
+                const searchAddress = {
+                    offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
+                    size: address & BigInt(0xFFFFFFFF),
+                }
 
-            const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
-            const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
+                const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
+                const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
 
-            addressInRange = (address: any) => {
-                return address.offset >= addressLow &&
-                    address.offset + address.size <= addressHigh &&
-                    (address.size != 0 || addressLow == addressHigh);
-            }
-        } else {
-            const searchAddress = address;
-            addressInRange = (address: any) => {
-                return address == searchAddress;
+                addressInRange = (address: any) => {
+                    return address.offset >= addressLow &&
+                        address.offset + address.size <= addressHigh &&
+                        (address.size != 0 || addressLow == addressHigh);
+                }
+            } else {
+                const searchAddress = address;
+                addressInRange = (address: any) => {
+                    return address == searchAddress;
+                }
             }
         }
 
@@ -268,7 +270,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 node.data.styleClass = "highlight";
             }
 
-            if (node.data.address && addressInRange(node.data.address)) {
+            if (node.data.address && addressInRange && addressInRange(node.data.address)) {
                 highlight = true;
 
                 if (!firstHighlightedItemIndex)
@@ -277,7 +279,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 node.data.styleClass = "highlight";
                 parents.forEach((parent: TreeTableNode) =>{
                     parent.expanded = true;
-                })
+                });
             }
 
             if (node.children) {

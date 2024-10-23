@@ -210,6 +210,8 @@ export class ParametersService {
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
 
+    tileIdsForSourceData: Array<any> = [];
+
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
     inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
@@ -255,8 +257,8 @@ export class ParametersService {
             selection.tileId,
             selection.layerId,
             selection.mapId,
-            selection.address.toString(),
-            selection.featureIds,
+            selection.address ? selection.address.toString() : "",
+            selection.featureIds ? selection.featureIds : "",
         ];
         this.parameters.next(this.p());
     }

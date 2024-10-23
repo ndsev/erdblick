@@ -15,6 +15,7 @@ import {coreLib} from "./wasm";
 import {ClipboardService} from "./clipboard.service";
 import {TreeTable} from "primeng/treetable";
 import {ParametersService} from "./parameters.service";
+import {InfoMessageService} from "./info.service";
 
 interface Column {
     field: string;
@@ -193,6 +194,7 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
                 public jumpService: JumpTargetService,
                 public parameterService: ParametersService,
                 private renderer: Renderer2,
+                private messageService: InfoMessageService,
                 public mapService: MapService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
@@ -360,19 +362,23 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     showSourceData(event: any, sourceDataRef: any) {
         event.stopPropagation();
 
-        const layerId = sourceDataRef.layerId;
-        const tileId = sourceDataRef.tileId;
-        const address = sourceDataRef.address;
-        const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
-        const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
+        try {
+            const layerId = sourceDataRef.layerId;
+            const tileId = sourceDataRef.tileId;
+            const address = sourceDataRef.address;
+            const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
+            const featureIds = this.inspectionService.selectedFeatures.map(f => f.featureId).join(", ");
 
-        this.inspectionService.selectedSourceData.next({
-            tileId: Number(tileId),
-            layerId: String(layerId),
-            mapId: String(mapId),
-            address: BigInt(address),
-            featureIds: featureIds,
-        })
+            this.inspectionService.selectedSourceData.next({
+                tileId: Number(tileId),
+                layerId: String(layerId),
+                mapId: String(mapId),
+                address: BigInt(address),
+                featureIds: featureIds,
+            })
+        } catch (e) {
+            this.messageService.showError(`Encountered error: ${e}`);
+        }
     }
 
     onValueClick(event: any, rowData: any) {

@@ -29,8 +29,8 @@ export interface SelectedSourceData {
     mapId: string,
     tileId: number,
     layerId: string,
-    address: bigint,
-    featureIds: string,
+    address?: bigint,
+    featureIds?: string,
 }
 
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
@@ -73,7 +73,6 @@ export class InspectionService {
     inspectionPanelChanged  = new EventEmitter<void>();
 
     constructor(private mapService: MapService,
-                private jumpService: JumpTargetService,
                 private infoMessageService: InfoMessageService,
                 private keyboardService: KeyboardService,
                 public parametersService: ParametersService) {
@@ -98,14 +97,14 @@ export class InspectionService {
                 selectedFeatures[0].peek((feature: Feature) => {
                     this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
                     this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-                    this.isInspectionPanelVisible = true;
                     const center = feature.center() as Cartesian3;
                     this.selectedFeatureCenter = center;
                     this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
                     let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
                     radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
                     this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
-                    this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
+                    this.selectedFeatureGeometryType = feature.getGeometryType() as any;
+                    this.isInspectionPanelVisible = true;
                 });
             }
             if (selectedFeatures.length > 1) {
@@ -123,10 +122,11 @@ export class InspectionService {
         });
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            if (selection)
+            if (selection) {
                 this.parametersService.setSelectedSourceData(selection);
-            else
+            } else {
                 this.parametersService.unsetSelectedSourceData();
+            }
         });
     }
 

@@ -388,7 +388,7 @@ export class MapService {
                     ...this.currentVisibleTileIds,
                     ...new Set<bigint>(
                         allViewportTileIds.slice(0, this.parameterService.parameters.getValue().tilesVisualizeLimit))
-                ])
+                ]);
             }
         }
 

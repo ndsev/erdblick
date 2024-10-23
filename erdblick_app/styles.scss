@@ -1042,6 +1042,16 @@ body {
   }
 }
 
+.tilesource-options {
+  display:flex;
+  flex-direction: column;
+  gap: 0.5em;
+
+  .p-dropdown {
+    width: 100%;
+  }
+}
+
 @media only screen and (max-width: 56em) {
   .help-button {
     width: 3em;
