@@ -1,1 +1,8 @@
-* text eol=lf
+* text=auto
+
+# Explicitly list (some) binary exts
+# to avoid false positive text detection
+*.png binary
+*.jpg binary
+*.ico binary
+*.glb binary
