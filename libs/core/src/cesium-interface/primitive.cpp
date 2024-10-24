@@ -87,7 +87,9 @@ void CesiumPrimitive::addPolyLine(
     if (synchronous_) {
         polyline = JsValue(polylineClass->call("createGeometry", polyline));
     }
-    addGeometryInstance(style, id, polyline, evalFun);
+    if (polyline.type() > JsValue::Type::Null) {
+        addGeometryInstance(style, id, polyline, evalFun);
+    }
 }
 
 void CesiumPrimitive::addPolygon(
