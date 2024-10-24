@@ -255,8 +255,8 @@ export class ParametersService {
             selection.tileId,
             selection.layerId,
             selection.mapId,
-            selection.address.toString(),
-            selection.featureIds,
+            selection.address ? selection.address.toString() : "",
+            selection.featureIds ? selection.featureIds : "",
         ];
         this.parameters.next(this.p());
     }

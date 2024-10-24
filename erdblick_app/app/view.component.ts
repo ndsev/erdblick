@@ -16,7 +16,7 @@ import {
     defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {AfterViewInit, Component} from "@angular/core";
+import {AfterViewInit, Component, OnInit} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
@@ -28,6 +28,8 @@ import {SearchResultPosition} from "./featurefilter.worker";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
+import {MenuItem} from "primeng/api";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -35,7 +37,9 @@ declare let window: DebugWindow;
 @Component({
     selector: 'erdblick-view',
     template: `
-        <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <p-contextMenu [target]="viewer" [model]="menuService.menuItems" />
+        <sourcedatadialog></sourcedatadialog>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -68,6 +72,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public jumpService: JumpTargetService,
                 public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
+                public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService) {
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
@@ -123,6 +128,25 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
 
+        this.mouseHandler.setInputAction((movement: any) => {
+            const position = movement.position;
+            const cartesian = this.viewer.camera.pickEllipsoid(
+                new Cartesian2(position.x, position.y),
+                this.viewer.scene.globe.ellipsoid
+            );
+            if (defined(cartesian)) {
+                const cartographic = Cartographic.fromCartesian(cartesian);
+                const longitude = CesiumMath.toDegrees(cartographic.longitude);
+                const latitude = CesiumMath.toDegrees(cartographic.latitude);
+                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
+                    const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
+                    return {id: tileId, name: `${tileId} (level ${level})`};
+                }));
+            } else {
+                this.menuService.tileIdsForSourceData.next([]);
+            }
+        }, ScreenSpaceEventType.RIGHT_DOWN);
+
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
@@ -144,6 +168,9 @@ export class ErdblickViewComponent implements AfterViewInit {
                         z: feature.primitive.position.z + 1000
                     });
                 }
+            }
+            if (!defined(feature)) {
+                this.inspectionService.isInspectionPanelVisible = false;
             }
             this.mapService.highlightFeatures(
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],

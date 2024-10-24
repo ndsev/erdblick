@@ -40,6 +40,10 @@ body {
       padding: 0.5em 0.75em;
     }
   }
+
+  .p-contextmenu {
+    width: 20em;
+  }
 }
 
 .mapviewer-renderlayer {
@@ -1039,6 +1043,16 @@ body {
         }
       }
     }
+  }
+}
+
+.tilesource-options {
+  display:flex;
+  flex-direction: column;
+  gap: 0.5em;
+
+  .p-dropdown {
+    width: 100%;
   }
 }
 
