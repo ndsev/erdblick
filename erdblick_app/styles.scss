@@ -1051,6 +1051,29 @@ body {
   flex-direction: column;
   gap: 0.5em;
 
+  .main-dropdown {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    gap: 0.5em;
+
+    p-dropdown {
+      width: 100%;
+    }
+
+    .p-inputtext {
+      width: 100%;
+    }
+
+    button {
+      padding-left: 0;
+      padding-right: 0;
+      width: 2.85em;
+      height: 2.85em;
+      box-shadow: none;
+    }
+  }
+
   .p-dropdown {
     width: 100%;
   }
