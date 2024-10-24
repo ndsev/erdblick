@@ -11,6 +11,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
+import {Color} from "./cesium";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -91,6 +92,7 @@ export class MapService {
     private tileVisualizationQueue: [string, TileVisualization][];
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
+    private specialTileBorderColourForTiles: [bigint, Color] = [-1n, Color.TRANSPARENT];
 
     tileParser: TileLayerParser|null = null;
     tileVisualizationTopic: Subject<any>;
@@ -426,6 +428,10 @@ export class MapService {
                     return false;
                 }
                 tileVisu.showTileBorder = this.getMapLayerBorderState(mapName, layerName);
+                if (this.specialTileBorderColourForTiles[0] == tileVisu.tile.tileId) {
+                    tileVisu.showTileBorder = true;
+                    tileVisu.specialBorderColour = this.specialTileBorderColourForTiles[1];
+                }
                 tileVisu.isHighDetail = this.currentHighDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
                 return true;
             });
@@ -803,5 +809,10 @@ export class MapService {
                 visualizationCollection.push(visu);
             }
         }
+    }
+
+    setSpecialTileBorder(tileId: bigint, color: Color) {
+        this.specialTileBorderColourForTiles = [tileId, color];
+        this.update();
     }
 }

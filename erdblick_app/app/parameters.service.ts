@@ -210,8 +210,6 @@ export class ParametersService {
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
 
-    tileIdsForSourceData: Array<any> = [];
-
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
     inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);

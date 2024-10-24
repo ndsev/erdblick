@@ -234,8 +234,8 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     }
 
     selectItemWithAddress(address?: bigint) {
-        let addressInRange: any;
-        if (address) {
+        let addressInRange: Function | undefined;
+        if (address !== undefined) {
             if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
                 const searchAddress = {
                     offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
@@ -282,6 +282,10 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 });
             }
 
+            if (address === undefined && node.children?.length == 1) {
+                node.expanded = true;
+            }
+
             if (node.children) {
                 node.children.forEach((item: TreeTableNode, index) => { select(item, [...parents, node], highlight, 1 + virtualRowIndex + index) })
             }
@@ -290,6 +294,12 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
+
+        if (address === undefined) {
+            for (const item of this.treeData) {
+                item.expanded = true;
+            }
+        }
 
         setTimeout(() => {
             this.table.scrollToVirtualIndex(firstHighlightedItemIndex || 0);

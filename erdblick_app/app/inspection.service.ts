@@ -308,6 +308,15 @@ export class InspectionService {
         return `{"type": "FeatureCollection", "features": [${this.selectedFeatureGeoJsonTexts.join(", ")}]}`;
     }
 
+    loadSourceDataInspection(tileId: number, mapId: string, layerId: string) {
+        this.isInspectionPanelVisible = true;
+        this.selectedSourceData.next({
+            tileId: tileId,
+            layerId: layerId,
+            mapId: mapId
+        });
+    }
+
     protected readonly InspectionValueType = coreLib.ValueType;
     protected readonly GeometryType = coreLib.GeomType;
 }

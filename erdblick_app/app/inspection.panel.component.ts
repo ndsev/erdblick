@@ -41,7 +41,7 @@ export interface InspectionContainerSize {
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
                         
                         <p-dropdown class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
-                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" 
+                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
                                     (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" />
                     </span>
                 </ng-template>

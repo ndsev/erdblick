@@ -39,7 +39,7 @@ declare let window: DebugWindow;
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <p-contextMenu [target]="viewer" [model]="menuService.menuItems" />
-        <tilesources></tilesources>
+        <sourcedatadialog></sourcedatadialog>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -50,13 +50,11 @@ declare let window: DebugWindow;
         }
     `]
 })
-export class ErdblickViewComponent implements OnInit, AfterViewInit {
+export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
-
-    items: MenuItem[] | undefined;
 
     /**
      * Construct a Cesium View with a Model.
@@ -106,10 +104,6 @@ export class ErdblickViewComponent implements OnInit, AfterViewInit {
         });
     }
 
-    ngOnInit() {
-        this.items = this.menuService.menuItems;
-    }
-
     ngAfterViewInit() {
         this.viewer = new Viewer("mapViewContainer",
             {
@@ -144,14 +138,12 @@ export class ErdblickViewComponent implements OnInit, AfterViewInit {
                 const cartographic = Cartographic.fromCartesian(cartesian);
                 const longitude = CesiumMath.toDegrees(cartographic.longitude);
                 const latitude = CesiumMath.toDegrees(cartographic.latitude);
-                this.parameterService.tileIdsForSourceData = [...Array(16).keys()].map(level => {
+                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
                     return {id: tileId, name: `${tileId} (level ${level})`};
-                });
-                this.menuService.tileIdsReady.next(true);
+                }));
             } else {
-                this.parameterService.tileIdsForSourceData = [];
-                this.menuService.tileIdsReady.next(false);
+                this.menuService.tileIdsForSourceData.next([]);
             }
         }, ScreenSpaceEventType.RIGHT_DOWN);
 
