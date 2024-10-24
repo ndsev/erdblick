@@ -1,5 +1,6 @@
 import {Component} from "@angular/core";
 import {MapService} from "./map.service";
+import {debounceTime} from "rxjs";
 
 @Component({
     selector: 'stats-dialog',
@@ -17,7 +18,7 @@ import {MapService} from "./map.service";
                         [style]="{'width': '100%'}">
                 </p-multiSelect>
                 <p-checkbox label="Consider Empty Tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"></p-checkbox>
-                <div>Total number of considered tiles: {{ consideredTilesCount }}</div>
+                <div>Total number of considered tile layers: {{ consideredTilesCount }}</div>
                 <table class="stats-table">
                     <thead>
                     <tr>
@@ -34,7 +35,7 @@ import {MapService} from "./map.service";
                     </tr>
                     </tbody>
                 </table>
-                <button pButton type="button" label="Update" icon="pi pi-refresh" (click)="update()"></button>
+                <button pButton type="button" [label]="needsUpdate ? 'Will update once tiles finished loading. Click to update now.' : 'Up to date.'" icon="pi pi-refresh" (click)="update()"></button>
             </div>
         </p-dialog>
     `,
@@ -67,10 +68,12 @@ export class StatsDialogComponent {
     public selectedMapLayers: { label: string }[] = [];
     public considerEmptyTiles: boolean = false;
     public consideredTilesCount: number = 0;
+    public needsUpdate: boolean = false;
 
     constructor(public mapService: MapService) {
         this.update();
-        this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.update());
+        this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.needsUpdate = true);
+        this.mapService.statsDialogNeedsUpdate.pipe(debounceTime(1000)).subscribe(_ => this.update());
     }
 
     update(): void {
@@ -116,5 +119,7 @@ export class StatsDialogComponent {
             const average = values.reduce((sum, val) => sum + val, 0) / values.length;
             return { name: statKey, peak, average };
         }).sort((a, b) => a.name.localeCompare(b.name));
+
+        this.needsUpdate = false;
     }
 }

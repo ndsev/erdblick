@@ -17,6 +17,10 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
                       pTooltip="Controls" tooltipPosition="right">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
             </p-button>
+            <p-button (click)="showStatsDialog()" label="" class="pref-button"
+                      pTooltip="Statistics" tooltipPosition="right">
+                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
+            </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">
@@ -24,7 +28,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
                 <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput"/>
+                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToLoadInput" (keydown.enter)="applyTileLimits()"/>
                     <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
                 </div>
             </div>
@@ -32,7 +36,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             <div class="slider-container">
                 <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
                 <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToVisualizeInput"/>
+                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToVisualizeInput" (keydown.enter)="applyTileLimits()"/>
                     <p-slider [(ngModel)]="tilesToVisualizeInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_VISUALIZE"></p-slider>
                 </div>
             </div>
@@ -116,94 +120,95 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
     `,
-    styles: [`
-        .slider-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            width: 30em;
-            margin: 1em 0;
-        }
-        
-        .tiles-input {
-            font-size: medium;
-            text-align: center;
-            width: 17em;
-            padding: 0.5em;
-        }
-        
-        .keyboard-dialog {
-            width: 25em;
-            text-align: center;
-            background-color: white;
-        }
-
-        h2 {
-            font-size: 1.5em;
-            color: #333;
-            margin-bottom: 1em;
-            font-weight: bold;
-        }
-
-        .keyboard-list {
-            list-style-type: none;
-            padding: 0;
-        }
-
-        .keyboard-list li {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1em;
-        }
-
-        .keyboard-list li span {
-            display: inline-block;
-            background-color: #eef1f7;
-            padding: 0.5em 0.75em;
-            border-radius: 0.5em;
-            color: #333;
-            font-weight: bold;
-            min-width: 4em;
-            text-align: center;
-        }
-
-        .control-desc {
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        /* Keyboard key styling */
-        .key {
-            border-radius: 0.5em;
-            background-color: #ffcc00;
-            font-size: 1em;
-            padding: 0.5em 0.75em;
-            color: #333;
-        }
-
-        .key-multi {
-            display: flex;
-            gap: 0.25em;
-        }
-
-        .key-multi .key {
-            background-color: #00bcd4;
-            padding: 0.3em 0.6em;
-        }
-
-        .highlight {
-            background-color: #ff5722;
-            color: white;
-        }
-        
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 3.5em;
-                padding-bottom: 0;
+    styles: [
+        `
+            .slider-container {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                width: 30em;
+                margin: 1em 0;
             }
-        }
-    `]
+
+            .tiles-input {
+                font-size: medium;
+                text-align: center;
+                width: 17em;
+                padding: 0.5em;
+            }
+
+            .keyboard-dialog {
+                width: 25em;
+                text-align: center;
+                background-color: white;
+            }
+
+            h2 {
+                font-size: 1.5em;
+                color: #333;
+                margin-bottom: 1em;
+                font-weight: bold;
+            }
+
+            .keyboard-list {
+                list-style-type: none;
+                padding: 0;
+            }
+
+            .keyboard-list li {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1em;
+            }
+
+            .keyboard-list li span {
+                display: inline-block;
+                background-color: #eef1f7;
+                padding: 0.5em 0.75em;
+                border-radius: 0.5em;
+                color: #333;
+                font-weight: bold;
+                min-width: 4em;
+                text-align: center;
+            }
+
+            .control-desc {
+                color: #666;
+                font-size: 0.9em;
+            }
+
+            /* Keyboard key styling */
+            .key {
+                border-radius: 0.5em;
+                background-color: #ffcc00;
+                font-size: 1em;
+                padding: 0.5em 0.75em;
+                color: #333;
+            }
+
+            .key-multi {
+                display: flex;
+                gap: 0.25em;
+            }
+
+            .key-multi .key {
+                background-color: #00bcd4;
+                padding: 0.3em 0.6em;
+            }
+
+            .highlight {
+                background-color: #ff5722;
+                color: white;
+            }
+
+            @media only screen and (max-width: 56em) {
+                .elevated {
+                    bottom: 3.5em;
+                    padding-bottom: 0;
+                }
+            }
+        `]
 })
 export class PreferencesComponent {
 
@@ -244,6 +249,11 @@ export class PreferencesComponent {
 
     showControlsDialog() {
         this.controlsDialogVisible = true;
+    }
+
+    showStatsDialog() {
+        this.mapService.statsDialogVisible = true;
+        this.mapService.statsDialogNeedsUpdate.next();
     }
 
     openHelp() {

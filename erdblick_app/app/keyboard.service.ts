@@ -40,6 +40,10 @@ export class KeyboardService {
             const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
             const key = this.getKeyCombination(event);
 
+            // TODO: Ensure that tab and escape, when pressed in a text area,
+            //  result in a tab character/autocomplete cancelation rather than
+            //  focusing another control/closing the enclosing dialog.
+
             // Let non-ctrl key events or text editing shortcuts do their default things.
             if (isInput && (!key.includes("Ctrl") || ["ctrl+x", "ctrl+c", "ctrl+v"].includes(key.toLowerCase()))) {
                 return;

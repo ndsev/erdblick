@@ -599,6 +599,7 @@ export class MapService {
             this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey)!);
         }
         this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
+        this.statsDialogNeedsUpdate.next();
 
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
@@ -633,6 +634,7 @@ export class MapService {
             return tileVisu.tile.mapTileKey !== tileLayer.mapTileKey;
         });
         this.loadedTileLayers.delete(tileLayer.mapTileKey);
+        this.statsDialogNeedsUpdate.next();
     }
 
     private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
