@@ -39,7 +39,7 @@ export function uint8ArrayFromWasm(fun: (data: SharedUint8Array)=>any) {
  * through a SharedUint8Array. If the operation fails or the WASM function
  * returns false, null is returned.
  */
-export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: any) {
+export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
     try {
         let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
         let bufferPtr = Number(sharedGlbArray.getPointer());
@@ -59,7 +59,7 @@ export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: any
  * through a SharedUint8Array. If the operation fails or the WASM function
  * returns false, null is returned.
  */
-export async function uint8ArrayToWasmAsync(fun: (d: SharedUint8Array)=>any, inputData: any) {
+export async function uint8ArrayToWasmAsync(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
     let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
     let bufferPtr = Number(sharedGlbArray.getPointer());
     coreLib.HEAPU8.set(inputData, bufferPtr);

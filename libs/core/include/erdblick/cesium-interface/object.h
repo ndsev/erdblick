@@ -114,7 +114,7 @@ struct JsValue
      * For EMSCRIPTEN, it will utilize the value_.call<ReturnType>(Args...) function.
      * For the mock version, it will add the method call to `methodCalls` and return an empty Object.
      */
-    template<typename ReturnType, typename... Args>
+    template<typename ReturnType=NativeJsValue, typename... Args>
     ReturnType call(std::string const& methodName, Args... args);
 
     /**
@@ -234,12 +234,12 @@ template<typename... Args>
 JsValue CesiumClass::New(Args... args) const
 {
 #ifdef EMSCRIPTEN
-    auto result = value_.new_(args...);
+    auto result = value_.new_(UnpackNativeValue(args)...);
     return JsValue(result);
 #else
     return JsValue(nlohmann::json::object({
         {"className", className_},
-        {"constructedWith", nlohmann::json::array({args...})}
+        {"constructedWith", nlohmann::json::array({UnpackNativeValue(args)...})}
     }));
 #endif
 }

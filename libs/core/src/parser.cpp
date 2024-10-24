@@ -134,10 +134,16 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         }
     );
-    auto numFeatures = -1;
+    int32_t numFeatures = -1;
     auto layerInfo = tileLayer.info();
+    auto allScalarFields = JsValue::Dict();
     if (layerInfo.is_object()) {
         numFeatures = layerInfo.value<int32_t>("num-features", -1);
+        for (auto const& [k, v] : layerInfo.items()) {
+            if (v.is_number()) {
+                allScalarFields.set(k, JsValue(v.get<double>()));
+            }
+        }
     }
     return {
         tileLayer.id().toString(),
@@ -145,7 +151,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
-        numFeatures
+        numFeatures,
+        *allScalarFields
     };
 }
 

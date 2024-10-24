@@ -176,6 +176,8 @@ export class TileVisualization {
                     this.pointMergeService,
                     this.highlightMode,
                     this.featureIdSubset);
+
+                let startTime = performance.now();
                 wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
                     wasmVisualization.run();
@@ -235,7 +237,6 @@ export class TileVisualization {
                     });
                 }
 
-
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
@@ -245,6 +246,16 @@ export class TileVisualization {
                     }
                 }
                 wasmVisualization.delete();
+                let endTime = performance.now();
+
+                // Add the render time for this style sheet as a statistic to the tile.
+                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingList = this.tile.stats.get(timingListKey);
+                if (!timingList) {
+                    timingList = [];
+                    this.tile.stats.set(timingListKey, timingList);
+                }
+                timingList.push(endTime - startTime);
                 return true;
             });
             if (this.primitiveCollection) {
@@ -311,9 +322,8 @@ export class TileVisualization {
      */
     isDirty() {
         return (
-            (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
-            (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
-            (this.showTileBorder != this.hasTileBorder)
+            this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
+            this.showTileBorder != this.hasTileBorder
         );
     }
 

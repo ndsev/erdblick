@@ -50,6 +50,7 @@ public:
         std::string layerName;
         uint64_t tileId;
         int32_t numFeatures;
+        NativeJsValue scalarFields;
     };
     TileLayerMetadata readTileLayerMetadata(SharedUint8Array const& buffer);
 

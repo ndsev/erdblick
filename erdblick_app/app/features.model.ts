@@ -19,6 +19,10 @@ export class FeatureTile {
     preventCulling: boolean;
     public readonly tileFeatureLayerBlob: any;
     disposed: boolean;
+    stats: Map<string, number[]> = new Map<string, number[]>();
+
+    static statTileSize = "tile-size-kb";
+    static statParseTime = "parse-time-ms";
 
     /**
      * Construct a FeatureTile object.
@@ -26,7 +30,7 @@ export class FeatureTile {
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(parser: TileLayerParser, tileFeatureLayerBlob: any, preventCulling: boolean) {
+    constructor(parser: TileLayerParser, tileFeatureLayerBlob: Uint8Array, preventCulling: boolean) {
         let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
@@ -36,6 +40,11 @@ export class FeatureTile {
         this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
         this.numFeatures = mapTileMetadata.numFeatures;
+        this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
+        for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
+            this.stats.set(k, [v as number]);
+        }
+        this.stats.set(FeatureTile.statParseTime, []);
         this.parser = parser;
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
@@ -50,9 +59,12 @@ export class FeatureTile {
     peek(callback: (layer: TileFeatureLayer) => any) {
         // Deserialize the WASM tileFeatureLayer from the blob.
         let result = uint8ArrayToWasm((bufferToRead: any) => {
+            let startTime = performance.now();
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            let endTime = performance.now();
             if (!deserializedLayer)
                 return null;
+            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
 
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.
@@ -72,9 +84,12 @@ export class FeatureTile {
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
         let result = await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
+            let startTime = performance.now();
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            let endTime = performance.now();
             if (!deserializedLayer)
                 return null;
+            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
 
             // Run the callback with the deserialized layer, and
             // provide the result as the return value.

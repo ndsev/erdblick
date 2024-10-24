@@ -322,7 +322,7 @@ export class MapPanelComponent {
                         this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -332,7 +332,7 @@ export class MapPanelComponent {
                         this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -342,7 +342,7 @@ export class MapPanelComponent {
                         this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -352,7 +352,7 @@ export class MapPanelComponent {
                         this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update();
+                    this.mapService.update().then();
                 }
             }
         ];
