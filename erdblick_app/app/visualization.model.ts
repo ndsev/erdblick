@@ -34,10 +34,10 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
 class TileBoxVisualization {
     static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
 
-    static get(tile: FeatureTile, featureCount: number, viewer: Viewer): TileBoxVisualization {
+    static get(tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
         if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
             TileBoxVisualization.visualizations.set(
-                tile.tileId, new TileBoxVisualization(viewer, tile));
+                tile.tileId, new TileBoxVisualization(viewer, tile, color));
         }
         let result = this.visualizations.get(tile.tileId)!;
         ++result.refCount;
@@ -52,7 +52,7 @@ class TileBoxVisualization {
     private readonly entity: Entity;
     private readonly id: bigint;
 
-    constructor(viewer: Viewer, tile: FeatureTile) {
+    constructor(viewer: Viewer, tile: FeatureTile, color?: Color) {
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         this.entity = viewer.entities.add({
             rectangle: {
@@ -62,10 +62,14 @@ class TileBoxVisualization {
                 outlineWidth: 2,
                 outline: true,
                 outlineColor: new CallbackProperty((time, result) => {
-                    if (this.featureCount > 0) {
-                        return Color.YELLOW.withAlpha(0.7);
-                    } else {
-                        return Color.AQUA.withAlpha(0.3);
+                    if (color !== undefined) {
+                        return color.withAlpha(0.7);
+                    } else{
+                        if (this.featureCount > 0) {
+                            return Color.YELLOW.withAlpha(0.7);
+                        } else {
+                            return Color.AQUA.withAlpha(0.3);
+                        }
                     }
                 }, false)
             }
@@ -88,6 +92,7 @@ export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
+    specialBorderColour: Color | undefined;
 
     private readonly style: StyleWithIsDeleted;
     private readonly styleName: string;
@@ -121,17 +126,15 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(
-        tile: FeatureTile,
-        pointMergeService: PointMergeService,
-        auxTileFun: (key: string) => FeatureTile | null,
-        style: FeatureLayerStyle,
-        highDetail: boolean,
-        highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
-        featureIdSubset?: string[],
-        boxGrid?: boolean,
-        options?: Record<string, boolean>)
-    {
+    constructor(tile: FeatureTile,
+                pointMergeService: PointMergeService,
+                auxTileFun: (key: string) => FeatureTile | null,
+                style: FeatureLayerStyle,
+                highDetail: boolean,
+                highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+                featureIdSubset?: string[],
+                boxGrid?: boolean,
+                options?: Record<string, boolean>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.styleName = this.style.name();
@@ -255,7 +258,7 @@ export class TileVisualization {
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer);
+            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
             this.hasTileBorder = true;
         }
 

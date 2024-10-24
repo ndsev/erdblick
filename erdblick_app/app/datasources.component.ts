@@ -208,7 +208,6 @@ export class DatasourcesComponent {
     }
 
     closeEditorDialog(event: any) {
-        console.log(event);
         if (this.editorDialog !== undefined) {
             if (this.wasModified) {
                 event.stopPropagation();

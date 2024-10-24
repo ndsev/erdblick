@@ -72,6 +72,9 @@ import {ReactiveFormsModule} from '@angular/forms';
 import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
 import {DataSourcesService} from "./datasources.service";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
+import {SourceDataLayerSelectionDialogComponent} from "./sourcedataselection.dialog.component";
+import {ContextMenuModule} from "primeng/contextmenu";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -147,6 +150,7 @@ export function typeValidationMessage({ schemaType }: any) {
         MultiSchemaTypeComponent,
         HighlightSearch,
         TreeTableFilterPatchDirective,
+        SourceDataLayerSelectionDialogComponent
     ],
     bootstrap: [
         AppComponent
@@ -213,7 +217,8 @@ export function typeValidationMessage({ schemaType }: any) {
                 {name: 'multischema', component: MultiSchemaTypeComponent}
             ],
         }),
-        ProgressSpinnerModule
+        ProgressSpinnerModule,
+        ContextMenuModule
     ],
     providers: [
         {
@@ -233,6 +238,7 @@ export function typeValidationMessage({ schemaType }: any) {
         ClipboardService,
         EditorService,
         DataSourcesService,
+        RightClickMenuService,
         provideHttpClient()
     ]
 })
