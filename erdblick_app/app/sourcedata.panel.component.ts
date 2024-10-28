@@ -234,7 +234,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     }
 
     selectItemWithAddress(address?: bigint) {
-        let addressInRange: Function | undefined;
+        let addressInRange: (address: any) => boolean | undefined;
         if (address !== undefined) {
             if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
                 const searchAddress = {
