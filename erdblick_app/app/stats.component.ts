@@ -24,6 +24,7 @@ import {debounceTime} from "rxjs";
                     <tr>
                         <th>Statistic</th>
                         <th>Peak Value</th>
+                        <th>Sum Value</th>
                         <th>Average Value</th>
                     </tr>
                     </thead>
@@ -31,6 +32,7 @@ import {debounceTime} from "rxjs";
                     <tr *ngFor="let stat of aggregatedStats">
                         <td>{{ stat.name }}</td>
                         <td>{{ stat.peak | number: '1.2-2' }}</td>
+                        <td>{{ stat.sum | number: '1.2-2' }}</td>
                         <td>{{ stat.average | number: '1.2-2' }}</td>
                     </tr>
                     </tbody>
@@ -63,7 +65,7 @@ import {debounceTime} from "rxjs";
     ]
 })
 export class StatsDialogComponent {
-    public aggregatedStats: { name: string, peak: number, average: number }[] = [];
+    public aggregatedStats: { name: string, peak: number, average: number, sum: number }[] = [];
     public availableMapLayers: { label: string }[] = [];
     public selectedMapLayers: { label: string }[] = [];
     public considerEmptyTiles: boolean = false;
@@ -116,8 +118,9 @@ export class StatsDialogComponent {
         // Calculate peak and average for each statistic
         this.aggregatedStats = Array.from(statsAccumulator.entries()).map(([statKey, values]) => {
             const peak = Math.max(...values);
-            const average = values.reduce((sum, val) => sum + val, 0) / values.length;
-            return { name: statKey, peak, average };
+            const sum = values.reduce((sum, val) => sum + val, 0);
+            const average = sum / values.length;
+            return { name: statKey, peak, average, sum };
         }).sort((a, b) => a.name.localeCompare(b.name));
 
         this.needsUpdate = false;
