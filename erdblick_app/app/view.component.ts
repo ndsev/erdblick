@@ -55,6 +55,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+    private cameraIsMoving: boolean = false;
 
     /**
      * Construct a Cesium View with a Model.
@@ -125,8 +126,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
-
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
+        this.cameraIsMoving = false;
 
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
@@ -193,6 +194,10 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
                 return;
             }
+            // Do not handle mouse move here, if the camera is currently being moved.
+            if (this.cameraIsMoving) {
+                return;
+            }
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
@@ -209,6 +214,12 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.camera.changed.addEventListener(() => {
             this.parameterService.setCameraState(this.viewer.camera);
             this.updateViewport();
+        });
+        this.viewer.camera.moveStart.addEventListener(() => {
+            this.cameraIsMoving = true;
+        });
+        this.viewer.camera.moveEnd.addEventListener(() => {
+            this.cameraIsMoving = false;
         });
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
 
