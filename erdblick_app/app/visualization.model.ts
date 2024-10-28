@@ -7,7 +7,13 @@ import {
     Rectangle,
     Viewer,
     CallbackProperty,
-    HeightReference
+    HeightReference,
+    ColorGeometryInstanceAttribute,
+    GeometryInstance,
+    PerInstanceColorAppearance,
+    Primitive,
+    RectangleGeometry,
+    RectangleOutlineGeometry
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
 import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
@@ -33,56 +39,98 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  */
 class TileBoxVisualization {
     static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
+    static outlinePrimitive: Primitive|null = null;
 
     static get(tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
         if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
             TileBoxVisualization.visualizations.set(
                 tile.tileId, new TileBoxVisualization(viewer, tile, color));
+            TileBoxVisualization.updatePrimitive(viewer);
         }
         let result = this.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
+        result.updateOutlineColor();
         return result;
     }
 
-    // Keep track of how many TileVisualizations are using this low-detail one.
-    // We can delete this instance, as soon as refCount is 0.
+    static updatePrimitive(viewer: Viewer) {
+        if (this.outlinePrimitive) {
+            viewer.scene.primitives.remove(this.outlinePrimitive);
+        }
+        this.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
+            geometryInstances: [...this.visualizations].map(kv => kv[1].instance),
+            appearance: new PerInstanceColorAppearance({
+                flat: true,
+                renderState: {
+                    depthTest: {
+                        enabled: true
+                    }
+                }
+            }),
+            asynchronous: false
+        }));
+    }
+
     refCount: number = 0;
     featureCount: number = 0;
-    private readonly entity: Entity;
     private readonly id: bigint;
+    private readonly color?: Color;
+    private outlineColorAttribute: ColorGeometryInstanceAttribute;
+    private instance: GeometryInstance;
 
     constructor(viewer: Viewer, tile: FeatureTile, color?: Color) {
+        this.color = color;
+        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(this.getCurrentOutlineColor());
+
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
-        this.entity = viewer.entities.add({
-            rectangle: {
-                coordinates: Rectangle.fromDegrees(...tileBox),
-                height: HeightReference.CLAMP_TO_GROUND,
-                material: Color.TRANSPARENT,
-                outlineWidth: 2,
-                outline: true,
-                outlineColor: new CallbackProperty((time, result) => {
-                    if (color !== undefined) {
-                        return color.withAlpha(0.7);
-                    } else{
-                        if (this.featureCount > 0) {
-                            return Color.YELLOW.withAlpha(0.7);
-                        } else {
-                            return Color.AQUA.withAlpha(0.3);
-                        }
-                    }
-                }, false)
+        let rectangle = Rectangle.fromDegrees(...tileBox);
+        let outlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
+            rectangle: rectangle,
+            height: 0.0
+        }));
+        if (!outlineGeometry) {
+            console.error("Failed to create RectangleOutlineGeometry!");
+        }
+
+        this.instance = new GeometryInstance({
+            geometry: outlineGeometry!,
+            attributes: {
+                color: this.outlineColorAttribute
             }
         });
+
         this.id = tile.tileId;
+    }
+
+    private getCurrentOutlineColor(): Color {
+        if (this.color !== undefined) {
+            return this.color.withAlpha(0.7);
+        } else {
+            if (this.featureCount > 0) {
+                return Color.YELLOW.withAlpha(0.7);
+            } else {
+                return Color.AQUA.withAlpha(0.3);
+            }
+        }
+    }
+
+    updateOutlineColor() {
+        let newColor = this.getCurrentOutlineColor();
+        // Update the color attribute
+        ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
     }
 
     delete(viewer: Viewer, featureCount: number) {
         --this.refCount;
         this.featureCount -= featureCount;
         if (this.refCount <= 0) {
-            viewer.entities.remove(this.entity);
             TileBoxVisualization.visualizations.delete(this.id);
+            TileBoxVisualization.updatePrimitive(viewer);
+        }
+        else {
+            // Update the outline color since featureCount has changed
+            this.updateOutlineColor();
         }
     }
 }
