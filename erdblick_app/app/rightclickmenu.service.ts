@@ -18,7 +18,7 @@ export class RightClickMenuService {
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
-    tileOutiline: Subject<Object | null> = new Subject<Object | null>();
+    tileOutiline: Subject<object | null> = new Subject<object | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
 
     constructor(private inspectionService: InspectionService) {

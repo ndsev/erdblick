@@ -167,8 +167,6 @@ export class JumpTargetService {
                 return null;
             }
 
-
-
             return [tileId, mapId, sourceLayerId]
         }
 
@@ -246,9 +244,6 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        if (fjt.name.toLowerCase().includes("tileid")) {
-
-                        }
                         this.highlightByJumpTarget(fjt).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
