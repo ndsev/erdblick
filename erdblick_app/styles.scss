@@ -42,7 +42,7 @@ body {
   }
 
   .p-contextmenu {
-    width: 20em;
+    width: 22em;
   }
 }
 
@@ -457,6 +457,10 @@ body {
 
     .blue {
       background-color: var(--primary-color);
+    }
+
+    .red {
+      background-color: indianred;
     }
 
     .orange {

@@ -8,6 +8,8 @@ import {coreLib} from "./wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
+import {InspectionService} from "./inspection.service";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 export interface SearchTarget {
     icon: string;
@@ -46,6 +48,8 @@ export class JumpTargetService {
                 private mapService: MapService,
                 private messageService: InfoMessageService,
                 private sidePanelService: SidePanelService,
+                private inspectionService: InspectionService,
+                private menuService: RightClickMenuService,
                 private searchService: FeatureSearchService) {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -108,6 +112,124 @@ export class JumpTargetService {
         }
     }
 
+    validateMapgetTileId(value: string) {
+        return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
+    }
+
+    parseMapgetTileId(value: string): number[] | undefined {
+        if (!value) {
+            this.messageService.showError("No value provided!");
+            return;
+        }
+        try {
+            let wgs84TileId = BigInt(value);
+            let position = coreLib.getTilePosition(wgs84TileId);
+            return [position.x, position.y, position.z]
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+        }
+        return undefined;
+    }
+
+    getInspectTileSourceDataTarget() {
+        const searchString = this.targetValueSubject.getValue();
+        let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
+
+        const matchSourceDataElements = (value: string) => {
+            const regex = /^\s*(\d+)\s*(?:[,\s;]+)?\s*([^\s,;]*)\s*(?:[,\s;]+)?\s*([^\s,;]*)?\s*$/;
+            const match = value.match(regex);
+            let tileId: bigint | null = null;
+            let mapId = null;
+            let sourceLayerId = null;
+            let valid = true;
+
+            if (match) {
+                const [_, bigintStr, str1, str2] = match;
+                try {
+                    tileId = BigInt(bigintStr);
+                    valid = this.validateMapgetTileId(tileId.toString());
+                } catch {
+                    valid = false;
+                }
+
+                // TODO: check whether the mapId and layerId are valid
+                if (str1) {
+                    mapId = str1;
+                }
+                if (str2) {
+                    sourceLayerId = str2;
+                }
+            } else {
+                valid = false;
+            }
+
+            if (!tileId || !valid) {
+                return null;
+            }
+
+
+
+            return [tileId, mapId, sourceLayerId]
+        }
+
+        const matches = matchSourceDataElements(searchString);
+        if (matches) {
+            const [tileId, mapId, sourceLayerId] = matches;
+            if (tileId) {
+                label = `tileId = ${tileId}`;
+                if (mapId) {
+                    label = `${label} | mapId = ${mapId}`;
+                    if (sourceLayerId) {
+                        label = `${label} | sourceLayerId = ${sourceLayerId}`;
+                    } else {
+                        label = `${label} | (sourceLayerId = ?)`;
+                    }
+                } else {
+                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`
+                }
+            } else {
+                label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            }
+        }
+
+        return {
+            icon: "pi-database",
+            color: "red",
+            name: "Inspect Mapget Tile",
+            label: label,
+            enabled: false,
+            execute: (value: string) => {
+                const matches = matchSourceDataElements(value);
+                if (matches) {
+                    const [tileId, mapId, sourceLayerId] = matches;
+                    try {
+                        if (tileId) {
+                            if (mapId) {
+                                if (sourceLayerId) {
+                                    this.inspectionService.loadSourceDataInspection(
+                                        Number(tileId),
+                                        String(mapId),
+                                        String(sourceLayerId)
+                                    )
+                                } else {
+                                    this.menuService.customTileAndMapId.next([String(tileId), String(mapId)]);
+                                }
+                            } else {
+                                this.menuService.customTileAndMapId.next([String(tileId), ""]);
+                            }
+                        }
+                    } catch (e) {
+                        this.messageService.showError(String(e));
+                    }
+                }
+            },
+            validate: (value: string) => {
+                const matches = matchSourceDataElements(value);
+                return matches && matches.length && matches[0];
+            }
+        }
+    }
+
     update() {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
@@ -123,7 +245,12 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    execute: (_: string) => { this.highlightByJumpTarget(fjt).then(); },
+                    execute: (_: string) => {
+                        if (fjt.name.toLowerCase().includes("tileid")) {
+
+                        }
+                        this.highlightByJumpTarget(fjt).then();
+                    },
                     validate: (_: string) => { return !fjt.error; },
                 }
             });
@@ -131,6 +258,7 @@ export class JumpTargetService {
 
         this.jumpTargets.next([
             this.getFeatureMatchTarget(),
+            this.getInspectTileSourceDataTarget(),
             ...featureJumpTargetsConverted,
             ...this.extJumpTargets
         ]);

@@ -499,10 +499,11 @@ export class ParametersService {
                 this.saveHistoryStateValue(value);
             }
         }
+        console.log(value);
         this.p().search = value ? value : [];
         this._replaceUrl = false;
-        this.parameters.next(this.p())
         this.lastSearchHistoryEntry.next(value);
+        this.parameters.next(this.p())
     }
 
     private saveHistoryStateValue(value: [number, string]) {

@@ -4,7 +4,8 @@ import {RightClickMenuService, SourceDataDropdownOption} from "./rightclickmenu.
 import {MapService} from "./map.service";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionService} from "./inspection.service";
-import {Color} from "./cesium";
+import {CallbackProperty, Color, HeightReference, Rectangle} from "./cesium";
+import {coreLib} from "./wasm";
 
 @Component({
     selector: 'sourcedatadialog',
@@ -29,7 +30,7 @@ import {Color} from "./cesium";
                            pInputText [(ngModel)]="customTileId" (ngModelChange)="onCustomTileIdChange($event)"/>
                     <p-button *ngIf="!errorString" (click)="toggleCustomTileIdInput()" class="osm-button"
                               icon="{{showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus'}}"
-                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
+                              label="" [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'" tooltipPosition="bottom" tabindex="0">
                     </p-button>
                 </div>
                 
@@ -73,10 +74,10 @@ export class SourceDataLayerSelectionDialogComponent {
     errorString: string = "";
     loading: boolean = true;
     customTileId: string = "";
+    customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
-    constructor(private parameterService: ParametersService,
-                private mapService: MapService,
+    constructor(private mapService: MapService,
                 private inspectionService: InspectionService,
                 public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
@@ -84,14 +85,26 @@ export class SourceDataLayerSelectionDialogComponent {
             this.loading = !data.length;
             this.load();
         });
+        this.menuService.customTileAndMapId.subscribe(([tileId, mapId]: [string, string]) => {
+            this.load(tileId.length > 0, tileId, mapId);
+            this.menuService.tileSourceDataDialogVisible = true;
+        });
     }
 
-    load() {
-        this.showCustomTileIdInput = false;
-        this.customTileId = "";
+    load(withCustomTileId: boolean = false, customTileId: string = "", customMapId: string = "") {
+        this.showCustomTileIdInput = withCustomTileId;
+        this.customTileId = customTileId;
+        this.customMapId = customMapId;
         this.mapIds = [];
         this.sourceDataLayers = [];
         this.loading = false;
+        this.menuService.tileOutiline.next(null);
+        if (withCustomTileId && customTileId) {
+            const tileId = BigInt(customTileId);
+            this.triggerModelChange({id: tileId, name: customTileId});
+            return;
+        }
+
         if (!this.tileIds.length) {
             this.selectedTileId = undefined;
             this.errorString = "No tile IDs available for the clicked position!";
@@ -100,7 +113,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
         for (let i = 0; i < this.tileIds.length; i++) {
             const id = this.tileIds[i].id as bigint;
-            const maps = this.findMapsForTileId(id);
+            const maps = [...this.findMapsForTileId(id)];
             this.tileIds[i]["disabled"] = !maps.length;
             this.mapIdsMap.set(id, maps);
         }
@@ -111,15 +124,25 @@ export class SourceDataLayerSelectionDialogComponent {
         this.triggerModelChange(this.selectedTileId);
     }
 
-    findMapsForTileId(tileId: bigint) {
-        // TODO: Load the tile if not loaded.
-        const maps = new Set<string>();
-        for (const featureTile of this.mapService.loadedTileLayers.values()) {
-            if (featureTile.tileId == tileId && featureTile.numFeatures > 0) {
-                maps.add(featureTile.mapName);
+    *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
+        const level = coreLib.getTileLevel(tileId);
+        for (const [mapId, mapInfo] of this.mapService.maps.getValue().entries()) {
+            for (const [_, layerInfo] of mapInfo.layers.entries()) {
+                if (layerInfo.type == "SourceData") {
+                    if (layerInfo.zoomLevels.includes(level)) {
+                        yield { id: mapId, name: mapId };
+                        break;
+                    } else {
+                        for (const featureTile of this.mapService.loadedTileLayers.values()) {
+                            if (featureTile.tileId == tileId) {
+                                yield { id: mapId, name: mapId };
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
-        return [...maps].map(mapId => ({ id: mapId, name: mapId }));
     }
 
     onCustomTileIdChange(tileIdString: string) {
@@ -130,13 +153,26 @@ export class SourceDataLayerSelectionDialogComponent {
         }
 
         const tileId = BigInt(tileIdString);
-        const maps = this.findMapsForTileId(tileId);
+        const maps = [...this.findMapsForTileId(tileId)];
         this.mapIdsMap.set(tileId, maps);
         this.triggerModelChange({id: tileId, name: tileIdString});
     }
 
     private triggerModelChange(tileId: SourceDataDropdownOption) {
         this.onTileIdChange(tileId);
+        if (this.customMapId.length) {
+            const mapId = { id: this.customMapId, name: this.customMapId };
+            if (!this.mapIds.includes(mapId)) {
+                this.mapIds.push(mapId);
+            }
+            this.selectedMapId = mapId;
+            this.onMapIdChange(this.selectedMapId);
+            if (this.sourceDataLayers.length) {
+                this.selectedSourceDataLayer = this.sourceDataLayers[0];
+                this.onLayerIdChange(this.selectedSourceDataLayer);
+            }
+            return;
+        }
         if (this.mapIds.length) {
             this.selectedMapId = this.mapIds[0];
             this.onMapIdChange(this.selectedMapId);
@@ -151,13 +187,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.selectedMapId = undefined;
         this.selectedSourceDataLayer = undefined;
         this.sourceDataLayers = [];
-        // TODO: Fix this.
-        //   Consider just drawing a tile box rectangle without visualising the tile.
-        // for (const featureTile of this.mapService.loadedTileLayers.values()) {
-        //     if (featureTile.tileId == tileId.id as bigint) {
-        //         this.mapService.setSpecialTileBorder(tileId.id as bigint, Color.HOTPINK);
-        //     }
-        // }
+        this.outlineTheTileBox(BigInt(tileId.id), Color.HOTPINK);
         const mapIds = this.mapIdsMap.get(tileId.id as bigint);
         if (mapIds !== undefined) {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
@@ -168,6 +198,22 @@ export class SourceDataLayerSelectionDialogComponent {
                 this.sourceDataLayersMap.set(id, layers);
             }
         }
+    }
+
+    outlineTheTileBox(tileId: bigint, color: Color) {
+        this.menuService.tileOutiline.next(null);
+        const tileBox = coreLib.getTileBox(tileId);
+        const entity = {
+            rectangle: {
+                coordinates: Rectangle.fromDegrees(...tileBox),
+                height: HeightReference.CLAMP_TO_GROUND,
+                material: Color.TRANSPARENT,
+                outlineWidth: 2,
+                outline: true,
+                outlineColor: color.withAlpha(0.5)
+            }
+        }
+        this.menuService.tileOutiline.next(entity);
     }
 
     findLayersForMapId(mapId: string) {
@@ -195,7 +241,9 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
-    onLayerIdChange(layerId: SourceDataDropdownOption) {
+    onLayerIdChange(_: SourceDataDropdownOption) {}
+
+    requestSourceData() {
         if (this.selectedTileId === undefined ||
             this.selectedMapId === undefined ||
             this.selectedSourceDataLayer === undefined) {
@@ -206,15 +254,12 @@ export class SourceDataLayerSelectionDialogComponent {
             mapId: String(this.selectedMapId.id),
             layerId: String(this.selectedSourceDataLayer.id)
         });
-    }
-
-    requestSourceData() {
-        const tileId = this.customTileId ? this.customTileId : this.selectedTileId?.id;
-        this.inspectionService.loadSourceDataInspection(
-            Number(tileId),
-            String(this.selectedMapId?.id),
-            String(this.selectedSourceDataLayer?.id)
-        );
+        // const tileId = this.customTileId ? this.customTileId : this.selectedTileId?.id;
+        // this.inspectionService.loadSourceDataInspection(
+        //     Number(tileId),
+        //     String(this.selectedMapId?.id),
+        //     String(this.selectedSourceDataLayer?.id)
+        // );
         this.close();
     }
 

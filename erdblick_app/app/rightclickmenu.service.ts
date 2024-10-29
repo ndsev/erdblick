@@ -2,6 +2,7 @@ import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
 import {InspectionService} from "./inspection.service";
+import {Entity} from "./cesium";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,
@@ -12,26 +13,30 @@ export interface SourceDataDropdownOption {
 @Injectable()
 export class RightClickMenuService {
 
-    menuItems: MenuItem[];
+    menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     tileSourceDataDialogVisible: boolean = false;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
+    tileOutiline: Subject<Object | null> = new Subject<Object | null>();
+    customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
 
     constructor(private inspectionService: InspectionService) {
-        this.menuItems = [{
+        this.menuItems.next([{
             label: 'Inspect Source Data for Tile',
             icon: 'pi pi-database',
             command: () => {
                 this.tileSourceDataDialogVisible = true;
             }
-        }];
+        }]);
 
         this.lastInspectedTileSourceDataOption.subscribe(lastInspectedTileSourceData => {
+            const items = this.menuItems.getValue();
             if (lastInspectedTileSourceData) {
                 this.updateMenuForLastInspectedSourceData(lastInspectedTileSourceData);
-            } else if (this.menuItems.length > 1) {
-                this.menuItems.shift();
+            } else if (items.length > 1) {
+                items.shift();
+                this.menuItems.next(items);
             }
         });
     }
@@ -48,11 +53,12 @@ export class RightClickMenuService {
                 );
             }
         };
-
-        if (this.menuItems.length > 1) {
-            this.menuItems[0] = menuItem;
+        const items = this.menuItems.getValue();
+        if (items.length > 1) {
+            items[0] = menuItem;
         } else {
-            this.menuItems.unshift(menuItem);
+            items.unshift(menuItem);
         }
+        this.menuItems.next(items);
     }
 }

@@ -38,7 +38,7 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-contextMenu [target]="viewer" [model]="menuService.menuItems" />
+        <p-contextMenu [target]="viewer" [model]="menuItems" />
         <sourcedatadialog></sourcedatadialog>
     `,
     styles: [`
@@ -55,6 +55,8 @@ export class ErdblickViewComponent implements AfterViewInit {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+    private tileOutlineEntity: Entity | null = null;
+    menuItems: MenuItem[] = [];
     private cameraIsMoving: boolean = false;
 
     /**
@@ -102,6 +104,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                     roll: 0 // No rotation.
                 }
             );
+        });
+
+        this.menuService.menuItems.subscribe(items => {
+            this.menuItems = [...items];
         });
     }
 
@@ -172,6 +178,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
             if (!defined(feature)) {
                 this.inspectionService.isInspectionPanelVisible = false;
+                this.menuService.tileOutiline.next(null);
             }
             this.mapService.highlightFeatures(
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],
@@ -304,6 +311,14 @@ export class ErdblickViewComponent implements AfterViewInit {
         if (spinner) {
             spinner.style.display = 'none';
         }
+
+        this.menuService.tileOutiline.subscribe(entity => {
+            if (entity) {
+                this.tileOutlineEntity = this.viewer.entities.add(entity);
+            } else if (this.tileOutlineEntity) {
+                this.viewer.entities.remove(this.tileOutlineEntity);
+            }
+        });
     }
 
     /**
