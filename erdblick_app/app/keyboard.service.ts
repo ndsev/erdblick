@@ -20,6 +20,7 @@ export class KeyboardService {
     private renderer: Renderer2;
     private dialogStack: Array<Dialog> = [];
     private shortcuts = new Map<string, (event: KeyboardEvent) => void>();
+    private preventOnInputShortcuts: Set<string> = new Set<string>();
 
     constructor(rendererFactory: RendererFactory2) {
         this.renderer = rendererFactory.createRenderer(null, null);
@@ -45,7 +46,7 @@ export class KeyboardService {
             //  focusing another control/closing the enclosing dialog.
 
             // Let non-ctrl key events or text editing shortcuts do their default things.
-            if (isInput && (!key.includes("Ctrl") || ["ctrl+x", "ctrl+c", "ctrl+v"].includes(key.toLowerCase()))) {
+            if (isInput && this.preventOnInputShortcuts.has(key)) {
                 return;
             }
 
@@ -69,12 +70,11 @@ export class KeyboardService {
         return key;
     }
 
-    registerShortcuts(keys: string[], callback: (event: KeyboardEvent) => void) {
-        keys.forEach(keys_ => this.registerShortcut(keys_, callback));
-    }
-
-    registerShortcut(keys: string, callback: (event: KeyboardEvent) => void) {
+    registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean=false) {
         this.shortcuts.set(keys, callback);
+        if (preventOnInput) {
+            this.preventOnInputShortcuts.add(keys);
+        }
     }
 
     ngOnDestroy() {

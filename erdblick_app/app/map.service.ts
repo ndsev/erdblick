@@ -206,10 +206,10 @@ export class MapService {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
 
-        this.keyboardService.registerShortcuts(["Ctrl+x", "Ctrl+X"], ()=>{
+        this.keyboardService.registerShortcut("Ctrl+x", ()=>{
             this.statsDialogVisible = true;
             this.statsDialogNeedsUpdate.next();
-        });
+        }, true);
     }
 
     private processTileStream() {

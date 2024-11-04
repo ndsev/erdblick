@@ -204,7 +204,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
                 private sidePanelService: SidePanelService) {
-        this.keyboardService.registerShortcuts(["Ctrl+k", "Ctrl+K"], this.clickOnSearchToStart.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
         this.clickListener = this.renderer.listen('document', 'click', this.handleClickOut.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {

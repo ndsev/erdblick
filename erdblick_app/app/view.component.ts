@@ -291,13 +291,13 @@ export class ErdblickViewComponent implements AfterViewInit {
             });
         });
 
-        this.keyboardService.registerShortcuts(['q', 'Q'], this.zoomIn.bind(this));
-        this.keyboardService.registerShortcuts(['e', 'E'], this.zoomOut.bind(this));
-        this.keyboardService.registerShortcuts(['w', 'W'], this.moveUp.bind(this));
-        this.keyboardService.registerShortcuts(['a', 'A'], this.moveLeft.bind(this));
-        this.keyboardService.registerShortcuts(['s', 'S'], this.moveDown.bind(this));
-        this.keyboardService.registerShortcuts(['d', 'D'], this.moveRight.bind(this));
-        this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
+        this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
+        this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
+        this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
+        this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
+        this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
+        this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
+        this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
 
         // Hide the global loading spinner.
         const spinner = document.getElementById('global-spinner-container');
