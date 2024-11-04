@@ -126,18 +126,6 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     inspectionContainerHeight: number;
     containerSizeSubscription: Subscription;
 
-    /**
-     * Returns a human-readable layer name for a layer id.
-     *
-     * @param layerId Layer id to get the name for
-     */
-    public static layerNameForLayerId(layerId: string) {
-        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
-        if (match)
-            return `${match[2]}.${match[3]}`;
-        return layerId;
-    }
-
     constructor(private inspectionService: InspectionService,
                 public parameterService: ParametersService,
                 private renderer: Renderer2,

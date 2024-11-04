@@ -124,7 +124,7 @@ export class JumpTargetService {
         try {
             let wgs84TileId = BigInt(value);
             let position = coreLib.getTilePosition(wgs84TileId);
-            return [position.x, position.y, position.z]
+            return [position.y, position.x, position.z]
         } catch (e) {
             this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
         }
@@ -136,7 +136,7 @@ export class JumpTargetService {
         let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
 
         const matchSourceDataElements = (value: string) => {
-            const regex = /^\s*(\d+)\s*(?:[,\s;]+)?\s*([^\s,;]*)\s*(?:[,\s;]+)?\s*([^\s,;]*)?\s*$/;
+            const regex = /^\s*(\d+)\s+(?:"([^"]+)"|([^\s,;"]+(?:\\\s[^\s,;"]+)*))\s+(?:"([^"]+)"|([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
             let tileId: bigint | null = null;
             let mapId = null;
@@ -144,20 +144,30 @@ export class JumpTargetService {
             let valid = true;
 
             if (match) {
-                const [_, bigintStr, str1, str2] = match;
+                const [_, bigintStr, quoted1, unquoted1, quoted2, unquoted2] = match;
                 try {
                     tileId = BigInt(bigintStr);
-                    valid = this.validateMapgetTileId(tileId.toString());
                 } catch {
                     valid = false;
                 }
 
-                // TODO: check whether the mapId and layerId are valid
-                if (str1) {
-                    mapId = str1;
+                if (quoted1 || unquoted1) {
+                    mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, ' ');
+                    if (mapId.startsWith('"') || mapId.startsWith("'")) {
+                        mapId = mapId.slice(1, -1);
+                    }
+                    if (mapId.endsWith('"') || mapId.endsWith("'")) {
+                        mapId = mapId.slice(1, -1);
+                    }
                 }
-                if (str2) {
-                    sourceLayerId = str2;
+                if (quoted2 || unquoted2) {
+                    sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, ' ');
+                    if (sourceLayerId.startsWith('"') || sourceLayerId.startsWith("'")) {
+                        sourceLayerId = sourceLayerId.slice(1, -1);
+                    }
+                    if (sourceLayerId.endsWith('"') || sourceLayerId.endsWith("'")) {
+                        mapId = sourceLayerId.slice(1, -1);
+                    }
                 }
             } else {
                 valid = false;
@@ -199,18 +209,27 @@ export class JumpTargetService {
             execute: (value: string) => {
                 const matches = matchSourceDataElements(value);
                 if (matches) {
-                    const [tileId, mapId, sourceLayerId] = matches;
+                    let [tileId, mapId, sourceLayerId] = matches;
                     try {
                         if (tileId) {
                             if (mapId) {
+                                mapId = String(mapId);
                                 if (sourceLayerId) {
-                                    this.inspectionService.loadSourceDataInspection(
-                                        Number(tileId),
-                                        String(mapId),
-                                        String(sourceLayerId)
-                                    )
+                                    sourceLayerId = String(sourceLayerId);
+                                    if (!sourceLayerId.startsWith("SourceData")) {
+                                        sourceLayerId = this.inspectionService.layerIdForLayerName(sourceLayerId);
+                                    }
+                                    if (sourceLayerId) {
+                                        this.inspectionService.loadSourceDataInspection(
+                                            Number(tileId),
+                                            String(mapId),
+                                            sourceLayerId
+                                        )
+                                    } else {
+                                        this.menuService.customTileAndMapId.next([String(tileId), mapId]);
+                                    }
                                 } else {
-                                    this.menuService.customTileAndMapId.next([String(tileId), String(mapId)]);
+                                    this.menuService.customTileAndMapId.next([String(tileId), mapId]);
                                 }
                             } else {
                                 this.menuService.customTileAndMapId.next([String(tileId), ""]);
@@ -223,7 +242,13 @@ export class JumpTargetService {
             },
             validate: (value: string) => {
                 const matches = matchSourceDataElements(value);
-                return matches && matches.length && matches[0];
+                // TODO: check whether the mapId and layerId are valid
+                if (matches?.length == 3 && matches[2]) {
+                    if (!this.inspectionService.layerIdForLayerName(String(matches[2]))) {
+                        return false;
+                    }
+                }
+                return matches && matches.length && matches[0] && this.validateMapgetTileId(matches[0].toString());
             }
         }
     }

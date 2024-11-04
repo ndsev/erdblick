@@ -126,16 +126,16 @@ export class SourceDataLayerSelectionDialogComponent {
 
     *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
         const level = coreLib.getTileLevel(tileId);
-        for (const [mapId, mapInfo] of this.mapService.maps.getValue().entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
                     if (layerInfo.zoomLevels.includes(level)) {
-                        yield { id: mapId, name: mapId };
+                        yield { id: mapInfo.mapId, name: mapInfo.mapId };
                         break;
                     } else {
                         for (const featureTile of this.mapService.loadedTileLayers.values()) {
                             if (featureTile.tileId == tileId) {
-                                yield { id: mapId, name: mapId };
+                                yield { id: mapInfo.mapId, name: mapInfo.mapId };
                                 break;
                             }
                         }
@@ -227,7 +227,7 @@ export class SourceDataLayerSelectionDialogComponent {
             }
             return [...dataLayers].map(layerId => ({
                 id: layerId,
-                name: SourceDataPanelComponent.layerNameForLayerId(layerId)
+                name: this.inspectionService.layerNameForLayerId(layerId)
             }));
         }
         return [];
@@ -254,6 +254,7 @@ export class SourceDataLayerSelectionDialogComponent {
             mapId: String(this.selectedMapId.id),
             layerId: String(this.selectedSourceDataLayer.id)
         });
+        // TODO: TBR
         // const tileId = this.customTileId ? this.customTileId : this.selectedTileId?.id;
         // this.inspectionService.loadSourceDataInspection(
         //     Number(tileId),

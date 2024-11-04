@@ -317,6 +317,39 @@ export class InspectionService {
         });
     }
 
+    /**
+     * Returns a human-readable layer name for a layer id.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    layerNameForLayerId(layerId: string) {
+        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
+        if (match)
+            return `${match[2]}.${match[3]}`;
+        return layerId;
+    }
+
+    /**
+     * Returns an internal layerId for a human-readable layer name.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    layerIdForLayerName(layerName: string) {
+        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
+            for (const [_, layerInfo] of mapInfo.layers.entries()) {
+                if (layerInfo.type == "SourceData") {
+                    console.log(layerInfo.layerId, this.layerNameForLayerId(layerInfo.layerId), layerName)
+                    if (this.layerNameForLayerId(layerInfo.layerId) == layerName ||
+                        this.layerNameForLayerId(layerInfo.layerId) == layerName.replace('-', '.') ||
+                        layerInfo.layerId == layerName) {
+                        return layerInfo.layerId;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     protected readonly InspectionValueType = coreLib.ValueType;
     protected readonly GeometryType = coreLib.GeomType;
 }
