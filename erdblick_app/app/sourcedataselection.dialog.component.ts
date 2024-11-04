@@ -129,16 +129,9 @@ export class SourceDataLayerSelectionDialogComponent {
         for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
-                    if (layerInfo.zoomLevels.includes(level)) {
+                    if (!layerInfo.zoomLevels.length || layerInfo.zoomLevels.includes(level)) {
                         yield { id: mapInfo.mapId, name: mapInfo.mapId };
                         break;
-                    } else {
-                        for (const featureTile of this.mapService.loadedTileLayers.values()) {
-                            if (featureTile.tileId == tileId) {
-                                yield { id: mapInfo.mapId, name: mapInfo.mapId };
-                                break;
-                            }
-                        }
                     }
                 }
             }
@@ -166,6 +159,7 @@ export class SourceDataLayerSelectionDialogComponent {
                 this.mapIds.push(mapId);
             }
             this.selectedMapId = mapId;
+            this.findLayersForMapId(mapId.id);
             this.onMapIdChange(this.selectedMapId);
             if (this.sourceDataLayers.length) {
                 this.selectedSourceDataLayer = this.sourceDataLayers[0];
@@ -227,7 +221,7 @@ export class SourceDataLayerSelectionDialogComponent {
             }
             return [...dataLayers].map(layerId => ({
                 id: layerId,
-                name: this.inspectionService.layerNameForLayerId(layerId)
+                name: this.inspectionService.layerNameForSourceDataLayerId(layerId)
             }));
         }
         return [];
@@ -254,13 +248,6 @@ export class SourceDataLayerSelectionDialogComponent {
             mapId: String(this.selectedMapId.id),
             layerId: String(this.selectedSourceDataLayer.id)
         });
-        // TODO: TBR
-        // const tileId = this.customTileId ? this.customTileId : this.selectedTileId?.id;
-        // this.inspectionService.loadSourceDataInspection(
-        //     Number(tileId),
-        //     String(this.selectedMapId?.id),
-        //     String(this.selectedSourceDataLayer?.id)
-        // );
         this.close();
     }
 

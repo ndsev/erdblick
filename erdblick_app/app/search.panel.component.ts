@@ -258,18 +258,18 @@ export class SearchPanelComponent implements AfterViewInit {
                     .replace(/Ü/g, "Ue");
                 this.searchInputValue = query;
                 this.runTarget(entry[0]);
+                this.sidePanelService.panel = SidePanelState.NONE;
             }
             this.reloadSearchHistory();
         });
 
         this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
-                const value = `${lastInspectedData?.tileId} ${lastInspectedData?.mapId} ${lastInspectedData?.layerId}`;
+                const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
                 for (let i = 0; i < this.searchItems.length; i++) {
-                    if (!this.searchItems[i].name.toLowerCase().includes("features") &&
-                        this.searchItems[i].validate(value)) {
-                        console.log("VALIDATED")
-                        console.log("SET HISTORY")
+                    // TODO: Introduce a static ID for the action, so we can reference it directly.
+                    if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
+                        console.assert(this.searchItems[i].validate(value))
                         this.parametersService.setSearchHistoryState([i, value]);
                         break;
                     }
@@ -523,8 +523,8 @@ export class SearchPanelComponent implements AfterViewInit {
 
     onKeydown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
-            if (this.searchInputValue.trim()) {
-                this.parametersService.setSearchHistoryState([0, this.searchInputValue]);
+            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+                this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
             } else {
                 this.parametersService.setSearchHistoryState(null);
             }

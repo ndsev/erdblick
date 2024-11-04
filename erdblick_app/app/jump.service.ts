@@ -89,8 +89,8 @@ export class JumpTargetService {
         try {
             coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
         } catch (e: any) {
-            const parsingError = e.message.split(':', 2);
-            simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
+            const parsingError = e.message.split(': ');
+            simfilError = parsingError.length > 1 ? parsingError.slice(1).join(": ") : parsingError[0];
         }
         let label = "Match features with a filter expression";
         if (simfilError) {
@@ -134,14 +134,14 @@ export class JumpTargetService {
     getInspectTileSourceDataTarget() {
         const searchString = this.targetValueSubject.getValue();
         let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
+        let valid = true;
 
-        const matchSourceDataElements = (value: string) => {
-            const regex = /^\s*(\d+)\s+(?:"([^"]+)"|([^\s,;"]+(?:\\\s[^\s,;"]+)*))\s+(?:"([^"]+)"|([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
+        const matchSourceDataElements = (value: string): [bigint, string, string]|null => {
+            const regex = /^\s*(\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
-            let tileId: bigint | null = null;
-            let mapId = null;
-            let sourceLayerId = null;
-            let valid = true;
+            let tileId: bigint = -1n;
+            let mapId = "";
+            let sourceLayerId = "";
 
             if (match) {
                 const [_, bigintStr, quoted1, unquoted1, quoted2, unquoted2] = match;
@@ -173,7 +173,7 @@ export class JumpTargetService {
                 valid = false;
             }
 
-            if (!tileId || !valid) {
+            if (tileId === -1n || !valid) {
                 return null;
             }
 
@@ -183,7 +183,7 @@ export class JumpTargetService {
         const matches = matchSourceDataElements(searchString);
         if (matches) {
             const [tileId, mapId, sourceLayerId] = matches;
-            if (tileId) {
+            if (tileId !== -1n) {
                 label = `tileId = ${tileId}`;
                 if (mapId) {
                     label = `${label} | mapId = ${mapId}`;
@@ -193,17 +193,34 @@ export class JumpTargetService {
                         label = `${label} | (sourceLayerId = ?)`;
                     }
                 } else {
-                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`
+                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
                 }
             } else {
                 label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+                valid = false;
             }
+
+            if (matches.length > 1 && matches[1]) {
+                if (!this.mapService.maps.getValue().has(matches[1])) {
+                    label += `<br><span class="search-option-warning">Map ID not found.</span>`;
+                    valid = false;
+                }
+            }
+
+            if (matches.length == 3 && matches[2]) {
+                if (!this.inspectionService.sourceDataLayerIdForLayerName(matches[2])) {
+                    label += `<br><span class="search-option-warning">SourceData layer ID not found.</span>`;
+                    valid = false;
+                }
+            }
+
+            valid &&= this.validateMapgetTileId(matches[0].toString());
         }
 
         return {
             icon: "pi-database",
             color: "red",
-            name: "Inspect Mapget Tile",
+            name: "Inspect Tile Layer Source Data",
             label: label,
             enabled: false,
             execute: (value: string) => {
@@ -213,16 +230,12 @@ export class JumpTargetService {
                     try {
                         if (tileId) {
                             if (mapId) {
-                                mapId = String(mapId);
                                 if (sourceLayerId) {
-                                    sourceLayerId = String(sourceLayerId);
-                                    if (!sourceLayerId.startsWith("SourceData")) {
-                                        sourceLayerId = this.inspectionService.layerIdForLayerName(sourceLayerId);
-                                    }
+                                    sourceLayerId = this.inspectionService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
                                         this.inspectionService.loadSourceDataInspection(
                                             Number(tileId),
-                                            String(mapId),
+                                            mapId,
                                             sourceLayerId
                                         )
                                     } else {
@@ -241,14 +254,7 @@ export class JumpTargetService {
                 }
             },
             validate: (value: string) => {
-                const matches = matchSourceDataElements(value);
-                // TODO: check whether the mapId and layerId are valid
-                if (matches?.length == 3 && matches[2]) {
-                    if (!this.inspectionService.layerIdForLayerName(String(matches[2]))) {
-                        return false;
-                    }
-                }
-                return matches && matches.length && matches[0] && this.validateMapgetTileId(matches[0].toString());
+                return valid;
             }
         }
     }

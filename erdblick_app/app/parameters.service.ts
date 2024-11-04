@@ -449,6 +449,7 @@ export class ParametersService {
 
     resetStorage() {
         localStorage.removeItem('erdblickParameters');
+        localStorage.removeItem('searchHistory');
         window.location.href = this.router.url.split('?')[0];
     }
 
@@ -499,7 +500,6 @@ export class ParametersService {
                 this.saveHistoryStateValue(value);
             }
         }
-        console.log(value);
         this.p().search = value ? value : [];
         this._replaceUrl = false;
         this.lastSearchHistoryEntry.next(value);
