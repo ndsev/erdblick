@@ -147,7 +147,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 const latitude = CesiumMath.toDegrees(cartographic.latitude);
                 this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
-                    return {id: tileId, name: `${tileId} (level ${level})`};
+                    return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
                 }));
             } else {
                 this.menuService.tileIdsForSourceData.next([]);

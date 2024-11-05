@@ -2,12 +2,13 @@ import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
 import {InspectionService} from "./inspection.service";
-import {Entity} from "./cesium";
+import {coreLib} from "./wasm";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,
     name: string,
     disabled?: boolean
+    tileLevel?: number;
 }
 
 @Injectable()
@@ -30,24 +31,36 @@ export class RightClickMenuService {
             }
         }]);
 
-        this.lastInspectedTileSourceDataOption.subscribe(lastInspectedTileSourceData => {
+        this.tileIdsForSourceData.subscribe(tileIds => {
             const items = this.menuItems.getValue();
-            if (lastInspectedTileSourceData) {
-                this.updateMenuForLastInspectedSourceData(lastInspectedTileSourceData);
-            } else if (items.length > 1) {
+            const lastOption = this.lastInspectedTileSourceDataOption.getValue();
+            if (lastOption) {
+                const level = coreLib.getTileLevel(BigInt(lastOption.tileId));
+                const tileId = tileIds.find(tileId => tileId.tileLevel === level);
+                if (tileId) {
+                    this.updateMenuForLastInspectedSourceData({
+                        tileId: tileId.id as bigint,
+                        mapId: lastOption.mapId,
+                        layerId: lastOption.layerId
+                    });
+                    return;
+                }
+            }
+
+            if (items.length > 1) {
                 items.shift();
                 this.menuItems.next(items);
             }
         });
     }
 
-    private updateMenuForLastInspectedSourceData(sourceDataParams: {tileId: number, mapId: string, layerId: string}) {
+    private updateMenuForLastInspectedSourceData(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}) {
         const menuItem = {
-            label: 'Inspect Last Selected Source Data',
+            label: 'Inspect for Last Selected Source Data Parameters',
             icon: 'pi pi-database',
             command: () => {
                 this.inspectionService.loadSourceDataInspection(
-                    sourceDataParams.tileId,
+                    Number(sourceDataParams.tileId),
                     sourceDataParams.mapId,
                     sourceDataParams.layerId
                 );
