@@ -101,7 +101,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.mapIds = [];
         this.sourceDataLayers = [];
         this.loading = false;
-        this.menuService.tileOutiline.next(null);
+        this.menuService.tileOutline.next(null);
 
         // Special case: There is a custom tile ID.
         if (customTileId) {
@@ -126,7 +126,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
         // Pre-select the tile ID.
         let tileIdSelection = this.tileIds.find(element =>
-            !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)]
+            !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
         );
         if (tileIdSelection) {
             this.setCurrentTileId(tileIdSelection);
@@ -204,19 +204,19 @@ export class SourceDataLayerSelectionDialogComponent {
     }
 
     outlineTheTileBox(tileId: bigint, color: Color) {
-        this.menuService.tileOutiline.next(null);
+        this.menuService.tileOutline.next(null);
         const tileBox = coreLib.getTileBox(tileId);
         const entity = {
             rectangle: {
                 coordinates: Rectangle.fromDegrees(...tileBox),
                 height: HeightReference.CLAMP_TO_GROUND,
-                material: Color.TRANSPARENT,
-                outlineWidth: 2,
+                material: color.withAlpha(0.2),
                 outline: true,
-                outlineColor: color.withAlpha(0.5)
+                outlineWidth: 3.,
+                outlineColor: color
             }
         }
-        this.menuService.tileOutiline.next(entity);
+        this.menuService.tileOutline.next(entity);
     }
 
     findLayersForMapId(mapId: string) {
@@ -285,6 +285,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.sourceDataLayers = [];
         this.showCustomTileIdInput = false;
         this.customTileId = "";
+        this.menuService.tileOutline.next(null);
     }
 
     close() {

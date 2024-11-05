@@ -38,7 +38,7 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-contextMenu [target]="viewer" [model]="menuItems" />
+        <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
         <sourcedatadialog></sourcedatadialog>
     `,
     styles: [`
@@ -178,7 +178,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
             if (!defined(feature)) {
                 this.inspectionService.isInspectionPanelVisible = false;
-                this.menuService.tileOutiline.next(null);
+                this.menuService.tileOutline.next(null);
             }
             this.mapService.highlightFeatures(
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],
@@ -312,11 +312,13 @@ export class ErdblickViewComponent implements AfterViewInit {
             spinner.style.display = 'none';
         }
 
-        this.menuService.tileOutiline.subscribe(entity => {
+        this.menuService.tileOutline.subscribe(entity => {
             if (entity) {
                 this.tileOutlineEntity = this.viewer.entities.add(entity);
+                this.viewer.scene.requestRender();
             } else if (this.tileOutlineEntity) {
                 this.viewer.entities.remove(this.tileOutlineEntity);
+                this.viewer.scene.requestRender();
             }
         });
     }
@@ -480,5 +482,11 @@ export class ErdblickViewComponent implements AfterViewInit {
             pitch: CesiumMath.toRadians(-90.0),
             roll: 0.0
         });
+    }
+
+    onContextMenuHide() {
+        if (!this.menuService.tileSourceDataDialogVisible) {
+            this.menuService.tileOutline.next(null)
+        }
     }
 }
