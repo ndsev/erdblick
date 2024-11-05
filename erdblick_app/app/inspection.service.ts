@@ -260,8 +260,6 @@ export class InspectionService {
     }
 
     async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
-        console.log(`Loading SourceDataLayer layerId=${layerId} tileId=${tileId}`);
-
         const tileParser = new coreLib.TileLayerParser();
         const newRequestBody = JSON.stringify({
             requests: [{
@@ -338,7 +336,6 @@ export class InspectionService {
         for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
-                    console.log(layerInfo.layerId, this.layerNameForSourceDataLayerId(layerInfo.layerId), layerName)
                     if (this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName ||
                         this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName.replace('-', '.') ||
                         layerInfo.layerId == layerName) {
