@@ -269,7 +269,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 for (let i = 0; i < this.searchItems.length; i++) {
                     // TODO: Introduce a static ID for the action, so we can reference it directly.
                     if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
-                        console.assert(this.searchItems[i].validate(value))
                         this.parametersService.setSearchHistoryState([i, value]);
                         break;
                     }

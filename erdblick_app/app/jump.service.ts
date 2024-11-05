@@ -148,7 +148,7 @@ export class JumpTargetService {
                 try {
                     tileId = BigInt(bigintStr);
                 } catch {
-                    valid = false;
+                    return null;
                 }
 
                 if (quoted1 || unquoted1) {
@@ -170,10 +170,10 @@ export class JumpTargetService {
                     }
                 }
             } else {
-                valid = false;
+                return null;
             }
 
-            if (tileId === -1n || !valid) {
+            if (tileId === -1n) {
                 return null;
             }
 
@@ -216,6 +216,9 @@ export class JumpTargetService {
 
             valid &&= this.validateMapgetTileId(matches[0].toString());
         }
+        else {
+            valid = false;
+        }
 
         return {
             icon: "pi-database",
@@ -253,7 +256,7 @@ export class JumpTargetService {
                     }
                 }
             },
-            validate: (value: string) => {
+            validate: (_: string) => {
                 return valid;
             }
         }

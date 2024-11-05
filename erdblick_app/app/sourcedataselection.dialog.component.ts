@@ -64,13 +64,16 @@ import {coreLib} from "./wasm";
 })
 export class SourceDataLayerSelectionDialogComponent {
     selectedTileId: SourceDataDropdownOption | undefined;
-    tileIds: SourceDataDropdownOption[] = [];
-    selectedSourceDataLayer: SourceDataDropdownOption | undefined;
-    sourceDataLayers: SourceDataDropdownOption[] = [];
-    sourceDataLayersMap: Map<string, SourceDataDropdownOption[]> = new Map<string, SourceDataDropdownOption[]>();
     selectedMapId: SourceDataDropdownOption | undefined;
-    mapIdsMap: Map<bigint, SourceDataDropdownOption[]> = new Map<bigint, SourceDataDropdownOption[]>();
+    selectedSourceDataLayer: SourceDataDropdownOption | undefined;
+
+    tileIds: SourceDataDropdownOption[] = [];
     mapIds: SourceDataDropdownOption[] = [];
+    sourceDataLayers: SourceDataDropdownOption[] = [];
+
+    mapIdsPerTileId: Map<bigint, SourceDataDropdownOption[]> = new Map<bigint, SourceDataDropdownOption[]>();
+    sourceDataLayersPerMapId: Map<string, SourceDataDropdownOption[]> = new Map<string, SourceDataDropdownOption[]>();
+
     errorString: string = "";
     loading: boolean = true;
     customTileId: string = "";
@@ -86,42 +89,46 @@ export class SourceDataLayerSelectionDialogComponent {
             this.load();
         });
         this.menuService.customTileAndMapId.subscribe(([tileId, mapId]: [string, string]) => {
-            this.load(tileId.length > 0, tileId, mapId);
+            this.load(tileId, mapId);
             this.menuService.tileSourceDataDialogVisible = true;
         });
     }
 
-    load(withCustomTileId: boolean = false, customTileId: string = "", customMapId: string = "") {
-        this.showCustomTileIdInput = withCustomTileId;
+    load(customTileId: string = "", customMapId: string = "") {
+        this.showCustomTileIdInput = customTileId.length > 0;
         this.customTileId = customTileId;
         this.customMapId = customMapId;
         this.mapIds = [];
         this.sourceDataLayers = [];
         this.loading = false;
         this.menuService.tileOutiline.next(null);
-        if (withCustomTileId && customTileId) {
-            const tileId = BigInt(customTileId);
-            this.triggerModelChange({id: tileId, name: customTileId});
+
+        // Special case: There is a custom tile ID.
+        if (customTileId) {
+            this.onCustomTileIdChange(customTileId);
             return;
         }
 
+        // Abort if no Tile IDs were provided by the menu service.
         if (!this.tileIds.length) {
             this.selectedTileId = undefined;
             this.errorString = "No tile IDs available for the clicked position!";
             return;
         }
 
+        // Fill map IDs per tile ID.
         for (let i = 0; i < this.tileIds.length; i++) {
             const id = this.tileIds[i].id as bigint;
             const maps = [...this.findMapsForTileId(id)];
             this.tileIds[i]["disabled"] = !maps.length;
-            this.mapIdsMap.set(id, maps);
+            this.mapIdsPerTileId.set(id, maps);
         }
-        this.selectedTileId = this.tileIds.find(element => !element.disabled);
-        if (this.selectedTileId === undefined) {
-            return;
+
+        // Pre-select the tile ID.
+        let tileIdSelection = this.tileIds.find(element => !element.disabled);
+        if (tileIdSelection) {
+            this.setCurrentTileId(tileIdSelection);
         }
-        this.triggerModelChange(this.selectedTileId);
     }
 
     *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
@@ -147,28 +154,28 @@ export class SourceDataLayerSelectionDialogComponent {
 
         const tileId = BigInt(tileIdString);
         const maps = [...this.findMapsForTileId(tileId)];
-        this.mapIdsMap.set(tileId, maps);
-        this.triggerModelChange({id: tileId, name: tileIdString});
+        this.mapIdsPerTileId.set(tileId, maps);
+        this.setCurrentTileId({id: tileId, name: tileIdString});
     }
 
-    private triggerModelChange(tileId: SourceDataDropdownOption) {
+    private setCurrentTileId(tileId: SourceDataDropdownOption) {
+        this.selectedTileId = tileId;
         this.onTileIdChange(tileId);
-        if (this.customMapId.length) {
-            const mapId = { id: this.customMapId, name: this.customMapId };
-            if (!this.mapIds.includes(mapId)) {
-                this.mapIds.push(mapId);
+
+        if (this.customMapId) {
+            let mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
+            if (mapSelection) {
+                this.selectedMapId = mapSelection;
             }
-            this.selectedMapId = mapId;
-            this.findLayersForMapId(mapId.id);
-            this.onMapIdChange(this.selectedMapId);
-            if (this.sourceDataLayers.length) {
-                this.selectedSourceDataLayer = this.sourceDataLayers[0];
-                this.onLayerIdChange(this.selectedSourceDataLayer);
+            else {
+                this.mapIds.unshift({ id: this.customMapId, name: this.customMapId });
             }
-            return;
         }
+
         if (this.mapIds.length) {
-            this.selectedMapId = this.mapIds[0];
+            if (!this.selectedMapId) {
+                this.selectedMapId = this.mapIds[0];
+            }
             this.onMapIdChange(this.selectedMapId);
             if (this.sourceDataLayers.length) {
                 this.selectedSourceDataLayer = this.sourceDataLayers[0];
@@ -182,14 +189,14 @@ export class SourceDataLayerSelectionDialogComponent {
         this.selectedSourceDataLayer = undefined;
         this.sourceDataLayers = [];
         this.outlineTheTileBox(BigInt(tileId.id), Color.HOTPINK);
-        const mapIds = this.mapIdsMap.get(tileId.id as bigint);
+        const mapIds = this.mapIdsPerTileId.get(tileId.id as bigint);
         if (mapIds !== undefined) {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {
                 const id = this.mapIds[i].id as string;
                 const layers = this.findLayersForMapId(id);
                 this.mapIds[i]["disabled"] = !layers.length;
-                this.sourceDataLayersMap.set(id, layers);
+                this.sourceDataLayersPerMapId.set(id, layers);
             }
         }
     }
@@ -229,7 +236,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
     onMapIdChange(mapId: SourceDataDropdownOption) {
         this.selectedSourceDataLayer = undefined;
-        const sourceDataLayers = this.sourceDataLayersMap.get(mapId.id as string);
+        const sourceDataLayers = this.sourceDataLayersPerMapId.get(mapId.id as string);
         if (sourceDataLayers !== undefined) {
             this.sourceDataLayers = sourceDataLayers;
         }
