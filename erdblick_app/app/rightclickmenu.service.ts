@@ -56,7 +56,7 @@ export class RightClickMenuService {
 
     private updateMenuForLastInspectedSourceData(sourceDataParams: {tileId: bigint, mapId: string, layerId: string}) {
         const menuItem = {
-            label: 'Inspect for Last Selected Source Data Parameters',
+            label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
                 this.inspectionService.loadSourceDataInspection(
