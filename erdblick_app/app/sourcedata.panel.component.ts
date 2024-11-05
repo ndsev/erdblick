@@ -126,18 +126,6 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     inspectionContainerHeight: number;
     containerSizeSubscription: Subscription;
 
-    /**
-     * Returns a human-readable layer name for a layer id.
-     *
-     * @param layerId Layer id to get the name for
-     */
-    public static layerNameForLayerId(layerId: string) {
-        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
-        if (match)
-            return `${match[2]}.${match[3]}`;
-        return layerId;
-    }
-
     constructor(private inspectionService: InspectionService,
                 public parameterService: ParametersService,
                 private renderer: Renderer2,
@@ -282,8 +270,13 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 });
             }
 
-            if (address === undefined && node.children?.length == 1) {
+            if (address === undefined && node.children && node.children.length < 5) {
                 node.expanded = true;
+                for (const child of node.children) {
+                    if (child.children && child.children.length < 5) {
+                        child.expanded = true;
+                    }
+                }
             }
 
             if (node.children) {
@@ -297,7 +290,14 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
 
         if (address === undefined) {
             for (const item of this.treeData) {
-                item.expanded = true;
+                if (item.children) {
+                    item.expanded = true;
+                    for (const child of item.children) {
+                        if (child.children && child.children.length < 5) {
+                            child.expanded = true;
+                        }
+                    }
+                }
             }
         }
 

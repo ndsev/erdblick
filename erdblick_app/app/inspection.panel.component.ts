@@ -115,7 +115,7 @@ export class InspectionPanelComponent
                 if (map) {
                     this.layerMenuItems = Array.from(map.layers.values()).filter(item => item.type == "SourceData").map(item => {
                         return {
-                            label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
+                            label: this.inspectionService.layerNameForSourceDataLayerId(item.layerId),
                             disabled: item.layerId === selection.layerId,
                             command: () => {
                                 let sourceData = {...selection};

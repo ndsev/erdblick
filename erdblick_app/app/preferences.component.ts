@@ -44,7 +44,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Storage for Viewer properties (URL):</label>
+                <label>Storage for Viewer properties and search history:</label>
                 <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
             </div>
             <div class="button-container">

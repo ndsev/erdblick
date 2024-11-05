@@ -42,7 +42,7 @@ body {
   }
 
   .p-contextmenu {
-    width: 20em;
+    width: 22em;
   }
 }
 
@@ -457,6 +457,10 @@ body {
 
     .blue {
       background-color: var(--primary-color);
+    }
+
+    .red {
+      background-color: indianred;
     }
 
     .orange {
@@ -1050,6 +1054,29 @@ body {
   display:flex;
   flex-direction: column;
   gap: 0.5em;
+
+  .main-dropdown {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    gap: 0.5em;
+
+    p-dropdown {
+      width: 100%;
+    }
+
+    .p-inputtext {
+      width: 100%;
+    }
+
+    button {
+      padding-left: 0;
+      padding-right: 0;
+      width: 2.85em;
+      height: 2.85em;
+      box-shadow: none;
+    }
+  }
 
   .p-dropdown {
     width: 100%;
