@@ -125,7 +125,9 @@ export class SourceDataLayerSelectionDialogComponent {
         }
 
         // Pre-select the tile ID.
-        let tileIdSelection = this.tileIds.find(element => !element.disabled);
+        let tileIdSelection = this.tileIds.find(element =>
+            !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)]
+        );
         if (tileIdSelection) {
             this.setCurrentTileId(tileIdSelection);
         }

@@ -809,6 +809,14 @@ export class MapService {
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
     }
 
+    *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
+        for (const tile of this.loadedTileLayers.values()) {
+            if (tile.tileId == tileId) {
+                yield tile;
+            }
+        }
+    }
+
     private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>) {
         let visualizationCollection = null;
         switch (mode) {
