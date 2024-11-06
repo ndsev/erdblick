@@ -177,6 +177,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         pointMergeGridCellSize_->y = yaml["point-merge-grid-cell"][1].as<double>();
         pointMergeGridCellSize_->z = yaml["point-merge-grid-cell"][2].as<double>();
     }
+    if (yaml["icon-url"].IsDefined()) {
+        iconUrl_ = yaml["icon-url"].as<std::string>();
+    }
+    if (yaml["icon-url-expression"].IsDefined()) {
+        iconUrlExpression_ = yaml["icon-url-expression"].as<std::string>();
+    }
 
     /////////////////////////////////////
     /// Line Style Fields
@@ -660,6 +666,24 @@ glm::dvec3 const& FeatureStyleRule::offset() const
 std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const
 {
     return pointMergeGridCellSize_;
+}
+
+bool FeatureStyleRule::hasIconUrl() const
+{
+    return !iconUrl_.empty() || !iconUrlExpression_.empty();
+}
+
+std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
+{
+    if (!iconUrlExpression_.empty()) {
+        auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
+        if (iconUrlVal.isa(simfil::ValueType::String)) {
+            return iconUrlVal.as<simfil::ValueType::String>();
+        }
+        std::cout << "Invalid result for iconUrl expression: " << iconUrlExpression_
+                  << ": " << iconUrlVal.toString() << std::endl;
+    }
+    return iconUrl_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const

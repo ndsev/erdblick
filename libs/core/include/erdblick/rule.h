@@ -66,6 +66,9 @@ public:
     [[nodiscard]] glm::dvec3 const& offset() const;
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
+    [[nodiscard]] bool hasIconUrl() const;
+    [[nodiscard]] std::string iconUrl(BoundEvalFun const& evalFun) const;
+
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
@@ -150,6 +153,9 @@ private:
     std::optional<std::array<float, 4>> translucencyByDistance_;
     std::optional<std::array<float, 4>> scaleByDistance_;
     std::optional<std::array<float, 4>> offsetScaleByDistance_;
+
+    std::string iconUrl_;
+    std::string iconUrlExpression_;
 
     std::optional<std::regex> relationType_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.

@@ -7,6 +7,7 @@
 #include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
 #include "cesium-interface/labels.h"
+#include "cesium-interface/billboards.h"
 #include "style.h"
 #include "simfil/overlay.h"
 #include "layer.h"
@@ -274,6 +275,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumLabelCollection labelCollection_;
+    CesiumBillboardCollection billboardCollection_;
 
     // Map from map-layer-style-rule-id to map from grid-position-hash
     // to pair of feature-id-set and MergedPointVisualization.

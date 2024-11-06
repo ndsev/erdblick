@@ -3,7 +3,8 @@ import {
     PointPrimitiveCollection,
     LabelCollection,
     Viewer,
-    Entity
+    Entity,
+    BillboardCollection
 } from "./cesium";
 import {coreLib} from "./wasm";
 import {TileFeatureId} from "./parameters.service";
@@ -38,6 +39,7 @@ export class MergedPointsTile {
 
     referencingTiles: Array<bigint> = [];
 
+    billboardPrimitives: BillboardCollection|null = null;
     pointPrimitives: PointPrimitiveCollection|null = null;
     labelPrimitives: LabelCollection|null = null;
     debugEntity: Entity|null = null;
@@ -73,17 +75,23 @@ export class MergedPointsTile {
     }
 
     render(viewer: Viewer) {
-        if (this.pointPrimitives || this.labelPrimitives) {
+        if (this.pointPrimitives || this.labelPrimitives || this.billboardPrimitives) {
             this.remove(viewer);
         }
 
+        this.billboardPrimitives = new BillboardCollection();
         this.pointPrimitives = new PointPrimitiveCollection();
         this.labelPrimitives = new LabelCollection();
 
         for (let [_, feature] of this.features) {
             if (feature.pointParameters) {
                 feature.pointParameters["id"] = feature.featureIds;
-                this.pointPrimitives.add(feature.pointParameters);
+                if (feature.pointParameters.hasOwnProperty("image")) {
+                    this.billboardPrimitives.add(feature.pointParameters);
+                }
+                else {
+                    this.pointPrimitives.add(feature.pointParameters);
+                }
             }
             if (feature.labelParameters) {
                 feature.labelParameters["id"] = feature.featureIds;
@@ -93,6 +101,9 @@ export class MergedPointsTile {
 
         if (this.pointPrimitives.length) {
             viewer.scene.primitives.add(this.pointPrimitives)
+        }
+        if (this.billboardPrimitives.length) {
+            viewer.scene.primitives.add(this.billboardPrimitives)
         }
         if (this.labelPrimitives.length) {
             viewer.scene.primitives.add(this.labelPrimitives)
@@ -129,6 +140,9 @@ export class MergedPointsTile {
     remove(viewer: Viewer) {
         if (this.pointPrimitives && this.pointPrimitives.length) {
             viewer.scene.primitives.remove(this.pointPrimitives)
+        }
+        if (this.billboardPrimitives && this.billboardPrimitives.length) {
+            viewer.scene.primitives.remove(this.billboardPrimitives)
         }
         if (this.labelPrimitives && this.labelPrimitives.length) {
             viewer.scene.primitives.remove(this.labelPrimitives)

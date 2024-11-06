@@ -33,6 +33,7 @@ struct CesiumLib
     CesiumClass PrimitiveType;
     CesiumClass Label;
     CesiumClass LabelCollection;
+    CesiumClass BillboardCollection;
     CesiumClass HorizontalOrigin;
     CesiumClass VerticalOrigin;
     CesiumClass LabelStyle;

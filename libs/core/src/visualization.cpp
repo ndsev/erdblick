@@ -5,6 +5,8 @@
 
 #include <iostream>
 
+#include "cesium-interface/billboards.h"
+
 using namespace mapget;
 
 namespace erdblick
@@ -158,6 +160,8 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
         collection.call<void>("add", coloredPoints_.toJsObject());
     if (!labelCollection_.empty())
         collection.call<void>("add", labelCollection_.toJsObject());
+    if (!billboardCollection_.empty())
+        collection.call<void>("add", billboardCollection_.toJsObject());
     return *collection;
 }
 
@@ -351,7 +355,6 @@ void FeatureLayerVisualization::addGeometry(
     case GeomType::Points:
         auto pointIndex = 0;
         for (auto const& pt : vertsCartesian) {
-
             // If a merge-grid cell size is set, then a merged feature representation was requested.
             if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
                 addMergedPointGeometry(
@@ -363,12 +366,25 @@ void FeatureLayerVisualization::addGeometry(
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return coloredPoints_
-                            .pointParams(JsValue(pt), rule, tileFeatureId, augmentedEvalFun);
+                        if (rule.hasIconUrl())
+                            return CesiumBillboardCollection::billboardParams(
+                                JsValue(pt),
+                                rule,
+                                tileFeatureId,
+                                augmentedEvalFun);
+                        return CesiumPointPrimitiveCollection::pointParams(
+                            JsValue(pt),
+                            rule,
+                            tileFeatureId,
+                            augmentedEvalFun);
                     });
             }
-            else
+            else if (rule.hasIconUrl()) {
+                billboardCollection_.addBillboard(JsValue(pt), rule, tileFeatureId, evalFun);
+            }
+            else {
                 coloredPoints_.addPoint(JsValue(pt), rule, tileFeatureId, evalFun);
+            }
 
             ++pointIndex;
         }
