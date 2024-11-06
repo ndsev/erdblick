@@ -255,8 +255,8 @@ export class ParametersService {
             selection.tileId,
             selection.layerId,
             selection.mapId,
-            selection.address.toString(),
-            selection.featureIds,
+            selection.address ? selection.address.toString() : "",
+            selection.featureIds ? selection.featureIds : "",
         ];
         this.parameters.next(this.p());
     }
@@ -449,6 +449,7 @@ export class ParametersService {
 
     resetStorage() {
         localStorage.removeItem('erdblickParameters');
+        localStorage.removeItem('searchHistory');
         window.location.href = this.router.url.split('?')[0];
     }
 
@@ -501,8 +502,8 @@ export class ParametersService {
         }
         this.p().search = value ? value : [];
         this._replaceUrl = false;
-        this.parameters.next(this.p())
         this.lastSearchHistoryEntry.next(value);
+        this.parameters.next(this.p())
     }
 
     private saveHistoryStateValue(value: [number, string]) {

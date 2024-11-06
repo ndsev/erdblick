@@ -8,6 +8,8 @@ import {coreLib} from "./wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
+import {InspectionService} from "./inspection.service";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 export interface SearchTarget {
     icon: string;
@@ -46,6 +48,8 @@ export class JumpTargetService {
                 private mapService: MapService,
                 private messageService: InfoMessageService,
                 private sidePanelService: SidePanelService,
+                private inspectionService: InspectionService,
+                private menuService: RightClickMenuService,
                 private searchService: FeatureSearchService) {
         this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -85,8 +89,8 @@ export class JumpTargetService {
         try {
             coreLib.validateSimfilQuery(this.targetValueSubject.getValue());
         } catch (e: any) {
-            const parsingError = e.message.split(':', 2);
-            simfilError = parsingError.length > 1 ? parsingError[1] : parsingError[0];
+            const parsingError = e.message.split(': ');
+            simfilError = parsingError.length > 1 ? parsingError.slice(1).join(": ") : parsingError[0];
         }
         let label = "Match features with a filter expression";
         if (simfilError) {
@@ -108,6 +112,156 @@ export class JumpTargetService {
         }
     }
 
+    validateMapgetTileId(value: string) {
+        return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
+    }
+
+    parseMapgetTileId(value: string): number[] | undefined {
+        if (!value) {
+            this.messageService.showError("No value provided!");
+            return;
+        }
+        try {
+            let wgs84TileId = BigInt(value);
+            let position = coreLib.getTilePosition(wgs84TileId);
+            return [position.y, position.x, position.z]
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+        }
+        return undefined;
+    }
+
+    getInspectTileSourceDataTarget() {
+        const searchString = this.targetValueSubject.getValue();
+        let label = "tileId = ? | (mapId = ?) | (sourceLayerId = ?)";
+        let valid = true;
+
+        const matchSourceDataElements = (value: string): [bigint, string, string]|null => {
+            const regex = /^\s*(\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
+            const match = value.match(regex);
+            let tileId: bigint = -1n;
+            let mapId = "";
+            let sourceLayerId = "";
+
+            if (match) {
+                const [_, bigintStr, quoted1, unquoted1, quoted2, unquoted2] = match;
+                try {
+                    tileId = BigInt(bigintStr);
+                } catch {
+                    return null;
+                }
+
+                if (quoted1 || unquoted1) {
+                    mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, ' ');
+                    if (mapId.startsWith('"') || mapId.startsWith("'")) {
+                        mapId = mapId.slice(1, -1);
+                    }
+                    if (mapId.endsWith('"') || mapId.endsWith("'")) {
+                        mapId = mapId.slice(1, -1);
+                    }
+                }
+                if (quoted2 || unquoted2) {
+                    sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, ' ');
+                    if (sourceLayerId.startsWith('"') || sourceLayerId.startsWith("'")) {
+                        sourceLayerId = sourceLayerId.slice(1, -1);
+                    }
+                    if (sourceLayerId.endsWith('"') || sourceLayerId.endsWith("'")) {
+                        mapId = sourceLayerId.slice(1, -1);
+                    }
+                }
+            } else {
+                return null;
+            }
+
+            if (tileId === -1n) {
+                return null;
+            }
+
+            return [tileId, mapId, sourceLayerId]
+        }
+
+        const matches = matchSourceDataElements(searchString);
+        if (matches) {
+            const [tileId, mapId, sourceLayerId] = matches;
+            if (tileId !== -1n) {
+                label = `tileId = ${tileId}`;
+                if (mapId) {
+                    label = `${label} | mapId = ${mapId}`;
+                    if (sourceLayerId) {
+                        label = `${label} | sourceLayerId = ${sourceLayerId}`;
+                    } else {
+                        label = `${label} | (sourceLayerId = ?)`;
+                    }
+                } else {
+                    label = `${label} | (mapId = ?) | (sourceLayerId = ?)`;
+                }
+            } else {
+                label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+                valid = false;
+            }
+
+            if (matches.length > 1 && matches[1]) {
+                if (!this.mapService.maps.getValue().has(matches[1])) {
+                    label += `<br><span class="search-option-warning">Map ID not found.</span>`;
+                    valid = false;
+                }
+            }
+
+            if (matches.length == 3 && matches[2]) {
+                if (!this.inspectionService.sourceDataLayerIdForLayerName(matches[2])) {
+                    label += `<br><span class="search-option-warning">SourceData layer ID not found.</span>`;
+                    valid = false;
+                }
+            }
+
+            valid &&= this.validateMapgetTileId(matches[0].toString());
+        }
+        else {
+            valid = false;
+        }
+
+        return {
+            icon: "pi-database",
+            color: "red",
+            name: "Inspect Tile Layer Source Data",
+            label: label,
+            enabled: false,
+            execute: (value: string) => {
+                const matches = matchSourceDataElements(value);
+                if (matches) {
+                    let [tileId, mapId, sourceLayerId] = matches;
+                    try {
+                        if (tileId) {
+                            if (mapId) {
+                                if (sourceLayerId) {
+                                    sourceLayerId = this.inspectionService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
+                                    if (sourceLayerId) {
+                                        this.inspectionService.loadSourceDataInspection(
+                                            Number(tileId),
+                                            mapId,
+                                            sourceLayerId
+                                        )
+                                    } else {
+                                        this.menuService.customTileAndMapId.next([String(tileId), mapId]);
+                                    }
+                                } else {
+                                    this.menuService.customTileAndMapId.next([String(tileId), mapId]);
+                                }
+                            } else {
+                                this.menuService.customTileAndMapId.next([String(tileId), ""]);
+                            }
+                        }
+                    } catch (e) {
+                        this.messageService.showError(String(e));
+                    }
+                }
+            },
+            validate: (_: string) => {
+                return valid;
+            }
+        }
+    }
+
     update() {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
@@ -123,7 +277,9 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    execute: (_: string) => { this.highlightByJumpTarget(fjt).then(); },
+                    execute: (_: string) => {
+                        this.highlightByJumpTarget(fjt).then();
+                    },
                     validate: (_: string) => { return !fjt.error; },
                 }
             });
@@ -131,6 +287,7 @@ export class JumpTargetService {
 
         this.jumpTargets.next([
             this.getFeatureMatchTarget(),
+            this.getInspectTileSourceDataTarget(),
             ...featureJumpTargetsConverted,
             ...this.extJumpTargets
         ]);

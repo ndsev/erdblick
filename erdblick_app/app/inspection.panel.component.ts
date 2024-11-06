@@ -29,18 +29,19 @@ export interface InspectionContainerSize {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion *ngIf="inspectionService.featureTree.value.length && inspectionService.isInspectionPanelVisible"
+        <p-accordion *ngIf="inspectionService.isInspectionPanelVisible"
                      class="w-full inspect-panel" [ngClass]="{'inspect-panel-small-header': activeIndex > 0}"
                      [activeIndex]="0" >
             <p-accordionTab>
                 <ng-template pTemplate="header">
                     <span class="inspector-title" *ngIf="activeIndex < tabs.length">
-                        <p-button icon="pi pi-chevron-left" *ngIf="activeIndex > 0" (click)="onGoBack($event)" />
+                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" 
+                                  *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length" />
                         
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
                         
                         <p-dropdown class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
-                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" 
+                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
                                     (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" />
                     </span>
                 </ng-template>
@@ -87,7 +88,7 @@ export class InspectionPanelComponent
                 private parameterService: ParametersService) {
         this.pushFeatureInspector();
 
-        this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
+        this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe(_ => {
             this.reset();
 
             // TODO: Create a new FeaturePanelComponent instance for each unique feature selection.
@@ -96,12 +97,11 @@ export class InspectionPanelComponent
             const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
             if (this.inspectionService.selectedFeatures.length == 1) {
                 this.tabs[0].title = featureIds;
-            }
-            else {
+            } else {
                 this.tabs[0].title = `Selected ${this.inspectionService.selectedFeatures.length} Features`;
             }
 
-            const selectedSourceData = parameterService.getSelectedSourceData()
+            const selectedSourceData = this.parameterService.getSelectedSourceData()
             if (selectedSourceData?.featureIds === featureIds)
                 this.inspectionService.selectedSourceData.next(selectedSourceData);
             else
@@ -115,7 +115,7 @@ export class InspectionPanelComponent
                 if (map) {
                     this.layerMenuItems = Array.from(map.layers.values()).filter(item => item.type == "SourceData").map(item => {
                         return {
-                            label: SourceDataPanelComponent.layerNameForLayerId(item.layerId),
+                            label: this.inspectionService.layerNameForSourceDataLayerId(item.layerId),
                             disabled: item.layerId === selection.layerId,
                             command: () => {
                                 let sourceData = {...selection};
@@ -131,7 +131,7 @@ export class InspectionPanelComponent
                 }
                 this.pushSourceDataInspector(selection);
             }
-        })
+        });
     }
 
     reset() {

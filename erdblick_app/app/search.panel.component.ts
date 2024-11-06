@@ -9,6 +9,7 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
 import {distinctUntilChanged} from "rxjs";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -116,7 +117,7 @@ export class SearchPanelComponent implements AfterViewInit {
         const targetsArray: Array<SearchTarget> = [];
         const value = this.searchInputValue.trim();
         let label = "tileId = ?";
-        if (this.validateMapgetTileId(value)) {
+        if (this.jumpToTargetService.validateMapgetTileId(value)) {
             label = `tileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -127,8 +128,8 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "Mapget Tile ID",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.parseMapgetTileId(value) },
-            validate: (value: string) => { return this.validateMapgetTileId(value) }
+            jump: (value: string) => { return this.jumpToTargetService.parseMapgetTileId(value) },
+            validate: (value: string) => { return this.jumpToTargetService.validateMapgetTileId(value) }
         });
         label = "lon = ? | lat = ? | (level = ?)"
         if (this.validateWGS84(value, true)) {
@@ -203,8 +204,9 @@ export class SearchPanelComponent implements AfterViewInit {
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
+                private menuService: RightClickMenuService,
                 private sidePanelService: SidePanelService) {
-        this.keyboardService.registerShortcuts(["Ctrl+k", "Ctrl+K"], this.clickOnSearchToStart.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
         this.clickListener = this.renderer.listen('document', 'click', this.handleClickOut.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
@@ -233,7 +235,11 @@ export class SearchPanelComponent implements AfterViewInit {
         this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
            if (parameters.search.length) {
                const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
-               if (lastEntry && parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
+               if (lastEntry) {
+                   if (parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
+                       this.parametersService.lastSearchHistoryEntry.next(parameters.search);
+                   }
+               } else {
                    this.parametersService.lastSearchHistoryEntry.next(parameters.search);
                }
            }
@@ -252,8 +258,22 @@ export class SearchPanelComponent implements AfterViewInit {
                     .replace(/Ü/g, "Ue");
                 this.searchInputValue = query;
                 this.runTarget(entry[0]);
+                this.sidePanelService.panel = SidePanelState.NONE;
             }
             this.reloadSearchHistory();
+        });
+
+        this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
+            if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
+                const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
+                for (let i = 0; i < this.searchItems.length; i++) {
+                    // TODO: Introduce a static ID for the action, so we can reference it directly.
+                    if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
+                        this.parametersService.setSearchHistoryState([i, value]);
+                        break;
+                    }
+                }
+            }
         });
 
         this.reloadSearchHistory();
@@ -296,21 +316,6 @@ export class SearchPanelComponent implements AfterViewInit {
         if (index == 0) {
             this.parametersService.resetSearchHistoryState();
         }
-    }
-
-    parseMapgetTileId(value: string): number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
-        }
-        try {
-            let wgs84TileId = BigInt(value);
-            let position = coreLib.getTilePosition(wgs84TileId);
-            return [position.x, position.y, position.z]
-        } catch (e) {
-            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
-        }
-        return undefined;
     }
 
     parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): number[] | undefined {
@@ -442,10 +447,6 @@ export class SearchPanelComponent implements AfterViewInit {
         );
     }
 
-    validateMapgetTileId(value: string) {
-        return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
-    }
-
     validateWGS84(value: string, isLonLat: boolean = false) {
         const coords = this.parseWgs84Coordinates(value, isLonLat);
         return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
@@ -521,8 +522,8 @@ export class SearchPanelComponent implements AfterViewInit {
 
     onKeydown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
-            if (this.searchInputValue.trim()) {
-                this.parametersService.setSearchHistoryState([0, this.searchInputValue]);
+            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+                this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
             } else {
                 this.parametersService.setSearchHistoryState(null);
             }

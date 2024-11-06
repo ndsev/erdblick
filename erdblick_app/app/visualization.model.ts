@@ -7,7 +7,13 @@ import {
     Rectangle,
     Viewer,
     CallbackProperty,
-    HeightReference
+    HeightReference,
+    ColorGeometryInstanceAttribute,
+    GeometryInstance,
+    PerInstanceColorAppearance,
+    Primitive,
+    RectangleGeometry,
+    RectangleOutlineGeometry
 } from "./cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
 import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
@@ -33,52 +39,98 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  */
 class TileBoxVisualization {
     static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
+    static outlinePrimitive: Primitive|null = null;
 
-    static get(tile: FeatureTile, featureCount: number, viewer: Viewer): TileBoxVisualization {
+    static get(tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
         if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
             TileBoxVisualization.visualizations.set(
-                tile.tileId, new TileBoxVisualization(viewer, tile));
+                tile.tileId, new TileBoxVisualization(viewer, tile, color));
+            TileBoxVisualization.updatePrimitive(viewer);
         }
         let result = this.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
+        result.updateOutlineColor();
         return result;
     }
 
-    // Keep track of how many TileVisualizations are using this low-detail one.
-    // We can delete this instance, as soon as refCount is 0.
+    static updatePrimitive(viewer: Viewer) {
+        if (this.outlinePrimitive) {
+            viewer.scene.primitives.remove(this.outlinePrimitive);
+        }
+        this.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
+            geometryInstances: [...this.visualizations].map(kv => kv[1].instance),
+            appearance: new PerInstanceColorAppearance({
+                flat: true,
+                renderState: {
+                    depthTest: {
+                        enabled: true
+                    }
+                }
+            }),
+            asynchronous: false
+        }));
+    }
+
     refCount: number = 0;
     featureCount: number = 0;
-    private readonly entity: Entity;
     private readonly id: bigint;
+    private readonly color?: Color;
+    private outlineColorAttribute: ColorGeometryInstanceAttribute;
+    private instance: GeometryInstance;
 
-    constructor(viewer: Viewer, tile: FeatureTile) {
+    constructor(viewer: Viewer, tile: FeatureTile, color?: Color) {
+        this.color = color;
+        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(this.getCurrentOutlineColor());
+
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
-        this.entity = viewer.entities.add({
-            rectangle: {
-                coordinates: Rectangle.fromDegrees(...tileBox),
-                height: HeightReference.CLAMP_TO_GROUND,
-                material: Color.TRANSPARENT,
-                outlineWidth: 2,
-                outline: true,
-                outlineColor: new CallbackProperty((time, result) => {
-                    if (this.featureCount > 0) {
-                        return Color.YELLOW.withAlpha(0.7);
-                    } else {
-                        return Color.AQUA.withAlpha(0.3);
-                    }
-                }, false)
+        let rectangle = Rectangle.fromDegrees(...tileBox);
+        let outlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
+            rectangle: rectangle,
+            height: 0.0
+        }));
+        if (!outlineGeometry) {
+            console.error("Failed to create RectangleOutlineGeometry!");
+        }
+
+        this.instance = new GeometryInstance({
+            geometry: outlineGeometry!,
+            attributes: {
+                color: this.outlineColorAttribute
             }
         });
+
         this.id = tile.tileId;
+    }
+
+    private getCurrentOutlineColor(): Color {
+        if (this.color !== undefined) {
+            return this.color.withAlpha(0.7);
+        } else {
+            if (this.featureCount > 0) {
+                return Color.YELLOW.withAlpha(0.7);
+            } else {
+                return Color.AQUA.withAlpha(0.3);
+            }
+        }
+    }
+
+    updateOutlineColor() {
+        let newColor = this.getCurrentOutlineColor();
+        // Update the color attribute
+        ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
     }
 
     delete(viewer: Viewer, featureCount: number) {
         --this.refCount;
         this.featureCount -= featureCount;
         if (this.refCount <= 0) {
-            viewer.entities.remove(this.entity);
             TileBoxVisualization.visualizations.delete(this.id);
+            TileBoxVisualization.updatePrimitive(viewer);
+        }
+        else {
+            // Update the outline color since featureCount has changed
+            this.updateOutlineColor();
         }
     }
 }
@@ -88,6 +140,7 @@ export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
+    specialBorderColour: Color | undefined;
 
     private readonly style: StyleWithIsDeleted;
     private readonly styleName: string;
@@ -121,17 +174,15 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(
-        tile: FeatureTile,
-        pointMergeService: PointMergeService,
-        auxTileFun: (key: string) => FeatureTile | null,
-        style: FeatureLayerStyle,
-        highDetail: boolean,
-        highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
-        featureIdSubset?: string[],
-        boxGrid?: boolean,
-        options?: Record<string, boolean>)
-    {
+    constructor(tile: FeatureTile,
+                pointMergeService: PointMergeService,
+                auxTileFun: (key: string) => FeatureTile | null,
+                style: FeatureLayerStyle,
+                highDetail: boolean,
+                highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+                featureIdSubset?: string[],
+                boxGrid?: boolean,
+                options?: Record<string, boolean>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.styleName = this.style.name();
@@ -176,6 +227,8 @@ export class TileVisualization {
                     this.pointMergeService,
                     this.highlightMode,
                     this.featureIdSubset);
+
+                let startTime = performance.now();
                 wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
                 try {
                     wasmVisualization.run();
@@ -235,7 +288,6 @@ export class TileVisualization {
                     });
                 }
 
-
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
@@ -245,6 +297,16 @@ export class TileVisualization {
                     }
                 }
                 wasmVisualization.delete();
+                let endTime = performance.now();
+
+                // Add the render time for this style sheet as a statistic to the tile.
+                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingList = this.tile.stats.get(timingListKey);
+                if (!timingList) {
+                    timingList = [];
+                    this.tile.stats.set(timingListKey, timingList);
+                }
+                timingList.push(endTime - startTime);
                 return true;
             });
             if (this.primitiveCollection) {
@@ -255,7 +317,7 @@ export class TileVisualization {
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer);
+            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
             this.hasTileBorder = true;
         }
 
@@ -311,9 +373,8 @@ export class TileVisualization {
      */
     isDirty() {
         return (
-            (this.isHighDetailAndNotEmpty() && !this.hasHighDetailVisualization) ||
-            (!this.isHighDetailAndNotEmpty() && !this.hasTileBorder) ||
-            (this.showTileBorder != this.hasTileBorder)
+            this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
+            this.showTileBorder != this.hasTileBorder
         );
     }
 

@@ -12,6 +12,7 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
     result.clampToGround_ = clampToGround;
     result.polyLinePrimitive_ = true;
     result.perInstanceColor_ = true;
+    result.synchronous_ = true;
     return result;
 }
 
@@ -51,7 +52,7 @@ CesiumPrimitive CesiumPrimitive::withPolylineArrowMaterialAppearance(
 
 CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSynchronous, bool clampToGround) {
     CesiumPrimitive result;
-    result.flatAndSynchronous_ = flatAndSynchronous;
+    result.synchronous_ = flatAndSynchronous;
     result.appearance_ = Cesium().PerInstanceColorAppearance.New({
          {"flat", JsValue(flatAndSynchronous)}
     });
@@ -66,20 +67,29 @@ void CesiumPrimitive::addPolyLine(
         FeatureStyleRule const &style,
         JsValue const& id,
         BoundEvalFun const &evalFun) {
-    JsValue polyline;
+    JsValue polylineArgs;
+    CesiumClass* polylineClass = nullptr;
     if (clampToGround_) {
-        polyline = Cesium().GroundPolylineGeometry.New({
+        polylineClass = &Cesium().GroundPolylineGeometry;
+        polylineArgs = JsValue::Dict({
             {"positions", vertices},
             {"width",     JsValue(style.width())}
        });
     } else {
-        polyline = Cesium().PolylineGeometry.New({
+        polylineClass = &Cesium().PolylineGeometry;
+        polylineArgs = JsValue::Dict({
             {"positions", vertices},
             {"width",     JsValue(style.width())},
             {"arcType",   Cesium().ArcType["NONE"]}
-     });
+        });
     }
-    addGeometryInstance(style, id, polyline, evalFun);
+    auto polyline = polylineClass->New(polylineArgs);
+    if (synchronous_) {
+        polyline = JsValue(polylineClass->call("createGeometry", polyline));
+    }
+    if (polyline.type() > JsValue::Type::Null) {
+        addGeometryInstance(style, id, polyline, evalFun);
+    }
 }
 
 void CesiumPrimitive::addPolygon(
@@ -139,7 +149,7 @@ NativeJsValue CesiumPrimitive::toJsObject() const {
         {"geometryInstances",        geometryInstances_},
         {"appearance",               appearance_},
         {"releaseGeometryInstances", JsValue(true)},
-        {"asynchronous",             JsValue(!flatAndSynchronous_)}
+        {"asynchronous",             JsValue(!synchronous_)}
     });
 
     if (clampToGround_ && polyLinePrimitive_)

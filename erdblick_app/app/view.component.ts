@@ -16,7 +16,7 @@ import {
     defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {AfterViewInit, Component} from "@angular/core";
+import {AfterViewInit, Component, OnInit} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {StyleService} from "./style.service";
@@ -28,6 +28,8 @@ import {SearchResultPosition} from "./featurefilter.worker";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
+import {MenuItem} from "primeng/api";
+import {RightClickMenuService} from "./rightclickmenu.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -35,7 +37,9 @@ declare let window: DebugWindow;
 @Component({
     selector: 'erdblick-view',
     template: `
-        <div id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
+        <sourcedatadialog></sourcedatadialog>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -51,6 +55,9 @@ export class ErdblickViewComponent implements AfterViewInit {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     private marker: Entity | null = null;
+    private tileOutlineEntity: Entity | null = null;
+    menuItems: MenuItem[] = [];
+    private cameraIsMoving: boolean = false;
 
     /**
      * Construct a Cesium View with a Model.
@@ -68,6 +75,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public jumpService: JumpTargetService,
                 public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
+                public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService) {
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
@@ -97,6 +105,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                 }
             );
         });
+
+        this.menuService.menuItems.subscribe(items => {
+            this.menuItems = [...items];
+        });
     }
 
     ngAfterViewInit() {
@@ -120,8 +132,27 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
-
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
+        this.cameraIsMoving = false;
+
+        this.mouseHandler.setInputAction((movement: any) => {
+            const position = movement.position;
+            const cartesian = this.viewer.camera.pickEllipsoid(
+                new Cartesian2(position.x, position.y),
+                this.viewer.scene.globe.ellipsoid
+            );
+            if (defined(cartesian)) {
+                const cartographic = Cartographic.fromCartesian(cartesian);
+                const longitude = CesiumMath.toDegrees(cartographic.longitude);
+                const latitude = CesiumMath.toDegrees(cartographic.latitude);
+                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
+                    const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
+                    return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
+                }));
+            } else {
+                this.menuService.tileIdsForSourceData.next([]);
+            }
+        }, ScreenSpaceEventType.RIGHT_DOWN);
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
@@ -145,6 +176,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                     });
                 }
             }
+            if (!defined(feature)) {
+                this.inspectionService.isInspectionPanelVisible = false;
+                this.menuService.tileOutline.next(null);
+            }
             this.mapService.highlightFeatures(
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],
                 false,
@@ -166,6 +201,10 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
                 return;
             }
+            // Do not handle mouse move here, if the camera is currently being moved.
+            if (this.cameraIsMoving) {
+                return;
+            }
             const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
@@ -182,6 +221,12 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.camera.changed.addEventListener(() => {
             this.parameterService.setCameraState(this.viewer.camera);
             this.updateViewport();
+        });
+        this.viewer.camera.moveStart.addEventListener(() => {
+            this.cameraIsMoving = true;
+        });
+        this.viewer.camera.moveEnd.addEventListener(() => {
+            this.cameraIsMoving = false;
         });
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
 
@@ -253,19 +298,29 @@ export class ErdblickViewComponent implements AfterViewInit {
             });
         });
 
-        this.keyboardService.registerShortcuts(['q', 'Q'], this.zoomIn.bind(this));
-        this.keyboardService.registerShortcuts(['e', 'E'], this.zoomOut.bind(this));
-        this.keyboardService.registerShortcuts(['w', 'W'], this.moveUp.bind(this));
-        this.keyboardService.registerShortcuts(['a', 'A'], this.moveLeft.bind(this));
-        this.keyboardService.registerShortcuts(['s', 'S'], this.moveDown.bind(this));
-        this.keyboardService.registerShortcuts(['d', 'D'], this.moveRight.bind(this));
-        this.keyboardService.registerShortcuts(['r', 'R'], this.resetOrientation.bind(this));
+        this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
+        this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
+        this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
+        this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
+        this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
+        this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
+        this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
 
         // Hide the global loading spinner.
         const spinner = document.getElementById('global-spinner-container');
         if (spinner) {
             spinner.style.display = 'none';
         }
+
+        this.menuService.tileOutline.subscribe(entity => {
+            if (entity) {
+                this.tileOutlineEntity = this.viewer.entities.add(entity);
+                this.viewer.scene.requestRender();
+            } else if (this.tileOutlineEntity) {
+                this.viewer.entities.remove(this.tileOutlineEntity);
+                this.viewer.scene.requestRender();
+            }
+        });
     }
 
     /**
@@ -427,5 +482,11 @@ export class ErdblickViewComponent implements AfterViewInit {
             pitch: CesiumMath.toRadians(-90.0),
             roll: 0.0
         });
+    }
+
+    onContextMenuHide() {
+        if (!this.menuService.tileSourceDataDialogVisible) {
+            this.menuService.tileOutline.next(null)
+        }
     }
 }

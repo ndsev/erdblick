@@ -20,6 +20,7 @@ export class KeyboardService {
     private renderer: Renderer2;
     private dialogStack: Array<Dialog> = [];
     private shortcuts = new Map<string, (event: KeyboardEvent) => void>();
+    private preventOnInputShortcuts: Set<string> = new Set<string>();
 
     constructor(rendererFactory: RendererFactory2) {
         this.renderer = rendererFactory.createRenderer(null, null);
@@ -40,21 +41,23 @@ export class KeyboardService {
             const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
             const key = this.getKeyCombination(event);
 
-            if (!isInput || key.includes("Ctrl")) {
-                if (key === 'Escape' || key === 'Esc') {
-                    // TODO: make this work!
-                    // if (this.dialogStack.length > 0) {
-                    //     event.preventDefault();
-                    //     const topDialog = this.dialogStack.pop();
-                    //     if (topDialog) {
-                    //         topDialog.close(new MouseEvent("mousedown"));
-                    //     }
-                    // }
-                } else if (this.shortcuts.has(key)) {
-                    event.preventDefault();
-                    this.shortcuts.get(key)?.(event);
-                }
+            // TODO: Ensure that tab and escape, when pressed in a text area,
+            //  result in a tab character/autocomplete cancelation rather than
+            //  focusing another control/closing the enclosing dialog.
+
+            // Let non-ctrl key events or text editing shortcuts do their default things.
+            if (isInput && this.preventOnInputShortcuts.has(key)) {
+                return;
             }
+
+            if (this.shortcuts.has(key)) {
+                event.preventDefault();
+                this.shortcuts.get(key)?.(event);
+            }
+
+            // TODO: Else-if Escape was hit, close the most recent dialog
+            //  in the stack. (JB: Can we get rid of this? Things seem
+            //  to work fine without the dialog stack).
         });
     }
 
@@ -67,12 +70,11 @@ export class KeyboardService {
         return key;
     }
 
-    registerShortcuts(keys: string[], callback: (event: KeyboardEvent) => void) {
-        keys.forEach(keys_ => this.registerShortcut(keys_, callback));
-    }
-
-    registerShortcut(keys: string, callback: (event: KeyboardEvent) => void) {
+    registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean=false) {
         this.shortcuts.set(keys, callback);
+        if (preventOnInput) {
+            this.preventOnInputShortcuts.add(keys);
+        }
     }
 
     ngOnDestroy() {

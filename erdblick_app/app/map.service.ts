@@ -11,6 +11,9 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {InfoMessageService} from "./info.service";
 import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
+import {KeyboardService} from "./keyboard.service";
+import * as uuid from 'uuid';
+import {Color} from "./cesium";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -47,6 +50,7 @@ export interface MapInfoItem extends Record<string, any> {
 
 const infoUrl = "/sources";
 const tileUrl = "/tiles";
+const abortUrl = "/abort";
 
 /** Redefinition of coreLib.Viewport. TODO: Check if needed. */
 type ViewportProperties = {
@@ -84,6 +88,8 @@ export class MapService {
     public loadedTileLayers: Map<string, FeatureTile>;
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: Fetch|null = null;
+    private currentFetchAbort: Fetch|null = null;
+    private currentFetchId: number = 0;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
     private currentHighDetailTileIds: Set<bigint>;
@@ -109,12 +115,16 @@ export class MapService {
         reject: null|((why: any)=>void),
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
+    statsDialogVisible: boolean = false;
+    statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
+    clientId: string = "";
 
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
-                private pointMergeService: PointMergeService)
+                private pointMergeService: PointMergeService,
+                private keyboardService: KeyboardService)
     {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
@@ -143,6 +153,10 @@ export class MapService {
 
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{x: number, y: number}>();
+
+        // Unique client ID which ensures that tile fetch requests from this map-service
+        // are de-duplicated on the mapget server.
+        this.clientId = uuid.v4();
     }
 
     public async initialize() {
@@ -175,7 +189,7 @@ export class MapService {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
                 }
             }
-            this.update();
+            this.update().then();
         })
 
         await this.reloadDataSources();
@@ -190,6 +204,11 @@ export class MapService {
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
+
+        this.keyboardService.registerShortcut("Ctrl+x", ()=>{
+            this.statsDialogVisible = true;
+            this.statsDialogNeedsUpdate.next();
+        }, true);
     }
 
     private processTileStream() {
@@ -319,7 +338,7 @@ export class MapService {
                 this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
             });
         }
-        this.update();
+        this.update().then();
     }
 
     toggleLayerTileBorderVisibility(mapId: string, layerId: string) {
@@ -331,7 +350,7 @@ export class MapService {
             const hasTileBorders = !layer.tileBorders;
             mapItem.layers.get(layerId)!.tileBorders = hasTileBorders;
             this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
-            this.update();
+            this.update().then();
         }
     }
 
@@ -343,7 +362,7 @@ export class MapService {
             const layer = mapItem.layers.get(layerId)!;
             this.parameterService.setMapLayerConfig(mapId, layerId, level, layer.visible, layer.tileBorders);
         }
-        this.update();
+        this.update().then();
     }
 
     *allLevels() {
@@ -367,7 +386,7 @@ export class MapService {
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.tileBorders : false;
     }
 
-    update() {
+    async update() {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
@@ -385,10 +404,10 @@ export class MapService {
                     ...new Set<bigint>(allViewportTileIds)
                 ]);
                 this.currentHighDetailTileIds = new Set([
-                    ...this.currentVisibleTileIds,
+                    ...this.currentHighDetailTileIds,
                     ...new Set<bigint>(
                         allViewportTileIds.slice(0, this.parameterService.parameters.getValue().tilesVisualizeLimit))
-                ])
+                ]);
             }
         }
 
@@ -446,8 +465,21 @@ export class MapService {
             });
         }
 
-        // Request non-present required tile layers.
-        // TODO: Consider tile TTL.
+        // Rest of this function: Request non-present required tile layers.
+        // Only do this, if there is no ongoing effort to do so.
+        //  Reason: This is an async function, so multiple "instances" of it
+        //  may be running simultaneously. But we only ever want one function to
+        //  execute the /abort-and-/tiles fetch combo.
+        let myFetchId = ++this.currentFetchId;
+        let abortAwaited = false;
+        if (this.currentFetchAbort) {
+            await this.currentFetchAbort.done;
+            abortAwaited = true;
+            if (myFetchId != this.currentFetchId) {
+                return;
+            }
+        }
+
         let requests = [];
         if (this.selectionTileRequest) {
             // Do not go forward with the selection tile request, if it
@@ -498,15 +530,31 @@ export class MapService {
             }
         }
 
-        // Abort previous fetch operation, if it is different from the new one.
         let newRequestBody = JSON.stringify({
             requests: requests,
-            stringPoolOffsets: this.tileParser!.getFieldDictOffsets()
+            stringPoolOffsets: this.tileParser!.getFieldDictOffsets(),
+            clientId: this.clientId
         });
         if (this.currentFetch) {
-            if (this.currentFetch.bodyJson === newRequestBody)
+            // Ensure that the new fetch operation is different from the previous one.
+            if (this.currentFetch.bodyJson === newRequestBody) {
                 return;
-            this.currentFetch.abort();
+            }
+            // Abort any ongoing requests for this clientId.
+            if (!abortAwaited) {
+                this.currentFetch.abort();
+                this.currentFetchAbort = new Fetch(abortUrl)
+                    .withMethod("POST")
+                    .withBody(JSON.stringify({clientId: this.clientId}));
+                await this.currentFetchAbort.go();
+                this.currentFetchAbort = null;
+            }
+            // Wait for the current Fetch operation to end.
+            await this.currentFetch.done;
+            // Do not proceed with this update, if a newer one was started.
+            if (myFetchId != this.currentFetchId) {
+                return;
+            }
             this.currentFetch = null;
             // Clear any unparsed messages from the previous stream.
             this.tileStreamParsingQueue = [];
@@ -526,12 +574,10 @@ export class MapService {
             .withMethod("POST")
             .withBody(newRequestBody)
             .withBufferCallback((message: any, messageType: any) => {
-                // Schedule the parsing of the newly arrived tile layer,
-                // but don't do it synchronously to avoid stalling the ongoing
-                // fetch operation.
+                // Schedule the parsing of the newly arrived tile layer.
                 this.tileStreamParsingQueue.push([message, messageType]);
             });
-        this.currentFetch.go();
+        await this.currentFetch.go();
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
@@ -554,6 +600,7 @@ export class MapService {
             this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey)!);
         }
         this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
+        this.statsDialogNeedsUpdate.next();
 
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
@@ -588,6 +635,7 @@ export class MapService {
             return tileVisu.tile.mapTileKey !== tileLayer.mapTileKey;
         });
         this.loadedTileLayers.delete(tileLayer.mapTileKey);
+        this.statsDialogNeedsUpdate.next();
     }
 
     private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
@@ -620,7 +668,7 @@ export class MapService {
     setViewport(viewport: ViewportProperties) {
         this.currentViewport = viewport;
         this.setTileLevelForViewport();
-        this.update();
+        this.update().then();
     }
 
     getPrioritisedTiles() {
@@ -668,7 +716,7 @@ export class MapService {
                 this.selectionTileRequest!.reject = reject;
             })
 
-            this.update();
+            this.update().then();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
         }
@@ -759,6 +807,14 @@ export class MapService {
             }
         }
         this.zoomLevel.next(MAX_ZOOM_LEVEL);
+    }
+
+    *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
+        for (const tile of this.loadedTileLayers.values()) {
+            if (tile.tileId == tileId) {
+                yield tile;
+            }
+        }
     }
 
     private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>) {

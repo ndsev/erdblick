@@ -29,8 +29,8 @@ export interface SelectedSourceData {
     mapId: string,
     tileId: number,
     layerId: string,
-    address: bigint,
-    featureIds: string,
+    address?: bigint,
+    featureIds?: string,
 }
 
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
@@ -73,12 +73,11 @@ export class InspectionService {
     inspectionPanelChanged  = new EventEmitter<void>();
 
     constructor(private mapService: MapService,
-                private jumpService: JumpTargetService,
                 private infoMessageService: InfoMessageService,
                 private keyboardService: KeyboardService,
                 public parametersService: ParametersService) {
 
-        this.keyboardService.registerShortcuts(["Ctrl+j", "Ctrl+J"], this.zoomToFeature.bind(this));
+        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
 
         this.mapService.selectionTopic.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
             if (!selectedFeatures?.length) {
@@ -98,14 +97,14 @@ export class InspectionService {
                 selectedFeatures[0].peek((feature: Feature) => {
                     this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
                     this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-                    this.isInspectionPanelVisible = true;
                     const center = feature.center() as Cartesian3;
                     this.selectedFeatureCenter = center;
                     this.selectedFeatureOrigin = Cartesian3.fromDegrees(center.x, center.y, center.z);
                     let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
                     radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
                     this.selectedFeatureBoundingRadius = Cartesian3.distance(this.selectedFeatureOrigin, radiusPoint);
-                    this.selectedFeatureGeometryType = feature.getGeometryType() as any;this.isInspectionPanelVisible = true;
+                    this.selectedFeatureGeometryType = feature.getGeometryType() as any;
+                    this.isInspectionPanelVisible = true;
                 });
             }
             if (selectedFeatures.length > 1) {
@@ -123,10 +122,11 @@ export class InspectionService {
         });
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            if (selection)
+            if (selection) {
                 this.parametersService.setSelectedSourceData(selection);
-            else
+            } else {
                 this.parametersService.unsetSelectedSourceData();
+            }
         });
     }
 
@@ -260,8 +260,6 @@ export class InspectionService {
     }
 
     async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
-        console.log(`Loading SourceDataLayer layerId=${layerId} tileId=${tileId}`);
-
         const tileParser = new coreLib.TileLayerParser();
         const newRequestBody = JSON.stringify({
             requests: [{
@@ -306,6 +304,47 @@ export class InspectionService {
 
     selectedFeatureGeoJsonCollection() {
         return `{"type": "FeatureCollection", "features": [${this.selectedFeatureGeoJsonTexts.join(", ")}]}`;
+    }
+
+    loadSourceDataInspection(tileId: number, mapId: string, layerId: string) {
+        this.isInspectionPanelVisible = true;
+        this.selectedSourceData.next({
+            tileId: tileId,
+            layerId: layerId,
+            mapId: mapId
+        });
+    }
+
+    /**
+     * Returns a human-readable layer name for a layer id.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    layerNameForSourceDataLayerId(layerId: string) {
+        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
+        if (match)
+            return `${match[2]}.${match[3]}`;
+        return layerId;
+    }
+
+    /**
+     * Returns an internal layerId for a human-readable layer name.
+     *
+     * @param layerId Layer id to get the name for
+     */
+    sourceDataLayerIdForLayerName(layerName: string) {
+        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
+            for (const [_, layerInfo] of mapInfo.layers.entries()) {
+                if (layerInfo.type == "SourceData") {
+                    if (this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName ||
+                        this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName.replace('-', '.') ||
+                        layerInfo.layerId == layerName) {
+                        return layerInfo.layerId;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;

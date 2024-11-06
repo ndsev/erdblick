@@ -40,6 +40,10 @@ body {
       padding: 0.5em 0.75em;
     }
   }
+
+  .p-contextmenu {
+    width: 22em;
+  }
 }
 
 .mapviewer-renderlayer {
@@ -453,6 +457,10 @@ body {
 
     .blue {
       background-color: var(--primary-color);
+    }
+
+    .red {
+      background-color: indianred;
     }
 
     .orange {
@@ -1039,6 +1047,39 @@ body {
         }
       }
     }
+  }
+}
+
+.tilesource-options {
+  display:flex;
+  flex-direction: column;
+  gap: 0.5em;
+
+  .main-dropdown {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    gap: 0.5em;
+
+    p-dropdown {
+      width: 100%;
+    }
+
+    .p-inputtext {
+      width: 100%;
+    }
+
+    button {
+      padding-left: 0;
+      padding-right: 0;
+      width: 2.85em;
+      height: 2.85em;
+      box-shadow: none;
+    }
+  }
+
+  .p-dropdown {
+    width: 100%;
   }
 }
 
