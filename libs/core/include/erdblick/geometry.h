@@ -30,19 +30,14 @@ bool isPointInsideTriangle(m::Point const& p, m::Point const& p0, m::Point const
  * This is used as a location for labels, and as the origin
  * for relation vectors.
  */
-m::Point geometryCenter(m::model_ptr<m::Geometry> const& g);
+m::Point geometryCenter(m::SelfContainedGeometry const& g);
 
 /**
  * Calculate a point furthest from the center for the given geometry.
  * Used to properly scale the camera in the viewer
  * relative to the feature's bounding sphere.
  */
-m::Point boundingRadiusEndPoint(m::model_ptr<m::Geometry> const& g);
-
-/**
- * Get type of the geometry.
- */
-m::GeomType getGeometryType(m::model_ptr<m::Geometry> const& g);
+m::Point boundingRadiusEndPoint(m::SelfContainedGeometry const& g);
 
 /**
  * Calculate a local WGS84 coordinate system for the geometry.
@@ -50,6 +45,6 @@ m::GeomType getGeometryType(m::model_ptr<m::Geometry> const& g);
  * in real-world length. The y-axis will point in the direction
  * (first-point -> last-point). The x-axis is perpendicular.
  */
-glm::dmat3x3 localWgs84UnitCoordinateSystem(const m::model_ptr<m::Geometry>& g);
+glm::dmat3x3 localWgs84UnitCoordinateSystem(mapget::SelfContainedGeometry const& g);
 
 }  // namespace erdblick

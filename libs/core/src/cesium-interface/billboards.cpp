@@ -18,6 +18,9 @@ JsValue CesiumBillboardCollection::billboardParams(
     const BoundEvalFun& evalFun)
 {
     auto result = CesiumPointPrimitiveCollection::pointParams(position, style, id, evalFun);
+    // TODO: Support non-square icons.
+    result.set("width", JsValue(style.width()));
+    result.set("height", JsValue(style.width()));
     if (style.hasIconUrl()) {
         result.set("image", JsValue(style.iconUrl(evalFun)));
     }

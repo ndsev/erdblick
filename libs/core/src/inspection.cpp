@@ -27,7 +27,7 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
     const auto& strings = model.strings();
     const auto tileId = model.tileId().value_;
 
-    modelNode->forEachReference([tileId, &node](const mapget::SourceDataReferenceItem& item) {
+    modelNode->forEachReference([tileId, &node](const SourceDataReferenceItem& item) {
         node.sourceDataRefs_.push_back(Ref{
             .tileId_ = tileId,
             .address_ = item.address().u64(),
@@ -81,7 +81,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     }
 
     // Basic attributes section.
-    if (auto attrs = featurePtr->attributes())
+    if (auto attrs = featurePtr->attributesOrNull())
     {
         auto scope = push(convertStringView("Basic Attributes"), "properties", ValueType::Section);
         for (auto const& [k, v] : attrs->fields()) {
@@ -90,7 +90,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     }
 
     // Flexible attributes section.
-    if (auto layers = featurePtr->attributeLayers())
+    if (auto layers = featurePtr->attributeLayersOrNull())
     {
         auto scope = push(convertStringView("Attribute Layers"), "properties.layer", ValueType::Section);
         layers->forEachLayer([this](auto&& layerName, auto&& layer) -> bool {
@@ -112,7 +112,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     }
 
     // Geometry section.
-    if (auto geomCollection = featurePtr->geom())
+    if (auto geomCollection = featurePtr->geomOrNull())
     {
         auto scope = push(convertStringView("Geometry"), "geometry", ValueType::Section);
         uint32_t geomIndex = 0;
@@ -202,27 +202,8 @@ void InspectionConverter::convertAttributeLayer(
             current_->type_ = ValueType::Boolean;
         }
 
-        if (attr->hasValidity()) {
-            convertGeometry(convertStringView("validity"), attr->validity());
-        }
-
-        if (auto direction = attr->direction()) {
-            auto dirScope = push("direction", "direction", ValueType::String);
-            switch (direction) {
-            case Attribute::Positive:
-                dirScope->value_ = convertStringView("POSITIVE");
-                break;
-            case Attribute::Negative:
-                dirScope->value_ = convertStringView("NEGATIVE");
-                break;
-            case Attribute::Both:
-                dirScope->value_ = convertStringView("BOTH");
-                break;
-            case Attribute::None:
-                dirScope->value_ = convertStringView("NONE");
-                break;
-            default: break;
-            }
+        if (auto validity = attr->validityOrNull()) {
+            convertValidity(convertStringView("validity"), validity);
         }
 
         attrScope->hoverId_ = featureId_+":attribute#"+std::to_string(nextAttributeIndex_);
@@ -245,19 +226,18 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
     relScope->mapId_ = JsValue(r->model().mapId());
     relScope->hoverId_ = featureId_+":relation#"+std::to_string(nextRelationIndex_);
     convertSourceDataReferences(r->sourceDataReferences(), *relScope);
-    if (r->hasSourceValidity()) {
-        convertGeometry(convertStringView("sourceValidity"), r->sourceValidity());
+    if (auto const sourceValidity = r->sourceValidityOrNull()) {
+        convertValidity(convertStringView("sourceValidity"), sourceValidity);
     }
-    if (r->hasTargetValidity()) {
-        convertGeometry(convertStringView("targetValidity"), r->targetValidity());
+    if (auto const targetValidity = r->targetValidityOrNull()) {
+        convertValidity(convertStringView("targetValidity"), targetValidity);
     }
     ++nextRelationIndex_;
 }
 
-void InspectionConverter::convertGeometry(
-    JsValue const& key,
-    const model_ptr<Geometry>& g)
+void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Geometry>& g)
 {
+    // TODO: Show geometry name
     auto geomScope = push(
         key,
         key.type() == JsValue::Type::Number ?
@@ -274,12 +254,92 @@ void InspectionConverter::convertGeometry(
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
     uint32_t index = 0;
-    g->forEachPoint([this, &geomScope, &index](auto&& pt){
-        auto ptScope = push(
-            JsValue(geomScope->children_.size()),
-            index++,
-            ValueType::Number | ValueType::ArrayBit);
-        ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
+    g->forEachPoint(
+        [this, &geomScope, &index](auto&& pt)
+        {
+            auto ptScope = push(
+                JsValue(geomScope->children_.size()),
+                index++,
+                ValueType::Number | ValueType::ArrayBit);
+            ptScope->value_ = JsValue::List({JsValue(pt.x), JsValue(pt.y), JsValue(pt.z)});
+            return true;
+        });
+}
+
+void InspectionConverter::convertValidity(
+    JsValue const& key,
+    model_ptr<MultiValidity> const& multiValidity)
+{
+    auto scope = push(key, key.as<std::string>(), ValueType::ArrayBit);
+    uint32_t valIndex = 0;
+    multiValidity->forEach([this, &valIndex](Validity const& v) -> bool {
+        auto validityScope = push(
+            JsValue(valIndex),
+            valIndex,
+            ValueType::ArrayBit);
+
+        if (auto direction = v.direction()) {
+            auto dirScope = push("direction", "direction", ValueType::String);
+            switch (direction) {
+            case Validity::Positive:
+                dirScope->value_ = convertStringView("POSITIVE");
+                break;
+            case Validity::Negative:
+                dirScope->value_ = convertStringView("NEGATIVE");
+                break;
+            case Validity::Both:
+                dirScope->value_ = convertStringView("BOTH");
+                break;
+            case Validity::None:
+                dirScope->value_ = convertStringView("NONE");
+                break;
+            default: break;
+            }
+        }
+
+        if (auto geom = v.simpleGeometry()) {
+            convertGeometry(JsValue("simpleGeometry"), geom);
+            return true;
+        }
+
+        if (auto geomName = v.geometryName()) {
+            push("geometryName", "geometryName", ValueType::String)->value_ = convertStringView(*geomName);
+        }
+
+        auto renderOffset = [this, &v](Point const& data, std::string_view const& name)
+        {
+            switch (v.geometryOffsetType()) {
+            case Validity::InvalidOffsetType:
+                break;
+            case Validity::GeoPosOffset: {
+                auto ptScope = push(name, name, ValueType::Number | ValueType::ArrayBit);
+                ptScope->value_ = JsValue::List({JsValue(data.x), JsValue(data.y), JsValue(data.z)});
+                break;
+            }
+            case Validity::BufferOffset: {
+                push(name, name, ValueType::Number)->value_ =
+                    JsValue(fmt::format("Point Index {}", static_cast<uint32_t>(data.x)));
+                break;
+            }
+            case Validity::RelativeLengthOffset:
+                push(name, name, ValueType::Number)->value_ =
+                    JsValue(fmt::format("{:.2f}%", data.x * 100.));
+                break;
+            case Validity::MetricLengthOffset:
+                push(name, name, ValueType::Number)->value_ =
+                    JsValue(fmt::format("{:.2f}m", data.x));
+                break;
+            }
+        };
+
+        if (auto rangeOffset = v.offsetRange()) {
+            renderOffset(rangeOffset->first, "start");
+            renderOffset(rangeOffset->second, "end");
+        }
+        else if (auto pointOffset = v.offsetPoint()) {
+            renderOffset(*pointOffset, "point");
+        }
+
         return true;
     });
 }

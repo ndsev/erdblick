@@ -169,6 +169,13 @@ private:
      * based on the geometry type and the style rule instructions.
      */
     void addGeometry(
+        mapget::SelfContainedGeometry const& geom,
+        std::string_view id,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    void addGeometry(
         mapget::model_ptr<mapget::Geometry> const& geom,
         std::string_view id,
         FeatureStyleRule const& rule,
