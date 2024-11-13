@@ -270,13 +270,12 @@ void InspectionConverter::convertValidity(
     JsValue const& key,
     model_ptr<MultiValidity> const& multiValidity)
 {
-    auto scope = push(key, key.as<std::string>(), ValueType::ArrayBit);
+    auto scope = push(key, key.as<std::string>());
     uint32_t valIndex = 0;
     multiValidity->forEach([this, &valIndex](Validity const& v) -> bool {
         auto validityScope = push(
             JsValue(valIndex),
-            valIndex,
-            ValueType::ArrayBit);
+            valIndex);
 
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
