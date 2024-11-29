@@ -29,6 +29,7 @@ CesiumLib::CesiumLib() :
     PrimitiveType("PrimitiveType"),
     Label("Label"),
     LabelCollection("LabelCollection"),
+    BillboardCollection("BillboardCollection"),
     HorizontalOrigin("HorizontalOrigin"),
     VerticalOrigin("VerticalOrigin"),
     LabelStyle("LabelStyle"),

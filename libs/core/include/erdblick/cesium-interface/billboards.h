@@ -4,27 +4,28 @@
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
 #include "../rule.h"
+#include "points.h"
 
 namespace erdblick
 {
 
-struct CesiumPointPrimitiveCollection
+struct CesiumBillboardCollection
 {
-    CesiumPointPrimitiveCollection();
+    CesiumBillboardCollection();
 
     /**
-     * Add an individual point to the collection.
+     * Add an individual billboard to the collection.
      */
-    void addPoint(
+    void addBillboard(
         const JsValue& position,
         FeatureStyleRule const& style,
         JsValue const& id,
         BoundEvalFun const& evalFun);
 
     /**
-     * Get the parameters for a PointPrimitiveCollection::add() call.
+     * Get the parameters for a BillboardCollection::add() call.
      */
-    static JsValue pointParams(
+    static JsValue billboardParams(
         const JsValue& position,
         FeatureStyleRule const& style,
         JsValue const& id,
@@ -41,11 +42,11 @@ struct CesiumPointPrimitiveCollection
     bool empty() const;
 
 private:
-    /** Number of points in this collection. */
+    /** Number of billboards in this collection. */
     size_t numGeometryInstances_ = 0;
 
-    /** Wrapped point primitive object from Cesium */
-    JsValue pointPrimitiveCollection_;
+    /** Wrapped billboard primitive object from Cesium */
+    JsValue billboardCollection_;
 };
 
 }

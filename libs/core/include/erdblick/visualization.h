@@ -7,6 +7,7 @@
 #include "cesium-interface/points.h"
 #include "cesium-interface/primitive.h"
 #include "cesium-interface/labels.h"
+#include "cesium-interface/billboards.h"
 #include "style.h"
 #include "simfil/overlay.h"
 #include "layer.h"
@@ -168,6 +169,13 @@ private:
      * based on the geometry type and the style rule instructions.
      */
     void addGeometry(
+        mapget::SelfContainedGeometry const& geom,
+        std::string_view id,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    void addGeometry(
         mapget::model_ptr<mapget::Geometry> const& geom,
         std::string_view id,
         FeatureStyleRule const& rule,
@@ -274,6 +282,7 @@ private:
     CesiumPrimitive coloredGroundMeshes_;
     CesiumPointPrimitiveCollection coloredPoints_;
     CesiumLabelCollection labelCollection_;
+    CesiumBillboardCollection billboardCollection_;
 
     // Map from map-layer-style-rule-id to map from grid-position-hash
     // to pair of feature-id-set and MergedPointVisualization.

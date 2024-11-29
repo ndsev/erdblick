@@ -397,7 +397,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "getGeometryType",
             std::function<mapget::GeomType(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return getGeometryType(self->firstGeometry());
+                    return self->firstGeometry().geomType_;
                 }));
 
     ////////// GeomType
