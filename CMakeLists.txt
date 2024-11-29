@@ -20,8 +20,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 
 FetchContent_Declare(mapget
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  # Version with new validity model
-  GIT_TAG        "9c706fb9"
+  GIT_TAG        "attribute-validities"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(mapget)
 
