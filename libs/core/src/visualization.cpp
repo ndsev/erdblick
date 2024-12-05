@@ -312,7 +312,7 @@ void FeatureLayerVisualization::addFeature(
 
                             try {
                                 auto result = boundEvalFun.eval_(*attrMask);
-                                if ((result.isa(simfil::ValueType::Bool) && !result.as<simfil::ValueType::Bool>()) ||
+                                if ((result.isa(simfil::ValueType::Bool) && !(result.as<simfil::ValueType::Bool>())) ||
                                     result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
                                     return true;
                                 }
