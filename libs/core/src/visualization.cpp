@@ -281,6 +281,52 @@ void FeatureLayerVisualization::addFeature(
             }
             // Iterate over all the layer's attributes.
             layer->forEachAttribute([&, this](auto&& attr){
+                // Check if the attribute's values match the attribute mask for the rule.
+                if (auto const& attrMask = rule.attributeMask()) {
+                    if (!attrMask->empty()) {
+                        auto const& constAttr = static_cast<mapget::Attribute const&>(*attr);
+                        simfil::OverlayNode attrEvaluationContext(simfil::Value::field(constAttr));
+
+                        try {
+                            constAttr.forEachField([&](auto const& fieldName, auto const& fieldValue) {
+                                if (fieldValue) {
+                                    attrEvaluationContext.set(
+                                        internalStringPoolCopy_->emplace(fieldName),
+                                        simfil::Value::field(fieldValue));
+                                }
+                                return true;
+                            });
+
+                            addOptionsToSimfilContext(attrEvaluationContext);
+
+                            auto boundEvalFun = BoundEvalFun{
+                                attrEvaluationContext,
+                                [this, &attrEvaluationContext](auto&& str) {
+                                    try {
+                                        return evaluateExpression(str, attrEvaluationContext);
+                                    } catch (const std::exception& e) {
+                                        std::cerr << "Error evaluating attribute expression: " << e.what() << std::endl;
+                                        return simfil::Value::null();
+                                    }
+                                }};
+
+                            try {
+                                auto result = boundEvalFun.eval_(*attrMask);
+                                if ((result.isa(simfil::ValueType::Bool) && !result.as<simfil::ValueType::Bool>()) ||
+                                    result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
+                                    return true;
+                                }
+                            } catch (std::exception const& e) {
+                                std::cerr << "Error evaluating attribute mask: " << e.what() << std::endl;
+                                return true;
+                            }
+                        } catch (const std::exception& e) {
+                            std::cerr << "Error setting up attribute evaluation context: " << e.what() << std::endl;
+                            return true;
+                        }
+                    }
+                }
+
                 addAttribute(
                     feature,
                     layerName,
