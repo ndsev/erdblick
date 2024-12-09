@@ -728,6 +728,17 @@ void FeatureLayerVisualization::addAttribute(
             return evaluateExpression(str, attrEvaluationContext);
         }};
 
+    // Check if the attribute's values match the attribute filter for the rule.
+    if (auto const& attrFilter = rule.attributeFilter()) {
+        if (!attrFilter->empty()) {
+            auto result = boundEvalFun.eval_(*attrFilter);
+            if ((result.isa(simfil::ValueType::Bool) && !result.template as<simfil::ValueType::Bool>()) ||
+                result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
+                return;
+            }
+        }
+    }
+
     // Bump visual offset factor for next visualized attribute.
     ++offsetFactor;
 

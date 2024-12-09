@@ -124,8 +124,19 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIdsPerTileId.set(id, maps);
         }
 
+        if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
+            const savedTileId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.tileId;
+            let tileIdSelection = this.tileIds.find(element =>
+                Number(element.id) == savedTileId && !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
+            );
+            if (tileIdSelection) {
+                this.setCurrentTileId(tileIdSelection);
+            }
+            return;
+        }
+
         // Pre-select the tile ID.
-        let tileIdSelection = this.tileIds.find(element =>
+        const tileIdSelection = this.tileIds.find(element =>
             !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
         );
         if (tileIdSelection) {
@@ -165,12 +176,17 @@ export class SourceDataLayerSelectionDialogComponent {
         this.onTileIdChange(tileId);
 
         if (this.customMapId) {
-            let mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
+            const mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
             if (mapSelection) {
                 this.selectedMapId = mapSelection;
-            }
-            else {
+            } else {
                 this.mapIds.unshift({ id: this.customMapId, name: this.customMapId });
+            }
+        } else if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
+            const savedMapId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.mapId;
+            const mapSelection = this.mapIds.find(entry => entry.id == savedMapId);
+            if (mapSelection) {
+                this.selectedMapId = mapSelection;
             }
         }
 
@@ -180,7 +196,17 @@ export class SourceDataLayerSelectionDialogComponent {
             }
             this.onMapIdChange(this.selectedMapId);
             if (this.sourceDataLayers.length) {
-                this.selectedSourceDataLayer = this.sourceDataLayers[0];
+                if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
+                    const savedLayerId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.layerId;
+                    const layerSelection = this.sourceDataLayers.find(entry => entry.id == savedLayerId);
+                    if (layerSelection) {
+                        this.selectedSourceDataLayer = layerSelection;
+                    } else {
+                        this.selectedSourceDataLayer = this.sourceDataLayers[0];
+                    }
+                } else {
+                    this.selectedSourceDataLayer = this.sourceDataLayers[0];
+                }
                 this.onLayerIdChange(this.selectedSourceDataLayer);
             }
         }
