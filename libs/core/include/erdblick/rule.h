@@ -78,7 +78,7 @@ public:
     [[nodiscard]] bool relationMergeTwoWay() const;
 
     [[nodiscard]] std::optional<std::regex> const& attributeType() const;
-    [[nodiscard]] std::optional<std::string> const& attributeMask() const;
+    [[nodiscard]] std::optional<std::string> const& attributeFilter() const;
     [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
 
@@ -167,7 +167,7 @@ private:
     bool relationMergeTwoWay_ = false;
 
     std::optional<std::regex> attributeType_;
-    std::optional<std::string> attributeMask_;
+    std::optional<std::string> attributeFilter_;
     std::optional<std::regex> attributeLayerType_;
     std::optional<bool> attributeValidityGeometry_;
 
