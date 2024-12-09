@@ -60,7 +60,7 @@ const completionsList = [
     {label: "offset-scale-by-distance", type: "property"},
     {label: "first-of", type: "property"},
     {label: "attribute-type", type: "property"},
-    {label: "attribute-mask", type: "property"},
+    {label: "attribute-filter", type: "property"},
     {label: "attribute-layer-type", type: "property"},
     {label: "point-merge-grid-cell", type: "property"},
     {label: "FILL", type: "keyword"},
