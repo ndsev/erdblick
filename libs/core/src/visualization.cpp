@@ -321,6 +321,9 @@ void FeatureLayerVisualization::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
+    if (!rule.supports(geom.geomType_))
+        return;
+
     // Combine the ID with the mapTileKey to create an
     // easy link from the geometry back to the feature.
     auto tileFeatureId = JsValue::Undefined();
