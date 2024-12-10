@@ -342,6 +342,7 @@ void FeatureLayerVisualization::addGeometry(
     }
 
     std::vector<mapget::Point> vertsCartesian;
+    vertsCartesian.reserve(geom.points_.size());
     for (auto const& vertCarto : geom.points_) {
         vertsCartesian.emplace_back(wgsToCartesian<Point>(vertCarto, offset));
     }
@@ -421,7 +422,7 @@ void FeatureLayerVisualization::addGeometry(
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return labelCollection_.labelParams(
+                        return CesiumLabelCollection::labelParams(
                             xyzPos,
                             text,
                             rule,
