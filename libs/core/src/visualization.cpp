@@ -321,6 +321,9 @@ void FeatureLayerVisualization::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
+    if (!rule.supports(geom.geomType_))
+        return;
+
     // Combine the ID with the mapTileKey to create an
     // easy link from the geometry back to the feature.
     auto tileFeatureId = JsValue::Undefined();
@@ -339,6 +342,7 @@ void FeatureLayerVisualization::addGeometry(
     }
 
     std::vector<mapget::Point> vertsCartesian;
+    vertsCartesian.reserve(geom.points_.size());
     for (auto const& vertCarto : geom.points_) {
         vertsCartesian.emplace_back(wgsToCartesian<Point>(vertCarto, offset));
     }
@@ -418,7 +422,7 @@ void FeatureLayerVisualization::addGeometry(
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return labelCollection_.labelParams(
+                        return CesiumLabelCollection::labelParams(
                             xyzPos,
                             text,
                             rule,
@@ -694,7 +698,7 @@ void FeatureLayerVisualization::addAttribute(
 
     // Check if the attribute validity is accepted for the rule.
     if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
-        if (*validityGeomRequired != attr->validityOrNull()) {
+        if (*validityGeomRequired != (attr->validityOrNull() && attr->validityOrNull()->size())) {
             return;
         }
     }
@@ -727,6 +731,17 @@ void FeatureLayerVisualization::addAttribute(
         {
             return evaluateExpression(str, attrEvaluationContext);
         }};
+
+    // Check if the attribute's values match the attribute filter for the rule.
+    if (auto const& attrFilter = rule.attributeFilter()) {
+        if (!attrFilter->empty()) {
+            auto result = boundEvalFun.eval_(*attrFilter);
+            if ((result.isa(simfil::ValueType::Bool) && !result.template as<simfil::ValueType::Bool>()) ||
+                result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
+                return;
+            }
+        }
+    }
 
     // Bump visual offset factor for next visualized attribute.
     ++offsetFactor;
