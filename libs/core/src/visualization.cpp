@@ -697,7 +697,7 @@ void FeatureLayerVisualization::addAttribute(
 
     // Check if the attribute validity is accepted for the rule.
     if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
-        if (*validityGeomRequired != attr->validityOrNull()) {
+        if (*validityGeomRequired != (attr->validityOrNull() && attr->validityOrNull()->size())) {
             return;
         }
     }
