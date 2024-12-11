@@ -65,60 +65,97 @@ The style editor automatically verifies YAML for syntax parsing errors and provi
 
 Each rule within the YAML `rules` array can have the following fields:
 
-| Field                         | Description                                                                                                                                                                                                 | Type                                                       | Example Value                                      |
-|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|----------------------------------------------------|
-| `geometry`                    | List of geometry type(s) or single type the rule applies to.                                                                                                                                                | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"`. | `["point", "mesh"]`, `line`                        |
-| `aspect`                      | Specifies the aspect to which the rule applies: `"feature"`, `"relation"`, or `"attribute"`.                                                                                                                | String                                                     | `"feature"`, `"relation"`                          |
-| `mode`                        | Specifies the highlight mode: `"none"` or `"hover"` or `"selection"`.                                                                                                                                       | String                                                     | `"none"`, `"hover"`                                |
-| `type`                        | A regular expression to match against a feature type.                                                                                                                                                       | String                                                     | `"Lane\|Boundary"`                                 |
-| `filter`                      | A [simfil](https://github.com/klebert-engineering/simfil) filter expression over the feature's JSON representation.                                                                                         | String                                                     | `*roadClass == 4`                                  |
-| `selectable`                  | Indicates if the feature is selectable.                                                                                                                                                                     | Boolean                                                    | `true`, `false`                                    |
-| `color`                       | A hexadecimal color code or [CSS color name](https://www.w3.org/wiki/CSS/Properties/color/keywords).                                                                                                        | String                                                     | `"#FF5733"`, `red`                                 |
-| `color-expression`            | A [simfil](https://github.com/klebert-engineering/simfil) expression which may return an RGBA integer or color string (see above). The expression is evaluated over the current feature/relation/attribute. | String                                                     | `isBridge and "#FF5733" or "black"`                |
-| `opacity`                     | A float value between 0 and 1 indicating the opacity.                                                                                                                                                       | Float                                                      | `0.8`                                              |
-| `width`                       | Specifies the line width or point diameter (default in pixels).                                                                                                                                             | Float                                                      | `4.5`                                              |
-| `flat`                        | Clamps the feature to the ground (Does not work for meshes).                                                                                                                                                | Boolean                                                    | `true`, `false`                                    |
-| `outline-color`               | Point outline color.                                                                                                                                                                                        | String                                                     | `green`, `#fff`                                    |
-| `outline-width`               | Point outline width in px.                                                                                                                                                                                  | Float                                                      | `3.6`                                              |
-| `point-merge-grid-cell`       | WGS84/altutide meter tolerance for merging point visualizations.                                                                                                                                            | Array of three Floats.                                     | `[0.000000084, 0.000000084, 0.01]`                 |
-| `near-far-scale`              | For points, indicate (`near-alt-meters`, `near-scale`, `far-alt-meters`, `far-scale`).                                                                                                                      | Array of four Floats.                                      | `[1.5e2,10,8.0e6,0]`                               |
-| `icon-url-expression`         | A [simfil](https://github.com/klebert-engineering/simfil) expression to evaluate on the point feature the icon belongs to.                                                                                  | String                                                     | `category == 5 and "/icons/ev-charging.png" or ""` |
-| `icon-url`                    | A placeholder in case the simfil expression either isn't necessary or won't produce a result.                                                                                                               | String                                                     | `/icons/unknown.png`                               |
-| `offset`                      | Apply a fixed offset to each shape-point in meters. Can be used for z-ordering.                                                                                                                             | Array of three Floats.                                     | `[0, 0, 5]`                                        |
-| `arrow`                       | For arrow-heads: One of `none`, `forward`, `backward`, `double`. Not compatible with `dashed`.                                                                                                              | String                                                     | `single`                                           |
-| `arrow-expression`            | A [simfil](https://github.com/klebert-engineering/simfil) expression which may return `none`, `forward`, `backward`, or `double`.                                                                           | String                                                     | `select(arr("single", "double"), 1)`               |
-| `dashed`                      | Indicate that a line has dashes.                                                                                                                                                                            | Boolean.                                                   | `true`                                             |
-| `gap-color`                   | If a gap between dashes has a color.                                                                                                                                                                        | String                                                     | `blue`, `#aaa`                                     |
-| `dash-length`                 | Size of a dash in pixels.                                                                                                                                                                                   | Integer.                                                   | `16`                                               |
-| `dash-pattern`                | A 16-bit pattern for the dash.                                                                                                                                                                              | Integer.                                                   | `255`                                              |
-| `relation-type`               | A regular expression to match against a relation type, e.g., `"connectedFrom"`.                                                                                                                             | String                                                     | `"connectedFrom\|connectedTo"`                     |
-| `relation-line-height-offset` | Vertical offset for relation line in meters.                                                                                                                                                                | Float                                                      | `0.5`                                              |
-| `relation-line-end-markers`   | Style for the relation line end-markers.                                                                                                                                                                    | Sub-rule object                                            | `relation-line-end-markers: { color: "black", width: 4 }`                                 |
-| `relation-source-style`       | Style for the relation source geometry.                                                                                                                                                                     | Sub-rule object                                            | `relation-source-style: { color: "orange", width: 2 }` visualize by using geometry only |
-| `relation-target-style`       | Style for the relation target geometry.                                                                                                                                                                     | Sub-rule object                                            | `relation-target-style: { opacity: 0, label-text-expression: "$target.id" }` visualize by using a label only |
-| `relation-recursive`          | Specifies whether relations should be resolved recursively. Only done if `mode=="Highlight"`, and only works for relations within the same layer.                                                           | Boolean                                                    | `true`, `false`                                    |
-| `relation-merge-twoway`       | Specifies whether bidirectional relations should be followed and merged.                                                                                                                                    | Boolean                                                    | `true`, `false`                                    |
-| `attribute-type`              | A regular expression to match against an attribute type.                                                                                                                                                    | String                                                     | `SPEED_LIMIT_.*`                                   |
-| `attribute-layer-type`        | A regular expression to match against the attribute layer type name.                                                                                                                                        | String                                                     | `Road.*Layer`                                      |
-| `attribute-validity-geom`     | Set to `required`, `none` or `any` to control whether matching attributes must have a validity geometry.                                                                                                    | String                                                     | `Road.*Layer`                                      |
-| `label-color`                 | Text color of the label.                                                                                                                                                                                    | String                                                     | `#00ccdd`                                          |
-| `label-outline-color`         | Text outline color of the label.                                                                                                                                                                            | String                                                     | `#111111`                                          |
-| `label-outline-width`         | Text outline width of the label.                                                                                                                                                                            | Float                                                      | `1.0`                                              |
-| `label-font`                  | The font used to draw the label (using the same syntax as the CSS 'font' property).                                                                                                                         | String                                                     | `24px Helvetica`                                   |
-| `label-background-color`      | Background color of the label.                                                                                                                                                                              | String                                                     | `#000000`                                          |
-| `label-background-padding`    | Background padding in pixels.                                                                                                                                                                               | Pair of Integers.                                          | `[7, 5]`                                           |
-| `label-horizontal-origin`     | Determines if the label is drawn to `LEFT`, `CENTER`, or `RIGHT` of its anchor position.                                                                                                                    | String                                                     | `LEFT`                                             |
-| `label-vertical-origin`       | Determines if the label is to `ABOVE`, `BELOW`, at `CENTER` or at `BASELINE` of its anchor position.                                                                                                        | String                                                     | `BASELINE`                                         |
-| `label-text-expression`       | A [simfil](https://github.com/klebert-engineering/simfil) expression to evaluate on the feature/relation the label belongs to.                                                                              | String                                                     | `**.speedLimitKmh`                                 |
-| `label-text`                  | A placeholder in case the simfil expression either isn't necessary or won't produce a result.                                                                                                               | String                                                     | `No speed limit`                                   |
-| `label-style`                 | Describes how to draw a label using `FILL`, `OUTLINE` or `FILL_AND_OUTLINE`.                                                                                                                                | String                                                     | `FILL`                                             |
-| `label-scale`                 | The uniform scale that is multiplied with the label's size in pixels.                                                                                                                                       | Float                                                      | `1.0`                                              |
-| `label-pixel-offset`          | The offset in screen space from the origin of this label (the screen space origin is the top, left corner of the canvas).                                                                                   | Pair of Floats.                                            | `[5.0, 30.0]`                                      |
-| `label-eye-offset`            | Gets and sets the 3D Cartesian offset applied to this label in eye coordinates.                                                                                                                             | Tuple of three Floats.                                     | `[5.0, 10.0, 15.0]`                                |
-| `translucency-by-distance`    | Near and far translucency properties of a Label based on the Label's distance from the camera.                                                                                                              | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]`                           |
-| `scale-by-distance`           | Near and far scaling properties of a Label based on the label's distance from the camera.                                                                                                                   | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]`                           |
-| `offset-scale-by-distance`    | Near and far pixel offset scaling properties of a Label based on the Label's distance from the camera.                                                                                                      | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]`                           |
-| `first-of`                    | Mark a rule as a parent of a fallback rule list. See description below.                                                                                                                                     | Array of Rule objects.                                     | See example below.                                 |
+### Style Rule Fields
+
+Style rules can include various fields organized into the following categories:
+
+#### Basic Rule Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `geometry` | List of geometry type(s) or single type the rule applies to | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"` | `["point", "mesh"]`, `line` |
+| `aspect` | Specifies the aspect to which the rule applies | String: `"feature"`, `"relation"`, or `"attribute"` | `"feature"` |
+| `mode` | Specifies the highlight mode | String: `"none"`, `"hover"`, or `"selection"` | `"hover"` |
+| `type` | Regular expression to match against a feature type | String | `"Lane\|Boundary"` |
+| `filter` | Simfil filter expression over feature's JSON | String | `*roadClass == 4` |
+| `selectable` | Indicates if the feature is selectable | Boolean | `true` |
+
+#### General Visual Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `color` | Hex color code or CSS color name | String | `"#FF5733"`, `red` |
+| `color-expression` | Simfil expression returning color value | String | `isBridge and "#FF5733" or "black"` |
+| `opacity` | Opacity value between 0 and 1 | Float | `0.8` |
+| `width` | Line width or point diameter | Float | `4.5` |
+| `flat` | Clamps feature to ground | Boolean | `true` |
+| `offset` | Fixed offset in meters | Array of three Floats | `[0, 0, 5]` |
+
+#### Point-Specific Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `outline-color` | Point outline color | String | `green` |
+| `outline-width` | Point outline width in px | Float | `3.6` |
+| `point-merge-grid-cell` | Merging tolerance | Array of three Floats | `[0.000000084, 0.000000084, 0.01]` |
+| `near-far-scale` | Point scaling parameters | Array of four Floats | `[1.5e2,10,8.0e6,0]` |
+| `icon-url` | Static icon URL | String | `/icons/unknown.png` |
+| `icon-url-expression` | Dynamic icon URL expression | String | `category == 5 and "/icons/ev-charging.png" or ""` |
+
+#### Line-Specific Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `arrow` | Type of arrowhead | String: `none`, `forward`, `backward`, `double` | `forward` |
+| `arrow-expression` | Dynamic arrow type | String | `select(arr("single", "double"), 1)` |
+| `dashed` | Enable line dashing | Boolean | `true` |
+| `gap-color` | Color between dashes | String | `blue` |
+| `dash-length` | Size of dash in pixels | Integer | `16` |
+| `dash-pattern` | 16-bit dash pattern | Integer | `255` |
+
+#### Relation Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `relation-type` | Relation type matcher | String | `"connectedFrom\|connectedTo"` |
+| `relation-line-height-offset` | Vertical offset in meters | Float | `0.5` |
+| `relation-line-end-markers` | End marker styling | Sub-rule object | `{ color: "black", width: 4 }` |
+| `relation-source-style` | Source geometry styling | Sub-rule object | `{ color: "orange", width: 2 }` |
+| `relation-target-style` | Target geometry styling | Sub-rule object | `{ opacity: 0 }` |
+| `relation-recursive` | Enable recursive resolution | Boolean | `true` |
+| `relation-merge-twoway` | Merge bidirectional relations | Boolean | `true` |
+
+#### Attribute Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `attribute-type` | Attribute type matcher | String | `SPEED_LIMIT_.*` |
+| `attribute-layer-type` | Layer type matcher | String | `Road.*Layer` |
+| `attribute-validity-geom` | Validity geometry requirement | String: `required`, `none`, `any` | `required` |
+
+#### Label Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `label-text` | Static label text | String | `No speed limit` |
+| `label-text-expression` | Dynamic label text | String | `**.speedLimitKmh` |
+| `label-color` | Text color | String | `#00ccdd` |
+| `label-outline-color` | Text outline color | String | `#111111` |
+| `label-outline-width` | Text outline width | Float | `1.0` |
+| `label-font` | CSS font property | String | `24px Helvetica` |
+| `label-background-color` | Label background | String | `#000000` |
+| `label-background-padding` | Background padding | Pair of Integers | `[7, 5]` |
+| `label-style` | Label drawing style | String: `FILL`, `OUTLINE`, `FILL_AND_OUTLINE` | `FILL` |
+| `label-scale` | Label size multiplier | Float | `1.0` |
+| `label-horizontal-origin` | Horizontal alignment | String: `LEFT`, `CENTER`, `RIGHT` | `LEFT` |
+| `label-vertical-origin` | Vertical alignment | String: `ABOVE`, `BELOW`, `CENTER`, `BASELINE` | `BASELINE` |
+| `label-pixel-offset` | Screen space offset | Pair of Floats | `[5.0, 30.0]` |
+| `label-eye-offset` | 3D eye coordinates offset | Tuple of three Floats | `[5.0, 10.0, 15.0]` |
+
+#### Distance-Based Properties
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `translucency-by-distance` | Distance-based transparency | Array of four Floats | `[1.5e2, 3, 8.0e6, 0.0]` |
+| `scale-by-distance` | Distance-based scaling | Array of four Floats | `[1.5e2, 3, 8.0e6, 0.0]` |
+| `offset-scale-by-distance` | Distance-based offset scaling | Array of four Floats | `[1.5e2, 3, 8.0e6, 0.0]` |
+
+#### Rule Organization
+| Field | Description | Type | Example |
+|-------|-------------|------|---------|
+| `first-of` | Parent of fallback rule list | Array of Rule objects | See "About first-of" section |
 
 ### Expression Evaluation Context
 
@@ -154,6 +191,7 @@ For aspect `attribute`:
 * `direction`: The direction of the attribute, if set.
 * `validity`: The validity geometry of the attribute, if set.
 * Any nested fields within the attribute
+
 ### Labels in Erdblick
 
 In Erdblick, labels are used to add textual information to the visualized geometries.
