@@ -120,6 +120,40 @@ Each rule within the YAML `rules` array can have the following fields:
 | `offset-scale-by-distance`    | Near and far pixel offset scaling properties of a Label based on the Label's distance from the camera.                                                                                                      | Array of four Floats.                                      | `[1.5e2, 3, 8.0e6, 0.0]`                           |
 | `first-of`                    | Mark a rule as a parent of a fallback rule list. See description below.                                                                                                                                     | Array of Rule objects.                                     | See example below.                                 |
 
+### Expression Evaluation Context
+
+Erdblick utilizes Simfil expressions to dynamically determine styling properties based on feature attributes and contextual variables.
+
+How It Works:
+
+* Evaluation Context: Each expression is evaluated within a context that includes variables related to the current feature, relation, or attribute being styled.
+* Context Variables: Depending on the aspect of the rule (feature, relation, or attribute), different variables are available for expression evaluation.
+
+Available Context Variables:
+
+For aspect `feature`:
+
+* `$feature`: Represents the current feature.
+* `$mergeCount`: (If point-merge-grid-cell is set) Indicates the number of merged points.
+* Any top-level field of the feature
+
+For aspect `relation`:
+
+* `$source`: The source feature of the relation.
+* `$target`: The target feature of the relation.
+* `$twoway`: Indicates if the relation is bidirectional.
+* `name`: The name/type of the relation.
+* `sourceValidity`: The validity geometry of the source feature, if available.
+* `targetValidity`: The validity geometry of the target feature, if available.
+
+For aspect `attribute`:
+
+* `$name`: The name of the attribute.
+* `$layer`: The layer name of the attribute.
+* `$feature`: The feature to which the attribute belongs.
+* `direction`: The direction of the attribute, if set.
+* `validity`: The validity geometry of the attribute, if set.
+* Any nested fields within the attribute
 ### Labels in Erdblick
 
 In Erdblick, labels are used to add textual information to the visualized geometries.
