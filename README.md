@@ -70,9 +70,12 @@ Each rule within the YAML `rules` array can have the following fields:
 Style rules can include various fields organized into the following categories:
 
 #### Basic Rule Properties
+
+These properties define the fundamental matching criteria for when a style rule should be applied to a feature.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
-| `geometry` | List of geometry type(s) or single type the rule applies to | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"` | `["point", "mesh"]`, `line` |
+| `geometry` | List of geometry type(s) or single type the rule applies to, when aspect is `attribute` then this is about the validity geometry | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"` | `["point", "mesh"]`, `line` |
 | `aspect` | Specifies the aspect to which the rule applies | String: `"feature"`, `"relation"`, or `"attribute"` | `"feature"` |
 | `mode` | Specifies the highlight mode | String: `"none"`, `"hover"`, or `"selection"` | `"hover"` |
 | `type` | Regular expression to match against a feature type | String | `"Lane\|Boundary"` |
@@ -80,6 +83,9 @@ Style rules can include various fields organized into the following categories:
 | `selectable` | Indicates if the feature is selectable | Boolean | `true` |
 
 #### General Visual Properties
+
+Core visual properties that can be applied to any geometry type to control its appearance.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `color` | Hex color code or CSS color name | String | `"#FF5733"`, `red` |
@@ -90,6 +96,9 @@ Style rules can include various fields organized into the following categories:
 | `offset` | Fixed offset in meters | Array of three Floats | `[0, 0, 5]` |
 
 #### Point-Specific Properties
+
+Special properties that only apply to point geometries, allowing detailed control of point visualization.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `outline-color` | Point outline color | String | `green` |
@@ -100,6 +109,9 @@ Style rules can include various fields organized into the following categories:
 | `icon-url-expression` | Dynamic icon URL expression | String | `category == 5 and "/icons/ev-charging.png" or ""` |
 
 #### Line-Specific Properties
+
+Properties specific to line geometries that control line appearance and decoration.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `arrow` | Type of arrowhead | String: `none`, `forward`, `backward`, `double` | `forward` |
@@ -110,6 +122,9 @@ Style rules can include various fields organized into the following categories:
 | `dash-pattern` | 16-bit dash pattern | Integer | `255` |
 
 #### Relation Properties
+
+Properties that control how relationships between features are visualized and processed.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `relation-type` | Relation type matcher | String | `"connectedFrom\|connectedTo"` |
@@ -121,6 +136,9 @@ Style rules can include various fields organized into the following categories:
 | `relation-merge-twoway` | Merge bidirectional relations | Boolean | `true` |
 
 #### Attribute Properties
+
+Properties that determine how feature attributes are matched.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `attribute-type` | Attribute type matcher | String | `SPEED_LIMIT_.*` |
@@ -128,6 +146,9 @@ Style rules can include various fields organized into the following categories:
 | `attribute-validity-geom` | Validity geometry requirement | String: `required`, `none`, `any` | `required` |
 
 #### Label Properties
+
+Properties that control the appearance and positioning of text labels on features.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `label-text` | Static label text | String | `No speed limit` |
@@ -146,6 +167,9 @@ Style rules can include various fields organized into the following categories:
 | `label-eye-offset` | 3D eye coordinates offset | Tuple of three Floats | `[5.0, 10.0, 15.0]` |
 
 #### Distance-Based Properties
+
+Properties that control how visualization changes based on camera distance.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `translucency-by-distance` | Distance-based transparency | Array of four Floats | `[1.5e2, 3, 8.0e6, 0.0]` |
@@ -153,6 +177,9 @@ Style rules can include various fields organized into the following categories:
 | `offset-scale-by-distance` | Distance-based offset scaling | Array of four Floats | `[1.5e2, 3, 8.0e6, 0.0]` |
 
 #### Rule Organization
+
+Properties that control how multiple style rules are combined and prioritized.
+
 | Field | Description | Type | Example |
 |-------|-------------|------|---------|
 | `first-of` | Parent of fallback rule list | Array of Rule objects | See "About first-of" section |
