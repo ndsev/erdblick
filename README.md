@@ -4,7 +4,7 @@
 
 **Capabilities:** 🛠️
 
-* 🗺️ View map layers from a specific [`mapget`](https://github.com/klebert-engineering/mapget) server.
+* 🗺️ View map layers from a specific [`mapget`](https://github.com/ndsev/mapget) server.
 * 🎨 Define visual styles for map layers through style-sheets, translating specific features into visual elements in both 2D and 3D.
 * 🏔️ Experience 3D features and terrains with a flexible 3D camera powered by [CesiumJS](https://github.com/CesiumGS/cesium/).
 * ✍️ Edit map layer style sheets in real-time directly from the front-end.
@@ -16,11 +16,11 @@
 
 ## Setup
 
-Ready to try out the latest version? 
-While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/Klebert-Engineering/erdblick/releases) to grab the newest build. 
-Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/klebert-engineering/mapget) server, 
-so make sure to serve it up with the `mapget serve` command. 
-Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with 
+Ready to try out the latest version?
+While the Desktop app is still work-in-progress, swing by the [Release Page](https://github.com/ndsev/erdblick/releases) to grab the newest build.
+Currently, `erdblick` is made to be served by a [`mapget`](https://github.com/ndsev/mapget) server,
+so make sure to serve it up with the `mapget serve` command.
+Not sure how to do that? Start off with a simple `pip install mapget` and then fire away with
 ```bash
 mapget serve -w <path-to-unpacked-erdblick>
 ```
