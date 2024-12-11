@@ -253,42 +253,36 @@ However, usually, it will be sufficient if only the first matching rule from a l
 is applied. This allows a simple fallback rule at the bottom of the list. For this purpose,
 the `first-of` style rule field exists. It may be applied as follows:
 
-```yaml
-rules:
-- type: Road
-  first-of:
-    - (subrule-1...)
-    - (subrule-2...)
-    - (subrule-n)
-```
+**How `first-of` Works:**
 
-Note that all attributes except for `type`, `filter`, and `first-of` are propagated
-from the parent rule to the subrules. For example, a parent rule `color` will be applied
-to the child, unless the child overrides the color. It is explicitly allowed
-that sub-rules may have sub-rules themselves.
+* When a rule contains the `first-of` field, Erdblick will evaluate each sub-rule in the order they are listed.
+* Once a sub-rule matches a feature, Erdblick applies that sub-rule exclusively and skips the remaining sub-rules within the `first-of` group.
+* This mechanism prevents multiple styles from being applied to the same feature, ensuring that the most specific applicable style is used.
 
-**A brief example:**
+**Inherited Properties:**
+
+* All attributes except for `type`, `filter`, and `first-of` are propagated from the parent rule to the sub-rules.
+* For example, if the parent rule defines a `color`, sub-rules inherit this color unless they explicitly override it.
+
+**Example Usage:**
 
 ```yaml
 rules:
-  - geometry:
-      - point
-      - mesh
-    aspect: "feature"
-    mode: "normal"
-    type: "Landmark"
-    filter: "properties.someProperty == someValue"
-    color: "#FF5733"
-    opacity: 0.8
-    width: 4.5
-  - geometry:
-      - line
-      - polygon
-    aspect: "relation"
-    mode: "highlight"
-    type: "Boundary"
-    color: "#33FF57"
+  - type: Road
+    first-of:
+      - filter: "speedLimit > 100"
+        color: "red"
+      - filter: "speedLimit > 60"
+        color: "orange"
+      - filter: "speedLimit <= 60"
+        color: "green"
 ```
+
+In this example:
+
+* Roads with a speedLimit greater than 100 are colored red.
+* If the speedLimit is not greater than 100 but is greater than 60, they are colored orange.
+* All other roads are colored green
 
 ## Build instructions (Linux-only)
 
