@@ -45,6 +45,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
     stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
+    tile_ = &featurePtr->model();
 
     // Top-Level Feature Item
     auto featureScope = push("Feature", "", ValueType::Section);
@@ -206,6 +207,7 @@ void InspectionConverter::convertAttributeLayer(
             convertValidity(convertStringView("validity"), validity);
         }
 
+        attrScope->mapId_ = convertStringView(tile_->mapId());
         attrScope->hoverId_ = featureId_+":attribute#"+std::to_string(nextAttributeIndex_);
 
         ++nextAttributeIndex_;
@@ -237,19 +239,23 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 
 void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Geometry>& g)
 {
-    // TODO: Show geometry name
     auto geomScope = push(
         key,
         key.type() == JsValue::Type::Number ?
             FieldOrIndex(key.as<uint32_t>()) :
             FieldOrIndex(key.as<std::string>()),
         ValueType::String);
+    std::string typeString;
     switch (g->geomType()) {
-    case GeomType::Points: geomScope->value_ = convertStringView("Points"); break;
-    case GeomType::Line: geomScope->value_ = convertStringView("Polyline"); break;
-    case GeomType::Polygon: geomScope->value_ = convertStringView("Polygon"); break;
-    case GeomType::Mesh: geomScope->value_ = convertStringView("Mesh"); break;
+    case GeomType::Points: typeString = "Points"; break;
+    case GeomType::Line: typeString = "Polyline"; break;
+    case GeomType::Polygon: typeString = "Polygon"; break;
+    case GeomType::Mesh: typeString = "Mesh"; break;
     }
+    if (g->name()) {
+        typeString += fmt::format(" ({})", *g->name());
+    }
+    geomScope->value_ = convertStringView(typeString);
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
@@ -294,6 +300,10 @@ void InspectionConverter::convertValidity(
                 break;
             default: break;
             }
+        }
+
+        if (auto featureId = v.featureId()) {
+            push("featureId", "featureId", ValueType::FeatureId)->value_ = convertStringView(featureId_);
         }
 
         if (auto geom = v.simpleGeometry()) {
@@ -364,23 +374,29 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     bool isArray = false;
     OptionalValueAndType singleValue;
 
-    switch (value->type()) {
-    case simfil::ValueType::Undef: return {};
-    case simfil::ValueType::TransientObject: break;
-    case simfil::ValueType::Null: singleValue = {JsValue(), ValueType::Null}; break;
-    case simfil::ValueType::Bool: singleValue = {JsValue(std::get<bool>(value->value())), ValueType::Boolean}; break;
-    case simfil::ValueType::Int: singleValue = {JsValue(std::get<int64_t>(value->value())), ValueType::Number}; break;
-    case simfil::ValueType::Float: singleValue = {JsValue(std::get<double>(value->value())), ValueType::Number}; break;
-    case simfil::ValueType::String: {
-        auto vv = value->value();
-        if (std::holds_alternative<std::string_view>(vv))
-            singleValue = {convertStringView(std::get<std::string_view>(vv)), ValueType::String};
-        else
-            singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
-        break;
+    if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds) {
+        singleValue = {convertStringView(tile_->resolveFeatureId(*value)->toString()), ValueType::FeatureId};
+        fieldScope->mapId_ = convertStringView(tile_->mapId());
     }
-    case simfil::ValueType::Object: break;
-    case simfil::ValueType::Array: isArray = true; break;
+    else {
+        switch (value->type()) {
+        case simfil::ValueType::Undef: return {};
+        case simfil::ValueType::TransientObject: break;
+        case simfil::ValueType::Null: singleValue = {JsValue(), ValueType::Null}; break;
+        case simfil::ValueType::Bool: singleValue = {JsValue(std::get<bool>(value->value())), ValueType::Boolean}; break;
+        case simfil::ValueType::Int: singleValue = {JsValue(std::get<int64_t>(value->value())), ValueType::Number}; break;
+        case simfil::ValueType::Float: singleValue = {JsValue(std::get<double>(value->value())), ValueType::Number}; break;
+        case simfil::ValueType::String: {
+            auto vv = value->value();
+            if (std::holds_alternative<std::string_view>(vv))
+                singleValue = {convertStringView(std::get<std::string_view>(vv)), ValueType::String};
+            else
+                singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
+            break;
+        }
+        case simfil::ValueType::Object: break;
+        case simfil::ValueType::Array: isArray = true; break;
+        }
     }
 
     if (singleValue) {

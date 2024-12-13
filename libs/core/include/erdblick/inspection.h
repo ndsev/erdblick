@@ -1,13 +1,13 @@
 #pragma once
 
-#include "cesium-interface/object.h"
-#include "mapget/model/feature.h"
-#include "mapget/model/sourceinfo.h"
-#include "simfil/model/string-pool.h"
-#include "sfl/small_vector.hpp"
-#include <unordered_map>
 #include <cstdint>
 #include <deque>
+#include <unordered_map>
+#include "cesium-interface/object.h"
+#include "mapget/model/feature.h"
+#include "sfl/small_vector.hpp"
+#include "simfil/model/string-pool.h"
+#include "mapget/model/featurelayer.h"
 
 namespace erdblick
 {
@@ -94,6 +94,7 @@ public:
     std::shared_ptr<simfil::StringPool> stringPool_;
     std::unordered_map<std::string_view, JsValue> translatedFieldNames_;
     std::unordered_map<std::string_view, InspectionNode*> relationsByType_;
+    mapget::TileFeatureLayer* tile_ = nullptr;
 };
 
 }  // namespace erdblick

@@ -243,7 +243,16 @@ void FeatureLayerVisualization::addFeature(
 {
     auto featureId = feature->id()->toString();
     if (!featureIdSubset_.empty()) {
-        if (featureIdSubset_.find(featureId) == featureIdSubset_.end()) {
+        bool isAllowed = false;
+        for (auto const& allowedFeatureId : featureIdSubset_) {
+            // The featureId may also refer to an attribute,
+            // in this case :attribute#<NUMBER> is appended to the string.
+            if (allowedFeatureId == featureId || allowedFeatureId.starts_with(featureId + ':')) {
+                isAllowed = true;
+                break;
+            }
+        }
+        if (!isAllowed) {
             return;
         }
     }
@@ -273,14 +282,24 @@ void FeatureLayerVisualization::addFeature(
             break;
 
         uint32_t offsetFactor = 0;
+        uint32_t attrIndex = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
             // Check if the attribute layer name is accepted for the rule.
             if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
-                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
+                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
+                    attrIndex += layer->size();
                     return true;
+                }
             }
             // Iterate over all the layer's attributes.
             layer->forEachAttribute([&, this](auto&& attr){
+                // if (!featureIdSubset_.empty()) {
+                //     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", featureId, attrIndex))) {
+                //         attrIndex++;
+                //         return true;
+                //     }
+                // }
+                attrIndex++;
                 addAttribute(
                     feature,
                     layerName,
@@ -724,6 +743,7 @@ void FeatureLayerVisualization::addAttribute(
         internalStringPoolCopy_->emplace("$layer"),
         simfil::Value(layer));
 
+
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
         attrEvaluationContext,
@@ -731,6 +751,9 @@ void FeatureLayerVisualization::addAttribute(
         {
             return evaluateExpression(str, attrEvaluationContext);
         }};
+
+    // Bump visual offset factor for next visualized attribute.
+    ++offsetFactor;
 
     // Check if the attribute's values match the attribute filter for the rule.
     if (auto const& attrFilter = rule.attributeFilter()) {
@@ -742,9 +765,6 @@ void FeatureLayerVisualization::addAttribute(
             }
         }
     }
-
-    // Bump visual offset factor for next visualized attribute.
-    ++offsetFactor;
 
     // Draw validity geometry.
     if (auto multiValidity = attr->validityOrNull()) {

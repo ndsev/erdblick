@@ -16,7 +16,11 @@
             "inherits": "common",
             "displayName": "Debug",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS_DEBUG": "-g"
+            },
+            "environment": {
+                "EMCC_DEBUG": "1"
             }
         },
         {
