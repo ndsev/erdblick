@@ -151,6 +151,10 @@ export class FeatureTile {
     }
 
     has(featureId: string) {
+        const index = featureId.indexOf(':attribute');
+        if (index > -1) {
+            featureId = featureId.slice(0, index);
+        }
         return this.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature = tileFeatureLayer.find(featureId);
             let result = !feature.isNull();

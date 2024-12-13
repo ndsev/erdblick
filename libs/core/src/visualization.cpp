@@ -293,12 +293,12 @@ void FeatureLayerVisualization::addFeature(
             }
             // Iterate over all the layer's attributes.
             layer->forEachAttribute([&, this](auto&& attr){
-                // if (!featureIdSubset_.empty()) {
-                //     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", featureId, attrIndex))) {
-                //         attrIndex++;
-                //         return true;
-                //     }
-                // }
+                if (!featureIdSubset_.empty()) {
+                     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", featureId, attrIndex))) {
+                         attrIndex++;
+                         return true;
+                     }
+                }
                 attrIndex++;
                 addAttribute(
                     feature,

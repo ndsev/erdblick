@@ -16,6 +16,14 @@
             "inherits": "common",
             "displayName": "Debug",
             "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "debug-wasm",
+            "inherits": "common",
+            "displayName": "Debug",
+            "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_FLAGS_DEBUG": "-g"
             },
