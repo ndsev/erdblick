@@ -27,7 +27,7 @@
                         "assets": [
                             {
                                 "glob": "**/*",
-                                "input": "node_modules/cesium/Build/Cesium",
+                                "input": "node_modules/cesium/Build/CesiumUnminified",
                                 "output": "/bundle/cesium"
                             },
                             {
@@ -58,9 +58,7 @@
                             "node_modules/material-icons/iconfont/material-icons.css",
                             "erdblick_app/styles.scss"
                         ],
-                        "scripts": [
-
-                        ],
+                        "scripts": [],
                         "customWebpackConfig": {
                             "path": "./webpack.config.js"
                         },
@@ -80,7 +78,34 @@
                                     "maximumError": "4kb"
                                 }
                             ],
-                            "outputHashing": "all"
+                            "outputHashing": "all",
+                            "assets": [
+                                {
+                                    "glob": "**/*",
+                                    "input": "node_modules/cesium/Build/Cesium",
+                                    "output": "/bundle/cesium"
+                                },
+                                {
+                                    "glob": "**/*",
+                                    "input": "config/styles",
+                                    "output": "/bundle/styles"
+                                },
+                                {
+                                    "glob": "**/*",
+                                    "input": "images",
+                                    "output": "/bundle/images"
+                                },
+                                {
+                                    "glob": "**/*.json",
+                                    "input": "config",
+                                    "output": "/"
+                                },
+                                {
+                                    "glob": "VERSION",
+                                    "input": ".",
+                                    "output": "/bundle/"
+                                }
+                            ]
                         },
                         "development": {
                             "buildOptimizer": false,
@@ -123,8 +148,7 @@
                             "zone.js/testing"
                         ],
                         "tsConfig": "tsconfig.spec.json",
-                        "assets": [
-                        ],
+                        "assets": [],
                         "styles": [
                             "erdblick_app/styles.scss"
                         ],
@@ -136,6 +160,6 @@
         }
     },
     "cli": {
-      "analytics": false
+        "analytics": false
     }
 }
