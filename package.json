@@ -26,7 +26,7 @@
     "@ngx-formly/core": "^6.3.9",
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
-    "cesium": "1.120.0",
+    "cesium": "1.124.0",
     "codemirror": "^6.0.1",
     "https-browserify": "^1.0.0",
     "js-yaml": "^4.1.0",
