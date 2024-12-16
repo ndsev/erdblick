@@ -82,8 +82,10 @@ public:
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
 
-    JsValue convertStringView(const simfil::StringId& f);
-    JsValue convertStringView(const std::string_view& f);
+    JsValue convertString(const simfil::StringId& f);
+    JsValue convertString(const std::string_view& f);
+    JsValue convertString(const std::string& f);
+    JsValue convertString(const char* s);
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
