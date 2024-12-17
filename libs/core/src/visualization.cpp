@@ -264,7 +264,7 @@ void FeatureLayerVisualization::addFeature(
         feature->geom()->forEachGeometry(
             [this, featureId, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
             {
-                if (rule.supports(geom->geomType()))
+                if (rule.supports(geom->geomType(), geom->name()))
                     addGeometry(geom, featureId, rule, mapLayerStyleRuleId, evalFun, offset);
                 return true;
             });

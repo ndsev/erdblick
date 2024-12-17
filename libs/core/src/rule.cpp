@@ -80,6 +80,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
+    if (yaml["geometry-name"].IsDefined()) {
+        geometryName_ = yaml["geometry-name"].as<std::string>();
+    }
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
@@ -413,9 +416,24 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     return this;
 }
 
-bool FeatureStyleRule::supports(const mapget::GeomType& g) const
+bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
 {
-    return geometryTypes_ & geomTypeBit(g);
+    // Ensure that the geometry type is supported by the rule.
+    if (!(geometryTypes_ & geomTypeBit(g))) {
+        return false;
+    }
+
+    // Ensure that the geometry name is supported by the rule.
+    if (geometryName_) {
+        if (!geometryName) {
+            return false;
+        }
+        if (!std::regex_match(geometryName->begin(), geometryName->end(), *geometryName_)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
