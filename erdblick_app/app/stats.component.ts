@@ -1,6 +1,7 @@
-import {Component} from "@angular/core";
-import {MapService} from "./map.service";
-import {debounceTime} from "rxjs";
+import { Component } from "@angular/core";
+import { MapService } from "./map.service";
+import { debounceTime } from "rxjs";
+import { ClipboardService } from "./clipboard.service";
 
 @Component({
     selector: 'stats-dialog',
@@ -9,32 +10,35 @@ import {debounceTime} from "rxjs";
                   [style]="{'min-height': '20em', 'min-width': '40em'}">
             <div class="dialog-content">
                 <p-multiSelect
-                        [options]="availableMapLayers"
-                        [(ngModel)]="selectedMapLayers"
-                        (ngModelChange)="update()"
-                        optionLabel="label"
-                        placeholder="Select Map Layers"
-                        [showHeader]="false"
-                        [style]="{'width': '100%'}">
+                    [options]="availableMapLayers"
+                    [(ngModel)]="selectedMapLayers"
+                    (ngModelChange)="update()"
+                    optionLabel="label"
+                    placeholder="Select Map Layers"
+                    [showHeader]="false"
+                    [style]="{'width': '100%'}">
                 </p-multiSelect>
                 <p-checkbox label="Consider Empty Tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"></p-checkbox>
                 <div>Total number of considered tile layers: {{ consideredTilesCount }}</div>
                 <table class="stats-table">
                     <thead>
-                    <tr>
-                        <th>Statistic</th>
-                        <th>Peak Value</th>
-                        <th>Sum Value</th>
-                        <th>Average Value</th>
-                    </tr>
+                        <tr>
+                            <th>Statistic</th>
+                            <th>Peak Value</th>
+                            <th>Sum Value</th>
+                            <th>Average Value</th>
+                        </tr>
                     </thead>
                     <tbody>
-                    <tr *ngFor="let stat of aggregatedStats">
-                        <td>{{ stat.name }}</td>
-                        <td>{{ stat.peak | number: '1.2-2' }}</td>
-                        <td>{{ stat.sum | number: '1.2-2' }}</td>
-                        <td>{{ stat.average | number: '1.2-2' }}</td>
-                    </tr>
+                        <tr *ngFor="let stat of aggregatedStats">
+                            <td>{{ stat.name }}</td>
+                            <td>
+                                {{ stat.peak | number: '1.2-2' }}
+                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(getTileIdWithPeak(stat.name))" [pTooltip]="getTileIdWithPeak(stat.name)" tooltipPosition="top"></i>
+                            </td>
+                            <td>{{ stat.sum | number: '1.2-2' }}</td>
+                            <td>{{ stat.average | number: '1.2-2' }}</td>
+                        </tr>
                     </tbody>
                 </table>
                 <button pButton type="button" [label]="needsUpdate ? 'Will update once tiles finished loading. Click to update now.' : 'Up to date.'" icon="pi pi-refresh" (click)="update()"></button>
@@ -72,7 +76,7 @@ export class StatsDialogComponent {
     public consideredTilesCount: number = 0;
     public needsUpdate: boolean = false;
 
-    constructor(public mapService: MapService) {
+    constructor(public mapService: MapService, public clipboardService: ClipboardService) {
         this.update();
         this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.needsUpdate = true);
         this.mapService.statsDialogNeedsUpdate.pipe(debounceTime(1000)).subscribe(_ => this.update());
@@ -125,4 +129,24 @@ export class StatsDialogComponent {
 
         this.needsUpdate = false;
     }
+
+    getTileIdWithPeak(statName: string): string {
+        let peakValue = -Infinity;
+        let peakTileId = '';
+        this.mapService.loadedTileLayers.forEach(tile => {
+            if (!this.considerEmptyTiles && tile.numFeatures <= 0) {
+                return;
+            }
+            if (this.selectedMapLayers.findIndex(entry => entry.label == `${tile.mapName} - ${tile.layerName}`) < 0) {
+                return;
+            }
+            const stats = tile.stats;
+            if (stats.has(statName) && stats.get(statName)?.some(v => v > peakValue)) {
+                peakValue = Math.max(...stats.get(statName)!);
+                peakTileId = String(tile.tileId);
+            }
+        });
+        return peakTileId;
+    }
 }
+
