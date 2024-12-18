@@ -259,6 +259,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse an attribute type regular expression, e.g. `SPEED_LIMIT_.*`
         attributeType_ = yaml["attribute-type"].as<std::string>();
     }
+    if (yaml["attribute-filter"].IsDefined()) {
+        // Parse an attribute based on it's field value, e.g. `speedLimitKmh > 100`
+        attributeFilter_ = yaml["attribute-filter"].as<std::string>();
+    }
     if (yaml["attribute-layer-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `Road.*Layer`
         attributeLayerType_ = yaml["attribute-layer-type"].as<std::string>();
@@ -689,6 +693,11 @@ std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const
 {
     return attributeType_;
+}
+
+std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
+{
+    return attributeFilter_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const

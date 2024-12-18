@@ -89,4 +89,15 @@ export class ErdblickDebugApi {
     coreLib(): ErdblickCore_ {
         return coreLib;
     }
+
+    /** Run some simfil query to reproduce problems with search. */
+    runSimfilQuery(query: string = "**.transition") {
+        for (const [_, tile] of this.mapService.loadedTileLayers) {
+            tile.peek(parsedTile => {
+                let search = new coreLib.FeatureLayerSearch(parsedTile);
+                const matchingFeatures = search.filter(query);
+                search.delete();
+            })
+        }
+    }
 }

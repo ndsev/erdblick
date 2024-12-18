@@ -243,7 +243,16 @@ void FeatureLayerVisualization::addFeature(
 {
     auto featureId = feature->id()->toString();
     if (!featureIdSubset_.empty()) {
-        if (featureIdSubset_.find(featureId) == featureIdSubset_.end()) {
+        bool isAllowed = false;
+        for (auto const& allowedFeatureId : featureIdSubset_) {
+            // The featureId may also refer to an attribute,
+            // in this case :attribute#<NUMBER> is appended to the string.
+            if (allowedFeatureId == featureId || allowedFeatureId.starts_with(featureId + ':')) {
+                isAllowed = true;
+                break;
+            }
+        }
+        if (!isAllowed) {
             return;
         }
     }
@@ -273,14 +282,24 @@ void FeatureLayerVisualization::addFeature(
             break;
 
         uint32_t offsetFactor = 0;
+        uint32_t attrIndex = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
             // Check if the attribute layer name is accepted for the rule.
             if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
-                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
+                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
+                    attrIndex += layer->size();
                     return true;
+                }
             }
             // Iterate over all the layer's attributes.
             layer->forEachAttribute([&, this](auto&& attr){
+                // if (!featureIdSubset_.empty()) {
+                //     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", featureId, attrIndex))) {
+                //         attrIndex++;
+                //         return true;
+                //     }
+                // }
+                attrIndex++;
                 addAttribute(
                     feature,
                     layerName,
@@ -321,6 +340,9 @@ void FeatureLayerVisualization::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
+    if (!rule.supports(geom.geomType_))
+        return;
+
     // Combine the ID with the mapTileKey to create an
     // easy link from the geometry back to the feature.
     auto tileFeatureId = JsValue::Undefined();
@@ -339,6 +361,7 @@ void FeatureLayerVisualization::addGeometry(
     }
 
     std::vector<mapget::Point> vertsCartesian;
+    vertsCartesian.reserve(geom.points_.size());
     for (auto const& vertCarto : geom.points_) {
         vertsCartesian.emplace_back(wgsToCartesian<Point>(vertCarto, offset));
     }
@@ -418,7 +441,7 @@ void FeatureLayerVisualization::addGeometry(
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return labelCollection_.labelParams(
+                        return CesiumLabelCollection::labelParams(
                             xyzPos,
                             text,
                             rule,
@@ -694,7 +717,7 @@ void FeatureLayerVisualization::addAttribute(
 
     // Check if the attribute validity is accepted for the rule.
     if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
-        if (*validityGeomRequired != attr->validityOrNull()) {
+        if (*validityGeomRequired != (attr->validityOrNull() && attr->validityOrNull()->size())) {
             return;
         }
     }
@@ -720,6 +743,7 @@ void FeatureLayerVisualization::addAttribute(
         internalStringPoolCopy_->emplace("$layer"),
         simfil::Value(layer));
 
+
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
         attrEvaluationContext,
@@ -730,6 +754,17 @@ void FeatureLayerVisualization::addAttribute(
 
     // Bump visual offset factor for next visualized attribute.
     ++offsetFactor;
+
+    // Check if the attribute's values match the attribute filter for the rule.
+    if (auto const& attrFilter = rule.attributeFilter()) {
+        if (!attrFilter->empty()) {
+            auto result = boundEvalFun.eval_(*attrFilter);
+            if ((result.isa(simfil::ValueType::Bool) && !result.template as<simfil::ValueType::Bool>()) ||
+                result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
+                return;
+            }
+        }
+    }
 
     // Draw validity geometry.
     if (auto multiValidity = attr->validityOrNull()) {
