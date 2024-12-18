@@ -21,6 +21,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/cesium-interface/point-conversion.h
   include/erdblick/cesium-interface/points.h
   include/erdblick/cesium-interface/labels.h
+  include/erdblick/cesium-interface/billboards.h
 
   src/visualization.cpp
   src/style.cpp
@@ -39,9 +40,16 @@ set(ERDBLICK_SOURCE_FILES
   src/cesium-interface/cesium.cpp
   src/cesium-interface/points.cpp
   src/cesium-interface/labels.cpp
+  src/cesium-interface/billboards.cpp
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+  # Defaulting to debug symbols if the build type is Debug
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+  endif()
+
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)

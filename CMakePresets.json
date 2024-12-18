@@ -20,6 +20,18 @@
             }
         },
         {
+            "name": "debug-wasm",
+            "inherits": "common",
+            "displayName": "Debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS_DEBUG": "-g"
+            },
+            "environment": {
+                "EMCC_DEBUG": "1"
+            }
+        },
+        {
             "name": "release",
             "inherits": "common",
             "displayName": "Release",
@@ -32,6 +44,14 @@
         {
             "name": "debug",
             "configurePreset": "debug",
+            "displayName": "Debug",
+            "environment": {
+                "NG_DEVELOP": "TRUE"
+            }
+        },
+        {
+            "name": "debug-wasm",
+            "configurePreset": "debug-wasm",
             "displayName": "Debug",
             "environment": {
                 "NG_DEVELOP": "TRUE"

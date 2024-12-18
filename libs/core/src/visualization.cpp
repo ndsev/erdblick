@@ -5,6 +5,8 @@
 
 #include <iostream>
 
+#include "cesium-interface/billboards.h"
+
 using namespace mapget;
 
 namespace erdblick
@@ -158,6 +160,8 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
         collection.call<void>("add", coloredPoints_.toJsObject());
     if (!labelCollection_.empty())
         collection.call<void>("add", labelCollection_.toJsObject());
+    if (!billboardCollection_.empty())
+        collection.call<void>("add", billboardCollection_.toJsObject());
     return *collection;
 }
 
@@ -239,7 +243,16 @@ void FeatureLayerVisualization::addFeature(
 {
     auto featureId = feature->id()->toString();
     if (!featureIdSubset_.empty()) {
-        if (featureIdSubset_.find(featureId) == featureIdSubset_.end()) {
+        bool isAllowed = false;
+        for (auto const& allowedFeatureId : featureIdSubset_) {
+            // The featureId may also refer to an attribute,
+            // in this case :attribute#<NUMBER> is appended to the string.
+            if (allowedFeatureId == featureId || allowedFeatureId.starts_with(featureId + ':')) {
+                isAllowed = true;
+                break;
+            }
+        }
+        if (!isAllowed) {
             return;
         }
     }
@@ -251,7 +264,7 @@ void FeatureLayerVisualization::addFeature(
         feature->geom()->forEachGeometry(
             [this, featureId, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
             {
-                if (rule.supports(geom->geomType()))
+                if (rule.supports(geom->geomType(), geom->name()))
                     addGeometry(geom, featureId, rule, mapLayerStyleRuleId, evalFun, offset);
                 return true;
             });
@@ -264,19 +277,29 @@ void FeatureLayerVisualization::addFeature(
     case FeatureStyleRule::Attribute: {
         // Use const-version of the attribute layers, so the feature does not
         // lazily initialize its attribute layer list.
-        auto attrLayers = const_cast<mapget::Feature const&>(*feature).attributeLayers();
+        auto attrLayers = feature->attributeLayersOrNull();
         if (!attrLayers)
             break;
 
         uint32_t offsetFactor = 0;
+        uint32_t attrIndex = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
             // Check if the attribute layer name is accepted for the rule.
             if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
-                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex))
+                if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
+                    attrIndex += layer->size();
                     return true;
+                }
             }
             // Iterate over all the layer's attributes.
             layer->forEachAttribute([&, this](auto&& attr){
+                if (!featureIdSubset_.empty() && highlightMode_ == FeatureStyleRule::HoverHighlight) {
+                     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", featureId, attrIndex))) {
+                         attrIndex++;
+                         return true;
+                     }
+                }
+                attrIndex++;
                 addAttribute(
                     feature,
                     layerName,
@@ -303,6 +326,23 @@ void FeatureLayerVisualization::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
+    if (!geom) {
+        return;
+    }
+    addGeometry(geom->toSelfContained(), id, rule, mapLayerStyleRuleId, evalFun, offset);
+}
+
+void FeatureLayerVisualization::addGeometry(
+    SelfContainedGeometry const& geom,
+    std::string_view id,
+    FeatureStyleRule const& rule,
+    std::string const& mapLayerStyleRuleId,
+    BoundEvalFun& evalFun,
+    glm::dvec3 const& offset)
+{
+    if (!rule.supports(geom.geomType_))
+        return;
+
     // Combine the ID with the mapTileKey to create an
     // easy link from the geometry back to the feature.
     auto tileFeatureId = JsValue::Undefined();
@@ -321,15 +361,12 @@ void FeatureLayerVisualization::addGeometry(
     }
 
     std::vector<mapget::Point> vertsCartesian;
-    vertsCartesian.reserve(geom->numPoints());
-    geom->forEachPoint(
-        [&vertsCartesian, &offset](auto&& vertex)
-        {
-            vertsCartesian.emplace_back(wgsToCartesian<Point>(vertex, offset));
-            return true;
-        });
+    vertsCartesian.reserve(geom.points_.size());
+    for (auto const& vertCarto : geom.points_) {
+        vertsCartesian.emplace_back(wgsToCartesian<Point>(vertCarto, offset));
+    }
 
-    switch (geom->geomType()) {
+    switch (geom.geomType_) {
     case GeomType::Polygon:
         if (vertsCartesian.size() >= 3) {
             auto jsVerts = encodeVerticesAsList(vertsCartesian);
@@ -351,24 +388,36 @@ void FeatureLayerVisualization::addGeometry(
     case GeomType::Points:
         auto pointIndex = 0;
         for (auto const& pt : vertsCartesian) {
-
             // If a merge-grid cell size is set, then a merged feature representation was requested.
             if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
                 addMergedPointGeometry(
                     id,
                     mapLayerStyleRuleId,
                     gridCellSize,
-                    geom->pointAt(pointIndex),
+                    geom.points_[pointIndex],
                     "pointParameters",
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return coloredPoints_
-                            .pointParams(JsValue(pt), rule, tileFeatureId, augmentedEvalFun);
+                        if (rule.hasIconUrl())
+                            return CesiumBillboardCollection::billboardParams(
+                                JsValue(pt),
+                                rule,
+                                tileFeatureId,
+                                augmentedEvalFun);
+                        return CesiumPointPrimitiveCollection::pointParams(
+                            JsValue(pt),
+                            rule,
+                            tileFeatureId,
+                            augmentedEvalFun);
                     });
             }
-            else
+            else if (rule.hasIconUrl()) {
+                billboardCollection_.addBillboard(JsValue(pt), rule, tileFeatureId, evalFun);
+            }
+            else {
                 coloredPoints_.addPoint(JsValue(pt), rule, tileFeatureId, evalFun);
+            }
 
             ++pointIndex;
         }
@@ -392,7 +441,7 @@ void FeatureLayerVisualization::addGeometry(
                     evalFun,
                     [&](auto& augmentedEvalFun)
                     {
-                        return labelCollection_.labelParams(
+                        return CesiumLabelCollection::labelParams(
                             xyzPos,
                             text,
                             rule,
@@ -668,7 +717,7 @@ void FeatureLayerVisualization::addAttribute(
 
     // Check if the attribute validity is accepted for the rule.
     if (auto const& validityGeomRequired = rule.attributeValidityGeometry()) {
-        if (*validityGeomRequired != attr->hasValidity()) {
+        if (*validityGeomRequired != (attr->validityOrNull() && attr->validityOrNull()->size())) {
             return;
         }
     }
@@ -694,6 +743,7 @@ void FeatureLayerVisualization::addAttribute(
         internalStringPoolCopy_->emplace("$layer"),
         simfil::Value(layer));
 
+
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
         attrEvaluationContext,
@@ -705,15 +755,40 @@ void FeatureLayerVisualization::addAttribute(
     // Bump visual offset factor for next visualized attribute.
     ++offsetFactor;
 
+    // Check if the attribute's values match the attribute filter for the rule.
+    if (auto const& attrFilter = rule.attributeFilter()) {
+        if (!attrFilter->empty()) {
+            auto result = boundEvalFun.eval_(*attrFilter);
+            if ((result.isa(simfil::ValueType::Bool) && !result.template as<simfil::ValueType::Bool>()) ||
+                result.isa(simfil::ValueType::Undef) || result.isa(simfil::ValueType::Null)) {
+                return;
+            }
+        }
+    }
+
     // Draw validity geometry.
-    auto geom = attr->hasValidity() ? attr->validity() : feature->firstGeometry();
-    addGeometry(
-        geom,
-        id,
-        rule,
-        mapLayerStyleRuleId,
-        boundEvalFun,
-        offset * static_cast<double>(offsetFactor));
+    if (auto multiValidity = attr->validityOrNull()) {
+        multiValidity->forEach([&, this](auto&& validity)
+        {
+            addGeometry(
+                validity.computeGeometry(feature->geomOrNull()),
+                id,
+                rule,
+                mapLayerStyleRuleId,
+                boundEvalFun,
+                offset * static_cast<double>(offsetFactor));
+            return true;
+        });
+    }
+    else {
+        addGeometry(
+            feature->firstGeometry(),
+            id,
+            rule,
+            mapLayerStyleRuleId,
+            boundEvalFun,
+            offset * static_cast<double>(offsetFactor));
+    }
 }
 
 void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& context)
@@ -867,15 +942,25 @@ void RecursiveRelationVisualizationState::render(
         }};
 
     // Obtain source/target geometries.
-    auto sourceGeom = r.relation_->hasSourceValidity() ?
-        r.relation_->sourceValidity() :
-        r.sourceFeature_->firstGeometry();
-    auto targetGeom = r.relation_->hasTargetValidity() ?
-        r.relation_->targetValidity() :
-        r.targetFeature_->firstGeometry();
+    auto convertMultiValidityWithFallback = [](model_ptr<MultiValidity> const& vv, model_ptr<Feature> const& feature) {
+        std::vector<SelfContainedGeometry> result;
+        if (vv) {
+            vv->forEach([&result, &feature](auto&& v)
+            {
+                result.emplace_back(v.computeGeometry(feature->geomOrNull()));
+                return true;
+            });
+        }
+        if (result.empty()) {
+            result = {feature->firstGeometry()};
+        }
+        return result;
+    };
+    auto sourceGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);
+    auto targetGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);;
 
     // Get offset base vector.
-    auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeom);
+    auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeoms[0]);
     auto offset = offsetBase * rule_.offset();
 
     // Ensure that sourceStyle, targetStyle and endMarkerStyle
@@ -884,10 +969,10 @@ void RecursiveRelationVisualizationState::render(
     auto targetId = r.targetFeature_->id()->toString();
 
     // Create line geometry which connects source and target feature.
-    if (sourceGeom && targetGeom)
+    if (!sourceGeoms[0].points_.empty() && !targetGeoms[0].points_.empty())
     {
-        auto p1lo = geometryCenter(sourceGeom);
-        auto p2lo = geometryCenter(targetGeom);
+        auto p1lo = geometryCenter(sourceGeoms[0]);
+        auto p2lo = geometryCenter(targetGeoms[0]);
         auto p1hi = Point{p1lo.x, p1lo.y, p1lo.z + rule_.relationLineHeightOffset()};
         auto p2hi = Point{p2lo.x, p2lo.y, p2lo.z + rule_.relationLineHeightOffset()};
 
@@ -915,16 +1000,22 @@ void RecursiveRelationVisualizationState::render(
     }
 
     // Run source geometry visualization.
-    if (sourceGeom && visualizedFeatures_.emplace(sourceId).second) {
+    if (visualizedFeatures_.emplace(sourceId).second) {
         if (auto sourceRule = rule_.relationSourceStyle()) {
-            visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, "", boundEvalFun, offsetBase * sourceRule->offset());
+            for (auto const& sourceGeom : sourceGeoms) {
+                if (sourceGeom.points_.empty()) continue;
+                    visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, "", boundEvalFun, offsetBase * sourceRule->offset());
+            }
         }
     }
 
     // Run target geometry visualization.
-    if (targetGeom && visualizedFeatures_.emplace(targetId).second) {
+    if (visualizedFeatures_.emplace(targetId).second) {
         if (auto targetRule = rule_.relationTargetStyle()) {
-            visu_.addGeometry(targetGeom, UnselectableId, *targetRule, "", boundEvalFun, offsetBase * targetRule->offset());
+            for (auto const& targetGeom : targetGeoms) {
+                if (targetGeom.points_.empty()) continue;
+                    visu_.addGeometry(targetGeom, UnselectableId, *targetRule, "", boundEvalFun, offsetBase * targetRule->offset());
+            }
         }
     }
 

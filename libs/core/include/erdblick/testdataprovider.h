@@ -168,7 +168,7 @@ public:
             // Add an attribute layer
             auto attrLayer = feature->attributeLayers()->newLayer("lane");
             auto attr = attrLayer->newAttribute("numLanes");
-            attr->setDirection(mapget::Attribute::Direction::Positive);
+            attr->validity()->newDirection(mapget::Validity::Positive);
             attr->addField("count", (int64_t)rand());
         }
 

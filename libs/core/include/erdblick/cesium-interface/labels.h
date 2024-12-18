@@ -14,7 +14,7 @@ struct CesiumLabelCollection
     /**
      * Get the parameter object for a call to LabelCollection.add().
      */
-    JsValue labelParams(
+    static JsValue labelParams(
         JsValue const &position,
         const std::string& labelText,
         FeatureStyleRule const &style,

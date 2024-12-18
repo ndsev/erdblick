@@ -131,7 +131,7 @@ export class InspectionService {
     }
 
     getFeatureTreeDataFromModel() {
-        let convertToTreeTableNodes = (dataNodes: Array<InspectionModelData>): TreeTableNode[] => {
+        let convertToTreeTableNodes = (dataNodes: Array<InspectionModelData>, featureIndex: number): TreeTableNode[] => {
             let treeNodes: Array<TreeTableNode> = [];
             for (const data of dataNodes) {
                 const node: TreeTableNode = {};
@@ -164,6 +164,8 @@ export class InspectionService {
                 }
                 if (data.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
+                    // Necessary to query one of the selectedFeatures for its mapTileKey
+                    node.data["featureIndex"] = featureIndex;
                 }
                 if (data.hasOwnProperty("mapId")) {
                     node.data["mapId"] = data.mapId;
@@ -174,7 +176,7 @@ export class InspectionService {
                 if (data.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = data.sourceDataReferences;
                 }
-                node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children) : [];
+                node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children, featureIndex) : [];
                 treeNodes.push(node);
             }
             return treeNodes;
@@ -182,7 +184,8 @@ export class InspectionService {
 
         let treeNodes: Array<TreeTableNode> = [];
         if (this.selectedFeatureInspectionModel) {
-            for (const section of this.selectedFeatureInspectionModel) {
+            for (let i = 0; i < this.selectedFeatureInspectionModel.length; i++) {
+                const section = this.selectedFeatureInspectionModel[i];
                 const node: TreeTableNode = {};
                 node.data = {key: section.key, value: section.value, type: section.type};
                 if (section.hasOwnProperty("info")) {
@@ -191,7 +194,7 @@ export class InspectionService {
                 if (section.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = section.sourceDataReferences;
                 }
-                node.children = convertToTreeTableNodes(section.children);
+                node.children = convertToTreeTableNodes(section.children, i);
                 treeNodes.push(node);
             }
         }

@@ -5,17 +5,11 @@
 
 using namespace mapget;
 
-Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
+Point erdblick::geometryCenter(const SelfContainedGeometry& g)
 {
-    if (!g) {
-        std::cerr << "Cannot obtain center of null geometry." << std::endl;
-        return {};
-    }
-
     // Initialize variables for averaging.
-    uint32_t totalPoints = g->numPoints();
-    std::vector<mapget::Point> points;
-    points.reserve(g->numPoints());
+    auto totalPoints = g.points_.size();
+    auto const& points = g.points_;
 
     // Lambda to update totalX, totalY, totalZ, and count.
     auto averageVectorPosition = [](const std::vector<Point>& points)
@@ -32,21 +26,13 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
       return result;
     };
 
-    // Process all points to find the average position.
-    g->forEachPoint(
-        [&points](const auto& p)
-        {
-          points.push_back(p);
-          return true;  // Continue iterating.
-        });
-
     if (totalPoints == 0) {
         std::cerr << "Geometry has no points." << std::endl;
         return {};
     }
 
     Point averagePoint = averageVectorPosition(points);
-    if (g->geomType() != GeomType::Mesh && g->geomType() != GeomType::Line) {
+    if (g.geomType_ != GeomType::Mesh && g.geomType_ != GeomType::Line) {
         return averagePoint;
     }
 
@@ -65,7 +51,7 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
         });
 
     // For lines, return the shape-point closest to the average.
-    if (g->geomType() == GeomType::Line) {
+    if (g.geomType_ == GeomType::Line) {
         if (totalPoints % 2 == 1) {
             // Odd number of points: Return closest point.
             return pointsSorted.front();
@@ -120,34 +106,27 @@ Point erdblick::geometryCenter(const model_ptr<Geometry>& g)
     return averageVectorPosition(intersectedTrianglePoints);
 }
 
-Point erdblick::boundingRadiusEndPoint(const model_ptr<Geometry>& g)
+Point erdblick::boundingRadiusEndPoint(const SelfContainedGeometry& g)
 {
-    const Point center = erdblick::geometryCenter(g);
-    if (!g) {
+    const Point center = geometryCenter(g);
+    if (g.points_.empty()) {
         std::cerr << "Cannot obtain bounding radius vector end point of null geometry." << std::endl;
         return center;
     }
 
     float maxDistanceSquared = 0.0f;
     Point farPoint = center;
-    g->forEachPoint([&center, &maxDistanceSquared, &farPoint](const auto& p)
+    for (auto const& p : g.points_)
     {
-        float dx = p.x - center.x;
-        float dy = p.y - center.y;
-        float dz = p.z - center.z;
-        float distanceSquared = dx * dx + dy * dy + dz * dz;
+        auto d = p - center;
+        float distanceSquared = d.x * d.x + d.y * d.y + d.z * d.z;
         if (distanceSquared > maxDistanceSquared) {
             farPoint = p;
             maxDistanceSquared = distanceSquared;
         }
-        return true;
-    });
+    }
 
     return farPoint;
-}
-
-GeomType erdblick::getGeometryType(const model_ptr<Geometry>& g) {
-    return g->geomType();
 }
 
 double erdblick::pointSideOfLine(const Point& lineVector, const Point& lineStart, const Point& p)
@@ -198,7 +177,7 @@ bool erdblick::isPointInsideTriangle(
     return (side0 <= 0 && side1 <= 0 && side2 <= 0) || (side0 >= 0 && side1 >= 0 && side2 >= 0);
 }
 
-glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>& g)
+glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const SelfContainedGeometry& g)
 {
     constexpr auto latMetersPerDegree = 110574.; // Meters per degree of latitude
     constexpr auto lonMetersPerDegree = 111320.; // Meters per degree of longitude at equator
@@ -207,13 +186,13 @@ glm::dmat3x3 erdblick::localWgs84UnitCoordinateSystem(const model_ptr<Geometry>&
         {.0, 1./latMetersPerDegree, .0},
         {.0, .0, 1.}};
 
-    if (!g || g->geomType() != GeomType::Line || g->numPoints() < 2) {
+    if (g.geomType_ != GeomType::Line || g.points_.size() < 2) {
         return defaultResult;
     }
 
-    auto const aWgs = g->pointAt(0);
+    auto const aWgs = g.points_[0];
     auto const a = wgsToCartesian<glm::dvec3>(aWgs);
-    auto const b = wgsToCartesian<glm::dvec3>(g->pointAt(g->numPoints() - 1));
+    auto const b = wgsToCartesian<glm::dvec3>(g.points_.back());
     auto const c = wgsToCartesian<glm::dvec3>(aWgs, {.0, .0, 1.});
     auto const forward = glm::normalize(b - a);
     auto const up = glm::normalize(c - a);

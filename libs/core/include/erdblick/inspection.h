@@ -1,13 +1,13 @@
 #pragma once
 
-#include "cesium-interface/object.h"
-#include "mapget/model/feature.h"
-#include "mapget/model/sourceinfo.h"
-#include "simfil/model/string-pool.h"
-#include "sfl/small_vector.hpp"
-#include <unordered_map>
 #include <cstdint>
 #include <deque>
+#include <unordered_map>
+#include "cesium-interface/object.h"
+#include "mapget/model/feature.h"
+#include "sfl/small_vector.hpp"
+#include "simfil/model/string-pool.h"
+#include "mapget/model/featurelayer.h"
 
 namespace erdblick
 {
@@ -76,13 +76,16 @@ public:
     void convertAttributeLayer(std::string_view const& name, mapget::model_ptr<mapget::AttributeLayer> const& l);
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
     void convertGeometry(JsValue const& key, mapget::model_ptr<mapget::Geometry> const& r);
+    void convertValidity(JsValue const& key, mapget::model_ptr<mapget::MultiValidity> const& r);
 
     OptionalValueAndType convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(std::string_view const& fieldName, simfil::ModelNode::Ptr const& value);
     OptionalValueAndType convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
 
-    JsValue convertStringView(const simfil::StringId& f);
-    JsValue convertStringView(const std::string_view& f);
+    JsValue convertString(const simfil::StringId& f);
+    JsValue convertString(const std::string_view& f);
+    JsValue convertString(const std::string& f);
+    JsValue convertString(const char* s);
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
@@ -93,6 +96,7 @@ public:
     std::shared_ptr<simfil::StringPool> stringPool_;
     std::unordered_map<std::string_view, JsValue> translatedFieldNames_;
     std::unordered_map<std::string_view, InspectionNode*> relationsByType_;
+    mapget::TileFeatureLayer* tile_ = nullptr;
 };
 
 }  // namespace erdblick

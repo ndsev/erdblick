@@ -50,7 +50,7 @@ public:
     [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] HighlightMode mode() const;
     [[nodiscard]] bool selectable() const;
-    [[nodiscard]] bool supports(mapget::GeomType const& g) const;
+    [[nodiscard]] bool supports(mapget::GeomType const& g, std::optional<std::string_view> geometryName={}) const;
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
     [[nodiscard]] float width() const;
@@ -66,6 +66,9 @@ public:
     [[nodiscard]] glm::dvec3 const& offset() const;
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
+    [[nodiscard]] bool hasIconUrl() const;
+    [[nodiscard]] std::string iconUrl(BoundEvalFun const& evalFun) const;
+
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
     [[nodiscard]] float relationLineHeightOffset() const;
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
@@ -75,6 +78,7 @@ public:
     [[nodiscard]] bool relationMergeTwoWay() const;
 
     [[nodiscard]] std::optional<std::regex> const& attributeType() const;
+    [[nodiscard]] std::optional<std::string> const& attributeFilter() const;
     [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
 
@@ -112,6 +116,7 @@ private:
     HighlightMode mode_ = NoHighlight;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
+    std::optional<std::regex> geometryName_;
     std::optional<std::regex> type_;
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
@@ -151,6 +156,9 @@ private:
     std::optional<std::array<float, 4>> scaleByDistance_;
     std::optional<std::array<float, 4>> offsetScaleByDistance_;
 
+    std::string iconUrl_;
+    std::string iconUrlExpression_;
+
     std::optional<std::regex> relationType_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
@@ -160,6 +168,7 @@ private:
     bool relationMergeTwoWay_ = false;
 
     std::optional<std::regex> attributeType_;
+    std::optional<std::string> attributeFilter_;
     std::optional<std::regex> attributeLayerType_;
     std::optional<bool> attributeValidityGeometry_;
 

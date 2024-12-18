@@ -80,6 +80,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
+    if (yaml["geometry-name"].IsDefined()) {
+        geometryName_ = yaml["geometry-name"].as<std::string>();
+    }
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
@@ -177,6 +180,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         pointMergeGridCellSize_->y = yaml["point-merge-grid-cell"][1].as<double>();
         pointMergeGridCellSize_->z = yaml["point-merge-grid-cell"][2].as<double>();
     }
+    if (yaml["icon-url"].IsDefined()) {
+        iconUrl_ = yaml["icon-url"].as<std::string>();
+    }
+    if (yaml["icon-url-expression"].IsDefined()) {
+        iconUrlExpression_ = yaml["icon-url-expression"].as<std::string>();
+    }
 
     /////////////////////////////////////
     /// Line Style Fields
@@ -252,6 +261,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["attribute-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `SPEED_LIMIT_.*`
         attributeType_ = yaml["attribute-type"].as<std::string>();
+    }
+    if (yaml["attribute-filter"].IsDefined()) {
+        // Parse an attribute based on it's field value, e.g. `speedLimitKmh > 100`
+        attributeFilter_ = yaml["attribute-filter"].as<std::string>();
     }
     if (yaml["attribute-layer-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `Road.*Layer`
@@ -403,9 +416,24 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     return this;
 }
 
-bool FeatureStyleRule::supports(const mapget::GeomType& g) const
+bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
 {
-    return geometryTypes_ & geomTypeBit(g);
+    // Ensure that the geometry type is supported by the rule.
+    if (!(geometryTypes_ & geomTypeBit(g))) {
+        return false;
+    }
+
+    // Ensure that the geometry name is supported by the rule.
+    if (geometryName_) {
+        if (!geometryName) {
+            return false;
+        }
+        if (!std::regex_match(geometryName->begin(), geometryName->end(), *geometryName_)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
@@ -662,9 +690,32 @@ std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() cons
     return pointMergeGridCellSize_;
 }
 
+bool FeatureStyleRule::hasIconUrl() const
+{
+    return !iconUrl_.empty() || !iconUrlExpression_.empty();
+}
+
+std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
+{
+    if (!iconUrlExpression_.empty()) {
+        auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
+        if (iconUrlVal.isa(simfil::ValueType::String)) {
+            return iconUrlVal.as<simfil::ValueType::String>();
+        }
+        std::cout << "Invalid result for iconUrl expression: " << iconUrlExpression_
+                  << ": " << iconUrlVal.toString() << std::endl;
+    }
+    return iconUrl_;
+}
+
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const
 {
     return attributeType_;
+}
+
+std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
+{
+    return attributeFilter_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const

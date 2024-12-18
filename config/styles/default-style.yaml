@@ -33,36 +33,36 @@ rules:
 
   # Hover/Selection styles
   - geometry: ["mesh", "polygon"]
-    color: orange
-    opacity: 1.0
+    color: green
+    opacity: 0.8
     mode: hover
     offset: [0, 0, -0.3]
   - geometry: ["line"]
-    color: orange
-    opacity: 1.0
+    color: green
+    opacity: 0.8
     width: 10.0
     mode: hover
     offset: [0, 0, -0.1]
   - geometry: ["point"]
-    color: orange
-    opacity: 1.0
+    color: green
+    opacity: 0.8
     width: 20.0
     mode: hover
     offset: [0, 0, 0.1]
   - geometry: ["mesh", "polygon"]
-    color: red
-    opacity: 1.0
+    color: yellow
+    opacity: 0.8
     mode: selection
     offset: [0, 0, -0.3]
   - geometry: ["line"]
-    color: red
-    opacity: 1.0
+    color: yellow
+    opacity: 0.8
     width: 10.0
     mode: selection
     offset: [0, 0, -0.1]
   - geometry: ["point"]
-    color: red
-    opacity: 1.0
+    color: yellow
+    opacity: 0.8
     width: 20.0
     mode: selection
     offset: [0, 0, 0.1]

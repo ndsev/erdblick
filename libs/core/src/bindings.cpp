@@ -8,11 +8,15 @@
 #include <cxxabi.h>
 
 #include <sanitizer/lsan_interface.h>
+#include <sanitizer/asan_interface.h>
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 const char *__lsan_default_options() {
     return "verbosity=1:malloc_context_size=64";
+}
+const char *__asan_default_options() {
+    return "verbosity=1:malloc_context_size=64:detect_container_overflow=0";
 }
 #endif
 #endif
@@ -397,7 +401,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "getGeometryType",
             std::function<mapget::GeomType(FeaturePtr&)>(
                 [](FeaturePtr& self){
-                    return getGeometryType(self->firstGeometry());
+                    return self->firstGeometry().geomType_;
                 }));
 
     ////////// GeomType
