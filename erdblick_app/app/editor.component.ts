@@ -15,6 +15,7 @@ const completionsList = [
     {label: "name", type: "property"},
     {label: "rules", type: "property"},
     {label: "geometry", type: "property"},
+    {label: "geometry-name", type: "property"},
     {label: "aspect", type: "property"},
     {label: "mode", type: "property"},
     {label: "type", type: "property"},

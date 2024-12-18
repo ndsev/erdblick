@@ -406,10 +406,10 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
                 rowData["value"],
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         } else if (rowData["hoverId"]) {
-            // this.mapService.highlightFeatures([{
-            //     mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
-            //     featureId: rowData["hoverId"]
-            // }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            this.mapService.highlightFeatures([{
+                mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
+                featureId: rowData["hoverId"]
+            }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }
     }
 
@@ -423,18 +423,18 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     onKeyHover(event: any, rowData: any) {
         event.stopPropagation();
         if (rowData["hoverId"]) {
-            // this.mapService.highlightFeatures([{
-            //     mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
-            //     featureId: rowData["hoverId"]
-            // }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            this.mapService.highlightFeatures([{
+                mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
+                featureId: rowData["hoverId"]
+            }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }
     }
 
     onKeyHoverExit(event: any, rowData: any) {
         event.stopPropagation();
-        // if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-        //     this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
-        // }
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
     }
 
     getStyleClassByType(valueType: number): string {
