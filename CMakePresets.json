@@ -50,6 +50,14 @@
             }
         },
         {
+            "name": "debug-wasm",
+            "configurePreset": "debug-wasm",
+            "displayName": "Debug",
+            "environment": {
+                "NG_DEVELOP": "TRUE"
+            }
+        },
+        {
             "name": "release",
             "configurePreset": "release",
             "displayName": "Release"
