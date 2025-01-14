@@ -80,8 +80,8 @@ export class StyleService {
 
             let styleUrls = [...data["styles"]] as [StyleConfigEntry];
             styleUrls.forEach((styleEntry: StyleConfigEntry) => {
-                if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("/bundle")) {
-                    styleEntry.url = `/bundle/styles/${styleEntry.url}`;
+                if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("bundle")) {
+                    styleEntry.url = `bundle/styles/${styleEntry.url}`;
                 }
             });
 

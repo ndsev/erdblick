@@ -51,7 +51,7 @@ export class JumpTargetService {
                 private inspectionService: InspectionService,
                 private menuService: RightClickMenuService,
                 private searchService: FeatureSearchService) {
-        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
+        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
                     if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
@@ -327,7 +327,7 @@ export class JumpTargetService {
             mapId: mapId,
             featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
         }]};
-        let response = await fetch("/locate", {
+        let response = await fetch("locate", {
             body: JSON.stringify(resolveMe),
             method: "POST"
         }).catch((err)=>console.error(`Error during /locate call: ${err}`));

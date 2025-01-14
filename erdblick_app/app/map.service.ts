@@ -48,9 +48,9 @@ export interface MapInfoItem extends Record<string, any> {
     visible: boolean;
 }
 
-const infoUrl = "/sources";
-const tileUrl = "/tiles";
-const abortUrl = "/abort";
+const infoUrl = "sources";
+const tileUrl = "tiles";
+const abortUrl = "abort";
 
 /** Redefinition of coreLib.Viewport. TODO: Check if needed. */
 type ViewportProperties = {
