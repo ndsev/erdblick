@@ -15,10 +15,10 @@ npm install
 
 echo "Building Angular distribution files."
 npm run lint
-if [[ -z "$NG_DEVELOP" ]]; then
-  npm run build -- -c production
+if [[ -n "$NG_DEVELOP" ]]; then
+  npm run build -- -c development
 else
-  npm run build --watch
+  npm run build
 fi
 
 exit 0

@@ -105,7 +105,17 @@
                                     "input": ".",
                                     "output": "/bundle/"
                                 }
-                            ]
+                            ],
+                            "buildOptimizer": true,
+                            "optimization": {
+                                "scripts": true,
+                                "styles": true,
+                                "fonts": true
+                            },
+                            "vendorChunk": false,
+                            "extractLicenses": false,
+                            "sourceMap": false,
+                            "namedChunks": false
                         },
                         "development": {
                             "buildOptimizer": false,
@@ -120,7 +130,7 @@
                             "namedChunks": true
                         }
                     },
-                    "defaultConfiguration": "development"
+                    "defaultConfiguration": "production"
                 },
                 "serve": {
                     "builder": "@angular-builders/custom-webpack:dev-server",
