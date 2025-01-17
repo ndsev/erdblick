@@ -73,7 +73,7 @@ export class StyleService {
 
     async initializeStyles(): Promise<void> {
         try {
-            const data: any = await firstValueFrom(this.httpClient.get("/config.json", {responseType: "json"}));
+            const data: any = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
             if (!data || !data.styles) {
                 throw new Error("Missing style configuration in config.json.");
             }
