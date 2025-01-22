@@ -73,15 +73,15 @@ export class StyleService {
 
     async initializeStyles(): Promise<void> {
         try {
-            const data: any = await firstValueFrom(this.httpClient.get("/config.json", {responseType: "json"}));
+            const data: any = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
             if (!data || !data.styles) {
                 throw new Error("Missing style configuration in config.json.");
             }
 
             let styleUrls = [...data["styles"]] as [StyleConfigEntry];
             styleUrls.forEach((styleEntry: StyleConfigEntry) => {
-                if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("/bundle")) {
-                    styleEntry.url = `/bundle/styles/${styleEntry.url}`;
+                if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("bundle")) {
+                    styleEntry.url = `bundle/styles/${styleEntry.url}`;
                 }
             });
 

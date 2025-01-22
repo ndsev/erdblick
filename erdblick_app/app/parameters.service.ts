@@ -218,6 +218,8 @@ export class ParametersService {
     private baseCameraZoomM = 100.0;
     private scalingFactor = 1;
 
+    legalInfoDialogVisible: boolean = false;
+
     constructor(public router: Router) {
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 

@@ -52,6 +52,15 @@ mapget::Point TileFeatureLayer::center() const
 }
 
 /**
+ * Retrieves the legal information / copyright of the tile feature layer as a string.
+ * @return The legal information string.
+ */
+std::string TileFeatureLayer::legalInfo() const
+{
+    return model_->legalInfo() ? *model_->legalInfo() : "";
+}
+
+/**
  * Finds a feature within the tile by its ID.
  * @param id The ID of the feature to find.
  * @return A pointer to the found feature, or `nullptr` if not found.

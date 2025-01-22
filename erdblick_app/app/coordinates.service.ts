@@ -20,7 +20,7 @@ export class CoordinatesService {
     }
 
     initialize() {
-        this.httpClient.get("/config.json", {responseType: 'json'}).subscribe({
+        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
                     if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {

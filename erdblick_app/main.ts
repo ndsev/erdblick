@@ -8,7 +8,7 @@ declare global {
         CESIUM_BASE_URL: string
     }
 }
-window.CESIUM_BASE_URL = '/bundle/cesium/';
+window.CESIUM_BASE_URL = 'bundle/cesium/';
 
 platformBrowserDynamic().bootstrapModule(AppModule)
   .catch(err => console.error(err));

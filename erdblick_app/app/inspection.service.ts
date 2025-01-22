@@ -273,7 +273,7 @@ export class InspectionService {
         });
 
         let layer: TileSourceDataLayer | undefined;
-        let fetch = new Fetch("/tiles")
+        let fetch = new Fetch("tiles")
             .withChunkProcessing()
             .withMethod("POST")
             .withBody(newRequestBody)
