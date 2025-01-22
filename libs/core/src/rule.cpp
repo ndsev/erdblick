@@ -423,8 +423,15 @@ bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::st
         return false;
     }
 
-    // Ensure that the geometry name is supported by the rule.
+    // Ensure that the geometry name matches the rule's requirements
     if (geometryName_) {
+
+        // Empty regex: explicitly match features without a geometry name
+        // TODO: Check if there is any recognizable performance impact
+        if (std::regex_match("", *geometryName_)) {
+            return !geometryName || geometryName->empty();
+        }
+
         if (!geometryName) {
             return false;
         }
