@@ -86,6 +86,8 @@ export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
     public loadedTileLayers: Map<string, FeatureTile>;
+    public legalInformationPerMap = new Map<string, Set<string>>();
+    public legalInformationUpdated = new Subject<boolean>();
     private visualizedTileLayers: Map<string, TileVisualization[]>;
     private currentFetch: Fetch|null = null;
     private currentFetchAbort: Fetch|null = null;
@@ -602,6 +604,12 @@ export class MapService {
         this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
         this.statsDialogNeedsUpdate.next();
 
+        // Update legal information if any.
+        if (tileLayer.legalInfo) {
+            console.log("Legal info", tileLayer.legalInfo);
+            this.setLegalInfo(tileLayer.mapName, tileLayer.legalInfo);
+        }
+
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
         setTimeout(() => {
@@ -859,5 +867,26 @@ export class MapService {
                 visualizationCollection.push(visu);
             }
         }
+    }
+
+    private setLegalInfo(mapName: string, legalInfo: string): void {
+        if (this.legalInformationPerMap.has(mapName)) {
+            this.legalInformationPerMap.get(mapName)!.add(legalInfo);
+        } else {
+            this.legalInformationPerMap.set(mapName, new Set<string>().add(legalInfo));
+        }
+        this.legalInformationUpdated.next(true);
+    }
+
+    private removeLegalInfo(mapName: string): void {
+        if (this.legalInformationPerMap.has(mapName)) {
+            this.legalInformationPerMap.delete(mapName);
+            this.legalInformationUpdated.next(true);
+        }
+    }
+
+    private clearAllLegalInfo(): void {
+        this.legalInformationPerMap.clear();
+        this.legalInformationUpdated.next(true);
     }
 }
