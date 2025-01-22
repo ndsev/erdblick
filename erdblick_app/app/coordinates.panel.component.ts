@@ -102,7 +102,7 @@ export class CoordinatesPanelComponent {
                 public clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        for (let level = 0; level < 15; level++) {
+        for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});
         }
         this.parametersService.parameters.subscribe(parameters => {
@@ -159,12 +159,12 @@ export class CoordinatesPanelComponent {
                 }
             }
         }
-        for (let level = 0; level < 15; level++) {
+        for (let level = 0; level <= 15; level++) {
             this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
                 coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
         }
         if (this.coordinatesService.auxiliaryTileIdsFun) {
-            for (let level = 0; level < 15; level++) {
+            for (let level = 0; level <= 15; level++) {
                 const levelData: Map<string, bigint> =
                     this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
                         (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
