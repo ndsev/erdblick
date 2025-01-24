@@ -961,7 +961,7 @@ void RecursiveRelationVisualizationState::render(
         return result;
     };
     auto sourceGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);
-    auto targetGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);;
+    auto targetGeoms = convertMultiValidityWithFallback(r.relation_->targetValidityOrNull(), r.targetFeature_);;
 
     // Get offset base vector.
     auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeoms[0]);
@@ -984,7 +984,7 @@ void RecursiveRelationVisualizationState::render(
             visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun, offset);
         }
         if (rule_.relationLineEndMarkerStyle()) {
-            if (visualizedFeatures_.emplace(sourceId + "-endmarker").second)
+            if (visualizedFeatures_.emplace(sourceId + "-endmarker").second) {
                 visu_.addLine(
                     p1lo,
                     p1hi,
@@ -992,7 +992,8 @@ void RecursiveRelationVisualizationState::render(
                     *rule_.relationLineEndMarkerStyle(),
                     boundEvalFun,
                     offsetBase * rule_.relationLineEndMarkerStyle()->offset());
-            if (visualizedFeatures_.emplace(targetId + "-endmarker").second)
+            }
+            if (visualizedFeatures_.emplace(targetId + "-endmarker").second) {
                 visu_.addLine(
                     p2lo,
                     p2hi,
@@ -1000,6 +1001,7 @@ void RecursiveRelationVisualizationState::render(
                     *rule_.relationLineEndMarkerStyle(),
                     boundEvalFun,
                     offsetBase * rule_.relationLineEndMarkerStyle()->offset());
+            }
         }
     }
 

@@ -263,7 +263,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         attributeType_ = yaml["attribute-type"].as<std::string>();
     }
     if (yaml["attribute-filter"].IsDefined()) {
-        // Parse an attribute based on it's field value, e.g. `speedLimitKmh > 100`
+        // Parse an attribute based on its field value, e.g. `speedLimitKmh > 100`
         attributeFilter_ = yaml["attribute-filter"].as<std::string>();
     }
     if (yaml["attribute-layer-type"].IsDefined()) {
