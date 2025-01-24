@@ -263,7 +263,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         attributeType_ = yaml["attribute-type"].as<std::string>();
     }
     if (yaml["attribute-filter"].IsDefined()) {
-        // Parse an attribute based on it's field value, e.g. `speedLimitKmh > 100`
+        // Parse an attribute based on its field value, e.g. `speedLimitKmh > 100`
         attributeFilter_ = yaml["attribute-filter"].as<std::string>();
     }
     if (yaml["attribute-layer-type"].IsDefined()) {
@@ -423,8 +423,15 @@ bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::st
         return false;
     }
 
-    // Ensure that the geometry name is supported by the rule.
+    // Ensure that the geometry name matches the rule's requirements
     if (geometryName_) {
+
+        // Empty regex: explicitly match features without a geometry name
+        // TODO: Check if there is any recognizable performance impact
+        if (std::regex_match("", *geometryName_)) {
+            return !geometryName || geometryName->empty();
+        }
+
         if (!geometryName) {
             return false;
         }

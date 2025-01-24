@@ -14,6 +14,7 @@ export class FeatureTile {
     mapName: string;
     layerName: string;
     tileId: bigint;
+    legalInfo: string;
     numFeatures: number;
     private parser: TileLayerParser;
     preventCulling: boolean;
@@ -39,6 +40,7 @@ export class FeatureTile {
         this.mapName = mapTileMetadata.mapName;
         this.layerName = mapTileMetadata.layerName;
         this.tileId = mapTileMetadata.tileId;
+        this.legalInfo = mapTileMetadata.legalInfo;
         this.numFeatures = mapTileMetadata.numFeatures;
         this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
         for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {

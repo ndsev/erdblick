@@ -241,7 +241,7 @@ export class TileVisualization {
                 // Try to resolve externally referenced auxiliary tiles.
                 let extRefs = {requests: wasmVisualization.externalReferences()};
                 if (extRefs.requests && extRefs.requests.length > 0) {
-                    let response = await fetch("/locate", {
+                    let response = await fetch("locate", {
                         body: JSON.stringify(extRefs, (_, value) =>
                             typeof value === 'bigint'
                                 ? Number(value)

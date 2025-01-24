@@ -449,6 +449,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
         .field("scalarFields", &TileLayerParser::TileLayerMetadata::scalarFields);
 

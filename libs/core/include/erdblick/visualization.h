@@ -170,6 +170,7 @@ private:
      */
     void addGeometry(
         mapget::SelfContainedGeometry const& geom,
+        std::optional<std::string_view> geometryName,
         std::string_view id,
         FeatureStyleRule const& rule,
         std::string const& mapLayerStyleRuleId,

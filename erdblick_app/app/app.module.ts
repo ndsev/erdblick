@@ -76,6 +76,7 @@ import {StatsDialogComponent} from "./stats.component";
 import {SourceDataLayerSelectionDialogComponent} from "./sourcedataselection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./rightclickmenu.service";
+import {LegalInfoDialogComponent} from "./legalinfo.component";
 
 export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
     return async () => {
@@ -152,7 +153,8 @@ export function typeValidationMessage({ schemaType }: any) {
         HighlightSearch,
         TreeTableFilterPatchDirective,
         StatsDialogComponent,
-        SourceDataLayerSelectionDialogComponent
+        SourceDataLayerSelectionDialogComponent,
+        LegalInfoDialogComponent
     ],
     bootstrap: [
         AppComponent

@@ -329,18 +329,19 @@ void FeatureLayerVisualization::addGeometry(
     if (!geom) {
         return;
     }
-    addGeometry(geom->toSelfContained(), id, rule, mapLayerStyleRuleId, evalFun, offset);
+    addGeometry(geom->toSelfContained(), geom->name(), id, rule, mapLayerStyleRuleId, evalFun, offset);
 }
 
 void FeatureLayerVisualization::addGeometry(
     SelfContainedGeometry const& geom,
+    std::optional<std::string_view> geometryName,
     std::string_view id,
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
-    if (!rule.supports(geom.geomType_))
+    if (!rule.supports(geom.geomType_, geometryName))
         return;
 
     // Combine the ID with the mapTileKey to create an
@@ -772,6 +773,7 @@ void FeatureLayerVisualization::addAttribute(
         {
             addGeometry(
                 validity.computeGeometry(feature->geomOrNull()),
+                std::nullopt,
                 id,
                 rule,
                 mapLayerStyleRuleId,
@@ -781,8 +783,10 @@ void FeatureLayerVisualization::addAttribute(
         });
     }
     else {
+        auto geom = feature->firstGeometry();
         addGeometry(
-            feature->firstGeometry(),
+            geom,
+            std::nullopt,
             id,
             rule,
             mapLayerStyleRuleId,
@@ -957,7 +961,7 @@ void RecursiveRelationVisualizationState::render(
         return result;
     };
     auto sourceGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);
-    auto targetGeoms = convertMultiValidityWithFallback(r.relation_->sourceValidityOrNull(), r.sourceFeature_);;
+    auto targetGeoms = convertMultiValidityWithFallback(r.relation_->targetValidityOrNull(), r.targetFeature_);;
 
     // Get offset base vector.
     auto offsetBase = localWgs84UnitCoordinateSystem(sourceGeoms[0]);
@@ -980,7 +984,7 @@ void RecursiveRelationVisualizationState::render(
             visu_.addLine(p1hi, p2hi, UnselectableId, rule_, boundEvalFun, offset);
         }
         if (rule_.relationLineEndMarkerStyle()) {
-            if (visualizedFeatures_.emplace(sourceId + "-endmarker").second)
+            if (visualizedFeatures_.emplace(sourceId + "-endmarker").second) {
                 visu_.addLine(
                     p1lo,
                     p1hi,
@@ -988,7 +992,8 @@ void RecursiveRelationVisualizationState::render(
                     *rule_.relationLineEndMarkerStyle(),
                     boundEvalFun,
                     offsetBase * rule_.relationLineEndMarkerStyle()->offset());
-            if (visualizedFeatures_.emplace(targetId + "-endmarker").second)
+            }
+            if (visualizedFeatures_.emplace(targetId + "-endmarker").second) {
                 visu_.addLine(
                     p2lo,
                     p2hi,
@@ -996,6 +1001,7 @@ void RecursiveRelationVisualizationState::render(
                     *rule_.relationLineEndMarkerStyle(),
                     boundEvalFun,
                     offsetBase * rule_.relationLineEndMarkerStyle()->offset());
+            }
         }
     }
 
@@ -1004,7 +1010,7 @@ void RecursiveRelationVisualizationState::render(
         if (auto sourceRule = rule_.relationSourceStyle()) {
             for (auto const& sourceGeom : sourceGeoms) {
                 if (sourceGeom.points_.empty()) continue;
-                    visu_.addGeometry(sourceGeom, UnselectableId, *sourceRule, "", boundEvalFun, offsetBase * sourceRule->offset());
+                    visu_.addGeometry(sourceGeom, std::nullopt, UnselectableId, *sourceRule, "", boundEvalFun, offsetBase * sourceRule->offset());
             }
         }
     }
@@ -1014,7 +1020,7 @@ void RecursiveRelationVisualizationState::render(
         if (auto targetRule = rule_.relationTargetStyle()) {
             for (auto const& targetGeom : targetGeoms) {
                 if (targetGeom.points_.empty()) continue;
-                    visu_.addGeometry(targetGeom, UnselectableId, *targetRule, "", boundEvalFun, offsetBase * targetRule->offset());
+                    visu_.addGeometry(targetGeom, std::nullopt, UnselectableId, *targetRule, "", boundEvalFun, offsetBase * targetRule->offset());
             }
         }
     }

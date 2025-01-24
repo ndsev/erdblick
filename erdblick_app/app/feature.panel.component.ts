@@ -398,8 +398,7 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
         }
     }
 
-    onValueHover(event: any, rowData: any) {
-        event.stopPropagation();
+    private highlightHoveredEntry(rowData: any) {
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
                 rowData["mapId"],
@@ -413,6 +412,11 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
         }
     }
 
+    onValueHover(event: any, rowData: any) {
+        event.stopPropagation();
+        this.highlightHoveredEntry(rowData);
+    }
+
     onValueHoverExit(event: any, rowData: any) {
         event.stopPropagation();
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
@@ -422,12 +426,7 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
 
     onKeyHover(event: any, rowData: any) {
         event.stopPropagation();
-        if (rowData["hoverId"]) {
-            this.mapService.highlightFeatures([{
-                mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
-                featureId: rowData["hoverId"]
-            }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
-        }
+        this.highlightHoveredEntry(rowData);
     }
 
     onKeyHoverExit(event: any, rowData: any) {

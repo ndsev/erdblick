@@ -6,6 +6,7 @@ import {CesiumMath} from "./cesium";
 import {ClipboardService} from "./clipboard.service";
 import {coreLib} from "./wasm";
 import {InspectionService} from "./inspection.service";
+import {KeyValue} from "@angular/common";
 
 interface PanelOption {
     name: string,
@@ -37,7 +38,7 @@ interface PanelOption {
                             <span *ngFor="let component of coords.value" class="coord-span">{{ component }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue">
+                    <ng-container *ngFor="let tileId of mapgetTileIds | keyvalue: compareLevels">
                         <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
                             <span class="name-span"
                                   (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}
@@ -45,7 +46,7 @@ interface PanelOption {
                             <span class="coord-span">{{ tileId.value }}</span>
                         </div>
                     </ng-container>
-                    <ng-container *ngFor="let tileId of auxiliaryTileIds | keyvalue">
+                    <ng-container *ngFor="let tileId of auxiliaryTileIds | keyvalue: compareLevels">
                         <div *ngIf="isSelectedOption(tileId.key)" class="coordinates-entry">
                             <span class="name-span"
                                   (click)="clipboardService.copyToClipboard(tileId.value.toString())">{{ tileId.key }}
@@ -102,7 +103,7 @@ export class CoordinatesPanelComponent {
                 public clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public parametersService: ParametersService) {
-        for (let level = 0; level < 15; level++) {
+        for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});
         }
         this.parametersService.parameters.subscribe(parameters => {
@@ -159,12 +160,12 @@ export class CoordinatesPanelComponent {
                 }
             }
         }
-        for (let level = 0; level < 15; level++) {
+        for (let level = 0; level <= 15; level++) {
             this.mapgetTileIds.set(`Mapget TileId (level ${level})`,
                 coreLib.getTileIdFromPosition(this.longitude, this.latitude, level));
         }
         if (this.coordinatesService.auxiliaryTileIdsFun) {
-            for (let level = 0; level < 15; level++) {
+            for (let level = 0; level <= 15; level++) {
                 const levelData: Map<string, bigint> =
                     this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
                         (map: Map<string, bigint>, [key, value]: [string, bigint]) => {
@@ -226,5 +227,12 @@ export class CoordinatesPanelComponent {
             array.push(option.name);
             return array;
         }, new Array<string>()));
+    }
+
+    compareLevels(a: KeyValue<string, bigint> , b: KeyValue<string, bigint>): number {
+        const aLevel = parseInt(a.key.match(/\d+/)?.[0] ?? '0', 10);
+        const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
+
+        return aLevel - bLevel;
     }
 }
