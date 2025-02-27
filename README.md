@@ -33,12 +33,12 @@ rule that matches it.
 
 ### Custom Style Declarations
 
-It is possible to apply own custom styles easily. 
-On build, Erdblick automatically picks up `.yaml` style files from `config/styles` directory (where you can drop your custom files) 
-and bundles them in `static/bundle/styles` (in case you are using a pre-built Erdblick distribution, 
+It is possible to apply own custom styles easily.
+On build, Erdblick automatically picks up `.yaml` style files from `config/styles` directory (where you can drop your custom files)
+and bundles them in `static/bundle/styles` (in case you are using a pre-built Erdblick distribution,
 you can directly put your styles in `static/bundle/styles`).
 
-For Erdblick to apply custom styles, it expects the following declarations for the styles in `config/config.json` 
+For Erdblick to apply custom styles, it expects the following declarations for the styles in `config/config.json`
 (in case you are using a pre-built Erdblick distribution, you can directly create your configuration in `static/config.json`):
 ```json
 {
@@ -55,11 +55,11 @@ It is also possible to export and import styles in GUI. Styles imported this way
 ### Editing Styles via Erdblick
 
 Both bundled and imported styles can be modified directly via a GUI editor included in Erdblick.
-If a style was modified this way, it will persist in the `local storage` of the browser 
-(if the `local storage` is cleared or reset, all of the modifications will be reset as well; 
+If a style was modified this way, it will persist in the `local storage` of the browser
+(if the `local storage` is cleared or reset, all of the modifications will be reset as well;
 in case you would like to clear the styles yourself, you can do that via the preferences panel.
 
-The style editor automatically verifies YAML for syntax parsing errors and provides basic autocomplete. 
+The style editor automatically verifies YAML for syntax parsing errors and provides basic autocomplete.
 
 ### Style Definitions
 
@@ -77,9 +77,9 @@ These properties define the fundamental matching criteria for when a style rule 
 |-------|-------------|------|---------|
 | `geometry` | List of geometry type(s) or single type the rule applies to, when aspect is `attribute` then this is about the validity geometry | At least one of `"point"`,`"mesh"`, `"line"`, `"polygon"` | `["point", "mesh"]`, `line` |
 | `aspect` | Specifies the aspect to which the rule applies | String: `"feature"`, `"relation"`, or `"attribute"` | `"feature"` |
-| `mode` | Specifies the highlight mode | String: `"none"`, `"hover"`, or `"selection"` | `"hover"` |
+| `mode` | Determines when the style is applied based on feature interaction state. When omitted or set to `none`, the style applies to features in their default state (not selected or hovered). | String: `"none"`, `"hover"`, or `"selection"` | `"hover"` |
 | `type` | Regular expression to match against a feature type | String | `"Lane\|Boundary"` |
-| `filter` | Simfil filter expression over feature's JSON | String | `*roadClass == 4` |
+| `filter` | [Simfil](https://github.com/Klebert-Engineering/simfil/blob/main/simfil-language.md) filter expression over feature's JSON expression. | String | `*roadClass == 4` |
 | `selectable` | Indicates if the feature is selectable | Boolean | `true` |
 
 #### General Visual Properties
@@ -103,7 +103,7 @@ Special properties that only apply to point geometries, allowing detailed contro
 |-------|-------------|------|---------|
 | `outline-color` | Point outline color | String | `green` |
 | `outline-width` | Point outline width in px | Float | `3.6` |
-| `point-merge-grid-cell` | Merging tolerance | Array of three Floats | `[0.000000084, 0.000000084, 0.01]` |
+| `point-merge-grid-cell` | Merging tolerance: a threshold defined as the WGS84 (with elevation) delta; points within this range are displayed and selectable as a single point | Array of three Floats | `[0.000000084, 0.000000084, 0.01]` |
 | `near-far-scale` | Point scaling parameters | Array of four Floats | `[1.5e2,10,8.0e6,0]` |
 | `icon-url` | Static icon URL | String | `/icons/unknown.png` |
 | `icon-url-expression` | Dynamic icon URL expression | String | `category == 5 and "/icons/ev-charging.png" or ""` |
