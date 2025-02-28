@@ -80,6 +80,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
+    if (yaml["geometry-name"].IsDefined()) {
+        geometryName_ = yaml["geometry-name"].as<std::string>();
+    }
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
@@ -259,6 +262,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse an attribute type regular expression, e.g. `SPEED_LIMIT_.*`
         attributeType_ = yaml["attribute-type"].as<std::string>();
     }
+    if (yaml["attribute-filter"].IsDefined()) {
+        // Parse an attribute based on its field value, e.g. `speedLimitKmh > 100`
+        attributeFilter_ = yaml["attribute-filter"].as<std::string>();
+    }
     if (yaml["attribute-layer-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `Road.*Layer`
         attributeLayerType_ = yaml["attribute-layer-type"].as<std::string>();
@@ -409,9 +416,31 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     return this;
 }
 
-bool FeatureStyleRule::supports(const mapget::GeomType& g) const
+bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
 {
-    return geometryTypes_ & geomTypeBit(g);
+    // Ensure that the geometry type is supported by the rule.
+    if (!(geometryTypes_ & geomTypeBit(g))) {
+        return false;
+    }
+
+    // Ensure that the geometry name matches the rule's requirements
+    if (geometryName_) {
+
+        // Empty regex: explicitly match features without a geometry name
+        // TODO: Check if there is any recognizable performance impact
+        if (std::regex_match("", *geometryName_)) {
+            return !geometryName || geometryName->empty();
+        }
+
+        if (!geometryName) {
+            return false;
+        }
+        if (!std::regex_match(geometryName->begin(), geometryName->end(), *geometryName_)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
@@ -689,6 +718,11 @@ std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
 std::optional<std::regex> const& FeatureStyleRule::attributeType() const
 {
     return attributeType_;
+}
+
+std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
+{
+    return attributeFilter_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const

@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
-import {Params, Router} from "@angular/router";
+import {Params} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
@@ -218,7 +218,9 @@ export class ParametersService {
     private baseCameraZoomM = 100.0;
     private scalingFactor = 1;
 
-    constructor(public router: Router) {
+    legalInfoDialogVisible: boolean = false;
+
+    constructor() {
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 
         let parameters = this.loadSavedParameters();
@@ -450,7 +452,8 @@ export class ParametersService {
     resetStorage() {
         localStorage.removeItem('erdblickParameters');
         localStorage.removeItem('searchHistory');
-        window.location.href = this.router.url.split('?')[0];
+        const {origin, pathname} = window.location;
+        window.location.href = origin + pathname;
     }
 
     private saveParameters() {

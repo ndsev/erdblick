@@ -6,7 +6,7 @@ include(FetchContent)
 set(CMAKE_CXX_STANDARD 20)
 
 # Treat warnings as errors, with some exceptions for Cesium.
-set (ERDBLICK_CXX_FLAGS
+set(ERDBLICK_CXX_FLAGS
   "-Wall -Wno-error=sign-conversion -Wno-sign-compare -Wno-sign-conversion -Wno-unused-local-typedefs -Wno-comment -Wno-effc++")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ERDBLICK_CXX_FLAGS} -Wno-bool-compare")
@@ -14,15 +14,22 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ERDBLICK_CXX_FLAGS} -Wno-error=shorten-64-to-32")
 endif()
 
-# External dependencies.
+# Adjust CXX_FLAGS for Debug builds
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+endif()
 
+# External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
-FetchContent_Declare(mapget
-  GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-  GIT_TAG        "attribute-validities"
-  GIT_SHALLOW    ON)
-FetchContent_MakeAvailable(mapget)
+
+if (NOT TARGET mapget)
+  FetchContent_Declare(mapget
+    GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+    GIT_TAG        "v2025.1.0"
+    GIT_SHALLOW    ON)
+  FetchContent_MakeAvailable(mapget)
+endif()
 
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
@@ -44,4 +51,3 @@ else()
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS erdblick-core)
 endif()
-

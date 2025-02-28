@@ -79,7 +79,10 @@ interface Column {
                                 <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
                                 </p-treeTableToggler>
                                 <span (click)="onKeyClick($event, rowData)"
-                                      style="cursor: pointer">{{ rowData['key'] }}
+                                      (mouseover)="onKeyHover($event, rowData)"
+                                      (mouseout)="onKeyHoverExit($event, rowData)"
+                                      style="cursor: pointer">
+                                    {{ rowData['key'] }}
                                 </span>
                                 <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
                                                class="source-data-ref-container">
@@ -395,17 +398,38 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
         }
     }
 
-    onValueHover(event: any, rowData: any) {
-        event.stopPropagation();
+    private highlightHoveredEntry(rowData: any) {
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
                 rowData["mapId"],
                 rowData["value"],
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        } else if (rowData["hoverId"]) {
+            this.mapService.highlightFeatures([{
+                mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
+                featureId: rowData["hoverId"]
+            }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }
     }
 
+    onValueHover(event: any, rowData: any) {
+        event.stopPropagation();
+        this.highlightHoveredEntry(rowData);
+    }
+
     onValueHoverExit(event: any, rowData: any) {
+        event.stopPropagation();
+        if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
+            this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        }
+    }
+
+    onKeyHover(event: any, rowData: any) {
+        event.stopPropagation();
+        this.highlightHoveredEntry(rowData);
+    }
+
+    onKeyHoverExit(event: any, rowData: any) {
         event.stopPropagation();
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.mapService.highlightFeatures([], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();

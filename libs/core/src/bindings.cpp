@@ -8,11 +8,15 @@
 #include <cxxabi.h>
 
 #include <sanitizer/lsan_interface.h>
+#include <sanitizer/asan_interface.h>
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 const char *__lsan_default_options() {
     return "verbosity=1:malloc_context_size=64";
+}
+const char *__asan_default_options() {
+    return "verbosity=1:malloc_context_size=64:detect_container_overflow=0";
 }
 #endif
 #endif
@@ -445,6 +449,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
         .field("scalarFields", &TileLayerParser::TileLayerMetadata::scalarFields);
 

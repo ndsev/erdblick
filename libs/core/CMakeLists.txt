@@ -44,6 +44,12 @@ set(ERDBLICK_SOURCE_FILES
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+  # Defaulting to debug symbols if the build type is Debug
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+  endif()
+
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)

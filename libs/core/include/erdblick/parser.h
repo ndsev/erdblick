@@ -49,6 +49,7 @@ public:
         std::string mapName;
         std::string layerName;
         uint64_t tileId;
+        std::string legalInfo;
         int32_t numFeatures;
         NativeJsValue scalarFields;
     };

@@ -19,7 +19,7 @@ export class DataSourcesService {
 
     postConfig(config: string) {
         this.loading = true;
-        this.http.post("/config", config, { observe: 'response', responseType: 'text' }).subscribe({
+        this.http.post("config", config, { observe: 'response', responseType: 'text' }).subscribe({
             next: (data: any) => {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
@@ -38,7 +38,7 @@ export class DataSourcesService {
         this.readOnly = true;
         this.errorMessage = "";
         this.loading = true;
-        this.http.get("/config").subscribe({
+        this.http.get("config").subscribe({
             next: (data: any) => {
                 if (!data) {
                     this.errorMessage = "Unknown error: DataSources configuration data is missing!";

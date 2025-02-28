@@ -18,6 +18,10 @@ import {filter} from "rxjs";
         <pref-components></pref-components>
         <coordinates-panel></coordinates-panel>
         <stats-dialog></stats-dialog>
+        <legal-dialog></legal-dialog>
+        <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
+            {{ copyright }}
+        </div>
         <div id="info">
             {{ title }} {{ version }}
         </div>
@@ -36,19 +40,25 @@ export class AppComponent {
 
     title: string = "erdblick";
     version: string = "";
+    copyright: string = "";
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
                 private activatedRoute: ActivatedRoute,
                 public mapService: MapService,
-                public styleService: StyleService,
-                public jumpToTargetService: JumpTargetService,
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.version = data.toString();
             });
         this.init();
+        this.mapService.legalInformationUpdated.subscribe(_ => {
+            this.copyright = "";
+            let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
+            if (firstSet !== undefined && firstSet.size) {
+                this.copyright = '© '.concat(firstSet.values().next().value as string).slice(0, 14).concat('…');
+            }
+        });
     }
 
     init() {
@@ -82,5 +92,9 @@ export class AppComponent {
             queryParamsHandling: 'merge',
             replaceUrl: replaceUrl
         });
+    }
+
+    openLegalInfo() {
+        this.parametersService.legalInfoDialogVisible = true;
     }
 }

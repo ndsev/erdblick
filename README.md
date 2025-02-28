@@ -324,13 +324,17 @@ For attributes, style expressions (e.g. `color-expression`) are evaluated in a c
 * `$name`: The attribute name.
 * `$layer`: The layer name of the attribute.
 * `$feature`: The feature of the attribute.
-* `direction`: Attribute direction if set.
-* `validity`: Attribute validity geometry if set.
+* `validity`: Attribute validity collection if available.
 * Top-level fields of the attribute with their nested members, e.g. `attributeValue.speedLimitKmh`.
 
 **Note:** To avoid colliding geometries when multiple attributes are visualized for the same feature,
 set the `offset` field. The spatial `offset` will be multiplied, so it is possible to "stack" attributes
 over a feature.
+
+**A note on hover/selection semantics:** The semantics of setting `mode: hover` vs.
+`mode: selection` for an attribute are a bit tricky: Hover styles for one specific attribute are applied,
+if the user hovers over the attribute in the attribute panel. Selection styles on the other hand are
+applied, if the user selects the feature which contains the attribute.
 
 ### About Merged Point Visualizations
 
