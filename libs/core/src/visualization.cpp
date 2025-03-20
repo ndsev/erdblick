@@ -684,7 +684,7 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
 {
     try
     {
-        auto results = tile_->evaluate(expression, ctx);
+        auto results = tile_->evaluate(expression, ctx, false);
         if (!results.empty()) {
             return std::move(results[0]);
         }
