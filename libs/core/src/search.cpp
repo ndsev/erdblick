@@ -37,9 +37,3 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::traceResults()
     // TODO: Implement
     return {};
 }
-
-std::string erdblick::anyWrap(const std::string_view& q)
-{
-    return fmt::format("any({})", q);
-}
-

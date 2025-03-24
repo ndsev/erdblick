@@ -250,7 +250,7 @@ private:
     /**
      * Simfil expression evaluation function for the tile which this visualization belongs to.
      */
-    simfil::Value evaluateExpression(std::string const& expression, simfil::ModelNode const& ctx) const;
+    simfil::Value evaluateExpression(std::string const& expression, simfil::ModelNode const& ctx, bool anyMode = true) const;
 
     /**
      * Insert style option variables into the given OverlayNode.
