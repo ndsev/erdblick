@@ -115,7 +115,13 @@
                             "vendorChunk": false,
                             "extractLicenses": false,
                             "sourceMap": false,
-                            "namedChunks": false
+                            "namedChunks": false,
+                            "fileReplacements": [
+                                {
+                                    "replace": "erdblick_app/environments/environment.ts",
+                                    "with": "erdblick_app/environments/environment.prod.ts"
+                                }
+                            ]
                         },
                         "development": {
                             "buildOptimizer": false,
@@ -127,7 +133,71 @@
                             "vendorChunk": true,
                             "extractLicenses": false,
                             "sourceMap": true,
-                            "namedChunks": true
+                            "namedChunks": true,
+                            "fileReplacements": [
+                                {
+                                    "replace": "erdblick_app/environments/environment.ts",
+                                    "with": "erdblick_app/environments/environment.ts"
+                                }
+                            ]
+                        },
+                        "visualization-only": {
+                            "budgets": [
+                                {
+                                    "type": "initial",
+                                    "maximumWarning": "500kb",
+                                    "maximumError": "100mb"
+                                },
+                                {
+                                    "type": "anyComponentStyle",
+                                    "maximumWarning": "2kb",
+                                    "maximumError": "4kb"
+                                }
+                            ],
+                            "outputHashing": "all",
+                            "assets": [
+                                {
+                                    "glob": "**/*",
+                                    "input": "node_modules/cesium/Build/Cesium",
+                                    "output": "/bundle/cesium"
+                                },
+                                {
+                                    "glob": "**/*",
+                                    "input": "config/styles",
+                                    "output": "/bundle/styles"
+                                },
+                                {
+                                    "glob": "**/*",
+                                    "input": "images",
+                                    "output": "/bundle/images"
+                                },
+                                {
+                                    "glob": "**/*.json",
+                                    "input": "config",
+                                    "output": "/"
+                                },
+                                {
+                                    "glob": "VERSION",
+                                    "input": ".",
+                                    "output": "/bundle/"
+                                }
+                            ],
+                            "buildOptimizer": true,
+                            "optimization": {
+                                "scripts": true,
+                                "styles": true,
+                                "fonts": true
+                            },
+                            "vendorChunk": false,
+                            "extractLicenses": false,
+                            "sourceMap": false,
+                            "namedChunks": false,
+                            "fileReplacements": [
+                                {
+                                    "replace": "erdblick_app/environments/environment.ts",
+                                    "with": "erdblick_app/environments/environment.visualization-only.ts"
+                                }
+                            ]
                         }
                     },
                     "defaultConfiguration": "production"
@@ -140,6 +210,9 @@
                         },
                         "development": {
                             "browserTarget": "erdblick:build:development"
+                        },
+                        "visualization-only": {
+                            "browserTarget": "erdblick:build:visualization-only"
                         }
                     },
                     "defaultConfiguration": "development"

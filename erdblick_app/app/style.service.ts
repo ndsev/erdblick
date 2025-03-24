@@ -12,6 +12,7 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
+import {AppModeService} from "./app-mode.service";
 
 interface StyleConfigEntry {
     id: string,
@@ -57,7 +58,9 @@ export class StyleService {
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
 
-    constructor(private httpClient: HttpClient, private parameterService: ParametersService)
+    constructor(private httpClient: HttpClient,
+                private parameterService: ParametersService,
+                private appModeService: AppModeService)
     {
         this.parameterService.parameters.subscribe(_ => {
             // This subscription exists specifically to catch the values of the query parameters.
@@ -69,6 +72,10 @@ export class StyleService {
             }
             this.reapplyAllStyles();
         })
+
+        // Attempt to load built-in and imported styles.
+        this.loadModifiedBuiltinStyles();
+        this.loadImportedStyles();
     }
 
     async initializeStyles(): Promise<void> {
@@ -404,5 +411,35 @@ export class StyleService {
     toggleOption(styleId: string, optionId: string, enabled: boolean) {
         const style = this.styles.get(styleId)!;
         style.params.options[optionId] = enabled;
+    }
+
+    /**
+     * Ensures all styles are visible when in visualization-only mode
+     * @returns Record of style parameters with all styles visible
+     */
+    ensureAllStylesVisible(): Record<string, StyleParameters> {
+        const styleParams: Record<string, StyleParameters> = {};
+
+        for (const [styleId, style] of this.styles) {
+            // Make all styles visible and enable all options
+            const options: Record<string, boolean> = {};
+            for (const option of style.options) {
+                options[option.id] = true;
+            }
+
+            styleParams[styleId] = {
+                visible: true,
+                options: options,
+                showOptions: false
+            };
+
+            // Update the style's parameters
+            if (style.params) {
+                style.params.visible = true;
+                style.params.options = options;
+            }
+        }
+
+        return styleParams;
     }
 }
