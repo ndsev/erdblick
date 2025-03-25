@@ -98,7 +98,7 @@ void FeatureLayerVisualization::run()
             evaluationContext,
             [this, &evaluationContext](auto&& str)
             {
-                return evaluateExpression(str, evaluationContext);
+                return evaluateExpression(str, evaluationContext, false, false);
             }};
 
         for (auto&& rule : style_.rules()) {
@@ -681,11 +681,12 @@ void FeatureLayerVisualization::addPolyLine(
 simfil::Value FeatureLayerVisualization::evaluateExpression(
     const std::string& expression,
     const simfil::ModelNode& ctx,
-    bool anyMode /* = true */) const
+    bool anyMode,
+    bool autoWildcard) const
 {
     try
     {
-        auto results = tile_->evaluate(expression, ctx, anyMode);
+        auto results = tile_->evaluate(expression, ctx, anyMode, autoWildcard);
         if (!results.empty()) {
             return std::move(results[0]);
         }
@@ -751,7 +752,7 @@ void FeatureLayerVisualization::addAttribute(
         attrEvaluationContext,
         [this, &attrEvaluationContext](auto&& str)
         {
-            return evaluateExpression(str, attrEvaluationContext);
+            return evaluateExpression(str, attrEvaluationContext, false, false);
         }};
 
     // Bump visual offset factor for next visualized attribute.
@@ -943,7 +944,7 @@ void RecursiveRelationVisualizationState::render(
         relationEvaluationContext,
         [this, &relationEvaluationContext](auto&& str)
         {
-            return visu_.evaluateExpression(str, relationEvaluationContext);
+            return visu_.evaluateExpression(str, relationEvaluationContext, false, false);
         }};
 
     // Obtain source/target geometries.
