@@ -113,7 +113,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    ngAfterViewInit() {
+    ngAfterViewInit(): void {
         this.viewer = new Viewer("mapViewContainer",
             {
                 baseLayerPicker: false,
@@ -136,6 +136,23 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.openStreetMapLayer.alpha = 0.3;
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
         this.cameraIsMoving = false;
+
+        // Add these critical initialization parts BEFORE the interactive events check
+        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+        this.featureSearchService.visualizationChanged.subscribe(_ => {
+            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+            this.viewer.scene.requestRender();
+        });
+
+        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+            this.renderFeatureSearchResultTree(level);
+        });
+
+        // Hide the global loading spinner.
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
 
         // Only register interactive events when not in visualization-only mode
         if (!this.appModeService.isVisualizationOnly) {
