@@ -18,7 +18,10 @@ echo "Building Angular distribution files."
 npm run lint
 
 # Determine which build mode to use
-if [[ -n "$NG_DEVELOP" ]]; then
+if [[ -n "$NG_DEVELOP" && "$BUILD_MODE" == "visualization-only" ]]; then
+  echo "Building in visualization-only development mode."
+  npm run build -- -c visualization-only-dev
+elif [[ -n "$NG_DEVELOP" ]]; then
   npm run build -- -c development
 elif [[ "$BUILD_MODE" == "visualization-only" ]]; then
   echo "Building in visualization-only mode."

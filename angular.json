@@ -198,6 +198,24 @@
                                     "with": "erdblick_app/environments/environment.visualization-only.ts"
                                 }
                             ]
+                        },
+                        "visualization-only-dev": {
+                            "buildOptimizer": false,
+                            "optimization": {
+                                "scripts": false,
+                                "styles": false,
+                                "fonts": false
+                            },
+                            "vendorChunk": true,
+                            "extractLicenses": false,
+                            "sourceMap": true,
+                            "namedChunks": true,
+                            "fileReplacements": [
+                                {
+                                    "replace": "erdblick_app/environments/environment.ts",
+                                    "with": "erdblick_app/environments/environment.visualization-only.ts"
+                                }
+                            ]
                         }
                     },
                     "defaultConfiguration": "production"
@@ -213,6 +231,9 @@
                         },
                         "visualization-only": {
                             "browserTarget": "erdblick:build:visualization-only"
+                        },
+                        "visualization-only-dev": {
+                            "browserTarget": "erdblick:build:visualization-only-dev"
                         }
                     },
                     "defaultConfiguration": "development"
