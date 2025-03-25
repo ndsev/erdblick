@@ -142,6 +142,7 @@
                             ]
                         },
                         "visualization-only": {
+                            "outputPath": "static-visualization-only",
                             "budgets": [
                                 {
                                     "type": "initial",
@@ -200,6 +201,7 @@
                             ]
                         },
                         "visualization-only-dev": {
+                            "outputPath": "static-visualization-only",
                             "buildOptimizer": false,
                             "optimization": {
                                 "scripts": false,

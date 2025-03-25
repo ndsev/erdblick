@@ -8,6 +8,14 @@ if [ -z $SOURCE_LOC ]; then
   exit 1
 fi
 
+# Validate build mode if provided
+if [ ! -z "$BUILD_MODE" ]; then
+  if [[ "$BUILD_MODE" != "default" && "$BUILD_MODE" != "visualization-only" && "$BUILD_MODE" != "all" ]]; then
+    echo "Invalid build mode. Supported values are: default, visualization-only, all"
+    exit 1
+  fi
+fi
+
 echo "Using source dir @ $SOURCE_LOC."
 cd "$SOURCE_LOC" || exit 1
 
@@ -18,7 +26,16 @@ echo "Building Angular distribution files."
 npm run lint
 
 # Determine which build mode to use
-if [[ -n "$NG_DEVELOP" && "$BUILD_MODE" == "visualization-only" ]]; then
+if [[ "$BUILD_MODE" == "all" ]]; then
+  echo "Building all configurations..."
+  if [[ -n "$NG_DEVELOP" ]]; then
+    npm run build -- -c development
+    npm run build -- -c visualization-only-dev
+  else
+    npm run build
+    npm run build -- -c visualization-only
+  fi
+elif [[ -n "$NG_DEVELOP" && "$BUILD_MODE" == "visualization-only" ]]; then
   echo "Building in visualization-only development mode."
   npm run build -- -c visualization-only-dev
 elif [[ -n "$NG_DEVELOP" ]]; then
