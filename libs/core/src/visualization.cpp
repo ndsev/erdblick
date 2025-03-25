@@ -680,12 +680,11 @@ void FeatureLayerVisualization::addPolyLine(
 
 simfil::Value FeatureLayerVisualization::evaluateExpression(
     const std::string& expression,
-    const simfil::ModelNode& ctx,
-    bool anyMode /* = true */) const
+    const simfil::ModelNode& ctx) const
 {
     try
     {
-        auto results = tile_->evaluate(expression, ctx, anyMode);
+        auto results = tile_->evaluate(expression, ctx, false);
         if (!results.empty()) {
             return std::move(results[0]);
         }
