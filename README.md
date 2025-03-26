@@ -22,6 +22,7 @@ erdblick can be built in two different modes to suit different use cases:
 
 The complete erdblick experience with all features enabled:
 
+* GUI for data sources and styles
 * Interactive feature selection and inspection
 * Style editing capabilities
 * Search functionality
@@ -33,10 +34,9 @@ The complete erdblick experience with all features enabled:
 
 A streamlined version focused purely on map visualization:
 
-* Map display with all configured styles (with only the options of each style that have `default: true` enabled)
+* Map display with all data sources and styles that are reflected in the URL used to open the viewer
 * Basic camera controls
 * No advanced features like search and inspection
-* Smaller bundle size
 * Perfect for embedding or usage for demo purposes
 
 This mode can be built using:
