@@ -205,7 +205,9 @@ const VISUALIZATION_ONLY_ALLOWED = new Set([
     'osm',
     'osmOpacity',
     'tilesLoadLimit',
-    'tilesVisualizeLimit'
+    'tilesVisualizeLimit',
+    'styles',
+    'layers'
 ]);
 
 @Injectable({providedIn: 'root'})
