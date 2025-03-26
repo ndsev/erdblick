@@ -14,7 +14,6 @@ import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
 import * as uuid from 'uuid';
 import {Color} from "./cesium";
-import {AppModeService} from "./app-mode.service";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -127,20 +126,19 @@ export class MapService {
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
-                private keyboardService: KeyboardService,
-                private appModeService: AppModeService)
+                private keyboardService: KeyboardService)
     {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
         this.currentViewport = {
-            orientation: 0,
-            camPosLon: 0,
-            south: 0,
-            west: 0,
-            width: 0,
-            height: 0,
-            camPosLat: 0
+            south: .0,
+            west: .0,
+            width: .0,
+            height: .0,
+            camPosLon: .0,
+            camPosLat: .0,
+            orientation: .0,
         };
         this.currentVisibleTileIds = new Set();
         this.currentHighDetailTileIds = new Set();
@@ -161,8 +159,6 @@ export class MapService {
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.
         this.clientId = uuid.v4();
-
-        this.keyboardService.registerShortcut('o', this.statsDialogKeyPressed.bind(this), true);
     }
 
     public async initialize() {
@@ -892,10 +888,5 @@ export class MapService {
     private clearAllLegalInfo(): void {
         this.legalInformationPerMap.clear();
         this.legalInformationUpdated.next(true);
-    }
-
-    private statsDialogKeyPressed() {
-        this.statsDialogVisible = true;
-        this.statsDialogNeedsUpdate.next();
     }
 }
