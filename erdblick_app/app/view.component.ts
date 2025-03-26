@@ -68,6 +68,7 @@ export class ErdblickViewComponent implements AfterViewInit {
      * @param parameterService The parameter service, used to update
      * @param jumpService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
+     * @param appModeService
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
@@ -77,8 +78,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
-                public appModeService: AppModeService,
-                public coordinatesService: CoordinatesService) {
+                public coordinatesService: CoordinatesService,
+                public appModeService: AppModeService) {
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
@@ -113,7 +114,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    ngAfterViewInit(): void {
+    ngAfterViewInit() {
         this.viewer = new Viewer("mapViewContainer",
             {
                 baseLayerPicker: false,
@@ -137,76 +138,9 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
         this.cameraIsMoving = false;
 
-        // Add these critical initialization parts BEFORE the interactive events check
-        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
-        this.featureSearchService.visualizationChanged.subscribe(_ => {
-            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
-            this.viewer.scene.requestRender();
-        });
-
-        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.renderFeatureSearchResultTree(level);
-        });
-
-        // Hide the global loading spinner.
-        const spinner = document.getElementById('global-spinner-container');
-        if (spinner) {
-            spinner.style.display = 'none';
-        }
-
-        // Only register interactive events when not in visualization-only mode
-        if (!this.appModeService.isVisualizationOnly) {
-            this.registerInteractiveEvents();
-        }
-
-        this.viewer.camera.percentageChanged = 0.1;
-        this.viewer.camera.changed.addEventListener(() => {
-            this.parameterService.setCameraState(this.viewer.camera);
-            this.updateViewport();
-        });
-        this.viewer.camera.moveStart.addEventListener(() => {
-            this.cameraIsMoving = true;
-        });
-        this.viewer.camera.moveEnd.addEventListener(() => {
-            this.cameraIsMoving = false;
-        });
-        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
-
-        // Remove fullscreen button as unnecessary
-        this.viewer.fullscreenButton.destroy();
-
-        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.viewer.camera.setView({
-                destination: cameraData.destination,
-                orientation: cameraData.orientation
-            });
-            this.updateViewport();
-        });
-
-        this.parameterService.parameters.subscribe(parameters => {
-            if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = parameters.osm;
-                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
-            }
-            if (parameters.marker && parameters.markedPosition.length == 2) {
-                this.addMarker(Cartesian3.fromDegrees(
-                    parameters.markedPosition[0],
-                    parameters.markedPosition[1],
-                    parameters.markedPosition.length > 2 ? parameters.markedPosition[2] : 0.0));
-            } else if (this.marker !== null) {
-                this.viewer.entities.remove(this.marker);
-                this.marker = null;
-            }
-        });
-
-        // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
-    }
-
-    private registerInteractiveEvents() {
-        if (!this.mouseHandler) return;
-
         this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
             const position = movement.position;
             const cartesian = this.viewer.camera.pickEllipsoid(
                 new Cartesian2(position.x, position.y),
@@ -227,6 +161,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
             const position = movement.position;
             let feature = this.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
@@ -276,16 +212,130 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (this.cameraIsMoving) {
                 return;
             }
-            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-            if (coordinates !== undefined) {
-                this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+
+            if (!this.appModeService.isVisualizationOnly) {
+                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+                if (coordinates !== undefined) {
+                    this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+                }
             }
-            let feature = this.viewer.scene.pick(position);
-            this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? feature.id : [feature?.id],
-                false,
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+
+            if (!this.appModeService.isVisualizationOnly) {
+                let feature = this.viewer.scene.pick(position);
+                this.mapService.highlightFeatures(
+                    Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                    false,
+                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            }
         }, ScreenSpaceEventType.MOUSE_MOVE);
+
+        // Add a handler for camera movement.
+        this.viewer.camera.percentageChanged = 0.1;
+        this.viewer.camera.changed.addEventListener(() => {
+            this.parameterService.setCameraState(this.viewer.camera);
+            this.updateViewport();
+        });
+        this.viewer.camera.moveStart.addEventListener(() => {
+            this.cameraIsMoving = true;
+        });
+        this.viewer.camera.moveEnd.addEventListener(() => {
+            this.cameraIsMoving = false;
+        });
+        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+        // Remove fullscreen button as unnecessary
+        this.viewer.fullscreenButton.destroy();
+
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
+            this.viewer.camera.setView({
+                destination: cameraData.destination,
+                orientation: cameraData.orientation
+            });
+            this.updateViewport();
+        });
+
+        this.parameterService.parameters.subscribe(parameters => {
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = parameters.osm;
+                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
+            }
+            if (parameters.marker && parameters.markedPosition.length == 2) {
+                this.addMarker(Cartesian3.fromDegrees(
+                    Number(parameters.markedPosition[0]),
+                    Number(parameters.markedPosition[1]))
+                );
+            } else {
+                if (this.marker) {
+                    this.viewer.entities.remove(this.marker);
+                }
+            }
+        });
+
+        // Add debug API that can be easily called from browser's debug console
+        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
+
+        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+        this.featureSearchService.visualizationChanged.subscribe(_ => {
+            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+            this.viewer.scene.requestRender();
+        });
+
+        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+            this.renderFeatureSearchResultTree(level);
+        });
+
+        this.jumpService.markedPosition.subscribe(position => {
+            if (position.length >= 2) {
+                this.parameterService.setMarkerState(true);
+                this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
+            }
+        });
+
+        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+            const [origin, normal] = values;
+            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+            Cartesian3.normalize(direction, direction);
+            Cartesian3.negate(direction, direction);
+            const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(endPoint, new Cartesian3());
+            const right = Cartesian3.cross(direction, up, new Cartesian3());
+            Cartesian3.normalize(right, right);
+            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+            Cartesian3.normalize(cameraUp, cameraUp);
+            this.viewer.camera.flyTo({
+                destination: endPoint,
+                orientation: {
+                    direction: direction,
+                    up: cameraUp,
+                }
+            });
+        });
+
+        if (!this.appModeService.isVisualizationOnly) {
+            this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
+            this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
+            this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
+            this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
+            this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
+            this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
+            this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
+        }
+
+        // Hide the global loading spinner.
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+
+        this.menuService.tileOutline.subscribe(entity => {
+            if (entity) {
+                this.tileOutlineEntity = this.viewer.entities.add(entity);
+                this.viewer.scene.requestRender();
+            } else if (this.tileOutlineEntity) {
+                this.viewer.entities.remove(this.tileOutlineEntity);
+                this.viewer.scene.requestRender();
+            }
+        });
     }
 
     /**
