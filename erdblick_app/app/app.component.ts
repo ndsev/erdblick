@@ -6,18 +6,19 @@ import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
 import {StyleService} from "./style.service";
 import {filter} from "rxjs";
+import {AppModeService} from "./app-mode.service";
 
 @Component({
     selector: 'app-root',
     template: `
         <erdblick-view></erdblick-view>
-        <map-panel></map-panel>
+        <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
         <p-toast position="top-center" key="tc"></p-toast>
-        <search-panel></search-panel>
-        <inspection-panel></inspection-panel>
-        <pref-components></pref-components>
-        <coordinates-panel></coordinates-panel>
-        <stats-dialog></stats-dialog>
+        <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
+        <inspection-panel *ngIf="!appModeService.isVisualizationOnly"></inspection-panel>
+        <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
+        <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
+        <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
         <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
             {{ copyright }}
@@ -46,6 +47,7 @@ export class AppComponent {
                 private router: Router,
                 private activatedRoute: ActivatedRoute,
                 public mapService: MapService,
+                public appModeService: AppModeService,
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {

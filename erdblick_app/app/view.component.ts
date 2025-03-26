@@ -30,6 +30,7 @@ import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
+import {AppModeService} from "./app-mode.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -38,8 +39,8 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
-        <sourcedatadialog></sourcedatadialog>
+        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
+        <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -76,6 +77,7 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
+                public appModeService: AppModeService,
                 public coordinatesService: CoordinatesService) {
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
@@ -111,7 +113,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         });
     }
 
-    ngAfterViewInit() {
+    ngAfterViewInit(): void {
         this.viewer = new Viewer("mapViewContainer",
             {
                 baseLayerPicker: false,
@@ -134,6 +136,75 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.openStreetMapLayer.alpha = 0.3;
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
         this.cameraIsMoving = false;
+
+        // Add these critical initialization parts BEFORE the interactive events check
+        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+        this.featureSearchService.visualizationChanged.subscribe(_ => {
+            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+            this.viewer.scene.requestRender();
+        });
+
+        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+            this.renderFeatureSearchResultTree(level);
+        });
+
+        // Hide the global loading spinner.
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+
+        // Only register interactive events when not in visualization-only mode
+        if (!this.appModeService.isVisualizationOnly) {
+            this.registerInteractiveEvents();
+        }
+
+        this.viewer.camera.percentageChanged = 0.1;
+        this.viewer.camera.changed.addEventListener(() => {
+            this.parameterService.setCameraState(this.viewer.camera);
+            this.updateViewport();
+        });
+        this.viewer.camera.moveStart.addEventListener(() => {
+            this.cameraIsMoving = true;
+        });
+        this.viewer.camera.moveEnd.addEventListener(() => {
+            this.cameraIsMoving = false;
+        });
+        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+        // Remove fullscreen button as unnecessary
+        this.viewer.fullscreenButton.destroy();
+
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
+            this.viewer.camera.setView({
+                destination: cameraData.destination,
+                orientation: cameraData.orientation
+            });
+            this.updateViewport();
+        });
+
+        this.parameterService.parameters.subscribe(parameters => {
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = parameters.osm;
+                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
+            }
+            if (parameters.marker && parameters.markedPosition.length == 2) {
+                this.addMarker(Cartesian3.fromDegrees(
+                    parameters.markedPosition[0],
+                    parameters.markedPosition[1],
+                    parameters.markedPosition.length > 2 ? parameters.markedPosition[2] : 0.0));
+            } else if (this.marker !== null) {
+                this.viewer.entities.remove(this.marker);
+                this.marker = null;
+            }
+        });
+
+        // Add debug API that can be easily called from browser's debug console
+        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
+    }
+
+    private registerInteractiveEvents() {
+        if (!this.mouseHandler) return;
 
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.position;
@@ -215,112 +286,6 @@ export class ErdblickViewComponent implements AfterViewInit {
                 false,
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }, ScreenSpaceEventType.MOUSE_MOVE);
-
-        // Add a handler for camera movement.
-        this.viewer.camera.percentageChanged = 0.1;
-        this.viewer.camera.changed.addEventListener(() => {
-            this.parameterService.setCameraState(this.viewer.camera);
-            this.updateViewport();
-        });
-        this.viewer.camera.moveStart.addEventListener(() => {
-            this.cameraIsMoving = true;
-        });
-        this.viewer.camera.moveEnd.addEventListener(() => {
-            this.cameraIsMoving = false;
-        });
-        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
-
-        // Remove fullscreen button as unnecessary
-        this.viewer.fullscreenButton.destroy();
-
-        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.viewer.camera.setView({
-                destination: cameraData.destination,
-                orientation: cameraData.orientation
-            });
-            this.updateViewport();
-        });
-
-        this.parameterService.parameters.subscribe(parameters => {
-            if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = parameters.osm;
-                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
-            }
-            if (parameters.marker && parameters.markedPosition.length == 2) {
-                this.addMarker(Cartesian3.fromDegrees(
-                    Number(parameters.markedPosition[0]),
-                    Number(parameters.markedPosition[1]))
-                );
-            } else {
-                if (this.marker) {
-                    this.viewer.entities.remove(this.marker);
-                }
-            }
-        });
-
-        // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
-
-        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
-        this.featureSearchService.visualizationChanged.subscribe(_ => {
-            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
-            this.viewer.scene.requestRender();
-        });
-
-        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.renderFeatureSearchResultTree(level);
-        });
-
-        this.jumpService.markedPosition.subscribe(position => {
-            if (position.length >= 2) {
-                this.parameterService.setMarkerState(true);
-                this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
-            }
-        });
-
-        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
-            const [origin, normal] = values;
-            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
-            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
-            Cartesian3.normalize(direction, direction);
-            Cartesian3.negate(direction, direction);
-            const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(endPoint, new Cartesian3());
-            const right = Cartesian3.cross(direction, up, new Cartesian3());
-            Cartesian3.normalize(right, right);
-            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
-            Cartesian3.normalize(cameraUp, cameraUp);
-            this.viewer.camera.flyTo({
-                destination: endPoint,
-                orientation: {
-                    direction: direction,
-                    up: cameraUp,
-                }
-            });
-        });
-
-        this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
-        this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
-        this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
-        this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
-        this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
-        this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
-        this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
-
-        // Hide the global loading spinner.
-        const spinner = document.getElementById('global-spinner-container');
-        if (spinner) {
-            spinner.style.display = 'none';
-        }
-
-        this.menuService.tileOutline.subscribe(entity => {
-            if (entity) {
-                this.tileOutlineEntity = this.viewer.entities.add(entity);
-                this.viewer.scene.requestRender();
-            } else if (this.tileOutlineEntity) {
-                this.viewer.entities.remove(this.tileOutlineEntity);
-                this.viewer.scene.requestRender();
-            }
-        });
     }
 
     /**
@@ -406,7 +371,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         });
     }
-    
+
     renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
