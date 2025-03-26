@@ -48,7 +48,7 @@ if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
 else()
   # Angular Build
   add_custom_target(erdblick-ui ALL
-    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}" all
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS erdblick-core)
 endif()
