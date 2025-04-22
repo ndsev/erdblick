@@ -17,7 +17,7 @@ TileFeatureLayer::TileFeatureLayer(std::shared_ptr<mapget::TileFeatureLayer> sel
  * Retrieves the ID of the tile feature layer as a string.
  * @return The ID string.
  */
-std::string TileFeatureLayer::id()
+std::string TileFeatureLayer::id() const
 {
     return model_->id().toString();
 }

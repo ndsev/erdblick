@@ -21,7 +21,7 @@ struct TileFeatureLayer
      * Retrieves the ID of the tile feature layer as a string.
      * @return The ID string.
      */
-    std::string id();
+    std::string id() const;
 
     /**
      * Retrieves the tile ID as a 64-bit unsigned integer.
