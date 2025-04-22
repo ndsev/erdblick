@@ -16,11 +16,30 @@ export interface SearchResultPosition {
     cartographicRad: {longitude: number, latitude: number, height: number}
 }
 
+export interface SearchDiagnosticsMessage {
+    message: string,
+    location: {offset: number, size: number},
+    fix: null|string,
+}
+
+export interface TraceResult {
+    calls: bigint;
+    totalus: bigint;
+    values: Array<string>;
+}
+
+export interface DiagnosticsMessage {
+    message: string;
+    fix: null | string;
+}
+
 export interface SearchResultForTile {
     tileId: bigint;
     query: string;
     numFeatures: number;
     matches: Array<[string, string, SearchResultPosition]>;  // Array of (MapTileKey, FeatureId, SearchResultPosition)
+    traces: null|Map<string, TraceResult>;
+    diagnostics: Array<DiagnosticsMessage>;
     billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
     error: null|string
 }
@@ -41,7 +60,7 @@ addEventListener('message', async ({data}) => {
 
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);
-        const matchingFeatures = search.filter(task.query);
+        const queryResult = search.filter(task.query);
         search.delete();
         tile.delete();
 
@@ -50,7 +69,9 @@ addEventListener('message', async ({data}) => {
             tileId: tileId,
             query: task.query,
             numFeatures: numFeatures,
-            matches: matchingFeatures,
+            matches: queryResult.result,
+            traces: queryResult.traces,
+            diagnostics: queryResult.diagnostics,
             error: null
         };
         postMessage(result);
@@ -62,6 +83,8 @@ addEventListener('message', async ({data}) => {
             query: task.query,
             numFeatures: 0,
             matches: [],
+            traces: null,
+            diagnostics: [],
             error: `${error.name}: ${error.message}`
         };
         postMessage(result);

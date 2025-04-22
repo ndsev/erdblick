@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
@@ -7,12 +7,14 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Listbox} from "primeng/listbox";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
+import { DiagnosticsMessage, TraceResult } from "./featurefilter.worker";
+import { SearchPanelComponent } from "./search.panel.component";
 
 @Component({
     selector: "feature-search",
     template: `
         <div [ngClass]="{'z-index-low': sidePanelService.featureSearchOpen && sidePanelService.searchOpen}">
-            <p-dialog class="side-menu-dialog" header="Search Loaded Features"
+            <p-dialog class="side-menu-dialog search-results-dialog" header="Search Loaded Features"
                       [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
                       [position]="'topleft'" [draggable]="false" [resizable]="false"
                       (onShow)="onShow($event)" (onHide)="onHide($event)">
@@ -32,25 +34,30 @@ import {KeyboardService} from "./keyboard.service";
                     <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                               pTooltip="Stop search" tooltipPosition="bottom"></p-button>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
                     <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
                     <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
                     <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
                     <span>Highlight colour:</span>
                     <span><p-colorPicker [(ngModel)]="searchService.pointColor"
                                          (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
                 </div>
-                <p-accordion *ngIf="traceResults.length" class="trace-entries" [multiple]="true">
-                    <p-accordionTab [header]="trace.name" *ngFor="let trace of traceResults">
-                        <span>{{ trace.content }}</span>
-                    </p-accordionTab>
-                </p-accordion>
+
+                @for (message of diagnostics; track message; let first = $first) {
+                    <p-card class="diagnostics-message">
+                        <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
+                            <span>{{ message.message }}</span>
+                            <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
+                        </div>
+                    </p-card>
+                }
+
                 <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                            optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
                            [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
@@ -67,12 +74,14 @@ import {KeyboardService} from "./keyboard.service";
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
     placeholder: Array<any> = [];
-    traceResults: Array<any> = [];
+    traces: Array<TraceResult> = [];
     selectedResult: any;
+    diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
 
+    @Input() searchPanelComponent!: SearchPanelComponent;
     @ViewChild('listbox') listbox!: Listbox;
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
 
@@ -97,16 +106,38 @@ export class FeatureSearchComponent {
         this.searchService.progress.subscribe(value => {
             this.percentDone = value;
             if (value >= 100) {
-                this.listbox.options = this.searchService.searchResults;
-                this.canPauseStopSearch = false;
-                if (this.searchService.errors.size) {
-                    this.infoMessageService.showAlertDialog(
-                        this.alertContainer,
-                        'Feature Search Errors',
-                        Array.from(searchService.errors).join('\n'))
-                }
+                this.searchResultReady();
             }
         });
+    }
+
+    ngAfterViewInit() {
+        // Hack to make the listbox resize properly
+        const listWrapper = this.listbox.el.nativeElement.querySelector('.p-listbox-list-wrapper');
+        if (listWrapper) {
+            listWrapper.style.height = '100%';
+            console.log("Set Wrapper Size");
+        }
+        const scroller = this.listbox.el.nativeElement.querySelector('.p-scroller');
+        if (scroller) {
+            scroller.style.height = '100%';
+            console.log("Set Scroller Size");
+        }
+    }
+
+    searchResultReady() {
+        this.listbox.options = this.searchService.searchResults;
+        this.canPauseStopSearch = false;
+        if (this.searchService.errors.size) {
+            this.infoMessageService.showAlertDialog(
+                this.alertContainer,
+                'Feature Search Errors',
+                Array.from(this.searchService.errors).join('\n'))
+        }
+
+        // Cut-off more than 3 items just in case
+        this.diagnostics = this.searchService.diagnosticsResults.slice(0, 3);
+        this.traces = this.searchService.traceResults;
     }
 
     selectResult(event: any) {
@@ -156,5 +187,11 @@ export class FeatureSearchComponent {
     onShow(event: any) {
         this.sidePanelService.featureSearchOpen = true;
         this.keyboardService.dialogOnShow(event);
+    }
+
+    onApplyFix(message: DiagnosticsMessage) {
+        if (message.fix) {
+            this.searchPanelComponent.setSearchValue(message.fix);
+        }
     }
 }

@@ -10,6 +10,7 @@ import {AnimateOnScroll} from "primeng/animateonscroll";
 import {FormsModule} from "@angular/forms";
 import {ScrollPanelModule} from "primeng/scrollpanel";
 import {TreeModule} from "primeng/tree";
+import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
 import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
@@ -244,6 +245,7 @@ export const initializeServices = () => {
         ListboxModule,
         MultiSelectModule,
         FloatLabelModule,
+        MessageModule,
         TabViewModule,
         Textarea,
         ButtonGroupModule,

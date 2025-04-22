@@ -18,7 +18,14 @@ class FeatureLayerSearch
 public:
     explicit FeatureLayerSearch(TileFeatureLayer& tfl);
 
-    /** Returns a list of Tuples of (Map Tile Key, Feature ID). */
+    /** Returns a resuct dictionary of the following structure:
+     *
+     *  {
+     *    result: [[map tile key, feature id], ...],
+     *    traces: map<string, {calls: int, values: [string, ...], totalus: int}>,
+     *    diagnostics: [{message: "...", location: [offset, size], fix: null | "..."}, ...],
+     *  }
+     */
     NativeJsValue filter(std::string const& q);
 
     /** Returns list of Tuples of (Trace Name, Trace Values). */

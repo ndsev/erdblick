@@ -85,7 +85,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </p-dialog>
-        <feature-search></feature-search>
+        <feature-search [searchPanelComponent]="this"></feature-search>
     `,
     styles: [`
         .item-disabled {
