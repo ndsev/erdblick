@@ -1,4 +1,4 @@
-import {APP_INITIALIZER, NgModule} from '@angular/core';
+import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app-routing.module';
 import {AppComponent} from './app.component';
@@ -6,7 +6,7 @@ import {provideHttpClient} from "@angular/common/http";
 import {SpeedDialModule} from "primeng/speeddial";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
-import {AnimateModule} from "primeng/animate";
+import {AnimateOnScroll} from "primeng/animateonscroll";
 import {FormsModule} from "@angular/forms";
 import {ScrollPanelModule} from "primeng/scrollpanel";
 import {TreeModule} from "primeng/tree";
@@ -55,11 +55,11 @@ import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
-import {InputTextareaModule} from "primeng/inputtextarea";
+import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
 import {TabViewModule} from "primeng/tabview";
 import {OnEnterClickDirective} from "./keyboard.service";
-import {DropdownModule} from "primeng/dropdown";
+import {SelectModule} from 'primeng/select';
 import {
     ArrayTypeComponent,
     DatasourcesComponent,
@@ -72,20 +72,40 @@ import {ReactiveFormsModule} from '@angular/forms';
 import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
 import {DataSourcesService} from "./datasources.service";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
+import {ProgressBarModule} from "primeng/progressbar";
+import {ButtonModule} from "primeng/button";
+import {TooltipModule} from "primeng/tooltip";
 import {StatsDialogComponent} from "./stats.component";
 import {SourceDataLayerSelectionDialogComponent} from "./sourcedataselection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./legalinfo.component";
+import {IconFieldModule} from 'primeng/iconfield';
+import {InputIconModule} from 'primeng/inputicon';
+import {PopoverModule} from "primeng/popover";
+import {provideAnimationsAsync} from "@angular/platform-browser/animations/async";
+import {providePrimeNG} from "primeng/config";
+import {definePreset} from '@primeng/themes';
+import Aura from "@primeng/themes/aura";
 
-export function initializeServices(styleService: StyleService, mapService: MapService, coordService: CoordinatesService) {
-    return async () => {
-        await initializeLibrary();
-        coordService.initialize();
-        await styleService.initializeStyles();
-        await mapService.initialize();
+export const ErdblickTheme = definePreset(Aura, {
+    semantic: {
+        primary: {
+            50: '{blue.50}',
+            100: '{blue.100}',
+            200: '{blue.200}',
+            300: '{blue.300}',
+            400: '{blue.400}',
+            500: '{blue.500}',
+            600: '{blue.600}',
+            700: '{blue.700}',
+            800: '{blue.800}',
+            900: '{blue.900}',
+            950: '{blue.950}'
+        }
     }
-}
+});
+
 
 export function minItemsValidationMessage(error: any, field: FormlyFieldConfig) {
     return `should NOT have fewer than ${field.props?.['minItems']} items`;
@@ -131,6 +151,19 @@ export function typeValidationMessage({ schemaType }: any) {
     return `should be "${schemaType[0]}".`;
 }
 
+export const initializeServices = () => {
+    const styleService = inject(StyleService);
+    const mapService = inject(MapService);
+    const coordService = inject(CoordinatesService);
+
+    return (async () => {
+        await initializeLibrary();
+        coordService.initialize();
+        await styleService.initializeStyles();
+        await mapService.initialize();
+    })();
+}
+
 @NgModule({
     declarations: [
         AppComponent,
@@ -160,9 +193,32 @@ export function typeValidationMessage({ schemaType }: any) {
         AppComponent
     ],
     imports: [
+        FormlyModule.forRoot({
+            validationMessages: [
+                {name: 'required', message: 'This field is required'},
+                {name: 'type', message: typeValidationMessage},
+                {name: 'minLength', message: minLengthValidationMessage},
+                {name: 'maxLength', message: maxLengthValidationMessage},
+                {name: 'min', message: minValidationMessage},
+                {name: 'max', message: maxValidationMessage},
+                {name: 'multipleOf', message: multipleOfValidationMessage},
+                {name: 'exclusiveMinimum', message: exclusiveMinimumValidationMessage},
+                {name: 'exclusiveMaximum', message: exclusiveMaximumValidationMessage},
+                {name: 'minItems', message: minItemsValidationMessage},
+                {name: 'maxItems', message: maxItemsValidationMessage},
+                {name: 'uniqueItems', message: 'should NOT have duplicate items'},
+                {name: 'const', message: constValidationMessage},
+                {name: 'enum', message: `must be equal to one of the allowed values`},
+            ],
+            types: [
+                {name: 'array', component: ArrayTypeComponent},
+                {name: 'object', component: ObjectTypeComponent},
+                {name: 'multischema', component: MultiSchemaTypeComponent}
+            ],
+        }),
         BrowserModule,
         BrowserAnimationsModule,
-        AnimateModule,
+        AnimateOnScroll,
         AppRoutingModule,
         SpeedDialModule,
         DialogModule,
@@ -187,50 +243,27 @@ export function typeValidationMessage({ schemaType }: any) {
         ColorPickerModule,
         ListboxModule,
         MultiSelectModule,
-        InputTextareaModule,
         FloatLabelModule,
         TabViewModule,
-        InputTextareaModule,
+        Textarea,
         ButtonGroupModule,
         BreadcrumbModule,
         TableModule,
-        DropdownModule,
+        SelectModule,
         TableModule,
         ReactiveFormsModule,
         FormlyPrimeNGModule,
-        FormlyModule.forRoot({
-            validationMessages: [
-                {name: 'required', message: 'This field is required'},
-                {name: 'type', message: typeValidationMessage},
-                {name: 'minLength', message: minLengthValidationMessage},
-                {name: 'maxLength', message: maxLengthValidationMessage},
-                {name: 'min', message: minValidationMessage},
-                {name: 'max', message: maxValidationMessage},
-                {name: 'multipleOf', message: multipleOfValidationMessage},
-                {name: 'exclusiveMinimum', message: exclusiveMinimumValidationMessage},
-                {name: 'exclusiveMaximum', message: exclusiveMaximumValidationMessage},
-                {name: 'minItems', message: minItemsValidationMessage},
-                {name: 'maxItems', message: maxItemsValidationMessage},
-                {name: 'uniqueItems', message: 'should NOT have duplicate items'},
-                {name: 'const', message: constValidationMessage},
-                {name: 'enum', message: `must be equal to one of the allowed values`},
-            ],
-            types: [
-                {name: 'array', component: ArrayTypeComponent},
-                {name: 'object', component: ObjectTypeComponent},
-                {name: 'multischema', component: MultiSchemaTypeComponent}
-            ],
-        }),
+        ProgressBarModule,
+        ButtonModule,
+        TooltipModule,
         ProgressSpinnerModule,
-        ContextMenuModule
+        ContextMenuModule,
+        IconFieldModule,
+        InputIconModule,
+        PopoverModule
     ],
     providers: [
-        {
-            provide: APP_INITIALIZER,
-            useFactory: initializeServices,
-            deps: [StyleService, MapService, CoordinatesService],
-            multi: true
-        },
+        provideAppInitializer(initializeServices),
         MapService,
         MessageService,
         InfoMessageService,
@@ -243,7 +276,14 @@ export function typeValidationMessage({ schemaType }: any) {
         EditorService,
         DataSourcesService,
         RightClickMenuService,
-        provideHttpClient()
+        provideHttpClient(),
+        provideAnimationsAsync(),
+        providePrimeNG({
+            ripple: true,
+            theme: {
+                preset: ErdblickTheme
+            }
+        })
     ]
 })
 export class AppModule {

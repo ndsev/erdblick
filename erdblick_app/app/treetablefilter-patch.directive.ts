@@ -13,7 +13,8 @@ import {TreeTableNode} from "primeng/api";
  * For expanding matched nodes, there is https://github.com/primefaces/primeng/issues/7417
  */
 @Directive({
-    selector: 'p-treeTable'
+    selector: 'p-treeTable',
+    standalone: false
 })
 export class TreeTableFilterPatchDirective implements AfterContentInit {
     constructor(private tt: TreeTable) {}

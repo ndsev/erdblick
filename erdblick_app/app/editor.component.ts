@@ -95,7 +95,8 @@ const completionsList = [
     template: `
         <div #editor class="editor-container"></div>
     `,
-    styles: []
+    styles: [],
+    standalone: false
 })
 export class EditorComponent implements AfterViewInit, OnDestroy {
 

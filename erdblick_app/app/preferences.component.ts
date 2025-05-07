@@ -208,7 +208,9 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
                     padding-bottom: 0;
                 }
             }
-        `]
+        `
+    ],
+    standalone: false
 })
 export class PreferencesComponent {
 

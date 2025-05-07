@@ -27,15 +27,15 @@ interface Column {
     template: `
         <div class="flex justify-content-end align-items-center"
              style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
-            <div class="p-input-icon-left filter-container">
-                <i (click)="filterPanel.toggle($event)" class="pi pi-filter" style="cursor: pointer"></i>
+            <p-iconfield class="filter-container">
+                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter" style="cursor: pointer" />
                 <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
                        [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
                        (keydown)="onKeydown($event)"
                 />
                 <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
-            </div>
+            </p-iconfield>
             <div>
                 <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
                           label="" pTooltip="Focus on feature" tooltipPosition="bottom"
@@ -69,32 +69,32 @@ interface Column {
                          [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
             >
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                    <tr [ttRow]="rowNode"
-                        [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}"
-                        (click)="onRowClick(rowNode)">
-                        <td>
+                    <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)">
+                        <td [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}">
                             <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                                  [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
                                  [tooltipOptions]="tooltipOptions">
-                                <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
-                                </p-treeTableToggler>
-                                <span (click)="onKeyClick($event, rowData)"
-                                      (mouseover)="onKeyHover($event, rowData)"
-                                      (mouseout)="onKeyHoverExit($event, rowData)"
-                                      style="cursor: pointer">
-                                    {{ rowData['key'] }}
-                                </span>
-                                <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
-                                               class="source-data-ref-container">
-                                    <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
-                                        <p-button class="source-data-button"
-                                                (click)="showSourceData($event, item)"
-                                                severity="secondary"
-                                                label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                pTooltip="Go to {{ item.qualifier }} Source Data"
-                                                tooltipPosition="bottom" />
-                                    </ng-template>
-                                </p-buttonGroup>
+                                <div style="display: flex; flex-direction: row; gap: 0.25em">
+                                    <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
+                                    </p-treeTableToggler>
+                                    <span (click)="onKeyClick($event, rowData)"
+                                          (mouseover)="onKeyHover($event, rowData)"
+                                          (mouseout)="onKeyHoverExit($event, rowData)"
+                                          style="cursor: pointer">
+                                        {{ rowData['key'] }}
+                                    </span>
+                                    <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
+                                                   class="source-data-ref-container">
+                                        <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
+                                            <p-button class="source-data-button"
+                                                      (click)="showSourceData($event, item)"
+                                                      severity="secondary"
+                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                      tooltipPosition="bottom" />
+                                        </ng-template>
+                                    </p-buttonGroup>
+                                </div>
                             </div>
                         </td>
                         <td [class]="getStyleClassByType(rowData['type'])">
@@ -125,27 +125,27 @@ interface Column {
         </div>
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="9999" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <p-overlayPanel #filterPanel class="filter-panel">
+        <p-popover #filterPanel class="filter-panel">
             <div class="font-bold white-space-nowrap"
                  style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
-                <span>
-                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree()"
-                                label="Filter by Keys" [binary]="true"/>
-                </span>
-                <span>
-                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree()"
-                                label="Filter by Values" [binary]="true"/>
-                </span>
-                <span>
-                    <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree()"
-                                label="Filter only FeatureIDs" [binary]="true"/>
-                </span>
-                <span>
-                    <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree()"
-                                label="Include Geometry Entries" [binary]="true"/>
-                </span>
+                <div style="display: inline-block; cursor: pointer" (click)="filterByKeys = !filterByKeys">
+                    <p-checkbox [(ngModel)]="filterByKeys" (ngModelChange)="filterTree()" inputId="fbk" [binary]="true"/>
+                    <label for="fbk" style="margin-left: 0.5em; cursor: pointer">Filter by Keys</label>
+                </div>
+                <div style="display: inline-block; cursor: pointer" (click)="filterByValues = !filterByValues">
+                    <p-checkbox [(ngModel)]="filterByValues" (ngModelChange)="filterTree()" inputId="fbv" [binary]="true"/>
+                    <label for="fbv" style="margin-left: 0.5em; cursor: pointer">Filter by Values</label>
+                </div>
+                <div style="display: inline-block; cursor: pointer" (click)="filterOnlyFeatureIds = !filterOnlyFeatureIds">
+                    <p-checkbox [(ngModel)]="filterOnlyFeatureIds" (ngModelChange)="filterTree()" inputId="fofids" [binary]="true"/>
+                    <label for="fofids" style="margin-left: 0.5em; cursor: pointer">Filter only FeatureIDs</label>
+                </div>
+                <div style="display: inline-block; cursor: pointer" (click)="filterGeometryEntries = !filterGeometryEntries">
+                    <p-checkbox [(ngModel)]="filterGeometryEntries" (ngModelChange)="filterTree()" inputId="ige" [binary]="true"/>
+                    <label for="ige" style="margin-left: 0.5em; cursor: pointer">Include Geometry Entries</label>
+                </div>
             </div>
-        </p-overlayPanel>
+        </p-popover>
     `,
     styles: [`
         .section-style {
@@ -164,7 +164,8 @@ interface Column {
                 height: calc(100vh - 3em);
             }
         }
-    `]
+    `],
+    standalone: false
 })
 export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  {
 

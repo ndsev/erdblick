@@ -42,6 +42,7 @@ import {DataSourcesService} from "./datasources.service";
                     </div>
                 </div>
                 <p-divider></p-divider>
+
                 <div *ngIf="!mapItems.size" style="margin-top: 0.75em">No maps loaded.</div>
                 <div *ngIf="mapItems.size" class="maps-container">
                     <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
@@ -55,11 +56,16 @@ import {DataSourcesService} from "./datasources.service";
                                     <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
                                       tabindex="0"
                                         (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
-                                    <span>
-                                        <p-checkbox onEnterClick [(ngModel)]="mapLayer.value.visible"
-                                                    (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
-                                                    [label]="mapLayer.key" [binary]="true" tabindex="0"/>
-                                    </span>
+                                    <div style="cursor: pointer; display: inline-block" (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.key, mapLayer.key)">
+                                        <span>
+                                            <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                        (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
+                                                        [binary]="true"
+                                                        [inputId]="mapLayer.key" 
+                                                        [name]="mapLayer.key" tabindex="0"/>
+                                            <label [for]="mapLayer.key" style="margin-left: 0.5em; cursor: pointer">{{mapLayer.key}}</label>
+                                        </span>
+                                    </div>
                                 </div>
                                 <div class="layer-controls">
                                     <p-button onEnterClick (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
@@ -112,11 +118,17 @@ import {DataSourcesService} from "./datasources.service";
                                       (click)="showStylesToggleMenu($event, style.key)" tabindex="0">
                                     more_vert
                                 </span>
-                                <span>
-                                    <p-checkbox onEnterClick [(ngModel)]="style.value.params.visible"
-                                                (ngModelChange)="applyStyleConfig(style.value)"
-                                                [label]="style.key" [binary]="true" tabindex="0"/>
-                                </span>
+                                <div onEnterClick style="cursor: pointer; display: inline-block" 
+                                     (click)="style.value.params.visible = !style.value.params.visible; applyStyleConfig(style.value)" tabindex="0">
+                                    <span>
+                                        <p-checkbox [(ngModel)]="style.value.params.visible"
+                                                    (ngModelChange)="applyStyleConfig(style.value)" 
+                                                    [binary]="true"
+                                                    [inputId]="style.key" 
+                                                    [name]="style.key" />
+                                        <label [for]="style.key" style="margin-left: 0.5em; cursor: pointer">{{style.key}}</label>
+                                    </span>
+                                </div>
                             </div>
                             <div class="layer-controls style-controls">
                                 <p-button onEnterClick *ngIf="style.value.imported" (click)="removeStyle(style.key)"
@@ -144,11 +156,17 @@ import {DataSourcesService} from "./datasources.service";
                                       (click)="showOptionsToggleMenu($event, style.value, option.id)" tabindex="0">
                                     more_vert
                                 </span>
-                                <span style="font-style: oblique">
-                                    <p-checkbox onEnterClick [(ngModel)]="style.value.params.options[option.id]"
-                                                (ngModelChange)="applyStyleConfig(style.value)"
-                                                [label]="option.label" [binary]="true" tabindex="0"/>
-                                </span>
+                                <div style="font-style: oblique; cursor: pointer; display: inline-block" 
+                                     (click)="style.value.params.options[option.id] = !style.value.params.options[option.id]; applyStyleConfig(style.value)" tabindex="0">
+                                    <span style="font-style: oblique">
+                                        <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
+                                                    (ngModelChange)="applyStyleConfig(style.value)" 
+                                                    [binary]="true"
+                                                    [inputId]="'option_' + style.key + '_' + option.id" 
+                                                    [name]="option.id" />
+                                        <label [for]="style.key + option.id" style="margin-left: 0.5em; cursor: pointer">{{option.label}}</label>
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -163,7 +181,7 @@ import {DataSourcesService} from "./datasources.service";
                 </div>
                 <div class="styles-container">
                     <div class="styles-import">
-                        <p-fileUpload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
+                        <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
                             accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
                             customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
                             class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
@@ -216,7 +234,8 @@ import {DataSourcesService} from "./datasources.service";
             pointer-events: none;
             opacity: 0.5;
         }
-    `]
+    `],
+    standalone: false
 })
 export class MapPanelComponent {
     layerDialogVisible: boolean = false;

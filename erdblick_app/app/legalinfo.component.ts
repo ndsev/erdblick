@@ -47,7 +47,8 @@ import { ParametersService } from "./parameters.service";
                 font-weight: bold;
             }
         `
-    ]
+    ],
+    standalone: false
 })
 export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
