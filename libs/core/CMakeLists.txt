@@ -69,6 +69,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     -s JS_MATH=0 \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s SINGLE_FILE=1 \
+    -s EXPORTED_RUNTIME_METHODS=HEAPU8 \
   ")
 else()
   add_library(erdblick-core ${ERDBLICK_SOURCE_FILES})

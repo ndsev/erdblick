@@ -26,15 +26,16 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    # TODO: Use official release.
-    GIT_TAG        "release/2025.2.0"
+    # Version that is needed to fix flat style
+    # TODO: Replace with next official release
+    GIT_TAG        "3ee2810"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
 
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "yaml-cpp-0.7.0"
+  GIT_TAG        "0.8.0"
   GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(yaml-cpp)
 
