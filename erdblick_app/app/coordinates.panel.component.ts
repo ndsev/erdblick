@@ -64,24 +64,14 @@ interface PanelOption {
         </div>
     `,
     styles: [`
-        .name-span {
-            cursor: pointer;
-            text-decoration: underline dotted;
-            text-wrap: nowrap;
-        }
-        
-        .coord-span {
-            text-align: right;
-            font-family: monospace;
-        }
-
         @media only screen and (max-width: 56em) {
             .elevated {
                 bottom: 4em;
                 padding-bottom: 0;
             }
         }
-    `]
+    `],
+    standalone: false
 })
 export class CoordinatesPanelComponent {
 

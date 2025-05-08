@@ -49,7 +49,8 @@ declare let window: DebugWindow;
                 padding-bottom: 0;
             }
         }
-    `]
+    `],
+    standalone: false
 })
 export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;

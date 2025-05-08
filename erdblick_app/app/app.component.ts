@@ -1,10 +1,8 @@
 import {Component} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
-import {JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
 import {ParametersService} from "./parameters.service";
-import {StyleService} from "./style.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
@@ -35,7 +33,8 @@ import {AppModeService} from "./app-mode.service";
                 padding-bottom: 0;
             }
         }
-    `]
+    `],
+    standalone: false
 })
 export class AppComponent {
 

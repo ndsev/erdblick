@@ -18,7 +18,7 @@ import {coreLib} from "./wasm";
             <div *ngIf="!loading" class="tilesource-options">
                 <p *ngIf="errorString">{{ errorString }}</p>
                 <div class="main-dropdown">
-                    <p-dropdown *ngIf="!errorString && !showCustomTileIdInput"
+                    <p-select *ngIf="!errorString && !showCustomTileIdInput"
                                 [options]="tileIds"
                                 [(ngModel)]="selectedTileId"
                                 optionLabel="name"
@@ -34,7 +34,7 @@ import {coreLib} from "./wasm";
                     </p-button>
                 </div>
                 
-                <p-dropdown *ngIf="!errorString"
+                <p-select *ngIf="!errorString"
                             [options]="mapIds"
                             [(ngModel)]="selectedMapId"
                             [disabled]="!mapIds.length"
@@ -43,7 +43,7 @@ import {coreLib} from "./wasm";
                             [placeholder]="mapIds.length ? 'Select a MapId' : 'No associated maps found'"
                             (ngModelChange)="onMapIdChange($event)"
                             appendTo="body" />
-                <p-dropdown *ngIf="!errorString"
+                <p-select *ngIf="!errorString"
                             [options]="sourceDataLayers" 
                             [(ngModel)]="selectedSourceDataLayer" 
                             [disabled]="!sourceDataLayers.length" 
@@ -60,7 +60,8 @@ import {coreLib} from "./wasm";
             </div>
         </p-dialog>
     `,
-    styles: [``]
+    styles: [``],
+    standalone: false
 })
 export class SourceDataLayerSelectionDialogComponent {
     selectedTileId: SourceDataDropdownOption | undefined;

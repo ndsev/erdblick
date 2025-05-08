@@ -14,14 +14,15 @@ import {MessageService} from "primeng/api";
     selector: 'alert-dialog',
     template: `
         <p-dialog [header]="headerText" [(visible)]="display" [modal]="true" [closable]="true" [dismissableMask]="true" (onHide)="close()">
-            <textarea class="message-area" rows="25" cols="75" pInputTextarea [(ngModel)]="messageText" readonly>
+            <textarea class="message-area" rows="25" cols="75" pTextarea [(ngModel)]="messageText" readonly>
             </textarea>
             <p-footer>
                 <button type="button" pButton label="Ok" icon="pi pi-check" (click)="close()"></button>
             </p-footer>
         </p-dialog>
     `,
-    styles: [``]
+    styles: [``],
+    standalone: false
 })
 export class AlertDialogComponent {
     @Input() headerText: string = 'Default Header';
