@@ -28,7 +28,7 @@ if (NOT TARGET mapget)
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
     # Version that is needed to fix flat style
     # TODO: Replace with next official release
-    GIT_TAG        "3ee2810"
+    GIT_TAG        "release/2025.2.0"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
