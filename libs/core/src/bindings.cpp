@@ -283,7 +283,7 @@ void setExceptionHandler(em::val handler) {
 /**  Validate provided SIMFIL query */
 void validateSimfil(const std::string &query) {
     auto simfilEnv = std::make_shared<simfil::Environment>(simfil::Environment::WithNewStringCache);
-    simfil::compile(*simfilEnv, query, false);
+    simfil::compile(*simfilEnv, query, false, true);
 }
 
 }

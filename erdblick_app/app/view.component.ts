@@ -30,6 +30,7 @@ import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
+import {AppModeService} from "./app-mode.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -38,8 +39,8 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
-        <sourcedatadialog></sourcedatadialog>
+        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
+        <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -68,6 +69,7 @@ export class ErdblickViewComponent implements AfterViewInit {
      * @param parameterService The parameter service, used to update
      * @param jumpService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
+     * @param appModeService
      */
     constructor(public mapService: MapService,
                 public styleService: StyleService,
@@ -77,7 +79,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
-                public coordinatesService: CoordinatesService) {
+                public coordinatesService: CoordinatesService,
+                public appModeService: AppModeService) {
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
@@ -137,6 +140,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.cameraIsMoving = false;
 
         this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
             const position = movement.position;
             const cartesian = this.viewer.camera.pickEllipsoid(
                 new Cartesian2(position.x, position.y),
@@ -157,6 +162,8 @@ export class ErdblickViewComponent implements AfterViewInit {
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
             const position = movement.position;
             let feature = this.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
@@ -206,15 +213,21 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (this.cameraIsMoving) {
                 return;
             }
-            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-            if (coordinates !== undefined) {
-                this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+
+            if (!this.appModeService.isVisualizationOnly) {
+                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+                if (coordinates !== undefined) {
+                    this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+                }
             }
-            let feature = this.viewer.scene.pick(position);
-            this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? feature.id : [feature?.id],
-                false,
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+
+            if (!this.appModeService.isVisualizationOnly) {
+                let feature = this.viewer.scene.pick(position);
+                this.mapService.highlightFeatures(
+                    Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                    false,
+                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
         // Add a handler for camera movement.
@@ -299,13 +312,15 @@ export class ErdblickViewComponent implements AfterViewInit {
             });
         });
 
-        this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
-        this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
-        this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
-        this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
-        this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
-        this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
-        this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
+        if (!this.appModeService.isVisualizationOnly) {
+            this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
+            this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
+            this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
+            this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
+            this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
+            this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
+            this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
+        }
 
         // Hide the global loading spinner.
         const spinner = document.getElementById('global-spinner-container');
@@ -407,7 +422,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         });
     }
-    
+
     renderFeatureSearchResultTree(level: number) {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);

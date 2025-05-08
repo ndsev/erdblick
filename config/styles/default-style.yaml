@@ -3,10 +3,13 @@ version: 1.0
 options:
   - label: Show Meshes/Polygons
     id: showMesh
+    default: false
   - label: Show Points
     id: showPoint
+    default: true
   - label: Show Lines
     id: showLine
+    default: true
 
 rules:
   # Normal styles

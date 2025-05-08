@@ -3,6 +3,7 @@ import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
+import { AppModeService } from "./app-mode.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -191,12 +192,33 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
     }
 };
 
+/** Set of parameter keys allowed in visualization-only mode */
+// TODO: Reflect this in the parameter descriptors, instead
+// of having a separate set.
+const VISUALIZATION_ONLY_ALLOWED = new Set([
+    'heading',
+    'pitch',
+    'roll',
+    'lon',
+    'lat',
+    'alt',
+    'osm',
+    'osmOpacity',
+    'tilesLoadLimit',
+    'tilesVisualizeLimit',
+    'styles',
+    'layers'
+]);
+
 @Injectable({providedIn: 'root'})
 export class ParametersService {
 
     private _replaceUrl: boolean = true;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
+
+    // Store filtered parameter descriptors based on mode
+    private parameterDescriptors: Record<string, ParameterDescriptor>;
 
     cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
         new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
@@ -220,7 +242,15 @@ export class ParametersService {
 
     legalInfoDialogVisible: boolean = false;
 
-    constructor() {
+    constructor(appModeService: AppModeService) {
+        // Filter parameter descriptors based on mode
+        this.parameterDescriptors = appModeService.isVisualizationOnly
+            ? Object.fromEntries(
+                Object.entries(erdblickParameters)
+                    .filter(([key]) => VISUALIZATION_ONLY_ALLOWED.has(key))
+              )
+            : erdblickParameters;
+
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 
         let parameters = this.loadSavedParameters();
@@ -292,6 +322,11 @@ export class ParametersService {
     }
 
     setInitialStyles(styles: Record<string, StyleParameters>) {
+        // In visualization-only mode, ignore style updates
+        if (Object.keys(this.parameterDescriptors).length !== Object.keys(erdblickParameters).length) {
+            return;
+        }
+
         // Only set styles, if there are no configured values yet.
         if (!Object.entries(this.p().styles).length) {
             return;
@@ -406,20 +441,33 @@ export class ParametersService {
         if (parameters) {
             parsedParameters = JSON.parse(parameters);
         }
-        return Object.keys(erdblickParameters).reduce((acc, key: string) => {
-            const descriptor = erdblickParameters[key];
-            let value = parsedParameters!.hasOwnProperty(key) ? parsedParameters[key] : descriptor.default;
-            acc[key] = descriptor.validator(value) ? value : descriptor.default;
+
+        // First create an object with all default values from the full parameter set
+        let defaultParameters = Object.keys(erdblickParameters).reduce((acc, key: string) => {
+            acc[key] = erdblickParameters[key].default;
             return acc;
         }, {} as any);
+
+        // Then override with valid values from the filtered parameter descriptors
+        Object.keys(this.parameterDescriptors).forEach(key => {
+            const descriptor = this.parameterDescriptors[key];
+            if (parsedParameters.hasOwnProperty(key)) {
+                const value = parsedParameters[key];
+                if (descriptor.validator(value)) {
+                    defaultParameters[key] = value;
+                }
+            }
+        });
+
+        return defaultParameters;
     }
 
     parseAndApplyQueryParams(params: Params) {
         let currentParameters = this.p();
         let updatedParameters: ErdblickParameters = { ...currentParameters };
 
-        Object.keys(erdblickParameters).forEach(key => {
-            const descriptor = erdblickParameters[key];
+        Object.keys(this.parameterDescriptors).forEach(key => {
+            const descriptor = this.parameterDescriptors[key];
             if (params.hasOwnProperty(key)) {
                 try {
                     const value = descriptor.converter(params[key]);
@@ -444,7 +492,6 @@ export class ParametersService {
             });
         }
 
-        // Update BehaviorSubject with the new parameters
         this.parameters.next(updatedParameters);
         this.initialQueryParamsSet = true;
     }
@@ -485,8 +532,8 @@ export class ParametersService {
     }
 
     isUrlParameter(name: string) {
-        if (erdblickParameters.hasOwnProperty(name)) {
-            return erdblickParameters[name].urlParam;
+        if (this.parameterDescriptors.hasOwnProperty(name)) {
+            return this.parameterDescriptors[name].urlParam;
         }
         return false;
     }

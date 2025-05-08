@@ -11,7 +11,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
     auto mapTileKey = tfl_.id();
 
     for (const auto& feature : *tfl_.model_) {
-        auto evalResult = tfl_.model_->evaluate(anyWrap(q), *feature);
+        auto evalResult = tfl_.model_->evaluate(q, *feature, true);
         if (evalResult.empty())
             continue;
         auto& firstEvalResult = evalResult[0];

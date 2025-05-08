@@ -26,6 +26,8 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
+    # Version that is needed to fix flat style
+    # TODO: Replace with next official release
     GIT_TAG        "3ee2810"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
@@ -47,7 +49,7 @@ if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
 else()
   # Angular Build
   add_custom_target(erdblick-ui ALL
-    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}"
+    COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}" all
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS erdblick-core)
 endif()
