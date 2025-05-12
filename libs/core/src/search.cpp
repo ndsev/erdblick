@@ -55,8 +55,14 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
         if (msg.fix)
             fixValue = JsValue(*msg.fix);
 
+        auto location = JsValue::Dict({
+            {"offset", JsValue(msg.location.begin)},
+            {"size", JsValue(msg.location.size)},
+        });
+
         diagnostics.push(JsValue::Dict({
             {"message", JsValue(msg.message)},
+            {"location", location},
             {"fix", fixValue},
         }));
     }

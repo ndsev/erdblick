@@ -16,12 +16,6 @@ export interface SearchResultPosition {
     cartographicRad: {longitude: number, latitude: number, height: number}
 }
 
-export interface SearchDiagnosticsMessage {
-    message: string,
-    location: {offset: number, size: number},
-    fix: null|string,
-}
-
 export interface TraceResult {
     calls: bigint;
     totalus: bigint;
@@ -30,6 +24,7 @@ export interface TraceResult {
 
 export interface DiagnosticsMessage {
     message: string;
+    location: {offset: number, size: number},
     fix: null | string;
 }
 
