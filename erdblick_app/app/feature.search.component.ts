@@ -55,6 +55,9 @@ import { SearchPanelComponent } from "./search.panel.component";
                             <span>{{ message.message }}</span>
                             <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
                         </div>
+                        <div>
+                            <code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:10"></code>
+                        </div>
                     </p-card>
                 }
 
@@ -109,20 +112,6 @@ export class FeatureSearchComponent {
                 this.searchResultReady();
             }
         });
-    }
-
-    ngAfterViewInit() {
-        // Hack to make the listbox resize properly
-        const listWrapper = this.listbox.el.nativeElement.querySelector('.p-listbox-list-wrapper');
-        if (listWrapper) {
-            listWrapper.style.height = '100%';
-            console.log("Set Wrapper Size");
-        }
-        const scroller = this.listbox.el.nativeElement.querySelector('.p-scroller');
-        if (scroller) {
-            scroller.style.height = '100%';
-            console.log("Set Scroller Size");
-        }
     }
 
     searchResultReady() {
@@ -189,8 +178,33 @@ export class FeatureSearchComponent {
         this.keyboardService.dialogOnShow(event);
     }
 
+    onHideFix(message: DiagnosticsMessage) {
+        const idx = this.diagnostics.indexOf(message);
+        if (idx) {
+            this.diagnostics = this.diagnostics.splice(idx, 1);
+        }
+    }
+
+    getLocationHint(message: DiagnosticsMessage) {
+        const epsilon = 5
+
+        if (message.location) {
+            const query = this.searchService.currentQuery || "";
+            const start = Math.max(0, message.location.offset - epsilon);
+            const end = Math.min(message.location.offset + message.location.size + epsilon, query.length);
+
+            const text = query.slice(start, message.location.offset)
+                + "<mark>"
+                + query.slice(message.location.offset, message.location.offset + message.location.size)
+                + "</mark>" + query.slice(message.location.offset + message.location.size, end);
+           return text;
+        }
+        return null;
+    }
+
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
+            this.onHideFix(message);
             this.searchPanelComponent.setSearchValue(message.fix);
         }
     }

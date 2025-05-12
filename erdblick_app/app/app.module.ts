@@ -55,6 +55,7 @@ import {ButtonGroupModule} from "primeng/buttongroup";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
+import {HighlightRegion} from "./highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
@@ -185,6 +186,7 @@ export const initializeServices = () => {
         ObjectTypeComponent,
         MultiSchemaTypeComponent,
         HighlightSearch,
+        HighlightRegion,
         TreeTableFilterPatchDirective,
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
