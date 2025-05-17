@@ -53,7 +53,7 @@ import {SearchPanelComponent} from "./search.panel.component";
                                     <li>
                                         <div>
                                             <span>{{ message.message }}</span>
-                                            <div><span>Here: </span><code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:10"></code></div>
+                                            <div><span>Here: </span><code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:25"></code></div>
                                         </div>
                                         <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
                                     </li>
@@ -206,23 +206,6 @@ export class FeatureSearchComponent {
     onShow(event: any) {
         this.sidePanelService.featureSearchOpen = true;
         this.keyboardService.dialogOnShow(event);
-    }
-
-    getLocationHint(message: DiagnosticsMessage) {
-        const epsilon = 25
-
-        if (message.location) {
-            const query = this.searchService.currentQuery || "";
-            const start = Math.max(0, message.location.offset - epsilon);
-            const end = Math.min(message.location.offset + message.location.size + epsilon, query.length);
-
-            const text = query.slice(start, message.location.offset)
-                + "<mark>"
-                + query.slice(message.location.offset, message.location.offset + message.location.size)
-                + "</mark>" + query.slice(message.location.offset + message.location.size, end);
-           return text;
-        }
-        return null;
     }
 
     onApplyFix(message: DiagnosticsMessage) {
