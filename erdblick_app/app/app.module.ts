@@ -10,6 +10,7 @@ import {AnimateOnScroll} from "primeng/animateonscroll";
 import {FormsModule} from "@angular/forms";
 import {ScrollPanelModule} from "primeng/scrollpanel";
 import {TreeModule} from "primeng/tree";
+import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
 import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
@@ -54,6 +55,7 @@ import {ButtonGroupModule} from "primeng/buttongroup";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
+import {HighlightRegion} from "./highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
@@ -184,6 +186,7 @@ export const initializeServices = () => {
         ObjectTypeComponent,
         MultiSchemaTypeComponent,
         HighlightSearch,
+        HighlightRegion,
         TreeTableFilterPatchDirective,
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
@@ -244,6 +247,7 @@ export const initializeServices = () => {
         ListboxModule,
         MultiSelectModule,
         FloatLabelModule,
+        MessageModule,
         TabViewModule,
         Textarea,
         ButtonGroupModule,

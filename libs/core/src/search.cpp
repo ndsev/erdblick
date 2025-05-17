@@ -1,21 +1,39 @@
 #include "search.h"
+#include <algorithm>
+#include "cesium-interface/object.h"
 #include "geometry.h"
 #include "cesium-interface/point-conversion.h"
+#include "simfil/environment.h"
 
 erdblick::FeatureLayerSearch::FeatureLayerSearch(TileFeatureLayer& tfl) : tfl_(tfl)
 {}
 
 erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& q)
 {
-    auto results = JsValue::List();
-    auto mapTileKey = tfl_.id();
+    auto obj = JsValue::Dict();
 
+    auto results = JsValue::List();
+
+    simfil::Diagnostics mergedDiagnostics;
+    std::map<std::string, simfil::Trace> mergedTraces;
+
+    auto mapTileKey = tfl_.id();
     for (const auto& feature : *tfl_.model_) {
-        auto evalResult = tfl_.model_->evaluate(q, *feature, true);
+        auto [evalResult, evalTraces, evalDiagnostics] = tfl_.model_->evaluate(q, *feature, true);
+
+        /* Merge traces */
+        for (auto&& [key, trace] : evalTraces) {
+            mergedTraces[key].append(std::move(trace));
+        }
+
+        /* Merge diagnostics */
+        mergedDiagnostics.append(evalDiagnostics);
+
         if (evalResult.empty())
             continue;
+
         auto& firstEvalResult = evalResult[0];
-        if (!firstEvalResult.as<simfil::ValueType::Bool>())
+        if (!firstEvalResult.template as<simfil::ValueType::Bool>())
             continue;
 
         auto jsResultForFeature = JsValue::List();
@@ -29,13 +47,44 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
         results.push(jsResultForFeature);
     }
 
-    return *results;
-}
+    obj.set("result", results);
 
-erdblick::NativeJsValue erdblick::FeatureLayerSearch::traceResults()
-{
-    // TODO: Implement
-    return {};
+    auto diagnostics = JsValue::List();
+    for (const auto& msg : tfl_.model_->collectQueryDiagnostics(q, mergedDiagnostics)) {
+        auto fixValue = JsValue::Undefined();
+        if (msg.fix)
+            fixValue = JsValue(*msg.fix);
+
+        auto location = JsValue::Dict({
+            {"offset", JsValue(msg.location.begin)},
+            {"size", JsValue(msg.location.size)},
+        });
+
+        diagnostics.push(JsValue::Dict({
+            {"message", JsValue(msg.message)},
+            {"location", location},
+            {"fix", fixValue},
+        }));
+    }
+    obj.set("diagnostics", diagnostics);
+
+    auto traces = JsValue::Dict();
+    for (const auto& [key, trace] : mergedTraces) {
+        auto values = JsValue::List();
+        values.set("length", JsValue(trace.values.size()));
+        for (const auto& v : trace.values) {
+            values.push(JsValue(v.toString()));
+        }
+
+        traces.set(key, JsValue::Dict({
+            {"calls", JsValue(trace.calls)},
+            {"totalus", JsValue(trace.totalus.count())},
+            {"values", std::move(values)}
+        }));
+    }
+    obj.set("traces", traces);
+
+    return *obj;
 }
 
 std::string erdblick::anyWrap(const std::string_view& q)

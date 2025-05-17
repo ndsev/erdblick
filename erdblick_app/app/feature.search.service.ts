@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
-import {SearchResultForTile, SearchResultPosition, SearchWorkerTask} from "./featurefilter.worker";
+import {DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult} from "./featurefilter.worker";
 import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
@@ -208,7 +208,6 @@ class FeatureSearchQuadTree {
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
-
     currentQuery: string = ""
     workers: Array<Worker> = []
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
@@ -227,6 +226,8 @@ export class FeatureSearchService {
     progress: Subject<number> = new Subject<number>();
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     searchResults: Array<any> = [];
+    traceResults: Array<any> = [];
+    diagnosticsResults: Array<DiagnosticsMessage> = [];
     pinTiers = [
         10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,
@@ -370,6 +371,8 @@ export class FeatureSearchService {
         this.doneTiles = 0;
         this.progress.next(0);
         this.searchResults = [];
+        this.traceResults = [];
+        this.diagnosticsResults = [];
         this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -388,6 +391,19 @@ export class FeatureSearchService {
         if (tileResult.query != this.currentQuery) {
             return;
         }
+
+        // Add trace results
+        for (let [key, trace] of Object.entries(tileResult.traces || {})) {
+            this.traceResults.push({
+                name: `${key}`,
+                calls: trace.calls,
+                totalus: trace.totalus,
+                values: trace.values,
+            })
+        }
+
+        // Add diagnostics
+        this.diagnosticsResults = this.diagnosticsResults.concat(tileResult.diagnostics);
 
         // Add visualizations and register the search result.
         if (tileResult.matches.length && tileResult.tileId) {
