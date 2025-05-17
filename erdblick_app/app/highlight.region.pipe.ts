@@ -2,7 +2,8 @@ import { Pipe, PipeTransform, SecurityContext } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 
 @Pipe({
-    name: 'highlightRegion'
+    name: 'highlightRegion',
+    standalone: false,
 })
 export class HighlightRegion implements PipeTransform {
     constructor(private sanitizer: DomSanitizer) {}
