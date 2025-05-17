@@ -17,6 +17,7 @@ export interface SearchResultPosition {
 }
 
 export interface TraceResult {
+    name: string;
     calls: bigint;
     totalus: bigint;
     values: Array<string>;

@@ -7,14 +7,14 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Listbox} from "primeng/listbox";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
-import { DiagnosticsMessage, TraceResult } from "./featurefilter.worker";
-import { SearchPanelComponent } from "./search.panel.component";
+import {DiagnosticsMessage, TraceResult} from "./featurefilter.worker";
+import {SearchPanelComponent} from "./search.panel.component";
 
 @Component({
     selector: "feature-search",
     template: `
         <div [ngClass]="{'z-index-low': sidePanelService.featureSearchOpen && sidePanelService.searchOpen}">
-            <p-dialog class="side-menu-dialog search-results-dialog" header="Search Loaded Features"
+            <p-dialog class="side-menu-dialog" header="Search Loaded Features"
                       [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
                       [position]="'topleft'" [draggable]="false" [resizable]="false"
                       (onShow)="onShow($event)" (onHide)="onHide($event)">
@@ -34,32 +34,57 @@ import { SearchPanelComponent } from "./search.panel.component";
                     <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                               pTooltip="Stop search" tooltipPosition="bottom"></p-button>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
-                    <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
-                    <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
-                    <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
+
+                <p-button type="button" [label]="diagnosticsSummary" (onClick)="diagnosticsPanel.toggle($event)" [disabled]="canPauseStopSearch" [style]="{'width': '100%'}"/>
+                <p-popover #diagnosticsPanel>
+                    <div id="searchDiagnosticsPanel">
+                        <div>
+                            <span class="section-heading">Results</span>
+                            <ul>
+                                <li><span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span></li>
+                                <li><span>Features:</span><span>{{ searchService.totalFeatureCount }}</span></li>
+                                <li><span>Matched:</span><span>{{ searchService.searchResults.length }}</span></li>
+                            </ul>
+                        </div>
+                        <div *ngIf="diagnostics.length > 0">
+                            <span class="section-heading">Diagnostics</span>
+                            <ul>
+                                @for (message of diagnostics; track message; let first = $first) {
+                                    <li>
+                                        <div>
+                                            <span>{{ message.message }}</span>
+                                            <div><span>Here: </span><code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:10"></code></div>
+                                        </div>
+                                        <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                        <div *ngIf="traces.length > 0">
+                            <span class="section-heading">Traces</span>
+                            <table>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Calls</th>
+                                    <th>Time</th>
+                                </tr>
+                                @for (trace of traces; track trace; let first = $first) {
+                                    <tr>
+                                        <td>{{ trace.name }}</td>
+                                        <td>{{ trace.calls }}</td>
+                                        <td>{{ trace.totalus }} &mu;s</td>
+                                    </tr>
+                                }
+                            </table>
+                        </div>
+                    </div>
+                </p-popover>
+
+                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                     <span>Highlight colour:</span>
                     <span><p-colorPicker [(ngModel)]="searchService.pointColor"
                                          (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
                 </div>
-
-                @for (message of diagnostics; track message; let first = $first) {
-                    <p-card class="diagnostics-message">
-                        <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 0.9em; align-items: center;">
-                            <span>{{ message.message }}</span>
-                            <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
-                        </div>
-                        <div>
-                            <code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:10"></code>
-                        </div>
-                    </p-card>
-                }
 
                 <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
                            optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
@@ -83,6 +108,9 @@ export class FeatureSearchComponent {
     percentDone: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
+
+    // Title of the diagnostics popover-button
+    diagnosticsSummary: string = "";
 
     @Input() searchPanelComponent!: SearchPanelComponent;
     @ViewChild('listbox') listbox!: Listbox;
@@ -124,9 +152,11 @@ export class FeatureSearchComponent {
                 Array.from(this.searchService.errors).join('\n'))
         }
 
-        // Cut-off more than 3 items just in case
-        this.diagnostics = this.searchService.diagnosticsResults.slice(0, 3);
+        // Cut-off more than n items just in case
+        this.diagnostics = this.searchService.diagnosticsResults.slice(0, 10);
         this.traces = this.searchService.traceResults;
+
+        this.diagnosticsSummary = this.generateDiagnosticsSummary();
     }
 
     selectResult(event: any) {
@@ -178,15 +208,8 @@ export class FeatureSearchComponent {
         this.keyboardService.dialogOnShow(event);
     }
 
-    onHideFix(message: DiagnosticsMessage) {
-        const idx = this.diagnostics.indexOf(message);
-        if (idx) {
-            this.diagnostics = this.diagnostics.splice(idx, 1);
-        }
-    }
-
     getLocationHint(message: DiagnosticsMessage) {
-        const epsilon = 5
+        const epsilon = 25
 
         if (message.location) {
             const query = this.searchService.currentQuery || "";
@@ -204,8 +227,36 @@ export class FeatureSearchComponent {
 
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
-            this.onHideFix(message);
             this.searchPanelComponent.setSearchValue(message.fix);
         }
+    }
+
+    generateDiagnosticsSummary() {
+        let items : string[] = [];
+
+        const numMatches = this.searchService.searchResults.length;
+        if (numMatches == 1) {
+            items.push(`${numMatches} Matche`);
+        } else if (numMatches > 0) {
+            items.push(`${numMatches} Matches`);
+        } else {
+            items.push(`No matches`);
+        }
+
+        const numMessages = this.diagnostics.length;
+        if (numMessages == 1) {
+            items.push(`${numMessages} Message`);
+        } else if (numMessages > 0) {
+            items.push(`${numMessages} Messages`);
+        }
+
+        const numTraces = this.traces.length;
+        if (numTraces == 1) {
+            items.push(`${numTraces} Trace`);
+        } else if (numTraces > 0) {
+            items.push(`${numTraces} Traces`);
+        }
+
+        return items.join(" / ");
     }
 }
