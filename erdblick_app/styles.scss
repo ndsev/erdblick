@@ -358,41 +358,6 @@ body {
       }
     }
   }
-
-  .p-dialog-content {
-    height: 100vh;
-    max-height: 100vh;
-
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-
-    >:last-child {
-      flex: 1;
-
-      ::ng-deep .p-listbox {
-        height: 100%;
-      }
-
-    }
-
-    p-listbox {
-      display: flex;
-      flex-direction: column;
-
-      .p-listbox {
-        flex: 1;
-      }
-    }
-  }
-}
-
-.diagnostics-message.p-card {
-  padding: 0;
-
-  .p-card-content {
-    padding: 0;
-  }
 }
 
 .search-wrapper {
@@ -1089,6 +1054,47 @@ body {
 
   .p-scroller {
     height: calc(100vh - 23em) !important;
+  }
+}
+
+#searchDiagnosticsPanel {
+  .section-heading {
+    font-weight: 700;
+  }
+
+  ul {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+
+    li {
+      display: flex;
+      flex-direction: row;
+      gap: 6px;
+      padding: 6px;
+      margin: 0;
+      border-radius: 6px;
+    }
+
+    li:hover {
+      background-color: var(--p-highlight-background);
+      cursor: pointer;
+    }
+
+    /* Spans are styled as horizontally padded items, the last item getting stretched
+       to the full dialog width.
+     */
+
+    li > span:last-child {
+      flex: 1;
+      text-align: right;
+    }
+
+    /* The first div gets stretched to fill the dialogs width. */
+
+    li > div:first-child {
+      flex: 1;
+    }
   }
 }
 
