@@ -106,6 +106,29 @@ export class MapService {
     moveToWgs84PositionTopic: Subject<{x: number, y: number, z?: number}>;
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+
+    /**
+     * When true, clearing the selection does not reset the side panel state.
+     * This is used when removing selections due to layer deactivation.
+     */
+    private preserveSidePanel: boolean = false;
+
+    /**
+     * Remove selected features that belong to the given map/layer combination.
+     * @param mapId Map identifier.
+     * @param layerId Layer identifier within the map.
+     */
+    private clearSelectionForLayer(mapId: string, layerId: string) {
+        const current = this.selectionTopic.getValue();
+        const remaining = current.filter(
+            fw => !(fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId)
+        );
+        if (remaining.length !== current.length) {
+            this.preserveSidePanel = true;
+            this.selectionTopic.next(remaining);
+            this.preserveSidePanel = false;
+        }
+    }
     selectionTileRequest: {
         remoteRequest: {
             mapId: string,
@@ -334,10 +357,16 @@ export class MapService {
             const layer = mapItem.layers.get(layerId);
             if (layer !== undefined) {
                 this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
+                if (!layer.visible) {
+                    this.clearSelectionForLayer(mapId, layerId);
+                }
             }
         } else {
             mapItem.layers.forEach(layer => {
                 this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
+                if (!mapItem.visible) {
+                    this.clearSelectionForLayer(mapId, layer.layerId);
+                }
             });
         }
         this.update().then();
@@ -829,7 +858,7 @@ export class MapService {
         let visualizationCollection = null;
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
-                if (this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
+                if (!this.preserveSidePanel && this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
                     this.sidePanelService.panel = SidePanelState.NONE;
                 }
                 visualizationCollection = this.selectionVisualizations;
