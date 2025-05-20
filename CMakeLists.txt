@@ -26,9 +26,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    # Version that is needed to fix flat style
-    # TODO: Replace with next official release
-    GIT_TAG        "release/2025.2.0"
+    GIT_TAG        "v2025.2.1"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
