@@ -61,7 +61,8 @@ import {KeyboardService} from "./keyboard.service";
         </div>
         <div #alert></div>
     `,
-    styles: [``]
+    styles: [``],
+    standalone: false
 })
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;

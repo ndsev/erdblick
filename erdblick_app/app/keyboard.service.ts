@@ -2,7 +2,8 @@ import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFact
 import {Dialog} from "primeng/dialog";
 
 @Directive({
-    selector: '[onEnterClick]'
+    selector: '[onEnterClick]',
+    standalone: false
 })
 export class OnEnterClickDirective {
     constructor(private el: ElementRef) {}

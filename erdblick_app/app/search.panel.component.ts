@@ -3,7 +3,6 @@ import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapService} from "./map.service";
-import {coreLib} from "./wasm";
 import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Dialog} from "primeng/dialog";
@@ -21,7 +20,7 @@ interface ExtendedSearchTarget extends SearchTarget {
         <div class="search-wrapper">
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
-                <textarea #textarea class="single-line" rows="1" pInputTextarea
+                <textarea #textarea class="single-line" rows="1" pTextarea
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay($event)"
                           (ngModelChange)="setSearchValue(searchInputValue)"
@@ -31,7 +30,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
-                          [position]="'top'" [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
+                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -93,7 +92,8 @@ interface ExtendedSearchTarget extends SearchTarget {
             color: darkgrey;
             pointer-events: none;
         }
-    `]
+    `],
+    standalone: false
 })
 export class SearchPanelComponent implements AfterViewInit {
 

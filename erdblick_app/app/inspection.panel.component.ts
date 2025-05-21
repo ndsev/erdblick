@@ -40,9 +40,10 @@ export interface InspectionContainerSize {
                         
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
                         
-                        <p-dropdown class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
+                        <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
                                     [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
-                                    (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" />
+                                    (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" 
+                                  appendTo="body"/>
                     </span>
                 </ng-template>
 
@@ -65,14 +66,15 @@ export interface InspectionContainerSize {
                 align-items: center;
 
                 .p-button {
-                    width: 1.75em;
-                    height: 1.75em;
+                    width: 1.75em !important;
+                    height: 1.75em !important;
                     margin: 0;
                 }
             }
         }
         `,
-    ]
+    ],
+    standalone: false
 })
 export class InspectionPanelComponent
 {

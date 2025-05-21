@@ -7,7 +7,7 @@ import { ClipboardService } from "./clipboard.service";
     selector: 'stats-dialog',
     template: `
         <p-dialog header="Viewport Statistics" [(visible)]="mapService.statsDialogVisible" [modal]="false"
-                  [style]="{'min-height': '20em', 'min-width': '40em'}">
+                  [style]="{'min-height': '20em', 'min-width': '40em', 'width': '40em'}">
             <div class="dialog-content">
                 <p-multiSelect
                     [options]="availableMapLayers"
@@ -18,7 +18,10 @@ import { ClipboardService } from "./clipboard.service";
                     [showHeader]="false"
                     [style]="{'width': '100%'}">
                 </p-multiSelect>
-                <p-checkbox label="Consider Empty Tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"></p-checkbox>
+                <div style="display: inline-block; cursor: pointer" (click)="considerEmptyTiles = !considerEmptyTiles">
+                    <p-checkbox inputId="stat-empty-tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"/>
+                    <label for="stat-empty-tiles" style="margin-left: 0.5em; cursor: pointer">Consider Empty Tiles</label>
+                </div>
                 <div>Total number of considered tile layers: {{ consideredTilesCount }}</div>
                 <table class="stats-table">
                     <thead>
@@ -66,7 +69,8 @@ import { ClipboardService } from "./clipboard.service";
                 font-weight: bold;
             }
         `
-    ]
+    ],
+    standalone: false
 })
 export class StatsDialogComponent {
     public aggregatedStats: { name: string, peak: number, average: number, sum: number }[] = [];

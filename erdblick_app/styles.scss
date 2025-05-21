@@ -14,9 +14,15 @@
 }
 
 .source-layer-dropdown {
-  .p-dropdown-label {
-    padding: 0.4em;
+  .p-select-label {
+    padding: 0.2em;
     min-width: 8em;
+    height: 1.75em;
+  }
+
+  .p-select-dropdown {
+    height: 1.75em;
+    width: 1.75em;
   }
 }
 
@@ -176,11 +182,14 @@ body {
 }
 
 .clear-icon {
-  right: 0.75rem;
+  position: absolute;
+  top: 0.5em;
+  right: 0.5em;
+  color: var(--p-iconfield-icon-color);
 }
 
 .inspect-panel-small-header {
-  .p-accordion-header .p-accordion-header-link {
+  .p-accordionheader {
     padding-top: 0.5em !important;
     padding-bottom: 0.5em !important;
   }
@@ -194,16 +203,21 @@ body {
 .inspect-panel {
   position: absolute;
   top: 0.5em;
-  right: 1em;
+  right: 0.5em;
   min-width: 30em;
   z-index: 110;
 
-  .p-accordion-header .p-accordion-header-link {
+  .p-accordionpanel {
+    border: none;
+  }
+
+  .p-accordionheader {
     padding: 0.95em;
   }
 
-  .p-accordion-content {
+  .p-accordioncontent-content {
     padding: 0;
+    border-radius: 0 0 6px 6px;
   }
 
   .filter-container {
@@ -213,16 +227,14 @@ body {
     justify-content: center;
 
     .p-button {
-      width: 32px;
-      height: 32px;
+      width: 2em;
+      height: 2em;
     }
   }
 
   .filter-input {
     height: 2em;
     width: 100%;
-    padding-left: 2.5em;
-    padding-right: 2.5em;
     border-radius: 6px;
     border: solid 1px lightgray;
     direction: ltr;
@@ -238,18 +250,30 @@ body {
     direction: rtl;
     max-width: calc(100vw - 28em);
     max-height: calc(100vh - 10.5em);
+    padding-bottom: 0.5em;
 
     * {
       direction: ltr;
     }
 
     .source-data-ref-container {
-      button {
-        width: 1.1em;
+      .p-buttongroup {
+        width: fit-content;
+      }
+
+      .p-button {
+        width: 1.2em;
         height: 1em;
         padding: 0.1em;
-        margin-bottom: 0.2em;
+        margin-top: 0.1em;
+        color: #fff;
+        background: #64748b;
+        border: 1px solid #64748b;
+      }
+
+      .p-button-label {
         font-family: monospace;
+        font-weight: 700;
         font-size: 1em;
       }
 
@@ -269,7 +293,7 @@ body {
       direction: ltr;
     }
 
-    table {
+    .p-treetable-tbody {
       direction: ltr;
       border-collapse: collapse;
       font-size: 0.9em !important;
@@ -295,10 +319,10 @@ body {
       /* Style used for highlighting individual table rows. */
       tr.highlight {
         color: black;
-        background: var(--green-100);
 
         td {
           border-color: darkgrey;
+          background: var(--p-green-100);
         }
       }
     }
@@ -355,9 +379,9 @@ body {
     max-height: calc(100vh - 10.5em);
   }
 
-  .resizable-container.multiline {
-    max-height: calc(100vh - 10.8em) !important;
-  }
+  //.resizable-container.multiline {
+  //  max-height: calc(100vh - 10.8em) !important;
+  //}
 
   .search-input {
     width: 100%;
@@ -382,7 +406,12 @@ body {
   }
 
   .p-dialog-mask {
-    position: relative;
+    position: relative !important;
+    height: inherit !important;
+    width: inherit !important;
+    min-width: 22em !important;
+    left: 0 !important;
+    top: 0 !important;
   }
 
   .p-dialog {
@@ -479,7 +508,7 @@ body {
     }
 
     .blue {
-      background-color: var(--primary-color);
+      background-color: var(--p-primary-500);
     }
 
     .red {
@@ -508,12 +537,12 @@ body {
   .p-dialog {
     width: 25.5em;
     min-width: 25.5em;
-    margin: 0;
+    margin: 0 !important;
     position: absolute;
     top: 4em;
     left: 0.5em;
     overflow: auto;
-    max-height: calc(100vh - 9em);
+    max-height: calc(100vh - 8em);
   }
 
   .p-dialog-content {
@@ -521,11 +550,15 @@ body {
   }
 
   .p-dialog-header {
-    padding: 0.5em;
+    padding: 0 0 0 0.5em;
 
     .p-dialog-title {
       font-size: medium;
     }
+  }
+
+  .p-fieldset {
+    padding: 0.5em 0.75em 0.5em 0.75em;
   }
 }
 
@@ -543,20 +576,20 @@ body {
     }
   }
 
-  .p-checkbox-box {
-    width: 1.5em;
-    height: 1.5em;
-    
-    .p-checkbox-icon {
-      transition-duration: 0.1s;
-      font-size: 1em;
-    }
-
-    .p-icon {
-      width: 1em;
-      height: 1em;
-    }
-  }
+  //.p-checkbox-box {
+  //  width: 1.5em;
+  //  height: 1.5em;
+  //
+  //  .p-checkbox-icon {
+  //    transition-duration: 0.1s;
+  //    font-size: 1em;
+  //  }
+  //
+  //  .p-icon {
+  //    width: 1em;
+  //    height: 1em;
+  //  }
+  //}
 }
 
 .map-tab {
@@ -737,15 +770,26 @@ body {
 
       input {
         margin: 0;
-      }
-
-      .p-inputnumber-buttons-horizontal .p-inputnumber-input {
-        order: 2;
         border-radius: 0;
         width: 2.5em;
         text-align: center;
         height: 2em;
         padding: 0;
+      }
+
+      .p-inputnumber-button {
+        width: 2.5em;
+        text-align: center;
+        height: 2.4em;
+        padding: 0;
+      }
+
+      .p-inputnumber-decrement-button {
+        border-radius: var(--p-button-border-radius) 0 0 var(--p-button-border-radius);
+      }
+
+      .p-inputnumber-increment-button {
+        border-radius: 0 var(--p-button-border-radius) var(--p-button-border-radius) 0;
       }
     }
 
@@ -803,7 +847,6 @@ body {
   position: absolute;
   left: 0;
   bottom: 0;
-  padding-bottom: 0.5em;
   display: flex;
   flex-direction: row;
   z-index: 110;
@@ -894,12 +937,12 @@ body {
 .trace-entries {
   font-size: 0.9em;
 
-  .p-accordion-header .p-accordion-header-link {
+  .p-accordionheader {
     padding: 0.8em;
     font-size: 0.9em;
   }
 
-  .p-accordion-content {
+  .p-accordioncontent-content {
     font-size: 0.9em;
   }
 }
@@ -907,7 +950,7 @@ body {
 .coordinates-container {
   z-index: 100;
   position: absolute;
-  bottom: 1em;
+  bottom: 0.5em;
   left: 0;
   margin: 0 auto;
   width: 100%;
@@ -933,6 +976,18 @@ body {
       & > .coordinates-entry:last-child {
         margin-right: 0.5em;
       }
+
+      .coord-span {
+        font-size: math;
+        text-align: right;
+        font-family: monospace;
+      }
+
+      .name-span {
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-wrap: nowrap;
+      }
     }
 
     .coordinates-button {
@@ -950,6 +1005,7 @@ body {
 
     .p-card {
       background: #ffffffdd;
+      border-radius: var(--p-button-border-radius)
     }
 
     .p-card:hover {
@@ -965,10 +1021,6 @@ body {
       display: flex;
       flex-direction: row;
 
-      p-multiselect {
-        margin-bottom: -0.2em;
-      }
-
       .p-multiselect {
         box-shadow: none;
         border: none;
@@ -978,7 +1030,7 @@ body {
         display: none;
       }
 
-      .p-multiselect-trigger {
+      .p-multiselect {
         width: 2.25em;
         height: 2em;
       }
@@ -1154,6 +1206,7 @@ body {
     z-index: 150;
 
     .resizable-container {
+      position: relative;
       min-width: 100%;
       min-height: 0;
       overflow: auto;
@@ -1167,6 +1220,7 @@ body {
     .p-dialog {
       max-height: calc(100vh - 11.5em);
       border-radius: 0;
+      position: absolute !important;
 
       .p-dialog-content:last-of-type {
         border-bottom-right-radius: 0;
@@ -1197,6 +1251,7 @@ body {
         width: 100% !important;
         height: 100%;
         padding-left: 2em;
+        padding-top: 0.75em;
         border-radius: 0;
         border: none;
         white-space: nowrap;
@@ -1289,19 +1344,15 @@ body {
       }
     }
 
-    .p-accordion .p-accordion-header,
-    .p-accordion .p-accordion-content {
-      transform: rotate(180deg);
+    .p-accordionheader,
+    .p-accordioncontent-content {
+      transform: rotate(180deg) !important;
       border-radius: 0;
     }
 
-    .p-accordion-header {
-      .p-accordion-toggle-icon {
+    .p-accordionheader {
+      .p-accordionheader-toggle-icon {
         transform: scaleY(-1);
-      }
-
-      .p-accordion-header-link {
-        border-radius: 0;
       }
     }
   }

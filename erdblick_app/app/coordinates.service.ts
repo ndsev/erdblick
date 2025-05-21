@@ -4,7 +4,6 @@ import {BehaviorSubject} from "rxjs";
 import {Cartographic} from "./cesium";
 import {HttpClient} from "@angular/common/http";
 
-
 @Injectable({providedIn: 'root'})
 export class CoordinatesService {
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);

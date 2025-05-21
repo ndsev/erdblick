@@ -14,6 +14,37 @@
 
 ![mapget ui](./docs/erdblick.png)
 
+## Build Modes
+
+erdblick can be built in two different modes to suit different use cases:
+
+### Full Mode (Default)
+
+The complete erdblick experience with all features enabled:
+
+* GUI for data sources and styles
+* Interactive feature selection and inspection
+* Style editing capabilities
+* Search functionality
+* Coordinate display
+* Statistics and preferences panels
+* Full keyboard navigation support
+
+### Visualization-Only Mode
+
+A streamlined version focused purely on map visualization:
+
+* Map display with all data sources and styles that are reflected in the URL used to open the viewer
+* Basic camera controls
+* No advanced features like search and inspection
+* Perfect for embedding or usage for demo purposes
+
+This mode can be built using:
+
+```bash
+./build-ui.bash /path/to/source visualization-only
+```
+
 ## Setup
 
 Ready to try out the latest version?

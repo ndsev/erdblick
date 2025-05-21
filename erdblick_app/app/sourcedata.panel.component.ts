@@ -42,16 +42,15 @@ import {Subscription} from "rxjs";
                     [globalFilterFields]="filterFields"
                 >
                     <ng-template pTemplate="caption">
-                        <div class="p-input-icon-left ml-auto filter-container">
-                            <i class="pi pi-filter"></i>
+                        <p-iconfield class="filter-container">
+                            <p-inputicon styleClass="pi pi-filter"/>
                             <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
                                    [(ngModel)]="filterString"
                                    (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
                                    (input)="tt.filterGlobal($any($event.target).value, 'contains')"
                             />
-                            <i *ngIf="filterString" (click)="clearFilter()"
-                               class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                        </div>
+                            <i *ngIf="filterString" (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                        </p-iconfield>
                     </ng-template>
 
                     <ng-template pTemplate="colgroup">
@@ -96,7 +95,8 @@ import {Subscription} from "rxjs";
                 height: calc(100vh - 3em);
             }
         }
-    `]
+    `],
+    standalone: false
 })
 export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 

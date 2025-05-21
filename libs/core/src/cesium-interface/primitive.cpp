@@ -12,7 +12,8 @@ CesiumPrimitive CesiumPrimitive::withPolylineColorAppearance(bool clampToGround)
     result.clampToGround_ = clampToGround;
     result.polyLinePrimitive_ = true;
     result.perInstanceColor_ = true;
-    result.synchronous_ = true;
+    // Allow async, otherwise we need to run initializeTerrainHeights() for ground primitives
+    result.synchronous_ = !clampToGround;
     return result;
 }
 

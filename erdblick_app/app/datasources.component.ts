@@ -24,6 +24,7 @@ import {FormlyJsonschema} from '@ngx-formly/core/json-schema';
       </div>
     </div>
   `,
+    standalone: false
 })
 export class MultiSchemaTypeComponent extends FieldType {}
 
@@ -39,6 +40,7 @@ export class MultiSchemaTypeComponent extends FieldType {}
       <formly-field *ngFor="let f of field.fieldGroup" [field]="f"></formly-field>
     </div>
   `,
+    standalone: false
 })
 export class ObjectTypeComponent extends FieldType {}
 
@@ -68,34 +70,13 @@ export class ObjectTypeComponent extends FieldType {}
         </p-fieldset>
     </div>
   `,
+    standalone: false
 })
 export class ArrayTypeComponent extends FieldArrayType {}
 
 @Component({
     selector: 'datasources',
     template: `
-        <!--        <p-dialog class="ds-config-dialog" header="DataSource Configuration" [(visible)]="dsService.configDialogVisible"-->
-        <!--                  [modal]="false" (onShow)="dsService.getConfig()">-->
-        <!--            <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>-->
-        <!--            <div *ngIf="!dsService.loading" style="margin: 0.5em 0; display: flex; flex-direction: column; gap: 1em;">-->
-        <!--                <form [formGroup]="form" *ngIf="form && fields && !dsService.errorMessage" (ngSubmit)="postConfig()"-->
-        <!--                      #formElement="ngForm">-->
-        <!--                    <formly-form [model]="model" [fields]="fields" [options]="options" [form]="form"></formly-form>-->
-        <!--                </form>-->
-        <!--                <div style="margin: 0.5em 0; display: flex; flex-direction: row; justify-content: center; gap: 1em;">-->
-        <!--                    <p-button (click)="showConfigEditor()" [disabled]="false"-->
-        <!--                              label="Open in Editor" icon="pi pi-pencil"></p-button>-->
-        <!--                    <p-button (click)="submitForm()" [disabled]="(form && !form.valid)"-->
-        <!--                              label="Apply" icon="pi pi-check"></p-button>-->
-        <!--                    <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">-->
-        <!--                        <p-button (click)="closeDatasources()" label="Close" icon="pi pi-times"></p-button>-->
-        <!--                    </div>-->
-        <!--                </div>-->
-        <!--            </div>-->
-        <!--            <div *ngIf="dsService.loading">-->
-        <!--                <p-progressSpinner ariaLabel="loading"/>-->
-        <!--            </div>-->
-        <!--        </p-dialog>-->
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
                   #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
             <p *ngIf="dsService.errorMessage">{{ dsService.errorMessage }}</p>
@@ -137,7 +118,8 @@ export class ArrayTypeComponent extends FieldArrayType {}
         .loading {
             visibility: collapse;
         }
-    `]
+    `],
+    standalone: false
 })
 export class DatasourcesComponent {
     datasourceWasModified: boolean = false;
