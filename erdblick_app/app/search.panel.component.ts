@@ -22,7 +22,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" rows="1" pTextarea
                           [(ngModel)]="searchInputValue"
-                          (click)="showSearchOverlay($event)"
+                          (click)="showSearchOverlay()"
                           (ngModelChange)="setSearchValue(searchInputValue)"
                           (keydown)="onKeydown($event)"
                           placeholder="Search">
@@ -452,8 +452,7 @@ export class SearchPanelComponent implements AfterViewInit {
         return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
     }
 
-    showSearchOverlay(event: Event) {
-        event.stopPropagation();
+    showSearchOverlay() {
         this.sidePanelService.panel = SidePanelState.SEARCH;
         this.setSearchValue(this.searchInputValue);
     }
