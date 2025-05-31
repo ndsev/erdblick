@@ -9,6 +9,7 @@ import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
 import {AnimateOnScroll} from "primeng/animateonscroll";
 import {FormsModule} from "@angular/forms";
 import {ScrollPanelModule} from "primeng/scrollpanel";
+import {BadgeModule} from "primeng/badge";
 import {TreeModule} from "primeng/tree";
 import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
@@ -59,7 +60,7 @@ import {HighlightRegion} from "./highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
-import {TabViewModule} from "primeng/tabview";
+import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./keyboard.service";
 import {SelectModule} from 'primeng/select';
 import {
@@ -227,10 +228,12 @@ export const initializeServices = () => {
         DialogModule,
         FormsModule,
         ScrollPanelModule,
+        BadgeModule,
         TreeModule,
         AccordionModule,
         OverlayPanelModule,
         DividerModule,
+        TabsModule,
         PanelMenuModule,
         TreeTableModule,
         ToastModule,
@@ -248,13 +251,11 @@ export const initializeServices = () => {
         MultiSelectModule,
         FloatLabelModule,
         MessageModule,
-        TabViewModule,
         Textarea,
         ButtonGroupModule,
         BreadcrumbModule,
         TableModule,
         SelectModule,
-        TableModule,
         ReactiveFormsModule,
         FormlyPrimeNGModule,
         ProgressBarModule,
