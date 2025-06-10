@@ -34,6 +34,8 @@ interface ErdblickParameters extends Record<string, any> {
     lon: number,
     lat: number,
     alt: number,
+    cameraMode: string,  // '2D' or '3D'
+    viewRectangle: [number, number, number, number] | null,  // [west, south, east, north] in degrees
     osm: boolean,
     osmOpacity: number,
     layers: Array<[string, number, boolean, boolean]>,
@@ -131,6 +133,18 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val),
         default: 16000000,
+        urlParam: true
+    },
+    cameraMode: {
+        converter: val => val,
+        validator: val => val === '2D' || val === '3D',
+        default: '2D',
+        urlParam: true
+    },
+    viewRectangle: {
+        converter: val => val === 'null' ? null : JSON.parse(val),
+        validator: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(v => typeof v === 'number')),
+        default: null,
         urlParam: true
     },
     osmOpacity: {
@@ -433,6 +447,32 @@ export class ParametersService {
             pitch: this.p().pitch,
             roll: this.p().roll
         });
+    }
+
+    set2DCameraState(camera: Camera) {
+        // In 2D mode, store the view rectangle
+        const viewRect = camera.computeViewRectangle();
+        if (viewRect) {
+            this.p().viewRectangle = [
+                CesiumMath.toDegrees(viewRect.west),
+                CesiumMath.toDegrees(viewRect.south),
+                CesiumMath.toDegrees(viewRect.east),
+                CesiumMath.toDegrees(viewRect.north)
+            ];
+            // Still update center position for compatibility
+            const center = Cartographic.fromRadians(
+                (viewRect.west + viewRect.east) / 2,
+                (viewRect.north + viewRect.south) / 2
+            );
+            this.p().lon = CesiumMath.toDegrees(center.longitude);
+            this.p().lat = CesiumMath.toDegrees(center.latitude);
+        }
+        this.parameters.next(this.p());
+    }
+
+    setCameraMode(mode: '2D' | '3D') {
+        this.p().cameraMode = mode;
+        this.parameters.next(this.p());
     }
 
     loadSavedParameters(): ErdblickParameters | null {

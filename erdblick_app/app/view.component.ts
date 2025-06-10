@@ -11,8 +11,11 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
+    SceneMode,
     HeightReference,
     Billboard,
+    BillboardCollection,
+    Rectangle,
     defined
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
@@ -39,6 +42,32 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
+            <p-button
+                [icon]="is2DMode ? 'pi pi-globe' : 'pi pi-map'"
+                [pTooltip]="is2DMode ? 'Switch to 3D' : 'Switch to 2D'"
+                tooltipPosition="left"
+                (onClick)="toggleSceneMode()"
+                [rounded]="true"
+                severity="secondary"
+                size="large">
+            </p-button>
+        </div>
+        <div class="navigation-controls" *ngIf="!appModeService.isVisualizationOnly">
+            <div class="nav-control-group">
+                <p-button icon="pi pi-plus" (onClick)="zoomIn()" [rounded]="true" severity="secondary" size="small" pTooltip="Zoom In (Q)"></p-button>
+                <p-button icon="pi pi-minus" (onClick)="zoomOut()" [rounded]="true" severity="secondary" size="small" pTooltip="Zoom Out (E)"></p-button>
+            </div>
+            <div class="nav-control-group">
+                <p-button icon="pi pi-arrow-up" (onClick)="moveUp()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Up (W)"></p-button>
+                <div class="nav-horizontal">
+                    <p-button icon="pi pi-arrow-left" (onClick)="moveLeft()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Left (A)"></p-button>
+                    <p-button icon="pi pi-arrow-right" (onClick)="moveRight()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Right (D)"></p-button>
+                </div>
+                <p-button icon="pi pi-arrow-down" (onClick)="moveDown()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
+            </div>
+            <p-button icon="pi pi-refresh" (onClick)="resetOrientation()" [rounded]="true" severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
+        </div>
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
     `,
@@ -49,6 +78,32 @@ declare let window: DebugWindow;
                 padding-bottom: 0;
             }
         }
+        .scene-mode-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+        }
+        .navigation-controls {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+        .nav-control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            align-items: center;
+        }
+        .nav-horizontal {
+            display: flex;
+            gap: 5px;
+        }
     `],
     standalone: false
 })
@@ -56,10 +111,12 @@ export class ErdblickViewComponent implements AfterViewInit {
     viewer!: Viewer;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
-    private marker: Entity | null = null;
+    private markerCollection: BillboardCollection | null = null;
     private tileOutlineEntity: Entity | null = null;
     menuItems: MenuItem[] = [];
     private cameraIsMoving: boolean = false;
+    is2DMode: boolean = true;
+    private ignoreNextCameraUpdate: boolean = false;
 
     /**
      * Construct a Cesium View with a Model.
@@ -130,9 +187,22 @@ export class ErdblickViewComponent implements AfterViewInit {
                 requestRenderMode: true,
                 maximumRenderTimeChange: Infinity,
                 infoBox: false,
-                baseLayer: false
+                baseLayer: false,
+                sceneMode: SceneMode.SCENE2D
             }
         );
+        
+        // Initialize camera mode from parameters
+        const params = this.parameterService.p();
+        if (params.cameraMode === '3D') {
+            this.is2DMode = false;
+            this.viewer.scene.mode = SceneMode.SCENE3D;
+            this.setup3DConstraints();
+        } else {
+            this.is2DMode = true;
+            this.viewer.scene.mode = SceneMode.SCENE2D;
+            this.setup2DConstraints();
+        }
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
@@ -233,7 +303,14 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add a handler for camera movement.
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
-            this.parameterService.setCameraState(this.viewer.camera);
+            if (!this.ignoreNextCameraUpdate) {
+                if (this.is2DMode) {
+                    this.parameterService.set2DCameraState(this.viewer.camera);
+                } else {
+                    this.parameterService.setCameraState(this.viewer.camera);
+                }
+            }
+            this.ignoreNextCameraUpdate = false;
             this.updateViewport();
         });
         this.viewer.camera.moveStart.addEventListener(() => {
@@ -242,16 +319,82 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.camera.moveEnd.addEventListener(() => {
             this.cameraIsMoving = false;
         });
+        
+        // Add custom wheel handler for 2D mode
+        this.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
+            if (this.is2DMode) {
+                event.preventDefault();
+                const zoomFactor = event.deltaY > 0 ? 1.5 : 0.67; // Smoother zoom steps
+                const camera = this.viewer.camera;
+                
+                // Get mouse position
+                const mousePosition = new Cartesian2(event.clientX, event.clientY);
+                const worldPosition = camera.pickEllipsoid(mousePosition, this.viewer.scene.globe.ellipsoid);
+                
+                const currentView = camera.computeViewRectangle();
+                if (currentView && worldPosition) {
+                    // Get the cursor position in geographic coordinates
+                    const cursorCartographic = Cartographic.fromCartesian(worldPosition);
+                    const cursorLon = cursorCartographic.longitude;
+                    const cursorLat = cursorCartographic.latitude;
+                    
+                    // Calculate current dimensions
+                    const currentWidth = currentView.east - currentView.west;
+                    const currentHeight = currentView.north - currentView.south;
+                    
+                    // Calculate cursor position as percentage of current view
+                    const xPercent = (cursorLon - currentView.west) / currentWidth;
+                    const yPercent = (cursorLat - currentView.south) / currentHeight;
+                    
+                    // Calculate new dimensions
+                    const newWidth = currentWidth * zoomFactor;
+                    const newHeight = currentHeight * zoomFactor;
+                    
+                    // Calculate new bounds keeping cursor position fixed
+                    const newWest = cursorLon - (newWidth * xPercent);
+                    const newSouth = cursorLat - (newHeight * yPercent);
+                    const newEast = newWest + newWidth;
+                    const newNorth = newSouth + newHeight;
+                    
+                    camera.setView({
+                        destination: Rectangle.fromRadians(newWest, newSouth, newEast, newNorth)
+                    });
+                }
+            }
+        });
         this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
 
         // Remove fullscreen button as unnecessary
         this.viewer.fullscreenButton.destroy();
 
         this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.viewer.camera.setView({
-                destination: cameraData.destination,
-                orientation: cameraData.orientation
-            });
+            this.ignoreNextCameraUpdate = true;
+            if (this.is2DMode) {
+                // In 2D mode, check if we have a view rectangle in parameters
+                const params = this.parameterService.p();
+                if (params.viewRectangle && params.viewRectangle.length === 4) {
+                    this.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(...params.viewRectangle)
+                    });
+                } else {
+                    // Fallback to center position
+                    const cartographic = Cartographic.fromCartesian(cameraData.destination);
+                    this.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(
+                            CesiumMath.toDegrees(cartographic.longitude) - 1,
+                            CesiumMath.toDegrees(cartographic.latitude) - 1,
+                            CesiumMath.toDegrees(cartographic.longitude) + 1,
+                            CesiumMath.toDegrees(cartographic.latitude) + 1
+                        )
+                    });
+                }
+            } else {
+                // 3D mode
+                this.viewer.camera.setView({
+                    destination: cameraData.destination,
+                    orientation: cameraData.orientation
+                });
+            }
             this.updateViewport();
         });
 
@@ -266,8 +409,9 @@ export class ErdblickViewComponent implements AfterViewInit {
                     Number(parameters.markedPosition[1]))
                 );
             } else {
-                if (this.marker) {
-                    this.viewer.entities.remove(this.marker);
+                if (this.markerCollection) {
+                    this.markerCollection.removeAll();
+                    this.viewer.scene.requestRender();
                 }
             }
         });
@@ -280,6 +424,12 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
             this.viewer.scene.requestRender();
         });
+        
+        // Create marker collection for position markers
+        this.markerCollection = new BillboardCollection({
+            scene: this.viewer.scene
+        });
+        this.viewer.scene.primitives.add(this.markerCollection);
 
         this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
             this.renderFeatureSearchResultTree(level);
@@ -320,6 +470,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
             this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
             this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
+            this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
         }
 
         // Hide the global loading spinner.
@@ -406,21 +557,31 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     addMarker(cartesian: Cartesian3) {
-        if (this.marker) {
-            this.viewer.entities.remove(this.marker);
+        // Ensure collection exists
+        if (!this.markerCollection) {
+            console.warn('MarkerCollection not initialized');
+            return;
         }
-
-        this.marker = this.viewer.entities.add({
-            position: cartesian,
-            billboard: {
+        
+        // Clear any existing markers in the collection
+        this.markerCollection.removeAll();
+        
+        // Add marker using same approach as search results
+        try {
+            this.markerCollection.add({
+                position: cartesian,
                 image: this.featureSearchService.markerGraphics(),
                 width: 32,
                 height: 32,
-                heightReference: HeightReference.CLAMP_TO_GROUND,
-                pixelOffset: new Cartesian2(0, -12),
-                eyeOffset: new Cartesian3(0, 0, -100)
-            }
-        });
+                pixelOffset: new Cartesian2(0, -16),
+                eyeOffset: new Cartesian3(0, 0, -20), // Same as search markers
+                heightReference: HeightReference.CLAMP_TO_GROUND
+            });
+            
+            this.viewer.scene.requestRender();
+        } catch (e) {
+            console.error('Error adding marker:', e);
+        }
     }
 
     renderFeatureSearchResultTree(level: number) {
@@ -480,29 +641,180 @@ export class ErdblickViewComponent implements AfterViewInit {
         const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
         const lat = cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset);
         const alt = cameraPosition.height;
-        const newPosition = Cartesian3.fromRadians(lon, lat, alt);
-        this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
+        
+        if (this.is2DMode) {
+            // In 2D mode, use setView to maintain the 2D constraints
+            this.viewer.camera.setView({
+                destination: Cartesian3.fromRadians(lon, lat, alt)
+            });
+        } else {
+            // 3D mode - use parameter service
+            const newPosition = Cartesian3.fromRadians(lon, lat, alt);
+            this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
+        }
     }
 
     zoomIn() {
-        this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
+        if (this.is2DMode) {
+            // In 2D mode, zoom by adjusting the view rectangle
+            const camera = this.viewer.camera;
+            const currentView = camera.computeViewRectangle();
+            
+            if (currentView) {
+                const zoomFactor = 0.67; // Zoom in (matching wheel zoom)
+                const center = Cartographic.fromRadians(
+                    (currentView.west + currentView.east) / 2,
+                    (currentView.north + currentView.south) / 2
+                );
+                
+                const newWidth = (currentView.east - currentView.west) * zoomFactor;
+                const newHeight = (currentView.north - currentView.south) * zoomFactor;
+                
+                camera.setView({
+                    destination: Rectangle.fromRadians(
+                        center.longitude - newWidth / 2,
+                        center.latitude - newHeight / 2,
+                        center.longitude + newWidth / 2,
+                        center.latitude + newHeight / 2
+                    )
+                });
+            }
+        } else {
+            this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
+        }
     }
 
     zoomOut() {
-        this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
+        if (this.is2DMode) {
+            // In 2D mode, zoom by adjusting the view rectangle
+            const camera = this.viewer.camera;
+            const currentView = camera.computeViewRectangle();
+            
+            if (currentView) {
+                const zoomFactor = 1.5; // Zoom out (matching wheel zoom)
+                const center = Cartographic.fromRadians(
+                    (currentView.west + currentView.east) / 2,
+                    (currentView.north + currentView.south) / 2
+                );
+                
+                const newWidth = (currentView.east - currentView.west) * zoomFactor;
+                const newHeight = (currentView.north - currentView.south) * zoomFactor;
+                
+                camera.setView({
+                    destination: Rectangle.fromRadians(
+                        center.longitude - newWidth / 2,
+                        center.latitude - newHeight / 2,
+                        center.longitude + newWidth / 2,
+                        center.latitude + newHeight / 2
+                    )
+                });
+            }
+        } else {
+            this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
+        }
     }
 
     resetOrientation() {
-        this.parameterService.setView(this.parameterService.getCameraPosition(), {
-            heading: CesiumMath.toRadians(0.0),
-            pitch: CesiumMath.toRadians(-90.0),
-            roll: 0.0
-        });
+        if (this.is2DMode) {
+            // In 2D mode, just reset to north-up orientation
+            this.parameterService.setView(this.parameterService.getCameraPosition(), {
+                heading: 0,
+                pitch: CesiumMath.toRadians(-90.0),
+                roll: 0.0
+            });
+        } else {
+            // In 3D mode, reset to default view angle
+            this.parameterService.setView(this.parameterService.getCameraPosition(), {
+                heading: CesiumMath.toRadians(0.0),
+                pitch: CesiumMath.toRadians(-45.0), // 45-degree angle for 3D
+                roll: 0.0
+            });
+        }
     }
 
     onContextMenuHide() {
         if (!this.menuService.tileSourceDataDialogVisible) {
             this.menuService.tileOutline.next(null)
         }
+    }
+
+    toggleSceneMode() {
+        // Simply store the current camera position before switching
+        const currentPos = this.viewer.camera.positionCartographic;
+        const currentHeight = currentPos.height;
+        const currentLon = currentPos.longitude;
+        const currentLat = currentPos.latitude;
+        
+        this.is2DMode = !this.is2DMode;
+        this.parameterService.setCameraMode(this.is2DMode ? '2D' : '3D');
+        
+        // Temporarily disable camera sync to avoid feedback
+        this.ignoreNextCameraUpdate = true;
+        
+        if (this.is2DMode) {
+            // Switch to 2D mode
+            this.viewer.scene.mode = SceneMode.SCENE2D;
+            this.setup2DConstraints();
+            
+            // In 2D, just look at the same position with same height
+            setTimeout(() => {
+                this.ignoreNextCameraUpdate = true;
+                this.viewer.camera.setView({
+                    destination: Cartesian3.fromRadians(currentLon, currentLat, currentHeight)
+                });
+            }, 50);
+        } else {
+            // Switch to 3D mode
+            this.viewer.scene.mode = SceneMode.SCENE3D;
+            this.setup3DConstraints();
+            
+            // In 3D, position camera at same location and height
+            setTimeout(() => {
+                this.ignoreNextCameraUpdate = true;
+                this.viewer.camera.setView({
+                    destination: Cartesian3.fromRadians(currentLon, currentLat, currentHeight),
+                    orientation: {
+                        heading: 0,
+                        pitch: CesiumMath.toRadians(-45),
+                        roll: 0
+                    }
+                });
+            }, 50);
+        }
+        
+        this.viewer.scene.requestRender();
+    }
+
+    private setup2DConstraints() {
+        // Enable 2D map interactions
+        const scene = this.viewer.scene;
+        
+        // Disable camera rotation and tilting in 2D
+        scene.screenSpaceCameraController.enableRotate = false;
+        scene.screenSpaceCameraController.enableTilt = false;
+        
+        // Enable standard 2D interactions
+        scene.screenSpaceCameraController.enableTranslate = true;
+        scene.screenSpaceCameraController.enableZoom = true;
+        scene.screenSpaceCameraController.enableLook = false;
+        
+        // Set zoom constraints for 2D mode
+        scene.screenSpaceCameraController.minimumZoomDistance = 100;
+        scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
+    }
+
+    private setup3DConstraints() {
+        // Re-enable full 3D camera controls
+        const scene = this.viewer.scene;
+        
+        scene.screenSpaceCameraController.enableRotate = true;
+        scene.screenSpaceCameraController.enableTilt = true;
+        scene.screenSpaceCameraController.enableTranslate = true;
+        scene.screenSpaceCameraController.enableZoom = true;
+        scene.screenSpaceCameraController.enableLook = true;
+        
+        // Reset zoom constraints for 3D mode
+        scene.screenSpaceCameraController.minimumZoomDistance = 1;
+        scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
     }
 }
