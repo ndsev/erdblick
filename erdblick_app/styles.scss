@@ -403,6 +403,40 @@ body {
       text-overflow: ellipsis;
       overflow: hidden;
     }
+
+    .completion-popup {
+      line-height: normal;
+
+      color: var(--p-content-color);
+      background: var(--p-contextmenu-background);
+      border: 1px solid var(--p-focus-ring-color);
+      border-radius: var(--p-contextmenu-border-radius);
+      padding: var(--p-contextmenu-list-padding);
+
+      position: fixed;
+      z-index: 100000;
+      margin-top: -0.5em;
+
+      min-width: 150px;
+      min-height: 1em;
+
+      div {
+        width: 100%;
+
+        padding: 2px;
+        border-radius: 4px;
+
+        background: var(--p-content-background);
+        color: var(--p-content-color);
+
+        cursor: pointer;
+      }
+
+      div.selected {
+        background: var(--p-primary-color);
+        color: var(--p-primary-contrast-color);
+      }
+    }
   }
 
   .p-dialog-mask {

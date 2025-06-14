@@ -1,9 +1,11 @@
 #include "search.h"
-#include <algorithm>
 #include "cesium-interface/object.h"
 #include "geometry.h"
 #include "cesium-interface/point-conversion.h"
 #include "simfil/environment.h"
+
+#include <algorithm>
+#include <set>
 
 erdblick::FeatureLayerSearch::FeatureLayerSearch(TileFeatureLayer& tfl) : tfl_(tfl)
 {}
@@ -84,6 +86,59 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
     }
     obj.set("traces", traces);
 
+    return *obj;
+}
+
+erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const& q, int point, emscripten::val const& options)
+{
+    point = std::max<int>(0, std::min<int>(point, q.size()));
+
+    size_t limit = 0;
+    if (options.hasOwnProperty("limit")) {
+        limit = std::max<int>(0, options["limit"].as<int>());
+    }
+
+    size_t timeoutMs = 0;
+    if (options.hasOwnProperty("timeoutMs")) {
+        timeoutMs = std::max<int>(0, options["timeoutMs"].as<int>());
+    }
+
+    simfil::CompletionOptions opts;
+    opts.limit = limit;
+    opts.timeoutMs = timeoutMs;
+    opts.autoWildcard = true;
+
+    std::set<simfil::CompletionCandidate> joinedResult;
+    for (const auto& feature : *tfl_.model_) {
+        auto result = tfl_.model_->complete(q, point, *feature, opts);
+
+        const auto n = std::min<int>(result.size(), limit - joinedResult.size());
+        if (n > 0) {
+            auto end = result.begin();
+            std::advance(end, n);
+            joinedResult.insert(result.begin(), end);
+        }
+
+        if (limit > 0 && joinedResult.size() >= limit) {
+            break;
+        }
+    }
+
+    auto obj = JsValue::List();
+    for (const auto& item : joinedResult) {
+        std::string query = q;
+        query.replace(item.location.begin, item.location.size, item.text);
+
+        auto candidate = JsValue::Dict({
+            {"text", JsValue(item.text)},
+            {"range", JsValue::List({
+                JsValue((int)item.location.begin), JsValue((int)item.location.size)
+            })},
+            {"query", JsValue(query)},
+        });
+
+        obj.push(std::move(candidate));
+    }
     return *obj;
 }
 
