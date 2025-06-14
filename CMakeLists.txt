@@ -25,7 +25,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "simfil-diagnostics"
+    GIT_TAG        "main"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
