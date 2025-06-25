@@ -30,6 +30,7 @@ body {
   overflow: hidden;
   height: 100vh !important;
   width: 100vw !important;
+  margin: 0;
 
   .p-multiselect-header {
     padding: 0.5em 0.75em;
@@ -397,6 +398,7 @@ body {
     }
 
     textarea.single-line {
+      padding-top: 0.75em;
       min-height: 3em;
       width: 22em !important;
       white-space: nowrap;
@@ -1251,7 +1253,6 @@ body {
         width: 100% !important;
         height: 100%;
         padding-left: 2em;
-        padding-top: 0.75em;
         border-radius: 0;
         border: none;
         white-space: nowrap;
