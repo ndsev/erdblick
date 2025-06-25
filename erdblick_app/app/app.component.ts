@@ -6,6 +6,11 @@ import {ParametersService} from "./parameters.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
+interface Versions {
+    name: string;
+    tag: string;
+}
+
 @Component({
     selector: 'app-root',
     template: `
@@ -22,8 +27,33 @@ import {AppModeService} from "./app-mode.service";
             {{ copyright }}
         </div>
         <div id="info">
-            {{ title }} {{ version }}
+            <span *ngIf="!distributionVersions.length">{{ title }} {{ erdblickVersion }}</span>
+            <span *ngIf="distributionVersions.length" style="cursor: pointer" (click)="showExposedVersions()">
+                {{ distributionVersions[0].name }} {{ distributionVersions[0].tag }}
+            </span>
         </div>
+        <p-dialog header="Distribution Version Information" [(visible)]="distributionVersionsDialogVisible" 
+                  [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
+            <div class="dialog-content">
+                <table class="stats-table">
+                    <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Version</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr *ngFor="let version of distributionVersions">
+                        <td>{{ version.name }}</td>
+                        <td>{{ version.tag }}</td>
+                    </tr>
+                    </tbody>
+                </table>
+                <button pButton type="button" label="Close" icon="pi pi-cross" 
+                        (click)="distributionVersionsDialogVisible = false">
+                </button>
+            </div>
+        </p-dialog>
         <router-outlet></router-outlet>
     `,
     styles: [`
@@ -39,8 +69,11 @@ import {AppModeService} from "./app-mode.service";
 export class AppComponent {
 
     title: string = "erdblick";
-    version: string = "";
+    erdblickVersion: string = "";
     copyright: string = "";
+    distributionVersions: Array<Versions> = [];
+    distributionVersionsDialogVisible: boolean = false;
+
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
@@ -50,8 +83,33 @@ export class AppComponent {
                 public parametersService: ParametersService) {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
-                this.version = data.toString();
+                this.erdblickVersion = data.toString();
             });
+        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
+            next: (data: any) => {
+                try {
+                    if (data && data["extensionModules"] && data["extensionModules"]["distribVersions"]) {
+                        let distribVersions = data["extensionModules"]["distribVersions"];
+                        if (distribVersions !== undefined) {
+                            // Using string interpolation so webpack can trace imports from the location
+                            import(`../../config/${distribVersions}.js`).then(function (plugin) {
+                                return plugin.default() as Array<Versions>;
+                            }).then((versions: Array<Versions>) => {
+                                this.distributionVersions = versions;
+                            }).catch((error) => {
+                                console.error(error);
+                            });
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    console.error(error);
+                }
+            },
+            error: error => {
+                console.error(error);
+            }
+        });
         this.init();
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.copyright = "";
@@ -97,5 +155,9 @@ export class AppComponent {
 
     openLegalInfo() {
         this.parametersService.legalInfoDialogVisible = true;
+    }
+
+    showExposedVersions() {
+        console.log(this.distributionVersions);
     }
 }
