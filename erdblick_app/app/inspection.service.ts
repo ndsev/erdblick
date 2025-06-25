@@ -318,6 +318,15 @@ export class InspectionService {
         });
     }
 
+    loadSourceDataInspectionForService(mapId: string) {
+        this.isInspectionPanelVisible = true;
+        this.selectedSourceData.next({
+            tileId: 0,
+            layerId: `${mapId}-Metadata-ServiceModuleDefinition`,
+            mapId: mapId
+        });
+    }
+
     /**
      * Returns a human-readable layer name for a layer id.
      *

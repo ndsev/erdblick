@@ -14,6 +14,7 @@ import {Menu} from "primeng/menu";
 import {KeyboardService} from "./keyboard.service";
 import {EditorService} from "./editor.service";
 import {DataSourcesService} from "./datasources.service";
+import {InspectionService} from "./inspection.service";
 
 
 @Component({
@@ -68,11 +69,20 @@ import {DataSourcesService} from "./datasources.service";
                                     </div>
                                 </div>
                                 <div class="layer-controls">
+                                    <p-button onEnterClick (click)="requestServiceMetadata(mapItem.key)"
+                                              label="" pTooltip="Request service metadata" tooltipPosition="bottom"
+                                              [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                            data_object
+                                        </span>
+                                    </p-button>
                                     <p-button onEnterClick (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
                                             label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
                                             [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
                                         <span class="material-icons"
-                                            style="font-size: 1.2em; margin: 0 auto;">{{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}</span>
+                                            style="font-size: 1.2em; margin: 0 auto;">
+                                            {{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}
+                                        </span>
                                     </p-button>
                                     <p-button onEnterClick *ngIf="mapLayer.value.coverage.length"
                                             (click)="focus(mapLayer.value.coverage[0], $event)"
@@ -262,6 +272,7 @@ export class MapPanelComponent {
                 public keyboardService: KeyboardService,
                 public editorService: EditorService,
                 public dsService: DataSourcesService,
+                private inspectionService: InspectionService,
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
 
@@ -594,5 +605,9 @@ export class MapPanelComponent {
     openDatasources() {
         this.editorService.styleEditorVisible = false;
         this.editorService.datasourcesEditorVisible = true;
+    }
+
+    requestServiceMetadata(mapName: string) {
+        this.inspectionService.loadSourceDataInspectionForService(mapName);
     }
 }
