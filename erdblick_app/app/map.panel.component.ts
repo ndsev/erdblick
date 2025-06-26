@@ -44,68 +44,142 @@ import {InspectionService} from "./inspection.service";
                 </div>
                 <p-divider></p-divider>
 
-                <div *ngIf="!mapItems.size" style="margin-top: 0.75em">No maps loaded.</div>
-                <div *ngIf="mapItems.size" class="maps-container">
-                    <div *ngFor="let mapItem of mapItems | keyvalue" class="map-container">
-                        <span class="font-bold white-space-nowrap map-header">
-                            {{ mapItem.key }}
-                        </span>
-                        <div *ngFor="let mapLayer of mapItem.value.layers | keyvalue: unordered">
-                            <div *ngIf="mapLayer.value.type != 'SourceData'" class="flex-container">
-                                <div class="font-bold white-space-nowrap"
-                                    style="margin-left: 0.5em; display: flex; align-items: center;">
+                <ng-container *ngIf=" mapService.mapGroups | async as mapGroups">
+                <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
+                    No maps loaded.
+                </div>
+                <div *ngIf="mapGroups.size" class="maps-container">
+                    <p-accordion *ngIf="mapGroups.size > 1 || !mapGroups.has('ungrouped')" [multiple]="true" styleClass="maps-accordion">
+                        <ng-container *ngFor="let group of mapGroups | keyvalue: unordered; let i = index">
+                            <p-accordion-panel *ngIf="group.key != 'ungrouped'" [value]="i">
+                                <p-accordion-header>{{ group.key }}</p-accordion-header>
+                                <p-accordion-content>
+                                    <div *ngFor="let mapId of group.value" class="map-container">
+                                        <span class="font-bold white-space-nowrap map-header">
+                                            {{ mapId }}
+                                        </span>
+                                        <div *ngFor="let mapLayer of mapItems.get(mapId)!.layers | keyvalue: unordered">
+                                            <div *ngIf="mapLayer.value.type != 'SourceData'" class="flex-container">
+                                                <div class="font-bold white-space-nowrap"
+                                                     style="margin-left: 0.5em; display: flex; align-items: center;">
                                     <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
-                                      tabindex="0"
-                                        (click)="showLayersToggleMenu($event, mapItem.key, mapLayer.key)">more_vert</span>
-                                    <div style="cursor: pointer; display: inline-block" (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.key, mapLayer.key)">
+                                          tabindex="0"
+                                          (click)="showLayersToggleMenu($event, mapId, mapLayer.key)">more_vert</span>
+                                                    <div style="cursor: pointer; display: inline-block" (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapId, mapLayer.key)">
                                         <span>
                                             <p-checkbox [(ngModel)]="mapLayer.value.visible"
-                                                        (ngModelChange)="toggleLayer(mapItem.key, mapLayer.key)"
+                                                        (ngModelChange)="toggleLayer(mapId, mapLayer.key)"
                                                         [binary]="true"
-                                                        [inputId]="mapLayer.key" 
+                                                        [inputId]="mapLayer.key"
                                                         [name]="mapLayer.key" tabindex="0"/>
                                             <label [for]="mapLayer.key" style="margin-left: 0.5em; cursor: pointer">{{mapLayer.key}}</label>
                                         </span>
-                                    </div>
-                                </div>
-                                <div class="layer-controls">
-                                    <p-button onEnterClick (click)="requestServiceMetadata(mapItem.key)"
-                                              label="" pTooltip="Request service metadata" tooltipPosition="bottom"
-                                              [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                                    </div>
+                                                </div>
+                                                <div class="layer-controls">
+                                                    <p-button onEnterClick (click)="requestServiceMetadata(mapId)"
+                                                              label="" pTooltip="Request service metadata" tooltipPosition="bottom"
+                                                              [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
                                         <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
                                             data_object
                                         </span>
-                                    </p-button>
-                                    <p-button onEnterClick (click)="toggleTileBorders(mapItem.key, mapLayer.key)"
-                                            label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
-                                            [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                                    </p-button>
+                                                    <p-button onEnterClick (click)="toggleTileBorders(mapId, mapLayer.key)"
+                                                              label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                                              [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
                                         <span class="material-icons"
-                                            style="font-size: 1.2em; margin: 0 auto;">
+                                              style="font-size: 1.2em; margin: 0 auto;">
                                             {{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}
                                         </span>
-                                    </p-button>
-                                    <p-button onEnterClick *ngIf="mapLayer.value.coverage.length"
-                                            (click)="focus(mapLayer.value.coverage[0], $event)"
-                                            label="" pTooltip="Focus on layer" tooltipPosition="bottom"
-                                            [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
-                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
-                                    </p-button>
-                                    <p-inputNumber [(ngModel)]="mapLayer.value.level"
-                                                (ngModelChange)="onLayerLevelChanged($event, mapItem.key, mapLayer.key)"
-                                                [showButtons]="true" [min]="0" [max]="15"
-                                                buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
-                                                decrementButtonClass="p-button-secondary"
-                                                incrementButtonClass="p-button-secondary"
-                                                incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
-                                                pTooltip="Change zoom level" tooltipPosition="bottom" tabindex="0">
-                                    </p-inputNumber>
+                                                    </p-button>
+                                                    <p-button onEnterClick *ngIf="mapLayer.value.coverage.length"
+                                                              (click)="focus(mapLayer.value.coverage[0], $event)"
+                                                              label="" pTooltip="Focus on layer" tooltipPosition="bottom"
+                                                              [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                                    </p-button>
+                                                    <p-inputNumber [(ngModel)]="mapLayer.value.level"
+                                                                   (ngModelChange)="onLayerLevelChanged($event, mapId, mapLayer.key)"
+                                                                   [showButtons]="true" [min]="0" [max]="15"
+                                                                   buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
+                                                                   decrementButtonClass="p-button-secondary"
+                                                                   incrementButtonClass="p-button-secondary"
+                                                                   incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
+                                                                   pTooltip="Change zoom level" tooltipPosition="bottom" tabindex="0">
+                                                    </p-inputNumber>
+                                                </div>
+                                                <input class="level-indicator" type="text" pInputText [disabled]="true"
+                                                       [(ngModel)]="mapLayer.value.level"/>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </p-accordion-content>
+                            </p-accordion-panel>
+                        </ng-container>
+                    </p-accordion>
+                    <ng-container *ngIf="mapGroups.has('ungrouped')">
+                        <div *ngFor="let mapId of mapGroups.get('ungrouped')" class="map-container">
+                            <span class="font-bold white-space-nowrap map-header">
+                                {{ mapId }}
+                            </span>
+                            <div *ngFor="let mapLayer of mapItems.get(mapId)!.layers | keyvalue: unordered">
+                                <div *ngIf="mapLayer.value.type != 'SourceData'" class="flex-container">
+                                    <div class="font-bold white-space-nowrap"
+                                         style="margin-left: 0.5em; display: flex; align-items: center;">
+                                    <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
+                                          tabindex="0"
+                                          (click)="showLayersToggleMenu($event, mapId, mapLayer.key)">more_vert</span>
+                                        <div style="cursor: pointer; display: inline-block" (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapId, mapLayer.key)">
+                                        <span>
+                                            <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                        (ngModelChange)="toggleLayer(mapId, mapLayer.key)"
+                                                        [binary]="true"
+                                                        [inputId]="mapLayer.key"
+                                                        [name]="mapLayer.key" tabindex="0"/>
+                                            <label [for]="mapLayer.key" style="margin-left: 0.5em; cursor: pointer">{{mapLayer.key}}</label>
+                                        </span>
+                                        </div>
+                                    </div>
+                                    <div class="layer-controls">
+                                        <p-button onEnterClick (click)="requestServiceMetadata(mapId)"
+                                                  label="" pTooltip="Request service metadata" tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                            data_object
+                                        </span>
+                                        </p-button>
+                                        <p-button onEnterClick (click)="toggleTileBorders(mapId, mapLayer.key)"
+                                                  label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                        <span class="material-icons"
+                                              style="font-size: 1.2em; margin: 0 auto;">
+                                            {{ mapLayer.value.tileBorders ? 'select_all' : 'deselect' }}
+                                        </span>
+                                        </p-button>
+                                        <p-button onEnterClick *ngIf="mapLayer.value.coverage.length"
+                                                  (click)="focus(mapLayer.value.coverage[0], $event)"
+                                                  label="" pTooltip="Focus on layer" tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0">
+                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                        </p-button>
+                                        <p-inputNumber [(ngModel)]="mapLayer.value.level"
+                                                       (ngModelChange)="onLayerLevelChanged($event, mapId, mapLayer.key)"
+                                                       [showButtons]="true" [min]="0" [max]="15"
+                                                       buttonLayout="horizontal" spinnerMode="horizontal" inputId="horizontal"
+                                                       decrementButtonClass="p-button-secondary"
+                                                       incrementButtonClass="p-button-secondary"
+                                                       incrementButtonIcon="pi pi-plus" decrementButtonIcon="pi pi-minus"
+                                                       pTooltip="Change zoom level" tooltipPosition="bottom" tabindex="0">
+                                        </p-inputNumber>
+                                    </div>
+                                    <input class="level-indicator" type="text" pInputText [disabled]="true"
+                                           [(ngModel)]="mapLayer.value.level"/>
                                 </div>
-                                <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                   [(ngModel)]="mapLayer.value.level"/>
                             </div>
                         </div>
-                    </div>
+                    </ng-container>
                 </div>
+                </ng-container>
             </p-fieldset>
             <p-fieldset class="map-tab" legend="Styles">
                 <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">

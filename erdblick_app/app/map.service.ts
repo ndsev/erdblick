@@ -85,6 +85,7 @@ function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
+    public mapGroups: BehaviorSubject<Map<string, Array<string>>> = new BehaviorSubject<Map<string, Array<string>>>(new Map<string, Array<string>>());
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
@@ -188,7 +189,28 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        // Initial call to processTileStream, will keep calling itself
+        this.maps.subscribe(mapItems => {
+            const groups = new Map<string, Array<string>>();
+            const ungrouped: Array<string> = []; // Maintain this group as the last inserted item for ordering simplicity
+            for (const mapId of mapItems.keys()) {
+                if (mapId.includes('/')) {
+                    const prefix = mapId.split('/')[0];
+                    if (groups.has(prefix)) {
+                        groups.get(prefix)!.push(mapId);
+                        continue;
+                    }
+                    groups.set(prefix, [mapId]);
+                } else {
+                    ungrouped.push(mapId);
+                }
+            }
+            if (ungrouped.length > 0) {
+                groups.set("ungrouped", ungrouped)
+            }
+            this.mapGroups.next(groups);
+        });
+
+        // Initial call to processTileStream: will keep calling itself
         this.processTileStream();
         this.processVisualizationTasks();
 
