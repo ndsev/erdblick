@@ -1,7 +1,8 @@
 #include "search.h"
+
 #include "cesium-interface/object.h"
-#include "geometry.h"
 #include "cesium-interface/point-conversion.h"
+#include "geometry.h"
 #include "simfil/environment.h"
 
 #include <algorithm>
@@ -89,17 +90,19 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::filter(const std::string& 
     return *obj;
 }
 
-erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const& q, int point, emscripten::val const& options)
+erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const& q, int point, NativeJsValue const& options_)
 {
+    JsValue options(options_);
+
     point = std::max<int>(0, std::min<int>(point, q.size()));
 
     size_t limit = 0;
-    if (options.hasOwnProperty("limit")) {
+    if (options.has("limit")) {
         limit = std::max<int>(0, options["limit"].as<int>());
     }
 
     size_t timeoutMs = 0;
-    if (options.hasOwnProperty("timeoutMs")) {
+    if (options.has("timeoutMs")) {
         timeoutMs = std::max<int>(0, options["timeoutMs"].as<int>());
     }
 

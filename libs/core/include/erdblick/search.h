@@ -1,8 +1,5 @@
 #pragma once
 
-#include <emscripten/val.h>
-
-#include "cesium-interface/object.h"
 #include "layer.h"
 
 namespace erdblick
@@ -36,7 +33,7 @@ public:
      *   {text: string, range: [begin, end]}, ...
      * ]
      */
-    NativeJsValue complete(std::string const& q, int point, emscripten::val const& options);
+    NativeJsValue complete(std::string const& q, int point, NativeJsValue const& options);
 
 private:
     TileFeatureLayer& tfl_;

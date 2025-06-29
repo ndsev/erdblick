@@ -90,10 +90,21 @@ JsValue JsValue::operator[](std::string const& propertyName)
 #endif
 }
 
-bool JsValue::has(std::string const& propertyName)
+JsValue JsValue::operator[](std::string const& propertyName) const
 {
 #ifdef EMSCRIPTEN
-    return value_[propertyName].typeOf().as<std::string>() != "undefined";
+    return JsValue(value_[propertyName]);
+#else
+    if (value_.contains(propertyName))
+        return JsValue(value_["properties"][propertyName]);
+    return JsValue();
+#endif
+}
+
+bool JsValue::has(std::string const& propertyName) const
+{
+#ifdef EMSCRIPTEN
+    return value_.hasOwnProperty(propertyName.c_str());
 #else
     return value_.contains(propertyName);
 #endif
