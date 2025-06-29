@@ -599,7 +599,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
         const ignoredKeys = [
             'Home', 'End', 'PageUp', 'PageDown', 'Escape',
-            'Enter', 'Tab'
+            'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
         ]
         if (ignoredKeys.indexOf(event.key) == -1) {
             this.searchInputChanged.next();
@@ -609,13 +609,14 @@ export class SearchPanelComponent implements AfterViewInit {
     onKeydown(event: KeyboardEvent) {
         const textarea = this.textarea.nativeElement;
         const dismissCompletionKeys = [
-            'Home', 'End', 'PageUp', 'PageDown', 'Escape'
+            'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete'
         ]
 
         // Dismiss the completion pop-up for control-keys
         if (dismissCompletionKeys.indexOf(event.key) >= 0) {
+            if (this.completion.visible)
+                event.preventDefault();
             this.completion.visible = false;
-            event.preventDefault();
         }
 
         // Prevent defaults if completion is active

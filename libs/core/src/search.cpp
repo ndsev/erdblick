@@ -109,20 +109,22 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
     opts.autoWildcard = true;
 
     std::set<simfil::CompletionCandidate> joinedResult;
-    for (const auto& feature : *tfl_.model_) {
-        auto result = tfl_.model_->complete(q, point, *feature, opts);
+    try {
+        for (const auto& feature : *tfl_.model_) {
+            auto result = tfl_.model_->complete(q, point, *feature, opts);
 
-        const auto n = std::min<int>(result.size(), limit - joinedResult.size());
-        if (n > 0) {
-            auto end = result.begin();
-            std::advance(end, n);
-            joinedResult.insert(result.begin(), end);
-        }
+            const auto n = std::min<int>(result.size(), limit - joinedResult.size());
+            if (n > 0) {
+                auto end = result.begin();
+                std::advance(end, n);
+                joinedResult.insert(result.begin(), end);
+            }
 
-        if (limit > 0 && joinedResult.size() >= limit) {
-            break;
+            if (limit > 0 && joinedResult.size() >= limit) {
+                break;
+            }
         }
-    }
+    } catch (...) {}
 
     auto obj = JsValue::List();
     for (const auto& item : joinedResult) {
