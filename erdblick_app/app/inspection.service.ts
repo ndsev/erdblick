@@ -11,7 +11,6 @@ import {Fetch} from "./fetch.model";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
-import {metadata} from "cesium";
 
 
 interface InspectionModelData {
