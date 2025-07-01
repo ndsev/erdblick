@@ -558,7 +558,15 @@ body {
   }
 
   .p-fieldset {
-    padding: 0.5em 0.75em 0.5em 0.75em;
+    padding: 0;
+
+    .p-accordionheader {
+      padding: 0.5em 1em 0.5em 1em;
+    }
+
+    .p-accordioncontent-content {
+      padding: 0;
+    }
   }
 }
 
@@ -597,7 +605,7 @@ body {
     display: flex;
     align-items: center;
     gap: 1em;
-    margin-top: 0.25em;
+    margin: 0.5em 0.75em;
 
     button {
       width: 2em;
@@ -673,6 +681,7 @@ body {
 
     .p-fieldset-legend {
       padding: 0.5em;
+      margin-left: 0.5em;
       border: 1px solid #dee2e6;
       color: #343a40;
       background: #f8f9fa;
@@ -692,12 +701,12 @@ body {
   }
 
   .maps-container {
-    margin-top: 0.25em;
-    padding-right: 0.75em;
-    margin-right: -0.75em;
+    &:last-child {
+      border: none;
+    }
 
     .map-container {
-      margin-top: 0.5em;
+      padding: 0.5em 1em 0.5em 1em;
 
       .map-header {
         font-size: 0.9em;
@@ -710,9 +719,10 @@ body {
   }
 
   .styles-container {
-    margin-top: 0.25em;
-    padding-right: 0.75em;
-    margin-right: -0.75em;
+    padding: 0.5em 1em 0.5em 1em;
+    //margin-top: 0.25em;
+    //padding-right: 0.75em;
+    //margin-right: -0.75em;
 
     .rotated-icon {
       transform: rotate(-90deg);
@@ -790,6 +800,20 @@ body {
 
       .p-inputnumber-increment-button {
         border-radius: 0 var(--p-button-border-radius) var(--p-button-border-radius) 0;
+      }
+    }
+
+    .map-controls {
+      display: flex;
+      gap: 0.5em;
+      width: 4em;
+      justify-content: flex-end;
+      transition: opacity 0s, visibility 0s;
+
+      button {
+        width: 2em;
+        height: 2em;
+        box-shadow: none;
       }
     }
 

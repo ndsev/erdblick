@@ -242,6 +242,8 @@ export class ParametersService {
 
     legalInfoDialogVisible: boolean = false;
 
+    sourceMetadataEntries: BehaviorSubject<Map<string, Array<string>>> = new BehaviorSubject(new Map<string, Array<string>>());
+
     constructor(appModeService: AppModeService) {
         // Filter parameter descriptors based on mode
         this.parameterDescriptors = appModeService.isVisualizationOnly
@@ -400,6 +402,21 @@ export class ParametersService {
         } else if (visible) {
             this.p().layers.push([mapLayerName, level, visible, tileBorders]);
         }
+        this.parameters.next(this.p());
+    }
+
+    setMapConfig(layerParams: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[]) {
+        layerParams.forEach(params => {
+            let mapLayerName = params.mapId+"/"+params.layerId;
+            let conf = this.p().layers.find(val => val[0] == mapLayerName);
+            if (conf !== undefined) {
+                conf[1] = params.level;
+                conf[2] = params.visible;
+                conf[3] = params.tileBorders;
+            } else if (params.visible) {
+                this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+            }
+        })
         this.parameters.next(this.p());
     }
 

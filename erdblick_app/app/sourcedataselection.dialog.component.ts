@@ -223,7 +223,7 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {
                 const id = this.mapIds[i].id as string;
-                const layers = this.findLayersForMapId(id);
+                const layers = this.inspectionService.findLayersForMapId(id);
                 this.mapIds[i]["disabled"] = !layers.length;
                 this.sourceDataLayersPerMapId.set(id, layers);
             }
@@ -244,23 +244,6 @@ export class SourceDataLayerSelectionDialogComponent {
             }
         }
         this.menuService.tileOutline.next(entity);
-    }
-
-    findLayersForMapId(mapId: string) {
-        const map = this.mapService.maps.getValue().get(mapId);
-        if (map) {
-            const dataLayers = new Set<string>();
-            for (const layer of map.layers.values()) {
-                if (layer.type == "SourceData") {
-                    dataLayers.add(layer.layerId);
-                }
-            }
-            return [...dataLayers].map(layerId => ({
-                id: layerId,
-                name: this.inspectionService.layerNameForSourceDataLayerId(layerId)
-            }));
-        }
-        return [];
     }
 
     onMapIdChange(mapId: SourceDataDropdownOption) {
