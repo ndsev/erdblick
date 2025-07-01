@@ -464,7 +464,12 @@ export class FeatureSearchService {
 
     private addCompletionCandidates(candidates: CompletionCandidatesForTile) {
         if (candidates.query == this.currentQuery) {
-            this.completionCandidateList = this.completionCandidateList.concat(candidates.candidates).slice(0, this.completionCandidateLimit);
+            this.completionCandidateList = this.completionCandidateList
+                .concat(candidates.candidates)
+                .slice(0, this.completionCandidateLimit)
+                .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
+                .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+
             this.completionCandidates.next(this.completionCandidateList);
         }
     }

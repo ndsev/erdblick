@@ -312,13 +312,16 @@ export class SearchPanelComponent implements AfterViewInit {
         this.reloadSearchHistory();
 
         this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
-            this.completionItems = value.filter(item => {
+            this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
                 // or does not relate to the current input (e.g. delayed results).
                 return item.query !== this.searchInputValue && item.source === this.searchInputValue;
             });
-            this.completion.selectionIndex = 0;
-            this.completion.visible = this.completionItems.length > 0;
+
+            const length = this.completionItems.length
+            if (length <= this.completion.selectionIndex)
+                this.completion.selectionIndex = length;
+            this.completion.visible = length > 0;
         });
 
         this.searchInputChanged.pipe(debounceTime(150)).subscribe(() => {
@@ -746,10 +749,12 @@ export class SearchPanelComponent implements AfterViewInit {
 
     completeQuery(query: string, point: number | undefined) {
         if (!query) {
+            this.completion.visible = false;
             this.completionItems = [];
             return;
         }
 
         this.searchService.completeQuery(query, point || query.length);
+        this.completion.selectionIndex = 0;
     }
 }
