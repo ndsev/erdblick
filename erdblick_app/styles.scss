@@ -389,6 +389,7 @@ body {
     line-height: 0;
 
     textarea {
+      padding-top: 0.75em;
       width: 100% !important;
       transition: all 0.3s;
       resize: none;
@@ -1269,13 +1270,13 @@ body {
         height: 100%;
         border-radius: 0;
         border: none;
+        padding-top: 1em;
       }
 
       textarea.single-line {
         width: 100% !important;
         height: 100%;
-        padding-left: 2em;
-        padding-top: 0.75em;
+        padding-left: 1em;
         border-radius: 0;
         border: none;
         white-space: nowrap;
