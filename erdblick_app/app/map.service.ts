@@ -13,7 +13,6 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
 import * as uuid from 'uuid';
-import {Color} from "./cesium";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -85,6 +84,7 @@ function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
+    public mapGroups: BehaviorSubject<Map<string, Array<MapInfoItem>>> = new BehaviorSubject<Map<string, Array<MapInfoItem>>>(new Map<string, Array<MapInfoItem>>());
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
@@ -188,7 +188,70 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        // Initial call to processTileStream, will keep calling itself
+        this.maps.subscribe(mapItems => {
+            const initRun = this.mapGroups.getValue().size == 0;
+            const groups = new Map<string, Array<MapInfoItem>>();
+            const ungrouped: Array<MapInfoItem> = []; // Maintain this group as the last inserted item to simplify ordering
+            let firstGroup = "";
+            for (const [mapId, mapItem] of mapItems) {
+                if (mapId.includes('/')) {
+                    const prefix = mapId.split('/')[0];
+                    if (groups.has(prefix)) {
+                        groups.get(prefix)!.push(mapItem);
+                        continue;
+                    }
+                    groups.set(prefix, [mapItem]);
+                    if (!firstGroup) {
+                        firstGroup = prefix;
+                    }
+                } else {
+                    ungrouped.push(mapItem);
+                }
+            }
+            if (!initRun) {
+                for (const [groupId, mapItems] of groups) {
+                    if (!this.mapGroups.getValue().has(groupId)) {
+                        for (const mapItem of mapItems) {
+                            mapItem.visible = true;
+                            this.toggleMapLayerVisibility(mapItem.mapId);
+                        }
+                    } else {
+                        const prevGroup = this.mapGroups.getValue().get(groupId)!;
+                        for (const mapItem of mapItems) {
+                            if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
+                                mapItem.visible = true;
+                                this.toggleMapLayerVisibility(mapItem.mapId);
+                            }
+                        }
+                    }
+                }
+            } else if (firstGroup) {
+                for (const mapItem of groups.get(firstGroup)!) {
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            }
+            if (ungrouped.length > 0) {
+                if (!initRun) {
+                    if (this.mapGroups.getValue().has("ungrouped")) {
+                        const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
+                        for (const mapItem of ungrouped) {
+                            if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
+                                mapItem.visible = true;
+                                this.toggleMapLayerVisibility(mapItem.mapId);
+                            }
+                        }
+                    }
+                } else if (!firstGroup) {
+                    ungrouped[0].visible = true;
+                    this.toggleMapLayerVisibility(ungrouped[0].mapId);
+                }
+                groups.set("ungrouped", ungrouped);
+            }
+            this.mapGroups.next(groups);
+        });
+
+        // Initial call to processTileStream: will keep calling itself
         this.processTileStream();
         this.processVisualizationTasks();
 
@@ -321,7 +384,7 @@ export class MapService {
                             layers.set(layerId, layerInfo);
                         }
                         mapInfo.layers = layers;
-                        mapInfo.visible = true;
+                        mapInfo.visible = false;
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
@@ -348,26 +411,45 @@ export class MapService {
         return false;
     }
 
-    toggleMapLayerVisibility(mapId: string, layerId: string) {
+    toggleMapLayerVisibility(mapId: string, layerId: string = "", state: boolean | undefined = undefined) {
         const mapItem = this.maps.getValue().get(mapId);
         if (mapItem === undefined) {
             return;
         }
         if (layerId) {
             const layer = mapItem.layers.get(layerId);
-            if (layer !== undefined) {
-                this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
-                if (!layer.visible) {
-                    this.clearSelectionForLayer(mapId, layerId);
+            if (layer === undefined) {
+                return;
+            }
+            if (state !== undefined) {
+                layer.visible = state;
+            }
+            this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
+            if (!layer.visible) {
+                this.clearSelectionForLayer(mapId, layerId);
+            }
+            mapItem.visible = mapItem.layers.values().some(layer => layer.visible);
+        } else {
+            if (state !== undefined) {
+                mapItem.visible = state;
+            }
+            const params: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[] = []
+            for (const [_, layer] of mapItem.layers) {
+                if (layer.type !== "SourceData") {
+                    layer.visible = mapItem.visible;
+                    params.push({
+                        mapId: mapItem.mapId,
+                        layerId: layer.layerId,
+                        level: layer.level,
+                        visible: layer.visible,
+                        tileBorders: layer.tileBorders
+                    });
+                    if (!layer.visible) {
+                        this.clearSelectionForLayer(mapId, layer.layerId);
+                    }
                 }
             }
-        } else {
-            mapItem.layers.forEach(layer => {
-                this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
-                if (!mapItem.visible) {
-                    this.clearSelectionForLayer(mapId, layer.layerId);
-                }
-            });
+            this.parameterService.setMapConfig(params);
         }
         this.update().then();
     }

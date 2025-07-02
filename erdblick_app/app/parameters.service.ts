@@ -403,6 +403,21 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
+    setMapConfig(layerParams: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[]) {
+        layerParams.forEach(params => {
+            let mapLayerName = params.mapId+"/"+params.layerId;
+            let conf = this.p().layers.find(val => val[0] == mapLayerName);
+            if (conf !== undefined) {
+                conf[1] = params.level;
+                conf[2] = params.visible;
+                conf[3] = params.tileBorders;
+            } else if (params.visible) {
+                this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+            }
+        })
+        this.parameters.next(this.p());
+    }
+
     styleConfig(styleId: string): StyleParameters {
         if (this.p().styles.hasOwnProperty(styleId)) {
             return this.p().styles[styleId];
