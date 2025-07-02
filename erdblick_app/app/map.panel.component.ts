@@ -368,7 +368,6 @@ import {InspectionService} from "./inspection.service";
 export class MapPanelComponent {
     layerDialogVisible: boolean = false;
     warningDialogVisible: boolean = false;
-    // mapItems: Map<string, MapInfoItem> = new Map<string, MapInfoItem>();
     editedStyleSourceSubscription: Subscription = new Subscription();
     savedStyleSourceSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;

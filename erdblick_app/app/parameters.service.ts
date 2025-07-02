@@ -242,8 +242,6 @@ export class ParametersService {
 
     legalInfoDialogVisible: boolean = false;
 
-    sourceMetadataEntries: BehaviorSubject<Map<string, Array<string>>> = new BehaviorSubject(new Map<string, Array<string>>());
-
     constructor(appModeService: AppModeService) {
         // Filter parameter descriptors based on mode
         this.parameterDescriptors = appModeService.isVisualizationOnly
