@@ -439,8 +439,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
         .constructor<TileFeatureLayer&>()
-        .function("filter", &FeatureLayerSearch::filter)
-        .function("traceResults", &FeatureLayerSearch::traceResults);
+        .function("filter", &FeatureLayerSearch::filter);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
