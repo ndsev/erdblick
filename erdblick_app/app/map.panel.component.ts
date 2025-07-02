@@ -156,7 +156,8 @@ import {InspectionService} from "./inspection.service";
                             <div class="flex-container">
                                 <div style="cursor: pointer; display: inline-block" (click)="mapItem.visible = !mapItem.visible; toggleMap(mapItem.mapId)">
                                     <span>
-                                        <p-checkbox (click)="toggleMap(mapItem.mapId)"
+                                        <p-checkbox [(ngModel)]="mapItem.visible"
+                                                    (ngModelChange)="toggleMap(mapItem.mapId)"
                                                     [binary]="true"
                                                     [inputId]="mapItem.mapId"
                                                     [name]="mapItem.mapId" tabindex="0"/>
