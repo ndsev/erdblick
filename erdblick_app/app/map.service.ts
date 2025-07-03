@@ -418,7 +418,7 @@ export class MapService {
         }
         if (layerId) {
             const layer = mapItem.layers.get(layerId);
-            if (layer === undefined) {
+            if (layer === undefined || layer.type == "SourceData") {
                 return;
             }
             if (state !== undefined) {
