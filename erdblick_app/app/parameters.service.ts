@@ -3,7 +3,8 @@ import {BehaviorSubject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
-import { AppModeService } from "./app-mode.service";
+import {AppModeService} from "./app-mode.service";
+import {MapInfoItem} from "./map.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -391,7 +392,10 @@ export class ParametersService {
     }
 
     setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
-        let mapLayerName = mapId+"/"+layerId;
+        if (layerId.includes("SourceData") || layerId.includes("Metadata")) {
+            return;
+        }
+        const mapLayerName = mapId+"/"+layerId;
         let conf = this.p().layers.find(val => val[0] == mapLayerName);
         if (conf !== undefined) {
             conf[1] = level;
@@ -405,16 +409,20 @@ export class ParametersService {
 
     setMapConfig(layerParams: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[]) {
         layerParams.forEach(params => {
-            let mapLayerName = params.mapId+"/"+params.layerId;
-            let conf = this.p().layers.find(val => val[0] == mapLayerName);
-            if (conf !== undefined) {
-                conf[1] = params.level;
-                conf[2] = params.visible;
-                conf[3] = params.tileBorders;
-            } else if (params.visible) {
-                this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+            if (!params.layerId.includes("SourceData") && !params.layerId.includes("Metadata")) {
+                const mapLayerName = params.mapId + "/" + params.layerId;
+                let conf = this.p().layers.find(
+                    val => val[0] == mapLayerName
+                );
+                if (conf !== undefined) {
+                    conf[1] = params.level;
+                    conf[2] = params.visible;
+                    conf[3] = params.tileBorders;
+                } else if (params.visible) {
+                    this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+                }
             }
-        })
+        });
         this.parameters.next(this.p());
     }
 
@@ -609,6 +617,18 @@ export class ParametersService {
             this.inspectionContainerWidth / this.baseFontSize,
             this.inspectionContainerHeight / this.baseFontSize
         ];
+        this.parameters.next(this.p());
+    }
+
+    pruneMapLayerConfig(mapItems: Array<MapInfoItem>) {
+        const mapLayerIds = new Set<string>();
+        mapItems.forEach(mapItem => {
+            mapItem.layers.keys().forEach(layerId => {
+                mapLayerIds.add(`${mapItem.mapId}/${layerId}`);
+            });
+        });
+
+        this.p().layers = this.p().layers.filter(layer => mapLayerIds.has(layer[0]));
         this.parameters.next(this.p());
     }
 }
