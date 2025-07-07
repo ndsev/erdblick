@@ -71,6 +71,20 @@ export type WorkerTask = SearchWorkerTask | CompletionWorkerTask;
 export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile;
 
 function processSearch(task: SearchWorkerTask) {
+    let postError = (name: string, message: string) => {
+        let result: SearchResultForTile = {
+            type: 'SearchResultForTile',
+            tileId: 0n,
+            query: task.query,
+            numFeatures: 0,
+            matches: [],
+            traces: null,
+            diagnostics: [],
+            error: `${name}: ${message}`
+        };
+        postMessage(result);
+    }
+
     try {
         // Parse the tile.
         let parser = new coreLib.TileLayerParser();
@@ -86,32 +100,26 @@ function processSearch(task: SearchWorkerTask) {
         search.delete();
         tile.delete();
 
-        // Post result back to the main thread.
-        let result: SearchResultForTile = {
-            type: 'SearchResultForTile',
-            tileId: tileId,
-            query: task.query,
-            numFeatures: numFeatures,
-            matches: queryResult.result,
-            traces: queryResult.traces,
-            diagnostics: queryResult.diagnostics,
-            error: null
-        };
-        postMessage(result);
+        if (queryResult["error"]) {
+            postError("Error", queryResult.error);
+        } else {
+            // Post result back to the main thread.
+            let result: SearchResultForTile = {
+                type: 'SearchResultForTile',
+                tileId: tileId,
+                query: task.query,
+                numFeatures: numFeatures,
+                matches: queryResult.result,
+                traces: queryResult.traces,
+                diagnostics: queryResult.diagnostics,
+                error: null
+            };
+            postMessage(result);
+        }
     }
     catch (someException: any) {
         let error = someException as Error
-        let result: SearchResultForTile = {
-            type: 'SearchResultForTile',
-            tileId: 0n,
-            query: task.query,
-            numFeatures: 0,
-            matches: [],
-            traces: null,
-            diagnostics: [],
-            error: `${error.name}: ${error.message}`
-        };
-        postMessage(result);
+        postError(error.name, error.message);
     }
 }
 
@@ -131,6 +139,12 @@ function processCompletion(task: CompletionWorkerTask) {
         });
         search.delete();
         tile.delete();
+
+        // We do not show completion errors.
+        if (candidates["error"]) {
+            console.error("Completion error", candidates["error"]);
+            return;
+        }
 
         // Post result back to the main thread.
         let result: CompletionCandidatesForTile = {
