@@ -117,6 +117,10 @@ export class ErdblickViewComponent implements AfterViewInit {
     private cameraIsMoving: boolean = false;
     is2DMode: boolean;
     private ignoreNextCameraUpdate: boolean = false;
+    
+    // Cache to prevent drift when switching between modes
+    private modeSwitch3DState: {altitude: number, centerLon: number, centerLat: number} | null = null;
+    private modeSwitch2DState: {viewRectHeight: number, centerLon: number, centerLat: number} | null = null;
 
     /**
      * Construct a Cesium View with a Model.
@@ -295,6 +299,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
             if (!this.ignoreNextCameraUpdate) {
+                // Clear mode switch cache when user manually moves camera
+                this.modeSwitch2DState = null;
+                this.modeSwitch3DState = null;
+                
                 if (this.is2DMode) {
                     this.parameterService.set2DCameraState(this.viewer.camera);
                 } else {
@@ -696,41 +704,54 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.mode = SceneMode.SCENE2D;
             this.setup2DConstraints();
 
-            // Get the point the camera is looking at (center of screen)
-            const canvas = this.viewer.scene.canvas;
-            const centerScreen = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-            const centerCartesian = this.viewer.camera.pickEllipsoid(centerScreen);
-            
             let centerLon: number;
             let centerLat: number;
-            
-            if (centerCartesian) {
-                // Use the point the camera is looking at
-                const centerCartographic = Cartographic.fromCartesian(centerCartesian);
-                centerLon = centerCartographic.longitude;
-                centerLat = centerCartographic.latitude;
+            let viewRectHeight: number;
+
+            // Check if we have a cached 2D state to restore
+            if (this.modeSwitch2DState) {
+                // Restore from cache to avoid drift
+                centerLon = this.modeSwitch2DState.centerLon;
+                centerLat = this.modeSwitch2DState.centerLat;
+                viewRectHeight = this.modeSwitch2DState.viewRectHeight;
+                console.log('Restoring cached 2D state');
             } else {
-                // Fallback to camera position if pick fails
+                // First time switching to 2D, calculate from 3D state
+                const canvas = this.viewer.scene.canvas;
+                const centerScreen = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+                const centerCartesian = this.viewer.camera.pickEllipsoid(centerScreen);
+                
+                if (centerCartesian) {
+                    const centerCartographic = Cartographic.fromCartesian(centerCartesian);
+                    centerLon = centerCartographic.longitude;
+                    centerLat = centerCartographic.latitude;
+                } else {
+                    const currentPos = this.viewer.camera.positionCartographic;
+                    centerLon = currentPos.longitude;
+                    centerLat = currentPos.latitude;
+                }
+
+                // Store the current 3D state before conversion
                 const currentPos = this.viewer.camera.positionCartographic;
-                centerLon = currentPos.longitude;
-                centerLat = currentPos.latitude;
+                this.modeSwitch3DState = {
+                    altitude: currentPos.height,
+                    centerLon: centerLon,
+                    centerLat: centerLat
+                };
+
+                // Convert 3D altitude to 2D view rectangle
+                const current3DAltitude = currentPos.height;
+                const current3DPitch = this.viewer.camera.pitch;
+                viewRectHeight = this.altitude3DToViewRectangle2D(current3DAltitude, current3DPitch);
             }
-
-            // Get current 3D camera state for altitude conversion
-            const currentPos = this.viewer.camera.positionCartographic;
-            const current3DAltitude = currentPos.height;
-            const current3DPitch = this.viewer.camera.pitch;
-
-            // Convert 3D altitude and pitch to appropriate 2D view rectangle
-            const viewRectHeight = this.altitude3DToViewRectangle2D(current3DAltitude, current3DPitch);
             
-            // Calculate aspect ratio to maintain proportions
+            // Calculate aspect ratio and apply view
+            const canvas = this.viewer.scene.canvas;
             const aspectRatio = canvas.clientWidth / canvas.clientHeight;
             const viewRectWidth = viewRectHeight * aspectRatio;
 
             setTimeout(() => {
                 this.ignoreNextCameraUpdate = true;
-                // Set 2D view with converted zoom level, centered on where the camera was looking
                 this.viewer.camera.setView({
                     destination: Rectangle.fromRadians(
                         centerLon - viewRectWidth / 2,
@@ -745,27 +766,42 @@ export class ErdblickViewComponent implements AfterViewInit {
             this.viewer.scene.mode = SceneMode.SCENE3D;
             this.setup3DConstraints();
 
-            // Get the center of the current 2D view rectangle
-            const current2DView = this.viewer.camera.computeViewRectangle();
             let centerLon: number;
             let centerLat: number;
             let altitude: number;
-            
-            if (current2DView) {
-                // Calculate the center of the 2D view rectangle
-                centerLon = (current2DView.west + current2DView.east) / 2;
-                centerLat = (current2DView.south + current2DView.north) / 2;
-                
-                // Convert 2D view rectangle to appropriate 3D altitude
-                const current2DViewHeight = current2DView.north - current2DView.south;
-                const desired3DPitch = CesiumMath.toRadians(-45); // Standard 3D viewing angle
-                altitude = this.viewRectangle2DToAltitude3D(current2DViewHeight, desired3DPitch);
+
+            // Check if we have a cached 3D state to restore
+            if (this.modeSwitch3DState) {
+                // Restore from cache to avoid drift
+                centerLon = this.modeSwitch3DState.centerLon;
+                centerLat = this.modeSwitch3DState.centerLat;
+                altitude = this.modeSwitch3DState.altitude;
+                console.log('Restoring cached 3D state');
             } else {
-                // Fallback if view rectangle can't be computed
-                const currentPos = this.viewer.camera.positionCartographic;
-                centerLon = currentPos.longitude;
-                centerLat = currentPos.latitude;
-                altitude = 1000000; // 1000 km
+                // First time switching to 3D, calculate from 2D state
+                const current2DView = this.viewer.camera.computeViewRectangle();
+                
+                if (current2DView) {
+                    centerLon = (current2DView.west + current2DView.east) / 2;
+                    centerLat = (current2DView.south + current2DView.north) / 2;
+                    
+                    // Store the current 2D state before conversion
+                    const current2DViewHeight = current2DView.north - current2DView.south;
+                    this.modeSwitch2DState = {
+                        viewRectHeight: current2DViewHeight,
+                        centerLon: centerLon,
+                        centerLat: centerLat
+                    };
+                    
+                    // Convert 2D view rectangle to 3D altitude
+                    altitude = this.viewRectangle2DToAltitude3D(current2DViewHeight);
+                } else {
+                    // Fallback if view rectangle can't be computed
+                    const currentPos = this.viewer.camera.positionCartographic;
+                    centerLon = currentPos.longitude;
+                    centerLat = currentPos.latitude;
+                    altitude = 1000000; // 1000 km
+                }
             }
 
             setTimeout(() => {
@@ -885,22 +921,21 @@ export class ErdblickViewComponent implements AfterViewInit {
      * @returns The height of the view rectangle in radians that shows equivalent area
      */
     private altitude3DToViewRectangle2D(altitude: number, pitch: number): number {
-        // Simplified approach: use altitude directly with a reasonable scaling factor
-        // This provides a more intuitive mapping between 3D altitude and 2D zoom
-        
-        // Convert altitude to degrees of latitude coverage
-        // Use a scaling factor to make the conversion feel more natural
-        const scalingFactor = 0.3; // Adjust this to fine-tune the conversion
+        // Use a direct linear mapping for perfect reversibility
+        const scalingFactor = 0.3;
         const visibleDegrees = (altitude * scalingFactor) / 111320;
-        
-        // Convert to radians
         const viewRectHeight = CesiumMath.toRadians(visibleDegrees);
         
-        // Clamp to reasonable bounds
+        // Apply bounds without clamping to preserve reversibility
         const minHeight = this.getMinViewRectangleHeight();
         const maxHeight = this.getMaxViewRectangleHeight();
         
-        return Math.max(minHeight, Math.min(maxHeight, viewRectHeight));
+        // Only warn if out of bounds, but don't clamp to avoid drift
+        if (viewRectHeight < minHeight || viewRectHeight > maxHeight) {
+            console.warn(`View rectangle height ${viewRectHeight} is outside bounds [${minHeight}, ${maxHeight}]`);
+        }
+        
+        return viewRectHeight;
     }
 
     /**
@@ -910,15 +945,21 @@ export class ErdblickViewComponent implements AfterViewInit {
      * @returns The altitude in meters that shows equivalent area
      */
     private viewRectangle2DToAltitude3D(viewRectHeight: number, desiredPitch: number = CesiumMath.toRadians(-45)): number {
-        // Use the inverse of the 3D to 2D conversion for consistency
+        // Exact inverse of the 3D to 2D conversion
         const visibleDegrees = CesiumMath.toDegrees(viewRectHeight);
         const scalingFactor = 0.3; // Same scaling factor as used in altitude3DToViewRectangle2D
-        
-        // Reverse the calculation: altitude = (visibleDegrees * 111320) / scalingFactor
         const altitude = (visibleDegrees * 111320) / scalingFactor;
         
-        // Ensure reasonable altitude bounds (100m to 50,000,000m)
-        return Math.max(100, Math.min(50000000, altitude));
+        // Apply bounds without clamping to preserve reversibility
+        const minAltitude = 100;
+        const maxAltitude = 50000000;
+        
+        // Only warn if out of bounds, but don't clamp to avoid drift
+        if (altitude < minAltitude || altitude > maxAltitude) {
+            console.warn(`Altitude ${altitude} is outside bounds [${minAltitude}, ${maxAltitude}]`);
+        }
+        
+        return altitude;
     }
 
     /**
