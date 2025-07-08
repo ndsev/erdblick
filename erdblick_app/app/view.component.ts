@@ -115,7 +115,7 @@ export class ErdblickViewComponent implements AfterViewInit {
     private tileOutlineEntity: Entity | null = null;
     menuItems: MenuItem[] = [];
     private cameraIsMoving: boolean = false;
-    is2DMode: boolean = true;
+    is2DMode: boolean;
     private ignoreNextCameraUpdate: boolean = false;
 
     /**
@@ -138,6 +138,8 @@ export class ErdblickViewComponent implements AfterViewInit {
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService) {
+
+        this.is2DMode = this.parameterService.parameters.getValue().mode2d;
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             tileVis.render(this.viewer).then(wasRendered => {
@@ -193,16 +195,7 @@ export class ErdblickViewComponent implements AfterViewInit {
         );
         
         // Initialize camera mode from parameters
-        const params = this.parameterService.p();
-        if (params.cameraMode === '3D') {
-            this.is2DMode = false;
-            this.viewer.scene.mode = SceneMode.SCENE3D;
-            this.setup3DConstraints();
-        } else {
-            this.is2DMode = true;
-            this.viewer.scene.mode = SceneMode.SCENE2D;
-            this.setup2DConstraints();
-        }
+        this.setupSceneMode(this.is2DMode);
 
         this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
         this.openStreetMapLayer.alpha = 0.3;
@@ -402,6 +395,9 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (this.openStreetMapLayer) {
                 this.openStreetMapLayer.show = parameters.osm;
                 this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
+            }
+            if (this.viewer && this.is2DMode !== parameters.mode2d) {
+                this.applySceneModeChange(parameters.mode2d);
             }
             if (parameters.marker && parameters.markedPosition.length == 2) {
                 this.addMarker(Cartesian3.fromDegrees(
@@ -739,23 +735,26 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     toggleSceneMode() {
+        this.parameterService.setCameraMode(!this.is2DMode);
+    }
+
+    private applySceneModeChange(is2D: boolean) {
         // Simply store the current camera position before switching
         const currentPos = this.viewer.camera.positionCartographic;
         const currentHeight = currentPos.height;
         const currentLon = currentPos.longitude;
         const currentLat = currentPos.latitude;
-        
-        this.is2DMode = !this.is2DMode;
-        this.parameterService.setCameraMode(this.is2DMode ? '2D' : '3D');
-        
+
+        this.setupSceneMode(is2D);
+
         // Temporarily disable camera sync to avoid feedback
         this.ignoreNextCameraUpdate = true;
-        
+
         if (this.is2DMode) {
             // Switch to 2D mode
             this.viewer.scene.mode = SceneMode.SCENE2D;
             this.setup2DConstraints();
-            
+
             // In 2D, just look at the same position with same height
             setTimeout(() => {
                 this.ignoreNextCameraUpdate = true;
@@ -767,7 +766,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             // Switch to 3D mode
             this.viewer.scene.mode = SceneMode.SCENE3D;
             this.setup3DConstraints();
-            
+
             // In 3D, position camera at same location and height
             setTimeout(() => {
                 this.ignoreNextCameraUpdate = true;
@@ -781,8 +780,19 @@ export class ErdblickViewComponent implements AfterViewInit {
                 });
             }, 50);
         }
-        
+
         this.viewer.scene.requestRender();
+    }
+
+    private setupSceneMode(is2D: boolean) {
+        this.is2DMode = is2D;
+        if (this.is2DMode) {
+            this.viewer.scene.mode = SceneMode.SCENE2D;
+            this.setup2DConstraints();
+        } else {
+            this.viewer.scene.mode = SceneMode.SCENE3D;
+            this.setup3DConstraints();
+        }
     }
 
     private setup2DConstraints() {

@@ -34,7 +34,7 @@ interface ErdblickParameters extends Record<string, any> {
     lon: number,
     lat: number,
     alt: number,
-    cameraMode: string,  // '2D' or '3D'
+    mode2d: boolean,
     viewRectangle: [number, number, number, number] | null,  // [west, south, east, north] in degrees
     osm: boolean,
     osmOpacity: number,
@@ -135,10 +135,10 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         default: 16000000,
         urlParam: true
     },
-    cameraMode: {
-        converter: val => val,
-        validator: val => val === '2D' || val === '3D',
-        default: '2D',
+    mode2d: {
+        converter: val => val === 'true',
+        validator: val => typeof val === 'boolean',
+        default: false,
         urlParam: true
     },
     viewRectangle: {
@@ -470,8 +470,8 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setCameraMode(mode: '2D' | '3D') {
-        this.p().cameraMode = mode;
+    setCameraMode(isEnabled: boolean) {
+        this.p().mode2d = isEnabled;
         this.parameters.next(this.p());
     }
 
