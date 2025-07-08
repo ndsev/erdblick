@@ -299,7 +299,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.camera.percentageChanged = 0.1;
         this.viewer.camera.changed.addEventListener(() => {
             if (!this.ignoreNextCameraUpdate) {
-                // Clear mode switch cache when user manually moves camera
+                // Only clear mode switch cache when user manually moves camera
+                // (not during programmatic zoom, movement, or mode switches)
                 this.modeSwitch2DState = null;
                 this.modeSwitch3DState = null;
                 
@@ -498,10 +499,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         let sizeLon = east - west;
         let sizeLat = north - south;
 
-        // Handle the antimeridian.
-        if (west > -180 && sizeLon > 180.0) {
-            sizeLon = 360.0 - sizeLon;
-        }
+        // Don't handle antimeridian - let Cesium's continuous chaining work naturally
+        // The sizeLon can be any value in continuous 2D mode
 
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
@@ -639,6 +638,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         
         if (this.is2DMode) {
             // In 2D mode, use setView to maintain the 2D constraints
+            // Ignore the camera change event to preserve mode switch cache
+            this.ignoreNextCameraUpdate = true;
             this.viewer.camera.setView({
                 destination: Cartesian3.fromRadians(lon, lat, alt)
             });
@@ -668,6 +669,8 @@ export class ErdblickViewComponent implements AfterViewInit {
     resetOrientation() {
         if (this.is2DMode) {
             // In 2D mode, just reset to north-up orientation
+            // Ignore the camera change event to preserve mode switch cache
+            this.ignoreNextCameraUpdate = true;
             this.parameterService.setView(this.parameterService.getCameraPosition(), {
                 heading: 0,
                 pitch: CesiumMath.toRadians(-90.0),
@@ -846,10 +849,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         
         // Enable standard 2D interactions
         scene.screenSpaceCameraController.enableTranslate = true;
-        scene.screenSpaceCameraController.enableZoom = false; // Disable Cesium's zoom to use custom handler
+        scene.screenSpaceCameraController.enableZoom = true; // Re-enable zoom for native methods
         scene.screenSpaceCameraController.enableLook = false;
         
-        // Set zoom constraints for 2D mode (not used since we disabled zoom)
+        // Set zoom constraints for 2D mode
         scene.screenSpaceCameraController.minimumZoomDistance = 100;
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
     }
@@ -870,22 +873,21 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     /**
-     * Calculate the minimum view rectangle height for 2D mode (5 meters in degrees)
+     * Calculate the minimum view rectangle height for 2D mode (10 meters in degrees)
      */
     private getMinViewRectangleHeight(): number {
         // 1 degree of latitude ≈ 111,320 meters
-        // 5 meters ≈ 5/111,320 ≈ 0.0000449 degrees
-        return 5 / 111320;
+        // 10 meters ≈ 10/111,320 ≈ 0.0000898 degrees
+        return 10 / 111320;
     }
 
     /**
-     * Calculate the maximum view rectangle height for 2D mode (world height)
+     * Calculate the maximum view rectangle height for 2D mode (45 degrees)
      */
     private getMaxViewRectangleHeight(): number {
-        // World spans from -90° to +90° latitude (180° total)
-        // Use a smaller value to prevent black bars at maximum zoom out
-        // This ensures the view doesn't extend beyond world boundaries
-        return Math.PI * 0.5; // ~90 degrees in radians
+        // Limit to 45 degrees to prevent excessive zoom out
+        // This provides a reasonable world view without black bars
+        return CesiumMath.toRadians(45);
     }
 
     /**
@@ -908,9 +910,23 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Move by 10% of the current view size (adjust this percentage as needed)
         const movementPercentage = 0.1;
         
+        // Calculate movement distances
+        let longitudeOffset = CesiumMath.toDegrees(currentWidth * movementPercentage);
+        let latitudeOffset = CesiumMath.toDegrees(currentHeight * movementPercentage);
+        
+        // Clamp longitude movement to reasonable values for continuous chaining
+        // This prevents extremely large movements when view spans multiple worlds
+        const maxLonMovement = 45; // Maximum 45 degrees longitude movement
+        const minLonMovement = 0.001; // Minimum movement to prevent getting stuck
+        
+        longitudeOffset = Math.max(minLonMovement, Math.min(maxLonMovement, Math.abs(longitudeOffset))) * Math.sign(longitudeOffset || 1);
+        
+        // Latitude movement is naturally bounded by the view height
+        latitudeOffset = Math.max(0.001, Math.abs(latitudeOffset)) * Math.sign(latitudeOffset || 1);
+        
         return {
-            longitudeOffset: CesiumMath.toDegrees(currentWidth * movementPercentage),
-            latitudeOffset: CesiumMath.toDegrees(currentHeight * movementPercentage)
+            longitudeOffset: longitudeOffset,
+            latitudeOffset: latitudeOffset
         };
     }
 
@@ -963,84 +979,57 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     /**
-     * Zoom the 2D camera by a factor while maintaining cursor position
+     * 2D zoom using height-based approach with proper limit conversion
      */
     private zoom2D(zoomFactor: number, cursorPosition?: Cartesian2): void {
         const camera = this.viewer.camera;
-        const currentView = camera.computeViewRectangle();
-        if (!currentView) return;
-
-        const currentHeight = currentView.north - currentView.south;
+        
+        // Get current camera height
+        const currentHeight = camera.positionCartographic.height;
         const newHeight = currentHeight * zoomFactor;
-
-        // Apply zoom limits
-        const minHeight = this.getMinViewRectangleHeight();
-        const maxHeight = this.getMaxViewRectangleHeight();
         
-        if (newHeight < minHeight || newHeight > maxHeight) {
-            return; // Don't zoom beyond limits
-        }
-
-        let centerLon = (currentView.west + currentView.east) / 2;
-        let centerLat = (currentView.south + currentView.north) / 2;
-
-        // Calculate current dimensions
-        const currentWidth = currentView.east - currentView.west;
-
-        // Calculate new dimensions
-        const newWidth = currentWidth * zoomFactor;
-
-        // If cursor position is provided, zoom towards it
-        if (cursorPosition) {
-            const worldPosition = camera.pickEllipsoid(cursorPosition, this.viewer.scene.globe.ellipsoid);
-            if (worldPosition) {
-                const cursorCartographic = Cartographic.fromCartesian(worldPosition);
-                const cursorLon = cursorCartographic.longitude;
-                const cursorLat = cursorCartographic.latitude;
-                
-                // Calculate cursor position as percentage of current view
-                const xPercent = (cursorLon - currentView.west) / currentWidth;
-                const yPercent = (cursorLat - currentView.south) / currentHeight;
-                
-                // Calculate new bounds keeping cursor position fixed
-                let newWest = cursorLon - (newWidth * xPercent);
-                let newSouth = cursorLat - (newHeight * yPercent);
-                
-                // Ensure bounds don't extend beyond world boundaries
-                const worldLatMin = -Math.PI / 2; // -90° in radians
-                const worldLatMax = Math.PI / 2;   // +90° in radians
-                
-                if (newSouth < worldLatMin) {
-                    newSouth = worldLatMin;
-                }
-                if (newSouth + newHeight > worldLatMax) {
-                    newSouth = worldLatMax - newHeight;
-                }
-                
-                camera.setView({
-                    destination: Rectangle.fromRadians(newWest, newSouth, newWest + newWidth, newSouth + newHeight)
-                });
-                return;
-            }
-        }
-
-        // Fallback: zoom to center with bounds checking
-        let newWest = centerLon - newWidth / 2;
-        let newSouth = centerLat - newHeight / 2;
+        // Convert height to equivalent view rectangle height for limit checking
+        // Use the same conversion as our mode switching functions
+        const scalingFactor = 0.3;
+        const currentViewRectHeightDegrees = (currentHeight * scalingFactor) / 111320;
+        const currentViewRectHeight = CesiumMath.toRadians(currentViewRectHeightDegrees);
         
-        // Ensure bounds don't extend beyond world boundaries
-        const worldLatMin = -Math.PI / 2; // -90° in radians
-        const worldLatMax = Math.PI / 2;   // +90° in radians
+        const newViewRectHeightDegrees = (newHeight * scalingFactor) / 111320;
+        const newViewRectHeight = CesiumMath.toRadians(newViewRectHeightDegrees);
         
-        if (newSouth < worldLatMin) {
-            newSouth = worldLatMin;
+        // Apply zoom limits based on view rectangle height
+        const minViewRectHeight = this.getMinViewRectangleHeight();
+        const maxViewRectHeight = this.getMaxViewRectangleHeight();
+        
+        console.log('View rectangle height check:', { 
+            currentViewRectHeight: CesiumMath.toDegrees(currentViewRectHeight),
+            newViewRectHeight: CesiumMath.toDegrees(newViewRectHeight),
+            minViewRectHeight: CesiumMath.toDegrees(minViewRectHeight),
+            maxViewRectHeight: CesiumMath.toDegrees(maxViewRectHeight)
+        });
+        
+        if (newViewRectHeight < minViewRectHeight || newViewRectHeight > maxViewRectHeight) {
+            console.log('Zoom blocked by view rectangle limits');
+            return;
         }
-        if (newSouth + newHeight > worldLatMax) {
-            newSouth = worldLatMax - newHeight;
-        }
+        
+        // DON'T clear cache during zoom - preserve it to prevent altitude drift
+        // this.modeSwitch2DState = null;
+        // this.modeSwitch3DState = null;
+        
+        // Set new camera height directly while preserving position
+        const currentPos = camera.positionCartographic;
+        const newPosition = Cartesian3.fromRadians(
+            currentPos.longitude,
+            currentPos.latitude,
+            newHeight
+        );
+        
+        // Ignore the camera change event for this programmatic zoom
+        this.ignoreNextCameraUpdate = true;
         
         camera.setView({
-            destination: Rectangle.fromRadians(newWest, newSouth, newWest + newWidth, newSouth + newHeight)
+            destination: newPosition
         });
     }
 }
