@@ -38,6 +38,19 @@ import {AppModeService} from "./app-mode.service";
 // Redeclare window with extended interface
 declare let window: DebugWindow;
 
+interface MarkersParams {
+    id?: SearchResultPrimitiveId;
+    position: Cartesian3;
+    image?: string;
+    width: number;
+    height: number;
+    eyeOffset?: Cartesian3;
+    pixelOffset?: Cartesian2;
+    color?: Color;
+    disableDepthTestDistance?: number;
+    heightReference?: HeightReference;
+}
+
 @Component({
     selector: 'erdblick-view',
     template: `
@@ -324,6 +337,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
             if (this.is2DMode) {
                 event.preventDefault();
+                event.stopPropagation();
+                
                 const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9; // Smoother zoom steps
                 
                 // Get mouse position relative to canvas
@@ -542,17 +557,22 @@ export class ErdblickViewComponent implements AfterViewInit {
         
         // Add marker using same approach as search results
         try {
-            this.markerCollection.add({
+            const params: MarkersParams = {
                 position: cartesian,
                 image: this.featureSearchService.markerGraphics(),
                 width: 32,
-                height: 32,
-                pixelOffset: new Cartesian2(0, -16),
-                eyeOffset: new Cartesian3(0, 0, -20), // Same as search markers
-                heightReference: HeightReference.CLAMP_TO_GROUND
-            });
-            
-            this.viewer.scene.requestRender();
+                height: 32
+            };
+            if (this.is2DMode) {
+                params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            } else {
+                params.pixelOffset = new Cartesian2(0, -10);
+                params.eyeOffset = new Cartesian3(0, 0, -50);
+                params.heightReference = HeightReference.CLAMP_TO_GROUND;
+            }
+            this.markerCollection.add(params);
+            this.viewer.scene.primitives.raiseToTop(this.markerCollection);
+            // this.viewer.scene.requestRender();
         } catch (e) {
             console.error('Error adding marker:', e);
         }
@@ -567,30 +587,41 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (node.markers.length) {
                 markers.push(...node.markers);
             } else if (node.count > 0 && node.center) {
-                this.featureSearchService.visualization.add({
+                const params: MarkersParams = {
                     position: node.center,
                     image: this.featureSearchService.getPinGraphics(node.count),
                     width: 64,
-                    height: 64,
-                    eyeOffset: new Cartesian3(0, 0, -50)
-                });
+                    height: 64
+                };
+                if (this.is2DMode) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
+                }
+                this.featureSearchService.visualization.add(params);
             }
         }
 
         if (markers.length) {
             markers.forEach(marker => {
-                this.featureSearchService.visualization.add({
+                const params: MarkersParams = {
                     id: marker[0],
                     position: marker[1].cartesian as Cartesian3,
                     image: this.featureSearchService.markerGraphics(),
                     width: 32,
                     height: 32,
-                    pixelOffset: new Cartesian2(0, -10),
-                    eyeOffset: new Cartesian3(0, 0, -20),
                     color: color
-                });
+                };
+                if (this.is2DMode) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.pixelOffset = new Cartesian2(0, -10);
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
+                }
+                this.featureSearchService.visualization.add(params);
             });
         }
+        this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
     }
 
     moveUp() {
@@ -717,7 +748,6 @@ export class ErdblickViewComponent implements AfterViewInit {
                 centerLon = this.modeSwitch2DState.centerLon;
                 centerLat = this.modeSwitch2DState.centerLat;
                 viewRectHeight = this.modeSwitch2DState.viewRectHeight;
-                console.log('Restoring cached 2D state');
             } else {
                 // First time switching to 2D, calculate from 3D state
                 const canvas = this.viewer.scene.canvas;
@@ -779,7 +809,6 @@ export class ErdblickViewComponent implements AfterViewInit {
                 centerLon = this.modeSwitch3DState.centerLon;
                 centerLat = this.modeSwitch3DState.centerLat;
                 altitude = this.modeSwitch3DState.altitude;
-                console.log('Restoring cached 3D state');
             } else {
                 // First time switching to 3D, calculate from 2D state
                 const current2DView = this.viewer.camera.computeViewRectangle();
@@ -849,10 +878,10 @@ export class ErdblickViewComponent implements AfterViewInit {
         
         // Enable standard 2D interactions
         scene.screenSpaceCameraController.enableTranslate = true;
-        scene.screenSpaceCameraController.enableZoom = true; // Re-enable zoom for native methods
+        scene.screenSpaceCameraController.enableZoom = false; // Disable Cesium's zoom to use only our custom handler
         scene.screenSpaceCameraController.enableLook = false;
         
-        // Set zoom constraints for 2D mode
+        // Set zoom constraints for 2D mode (not used since we disabled zoom)
         scene.screenSpaceCameraController.minimumZoomDistance = 100;
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
     }
@@ -873,12 +902,12 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     /**
-     * Calculate the minimum view rectangle height for 2D mode (10 meters in degrees)
+     * Calculate the minimum view rectangle height for 2D mode (1 meter in degrees)
      */
     private getMinViewRectangleHeight(): number {
         // 1 degree of latitude ≈ 111,320 meters
-        // 10 meters ≈ 10/111,320 ≈ 0.0000898 degrees
-        return 10 / 111320;
+        // 0.25 meter ≈ 1/111,320 ≈ 0.000002245 degrees
+        return 0.25 / 111320;
     }
 
     /**
@@ -1001,15 +1030,8 @@ export class ErdblickViewComponent implements AfterViewInit {
         const minViewRectHeight = this.getMinViewRectangleHeight();
         const maxViewRectHeight = this.getMaxViewRectangleHeight();
         
-        console.log('View rectangle height check:', { 
-            currentViewRectHeight: CesiumMath.toDegrees(currentViewRectHeight),
-            newViewRectHeight: CesiumMath.toDegrees(newViewRectHeight),
-            minViewRectHeight: CesiumMath.toDegrees(minViewRectHeight),
-            maxViewRectHeight: CesiumMath.toDegrees(maxViewRectHeight)
-        });
-        
         if (newViewRectHeight < minViewRectHeight || newViewRectHeight > maxViewRectHeight) {
-            console.log('Zoom blocked by view rectangle limits');
+            console.warn('Zoom blocked by view rectangle limits');
             return;
         }
         
