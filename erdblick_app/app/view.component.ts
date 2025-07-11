@@ -17,10 +17,12 @@ import {
     BillboardCollection,
     Rectangle,
     defined,
-    Matrix3
+    Matrix3,
+    WebMercatorProjection,
+    GeographicProjection
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {AfterViewInit, Component, OnInit} from "@angular/core";
+import {AfterViewInit, Component, OnDestroy, OnInit} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {FeatureSearchService, MAX_ZOOM_LEVEL, SearchResultPrimitiveId} from "./feature.search.service";
@@ -93,8 +95,8 @@ interface MarkersParams {
         }
         .scene-mode-toggle {
             position: absolute;
-            top: 10px;
-            right: 10px;
+            bottom: 30px;
+            right: 75px;
             z-index: 1;
         }
         .navigation-controls {
@@ -120,7 +122,7 @@ interface MarkersParams {
     `],
     standalone: false
 })
-export class ErdblickViewComponent implements AfterViewInit {
+export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     viewer!: Viewer;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
@@ -134,6 +136,16 @@ export class ErdblickViewComponent implements AfterViewInit {
     // Cache to prevent drift when switching between modes
     private modeSwitch3DState: {altitude: number, centerLon: number, centerLat: number} | null = null;
     private modeSwitch2DState: {viewRectHeight: number, centerLon: number, centerLat: number} | null = null;
+    
+    // State to preserve during viewer reinitialization
+    private viewerState: {
+        openStreetMapLayerAlpha: number;
+        openStreetMapLayerShow: boolean;
+        markerPositions: Cartesian3[];
+        tileOutlineEntity: Entity | null;
+        cameraState: any;
+        menuItems: MenuItem[];
+    } | null = null;
 
     /**
      * Construct a Cesium View with a Model.
@@ -157,19 +169,42 @@ export class ErdblickViewComponent implements AfterViewInit {
         this.is2DMode = this.parameterService.parameters.getValue().mode2d;
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
+            // Safety check: ensure viewer exists and is not destroyed
+            if (!this.viewer || (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed())) {
+                console.warn('Cannot render tile visualization: viewer not available');
+                return;
+            }
+            
             tileVis.render(this.viewer).then(wasRendered => {
-                if (wasRendered) {
+                if (wasRendered && this.viewer && this.viewer.scene) {
+                    // Double-check viewer is still available after async operation
+                    if (typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed()) {
                     this.viewer.scene.requestRender();
+                    }
                 }
             });
         });
 
         this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
+            // Safety check: ensure viewer exists and is not destroyed
+            if (!this.viewer || (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed())) {
+                console.warn('Cannot destroy tile visualization: viewer not available');
+                return;
+            }
+            
             tileVis.destroy(this.viewer);
+            if (this.viewer && this.viewer.scene) {
             this.viewer.scene.requestRender();
+            }
         });
 
         this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number, z?: number}) => {
+            // Safety check: ensure viewer exists and is not destroyed
+            if (!this.viewer || !this.viewer.camera || (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed())) {
+                console.warn('Cannot move to WGS84 position: viewer not available');
+                return;
+            }
+            
             // Convert lon/lat to Cartesian3 using current camera altitude.
             this.parameterService.setView(
                 Cartesian3.fromDegrees(
@@ -190,32 +225,97 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
-        this.viewer = new Viewer("mapViewContainer",
-            {
-                baseLayerPicker: false,
-                animation: false,
-                geocoder: false,
-                homeButton: false,
-                sceneModePicker: false,
-                selectionIndicator: false,
-                timeline: false,
-                navigationHelpButton: false,
-                navigationInstructionsInitiallyVisible: false,
-                requestRenderMode: true,
-                maximumRenderTimeChange: Infinity,
-                infoBox: false,
-                baseLayer: false,
-                sceneMode: SceneMode.SCENE2D
-            }
-        );
-        
-        // Initialize camera mode from parameters
-        this.setupSceneMode(this.is2DMode);
+        // Initialize viewer with appropriate projection
+        this.createViewer(this.is2DMode).then(() => {
+            // Continue with the rest of the initialization
+            this.initializeAfterViewer();
+        }).catch((error) => {
+            console.error('Failed to initialize viewer:', error);
+            // Show user-friendly error or fallback behavior
+            alert('Failed to initialize the map viewer. Please refresh the page.');
+        });
+    }
 
-        this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
-        this.openStreetMapLayer.alpha = 0.3;
-        this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-        this.cameraIsMoving = false;
+    /**
+     * Initialize components after viewer is created
+     */
+    private initializeAfterViewer() {
+        // Setup parameter subscriptions and event handlers
+        this.setupParameterSubscriptions();
+        this.setupEventHandlers();
+        
+        // Hide the global loading spinner
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Setup parameter subscriptions
+     */
+    private setupParameterSubscriptions() {
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
+            this.ignoreNextCameraUpdate = true;
+            if (this.is2DMode) {
+                // In 2D mode, check if we have a view rectangle in parameters
+                const params = this.parameterService.p();
+                if (params.viewRectangle && params.viewRectangle.length === 4) {
+                    this.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(...params.viewRectangle)
+                    });
+                } else {
+                    // Fallback to center position
+                    const cartographic = Cartographic.fromCartesian(cameraData.destination);
+                    this.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(
+                            CesiumMath.toDegrees(cartographic.longitude) - 1,
+                            CesiumMath.toDegrees(cartographic.latitude) - 1,
+                            CesiumMath.toDegrees(cartographic.longitude) + 1,
+                            CesiumMath.toDegrees(cartographic.latitude) + 1
+                        )
+                    });
+                }
+            } else {
+                // 3D mode
+                this.viewer.camera.setView({
+                    destination: cameraData.destination,
+                    orientation: cameraData.orientation
+                });
+            }
+            this.updateViewport();
+        });
+
+        this.parameterService.parameters.subscribe(parameters => {
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = parameters.osm;
+                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
+            }
+            if (this.viewer && this.is2DMode !== parameters.mode2d) {
+                // Handle async mode change properly
+                this.applySceneModeChange(parameters.mode2d).catch(error => {
+                    console.error('Failed to change scene mode:', error);
+                });
+            }
+            if (parameters.marker && parameters.markedPosition.length == 2) {
+                this.addMarker(Cartesian3.fromDegrees(
+                    Number(parameters.markedPosition[0]),
+                    Number(parameters.markedPosition[1]))
+                );
+            } else {
+                if (this.markerCollection) {
+                    this.markerCollection.removeAll();
+                    this.viewer.scene.requestRender();
+                }
+            }
+        });
+    }
+
+    /**
+     * Setup event handlers and subscriptions
+     */
+    private setupEventHandlers() {
+        if (!this.mouseHandler) return;
 
         this.mouseHandler.setInputAction((movement: any) => {
             if (this.appModeService.isVisualizationOnly) return;
@@ -308,120 +408,22 @@ export class ErdblickViewComponent implements AfterViewInit {
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
-        // Add a handler for camera movement.
-        this.viewer.camera.percentageChanged = 0.1;
-        this.viewer.camera.changed.addEventListener(() => {
-            if (!this.ignoreNextCameraUpdate) {
-                // Only clear mode switch cache when user manually moves camera
-                // (not during programmatic zoom, movement, or mode switches)
-                this.modeSwitch2DState = null;
-                this.modeSwitch3DState = null;
-                
-                if (this.is2DMode) {
-                    this.parameterService.set2DCameraState(this.viewer.camera);
-                } else {
-                    this.parameterService.setCameraState(this.viewer.camera);
-                }
-            }
-            this.ignoreNextCameraUpdate = false;
-            this.updateViewport();
-        });
-        this.viewer.camera.moveStart.addEventListener(() => {
-            this.cameraIsMoving = true;
-        });
-        this.viewer.camera.moveEnd.addEventListener(() => {
-            this.cameraIsMoving = false;
-        });
-        
-        // Add custom wheel handler for 2D mode
-        this.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
-            if (this.is2DMode) {
-                event.preventDefault();
-                event.stopPropagation();
-                
-                const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9; // Smoother zoom steps
-                
-                // Get mouse position relative to canvas
-                const rect = this.viewer.scene.canvas.getBoundingClientRect();
-                const mousePosition = new Cartesian2(
-                    event.clientX - rect.left,
-                    event.clientY - rect.top
-                );
-                
-                this.zoom2D(zoomFactor, mousePosition);
-            }
-        });
-        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+        // Setup additional subscriptions and services
+        this.setupAdditionalSubscriptions();
+        this.setupKeyboardShortcuts();
+    }
 
-        // Remove fullscreen button as unnecessary
-        this.viewer.fullscreenButton.destroy();
-
-        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.ignoreNextCameraUpdate = true;
-            if (this.is2DMode) {
-                // In 2D mode, check if we have a view rectangle in parameters
-                const params = this.parameterService.p();
-                if (params.viewRectangle && params.viewRectangle.length === 4) {
-                    this.viewer.camera.setView({
-                        destination: Rectangle.fromDegrees(...params.viewRectangle)
-                    });
-                } else {
-                    // Fallback to center position
-                    const cartographic = Cartographic.fromCartesian(cameraData.destination);
-                    this.viewer.camera.setView({
-                        destination: Rectangle.fromDegrees(
-                            CesiumMath.toDegrees(cartographic.longitude) - 1,
-                            CesiumMath.toDegrees(cartographic.latitude) - 1,
-                            CesiumMath.toDegrees(cartographic.longitude) + 1,
-                            CesiumMath.toDegrees(cartographic.latitude) + 1
-                        )
-                    });
-                }
-            } else {
-                // 3D mode
-                this.viewer.camera.setView({
-                    destination: cameraData.destination,
-                    orientation: cameraData.orientation
-                });
-            }
-            this.updateViewport();
-        });
-
-        this.parameterService.parameters.subscribe(parameters => {
-            if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = parameters.osm;
-                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
-            }
-            if (this.viewer && this.is2DMode !== parameters.mode2d) {
-                this.applySceneModeChange(parameters.mode2d);
-            }
-            if (parameters.marker && parameters.markedPosition.length == 2) {
-                this.addMarker(Cartesian3.fromDegrees(
-                    Number(parameters.markedPosition[0]),
-                    Number(parameters.markedPosition[1]))
-                );
-            } else {
-                if (this.markerCollection) {
-                    this.markerCollection.removeAll();
-                    this.viewer.scene.requestRender();
-                }
-            }
-        });
-
+    /**
+     * Setup additional subscriptions for services
+     */
+    private setupAdditionalSubscriptions() {
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
 
-        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
         this.featureSearchService.visualizationChanged.subscribe(_ => {
             this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
             this.viewer.scene.requestRender();
         });
-        
-        // Create marker collection for position markers
-        this.markerCollection = new BillboardCollection({
-            scene: this.viewer.scene
-        });
-        this.viewer.scene.primitives.add(this.markerCollection);
 
         this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
             this.renderFeatureSearchResultTree(level);
@@ -454,23 +456,6 @@ export class ErdblickViewComponent implements AfterViewInit {
             });
         });
 
-        if (!this.appModeService.isVisualizationOnly) {
-            this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
-            this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
-            this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
-            this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
-            this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
-            this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
-            this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
-            this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
-        }
-
-        // Hide the global loading spinner.
-        const spinner = document.getElementById('global-spinner-container');
-        if (spinner) {
-            spinner.style.display = 'none';
-        }
-
         this.menuService.tileOutline.subscribe(entity => {
             if (entity) {
                 this.tileOutlineEntity = this.viewer.entities.add(entity);
@@ -483,10 +468,44 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     /**
+     * Setup keyboard shortcuts
+     */
+    private setupKeyboardShortcuts() {
+        if (!this.appModeService.isVisualizationOnly) {
+            this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
+            this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
+            this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
+            this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
+            this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
+            this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
+            this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
+            this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
+        }
+    }
+
+    /**
      * Update the visible viewport, and communicate it to the model.
      */
     updateViewport() {
+        // Safety check for viewer existence
+        if (!this.viewer || !this.viewer.scene || !this.viewer.camera) {
+            console.warn('Cannot update viewport: viewer not available');
+            return;
+        }
+
+        try {
+            // Check if viewer is destroyed
+            if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+                console.warn('Cannot update viewport: viewer is destroyed');
+                return;
+            }
+
         let canvas = this.viewer.scene.canvas;
+            if (!canvas) {
+                console.warn('Cannot update viewport: canvas not available');
+                return;
+            }
+
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
         let centerLon, centerLat;
@@ -529,6 +548,9 @@ export class ErdblickViewComponent implements AfterViewInit {
             camPosLat: centerLat,
             orientation: -this.viewer.camera.heading + Math.PI * .5,
         });
+        } catch (error) {
+            console.warn('Error updating viewport:', error);
+        }
     }
 
     private getOpenStreetMapLayerProvider() {
@@ -539,21 +561,32 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     updateOpenStreetMapLayer(opacity: number) {
-        if (this.openStreetMapLayer) {
+        if (this.openStreetMapLayer && this.viewer && this.viewer.scene) {
             this.openStreetMapLayer.alpha = opacity;
             this.viewer.scene.requestRender();
         }
     }
 
     addMarker(cartesian: Cartesian3) {
-        // Ensure collection exists
-        if (!this.markerCollection) {
-            console.warn('MarkerCollection not initialized');
+        // Ensure collection and viewer exist
+        if (!this.markerCollection || !this.viewer || !this.viewer.scene) {
+            console.warn('Cannot add marker: MarkerCollection or viewer not initialized');
+            return;
+        }
+
+        // Check if viewer is destroyed
+        if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+            console.warn('Cannot add marker: viewer is destroyed');
             return;
         }
         
         // Clear any existing markers in the collection
+        try {
         this.markerCollection.removeAll();
+        } catch (e) {
+            console.warn('Error clearing markers:', e);
+            return;
+        }
         
         // Add marker using same approach as search results
         try {
@@ -571,7 +604,10 @@ export class ErdblickViewComponent implements AfterViewInit {
                 params.heightReference = HeightReference.CLAMP_TO_GROUND;
             }
             this.markerCollection.add(params);
+            
+            if (this.viewer.scene.primitives) {
             this.viewer.scene.primitives.raiseToTop(this.markerCollection);
+            }
             // this.viewer.scene.requestRender();
         } catch (e) {
             console.error('Error adding marker:', e);
@@ -579,6 +615,18 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     renderFeatureSearchResultTree(level: number) {
+        if (!this.viewer || !this.viewer.scene) {
+            console.warn('Cannot render feature search results: viewer not initialized');
+            return;
+        }
+
+        // Check if viewer is destroyed
+        if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+            console.warn('Cannot render feature search results: viewer is destroyed');
+            return;
+        }
+
+        try {
         this.featureSearchService.visualization.removeAll();
         const color = Color.fromCssColorString(this.featureSearchService.pointColor);
         let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
@@ -621,7 +669,13 @@ export class ErdblickViewComponent implements AfterViewInit {
                 this.featureSearchService.visualization.add(params);
             });
         }
+            
+            if (this.viewer && this.viewer.scene && this.viewer.scene.primitives) {
         this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
+            }
+        } catch (error) {
+            console.warn('Error rendering feature search results:', error);
+        }
     }
 
     moveUp() {
@@ -661,6 +715,19 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     private moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
+        // Safety check for viewer existence
+        if (!this.viewer || !this.viewer.camera) {
+            console.warn('Cannot move camera: viewer not available');
+            return;
+        }
+
+        try {
+            // Check if viewer is destroyed
+            if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+                console.warn('Cannot move camera: viewer is destroyed');
+                return;
+            }
+
         // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
         const cameraPosition = this.viewer.camera.positionCartographic;
         const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
@@ -678,26 +745,53 @@ export class ErdblickViewComponent implements AfterViewInit {
             // 3D mode - use parameter service
             const newPosition = Cartesian3.fromRadians(lon, lat, alt);
             this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
+            }
+        } catch (error) {
+            console.warn('Error moving camera:', error);
         }
     }
 
     zoomIn() {
+        if (!this.viewer || !this.viewer.camera) {
+            console.warn('Cannot zoom in: viewer not available');
+            return;
+        }
+
+        try {
         if (this.is2DMode) {
             this.zoom2D(0.8); // Zoom in by 20%
         } else {
             this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
+            }
+        } catch (error) {
+            console.warn('Error zooming in:', error);
         }
     }
 
     zoomOut() {
+        if (!this.viewer || !this.viewer.camera) {
+            console.warn('Cannot zoom out: viewer not available');
+            return;
+        }
+
+        try {
         if (this.is2DMode) {
             this.zoom2D(1.25); // Zoom out by 25%
         } else {
             this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
+            }
+        } catch (error) {
+            console.warn('Error zooming out:', error);
         }
     }
 
     resetOrientation() {
+        if (!this.viewer || !this.viewer.camera) {
+            console.warn('Cannot reset orientation: viewer not available');
+            return;
+        }
+
+        try {
         if (this.is2DMode) {
             // In 2D mode, just reset to north-up orientation
             // Ignore the camera change event to preserve mode switch cache
@@ -714,6 +808,9 @@ export class ErdblickViewComponent implements AfterViewInit {
                 pitch: CesiumMath.toRadians(-45.0), // 45-degree angle for 3D
                 roll: 0.0
             });
+            }
+        } catch (error) {
+            console.warn('Error resetting orientation:', error);
         }
     }
 
@@ -724,137 +821,570 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     toggleSceneMode() {
+        // Don't allow toggling if already changing modes
+        if (this._isChangingMode) {
+            console.warn('Mode change already in progress, ignoring toggle request');
+            return;
+        }
+        
         this.parameterService.setCameraMode(!this.is2DMode);
     }
 
-    private applySceneModeChange(is2D: boolean) {
-        this.setupSceneMode(is2D);
-
-        // Temporarily disable camera sync to avoid feedback
-        this.ignoreNextCameraUpdate = true;
-
-        if (this.is2DMode) {
-            // Switch FROM 3D TO 2D mode
-            this.viewer.scene.mode = SceneMode.SCENE2D;
-            this.setup2DConstraints();
-
-            let centerLon: number;
-            let centerLat: number;
-            let viewRectHeight: number;
-
-            // Check if we have a cached 2D state to restore
-            if (this.modeSwitch2DState) {
-                // Restore from cache to avoid drift
-                centerLon = this.modeSwitch2DState.centerLon;
-                centerLat = this.modeSwitch2DState.centerLat;
-                viewRectHeight = this.modeSwitch2DState.viewRectHeight;
-            } else {
-                // First time switching to 2D, calculate from 3D state
-                const canvas = this.viewer.scene.canvas;
-                const centerScreen = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-                const centerCartesian = this.viewer.camera.pickEllipsoid(centerScreen);
-                
-                if (centerCartesian) {
-                    const centerCartographic = Cartographic.fromCartesian(centerCartesian);
-                    centerLon = centerCartographic.longitude;
-                    centerLat = centerCartographic.latitude;
-                } else {
-                    const currentPos = this.viewer.camera.positionCartographic;
-                    centerLon = currentPos.longitude;
-                    centerLat = currentPos.latitude;
-                }
-
-                // Store the current 3D state before conversion
-                const currentPos = this.viewer.camera.positionCartographic;
-                this.modeSwitch3DState = {
-                    altitude: currentPos.height,
-                    centerLon: centerLon,
-                    centerLat: centerLat
-                };
-
-                // Convert 3D altitude to 2D view rectangle
-                const current3DAltitude = currentPos.height;
-                const current3DPitch = this.viewer.camera.pitch;
-                viewRectHeight = this.altitude3DToViewRectangle2D(current3DAltitude, current3DPitch);
-            }
-            
-            // Calculate aspect ratio and apply view
-            const canvas = this.viewer.scene.canvas;
-            const aspectRatio = canvas.clientWidth / canvas.clientHeight;
-            const viewRectWidth = viewRectHeight * aspectRatio;
-
-            setTimeout(() => {
-                this.ignoreNextCameraUpdate = true;
-                this.viewer.camera.setView({
-                    destination: Rectangle.fromRadians(
-                        centerLon - viewRectWidth / 2,
-                        centerLat - viewRectHeight / 2,
-                        centerLon + viewRectWidth / 2,
-                        centerLat + viewRectHeight / 2
-                    )
-                });
-            }, 50);
-        } else {
-            // Switch FROM 2D TO 3D mode
-            this.viewer.scene.mode = SceneMode.SCENE3D;
-            this.setup3DConstraints();
-
-            let centerLon: number;
-            let centerLat: number;
-            let altitude: number;
-
-            // Check if we have a cached 3D state to restore
-            if (this.modeSwitch3DState) {
-                // Restore from cache to avoid drift
-                centerLon = this.modeSwitch3DState.centerLon;
-                centerLat = this.modeSwitch3DState.centerLat;
-                altitude = this.modeSwitch3DState.altitude;
-            } else {
-                // First time switching to 3D, calculate from 2D state
-                const current2DView = this.viewer.camera.computeViewRectangle();
-                
-                if (current2DView) {
-                    centerLon = (current2DView.west + current2DView.east) / 2;
-                    centerLat = (current2DView.south + current2DView.north) / 2;
-                    
-                    // Store the current 2D state before conversion
-                    const current2DViewHeight = current2DView.north - current2DView.south;
-                    this.modeSwitch2DState = {
-                        viewRectHeight: current2DViewHeight,
-                        centerLon: centerLon,
-                        centerLat: centerLat
-                    };
-                    
-                    // Convert 2D view rectangle to 3D altitude
-                    altitude = this.viewRectangle2DToAltitude3D(current2DViewHeight);
-                } else {
-                    // Fallback if view rectangle can't be computed
-                    const currentPos = this.viewer.camera.positionCartographic;
-                    centerLon = currentPos.longitude;
-                    centerLat = currentPos.latitude;
-                    altitude = 1000000; // 1000 km
-                }
-            }
-
-            setTimeout(() => {
-                this.ignoreNextCameraUpdate = true;
-                
-                // Set camera to look straight down (orthogonal to ground), just like in 2D mode
-                this.viewer.camera.setView({
-                    destination: Cartesian3.fromRadians(centerLon, centerLat, altitude),
-                    orientation: {
-                        heading: 0, // North
-                        pitch: CesiumMath.toRadians(-90), // Straight down (orthogonal)
-                        roll: 0
-                    }
-                });
-                
-                // Force a render
-                this.viewer.scene.requestRender();
-            }, 100);
+    /**
+     * Updated scene mode change to use viewer reinitialization
+     */
+    private async applySceneModeChange(is2D: boolean) {
+        // Prevent multiple mode changes at once
+        if (this._isChangingMode) {
+            console.warn('Mode change already in progress');
+            return;
         }
 
+        // Prevent mode change during destruction
+        if (this._isDestroyingViewer) {
+            console.warn('Mode change prevented: viewer destruction in progress');
+            return;
+        }
+
+        this._isChangingMode = true;
+        
+        try {
+            // Reinitialize viewer with appropriate projection
+            await this.reinitializeViewer(is2D);
+            
+            // Update mode flag only after successful reinitialization
+        this.setupSceneMode(is2D);
+
+        } catch (error) {
+            console.error('Error during scene mode change:', error);
+            // Show user-friendly message
+            console.warn('Scene mode change failed. Retrying with fallback...');
+            
+            // Don't throw the error, just log it and continue
+            // The viewer should still be in a usable state due to fallback creation
+            
+        } finally {
+            this._isChangingMode = false;
+        }
+    }
+
+    // Add flag to prevent concurrent mode changes
+    private _isChangingMode = false;
+    private _isDestroyingViewer = false;
+
+    /**
+     * Reinitialize the viewer with different projection for 2D/3D modes
+     * This is necessary because Cesium doesn't support dynamic projection switching
+     */
+    private async reinitializeViewer(is2D: boolean) {
+        // Prevent multiple simultaneous reinitializations
+        if (this.viewerState) {
+            console.warn('Viewer reinitialization already in progress');
+            return;
+        }
+
+        // Also check if we're currently destroying
+        if (this._isDestroyingViewer) {
+            console.warn('Cannot reinitialize: viewer destruction in progress');
+            return;
+        }
+
+        try {
+            // Save current state
+            this.saveViewerState();
+
+            // Destroy current viewer
+            await this.destroyViewer();
+
+            // Small delay to ensure DOM is ready
+            await new Promise(resolve => setTimeout(resolve, 150));
+
+            // Create new viewer with appropriate projection
+            await this.createViewer(is2D);
+
+            // Restore state
+            this.restoreViewerState();
+            
+        } catch (error) {
+            console.error('Error during viewer reinitialization:', error);
+            // Reset state on error to prevent future issues
+            this.viewerState = null;
+            this._isDestroyingViewer = false;
+            
+            // Try to create a basic viewer as fallback
+            try {
+                console.log('Attempting fallback viewer creation...');
+                await this.createViewer(is2D);
+            } catch (fallbackError) {
+                console.error('Fallback viewer creation failed:', fallbackError);
+                throw new Error('Failed to create viewer. Please refresh the page.');
+            }
+        }
+    }
+
+    /**
+     * Save the current viewer state before reinitialization
+     */
+    private saveViewerState() {
+        if (!this.viewer) {
+            console.warn('Cannot save viewer state: viewer is null');
+            return;
+        }
+
+        try {
+            // Check if viewer is destroyed
+            if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+                console.warn('Cannot save viewer state: viewer is destroyed');
+                return;
+            }
+
+            const markerPositions: Cartesian3[] = [];
+            if (this.markerCollection) {
+                try {
+                    for (let i = 0; i < this.markerCollection.length; i++) {
+                        const marker = this.markerCollection.get(i);
+                        if (marker && marker.position) {
+                            markerPositions.push(marker.position);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Error collecting marker positions:', e);
+                }
+            }
+
+            this.viewerState = {
+                openStreetMapLayerAlpha: this.openStreetMapLayer?.alpha || 0.3,
+                openStreetMapLayerShow: this.openStreetMapLayer?.show || false,
+                markerPositions: markerPositions,
+                tileOutlineEntity: this.tileOutlineEntity,
+                cameraState: this.getCurrentCameraState(),
+                menuItems: [...this.menuItems]
+            };
+        } catch (error) {
+            console.warn('Error saving viewer state:', error);
+            // Don't throw, just continue without saving state
+        }
+    }
+
+    /**
+     * Get current camera state for preservation
+     */
+    private getCurrentCameraState() {
+        if (!this.viewer || !this.viewer.camera) return null;
+
+        try {
+            const camera = this.viewer.camera;
+            const position = camera.positionCartographic;
+            
+            return {
+                longitude: position.longitude,
+                latitude: position.latitude,
+                height: position.height,
+                heading: camera.heading,
+                pitch: camera.pitch,
+                roll: camera.roll,
+                viewRectangle: camera.computeViewRectangle()
+            };
+        } catch (e) {
+            console.warn('Error getting camera state:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Destroy the current viewer and clean up resources
+     */
+    private async destroyViewer(): Promise<void> {
+        // Early return if viewer is already null or destroyed
+        if (!this.viewer || (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed())) {
+            console.warn('Viewer already null or destroyed, skipping destruction');
+            return;
+        }
+        
+        if (this._isDestroyingViewer) {
+            console.warn('Viewer already in destruction process.');
+            return;
+        }
+        this._isDestroyingViewer = true;
+
+        return new Promise((resolve) => {
+            try {
+                // Clean up mouse handler first
+                if (this.mouseHandler) {
+                    try {
+                        if (!this.mouseHandler.isDestroyed()) {
+                            this.mouseHandler.destroy();
+                        }
+                    } catch (e) {
+                        console.warn('Error destroying mouse handler:', e);
+                    }
+                    this.mouseHandler = null;
+                }
+                
+                // Clean up collections and entities references
+                this.markerCollection = null;
+                this.tileOutlineEntity = null;
+                this.openStreetMapLayer = null;
+                
+                // Destroy viewer with multiple safety checks
+                if (this.viewer) {
+                    try {
+                        // Check if viewer is still valid before operations
+                        if (typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed()) {
+                            // Remove event listeners first
+                            if (this.viewer.camera) {
+                                try {
+                                    this.viewer.camera.changed.removeEventListener(this.cameraChangedHandler);
+                                    this.viewer.camera.moveStart.removeEventListener(this.cameraMoveStartHandler);
+                                    this.viewer.camera.moveEnd.removeEventListener(this.cameraMoveEndHandler);
+                                } catch (e) {
+                                    console.warn('Error removing camera event listeners:', e);
+                                }
+                            }
+
+                                                // Destroy the viewer - final safety check with try-catch
+                            if (typeof this.viewer.destroy === 'function' && !this.viewer.isDestroyed()) {
+                                try {
+                                    this.viewer.destroy();
+                                } catch (e) {
+                                    console.warn('Error calling viewer.destroy() - viewer may have been destroyed already:', e);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Error during viewer destruction:', e);
+                    }
+                    
+                    // Clear viewer reference regardless
+                    this.viewer = null as any;
+                }
+                
+                // Small delay to ensure DOM cleanup completes
+            setTimeout(() => {
+                    this._isDestroyingViewer = false;
+                    resolve();
+                }, 100);
+                
+            } catch (error) {
+                console.error('Error during viewer destruction:', error);
+                this._isDestroyingViewer = false;
+                // Clear references even on error
+                this.viewer = null as any;
+                this.mouseHandler = null;
+                this.markerCollection = null;
+                this.tileOutlineEntity = null;
+                this.openStreetMapLayer = null;
+                resolve(); // Continue anyway
+            }
+        });
+    }
+
+    /**
+     * Create a new viewer with appropriate projection
+     */
+    private async createViewer(is2D: boolean): Promise<void> {
+        return new Promise((resolve, reject) => {
+            try {
+                const mapProjection = is2D ? new WebMercatorProjection() : new GeographicProjection();
+                
+                this.viewer = new Viewer("mapViewContainer", {
+                    baseLayerPicker: false,
+                    animation: false,
+                    geocoder: false,
+                    homeButton: false,
+                    sceneModePicker: false,
+                    selectionIndicator: false,
+                    timeline: false,
+                    navigationHelpButton: false,
+                    navigationInstructionsInitiallyVisible: false,
+                    requestRenderMode: true,
+                    maximumRenderTimeChange: Infinity,
+                    infoBox: false,
+                    baseLayer: false,
+                    sceneMode: is2D ? SceneMode.SCENE2D : SceneMode.SCENE3D,
+                    mapProjection: mapProjection
+                });
+
+                // Small delay to ensure viewer is fully initialized
+                setTimeout(async () => {
+                    try {
+                        // Reinitialize all viewer components
+                        await this.initializeViewerComponents();
+                        resolve();
+                    } catch (error) {
+                        console.error('Error initializing viewer components:', error);
+                        reject(error);
+                    }
+                }, 100);
+                
+            } catch (error) {
+                console.error('Error creating viewer:', error);
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Initialize viewer components after creation
+     */
+    private async initializeViewerComponents(): Promise<void> {
+        try {
+            // Initialize scene mode constraints
+            this.setupSceneMode(this.is2DMode);
+
+            // Recreate OpenStreetMap layer
+            this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
+            
+            // Recreate mouse handler
+            this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
+            this.setupMouseHandlers();
+
+            // Setup camera event handlers
+            this.setupCameraHandlers();
+
+            // Setup custom wheel handler for 2D mode
+            this.setupWheelHandler();
+
+            // Set globe appearance
+            this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+            // Remove fullscreen button
+            if (this.viewer.fullscreenButton && !this.viewer.fullscreenButton.isDestroyed()) {
+                this.viewer.fullscreenButton.destroy();
+            }
+
+            // Recreate marker collection
+            this.markerCollection = new BillboardCollection({
+                scene: this.viewer.scene
+            });
+            this.viewer.scene.primitives.add(this.markerCollection);
+
+            // Re-add feature search visualization
+            this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+            
+        } catch (error) {
+            console.error('Error during viewer component initialization:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Setup mouse event handlers
+     */
+    private setupMouseHandlers() {
+        if (!this.mouseHandler) return;
+
+        // Right click handler
+        this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
+            const position = movement.position;
+            const cartesian = this.viewer.camera.pickEllipsoid(
+                new Cartesian2(position.x, position.y),
+                this.viewer.scene.globe.ellipsoid
+            );
+            if (defined(cartesian)) {
+                const cartographic = Cartographic.fromCartesian(cartesian);
+                const longitude = CesiumMath.toDegrees(cartographic.longitude);
+                const latitude = CesiumMath.toDegrees(cartographic.latitude);
+                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
+                    const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
+                    return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
+                }));
+        } else {
+                this.menuService.tileIdsForSourceData.next([]);
+            }
+        }, ScreenSpaceEventType.RIGHT_DOWN);
+
+        // Left click handler
+        this.mouseHandler.setInputAction((movement: any) => {
+            if (this.appModeService.isVisualizationOnly) return;
+
+            const position = movement.position;
+            let feature = this.viewer.scene.pick(position);
+            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
+                if (feature.primitive.id) {
+                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
+                    if (featureInfo.mapId && featureInfo.featureId) {
+                        this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId, featureInfo.featureId).then(() => {
+                            if (this.inspectionService.selectedFeatures) {
+                                this.inspectionService.zoomToFeature();
+                            }
+                        });
+                    }
+            } else {
+                    this.mapService.moveToWgs84PositionTopic.next({
+                        x: feature.primitive.position.x,
+                        y: feature.primitive.position.y,
+                        z: feature.primitive.position.z + 1000
+                    });
+                }
+            }
+            if (!defined(feature)) {
+                this.inspectionService.isInspectionPanelVisible = false;
+                this.menuService.tileOutline.next(null);
+            }
+            this.mapService.highlightFeatures(
+                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                false,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
+            // Handle position update after highlighting
+            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            if (coordinates !== undefined) {
+                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
+            }
+        }, ScreenSpaceEventType.LEFT_CLICK);
+
+        // Mouse move handler
+        this.mouseHandler.setInputAction((movement: any) => {
+            const position = movement.endPosition;
+            if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
+                return;
+            }
+            if (this.cameraIsMoving) {
+                return;
+            }
+
+            if (!this.appModeService.isVisualizationOnly) {
+                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+                if (coordinates !== undefined) {
+                    this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
+                }
+            }
+
+            if (!this.appModeService.isVisualizationOnly) {
+                let feature = this.viewer.scene.pick(position);
+                this.mapService.highlightFeatures(
+                    Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                    false,
+                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            }
+        }, ScreenSpaceEventType.MOUSE_MOVE);
+    }
+
+    /**
+     * Setup camera event handlers
+     */
+    private setupCameraHandlers() {
+        this.viewer.camera.percentageChanged = 0.1;
+        this.viewer.camera.changed.addEventListener(this.cameraChangedHandler);
+        this.viewer.camera.moveStart.addEventListener(this.cameraMoveStartHandler);
+        this.viewer.camera.moveEnd.addEventListener(this.cameraMoveEndHandler);
+    }
+
+    /**
+     * Setup custom wheel handler for 2D mode
+     */
+    private setupWheelHandler() {
+        this.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
+            if (this.is2DMode) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9;
+                const rect = this.viewer.scene.canvas.getBoundingClientRect();
+                const mousePosition = new Cartesian2(
+                    event.clientX - rect.left,
+                    event.clientY - rect.top
+                );
+                
+                this.zoom2D(zoomFactor, mousePosition);
+            }
+        });
+    }
+
+    /**
+     * Restore viewer state after reinitialization
+     */
+    private restoreViewerState() {
+        if (!this.viewerState || !this.viewer) {
+            console.warn('Cannot restore viewer state: missing state or viewer');
+            return;
+        }
+
+        try {
+            // Restore OpenStreetMap layer
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.alpha = this.viewerState.openStreetMapLayerAlpha;
+                this.openStreetMapLayer.show = this.viewerState.openStreetMapLayerShow;
+            }
+
+            // Restore markers
+            if (this.markerCollection && this.viewerState.markerPositions.length > 0) {
+                this.viewerState.markerPositions.forEach(position => {
+                    this.addMarker(position);
+                });
+            }
+
+            // Restore camera state
+            this.restoreCameraState();
+
+            // Restore menu items
+            this.menuItems = this.viewerState.menuItems;
+
+            // Clear saved state
+            this.viewerState = null;
+            
+            // Force a render to ensure everything is displayed
+            if (this.viewer && this.viewer.scene) {
         this.viewer.scene.requestRender();
+            }
+            
+        } catch (error) {
+            console.error('Error restoring viewer state:', error);
+            // Clear state on error to prevent future issues
+            this.viewerState = null;
+        }
+    }
+
+    /**
+     * Restore camera state from saved state
+     */
+    private restoreCameraState() {
+        if (!this.viewerState?.cameraState || !this.viewer || !this.viewer.camera) {
+            console.warn('Cannot restore camera state: missing state, viewer, or camera');
+            return;
+        }
+
+        try {
+            const cameraState = this.viewerState.cameraState;
+            this.ignoreNextCameraUpdate = true;
+
+            if (this.is2DMode) {
+                // For 2D mode, use view rectangle if available
+                if (cameraState.viewRectangle) {
+                    this.viewer.camera.setView({
+                        destination: cameraState.viewRectangle
+                    });
+                } else {
+                    // Fallback to center position
+                    this.viewer.camera.setView({
+                        destination: Rectangle.fromRadians(
+                            cameraState.longitude - 0.01,
+                            cameraState.latitude - 0.01,
+                            cameraState.longitude + 0.01,
+                            cameraState.latitude + 0.01
+                        )
+                    });
+                }
+            } else {
+                // For 3D mode, restore full camera state
+                this.viewer.camera.setView({
+                    destination: Cartesian3.fromRadians(
+                        cameraState.longitude, 
+                        cameraState.latitude, 
+                        cameraState.height
+                    ),
+                    orientation: {
+                        heading: cameraState.heading,
+                        pitch: cameraState.pitch,
+                        roll: cameraState.roll
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error restoring camera state:', error);
+        }
     }
 
     private setupSceneMode(is2D: boolean) {
@@ -1011,6 +1541,18 @@ export class ErdblickViewComponent implements AfterViewInit {
      * 2D zoom using height-based approach with proper limit conversion
      */
     private zoom2D(zoomFactor: number, cursorPosition?: Cartesian2): void {
+        if (!this.viewer || !this.viewer.camera) {
+            console.warn('Cannot zoom in 2D: viewer not available');
+            return;
+        }
+
+        try {
+            // Check if viewer is destroyed
+            if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+                console.warn('Cannot zoom in 2D: viewer is destroyed');
+                return;
+            }
+
         const camera = this.viewer.camera;
         
         // Get current camera height
@@ -1053,5 +1595,87 @@ export class ErdblickViewComponent implements AfterViewInit {
         camera.setView({
             destination: newPosition
         });
+        } catch (error) {
+            console.warn('Error in 2D zoom:', error);
+        }
+    }
+
+    // Store event handler references for proper cleanup
+    private cameraChangedHandler = () => {
+        if (!this.ignoreNextCameraUpdate) {
+            this.modeSwitch2DState = null;
+            this.modeSwitch3DState = null;
+            
+            if (this.is2DMode) {
+                this.parameterService.set2DCameraState(this.viewer.camera);
+            } else {
+                this.parameterService.setCameraState(this.viewer.camera);
+            }
+        }
+        this.ignoreNextCameraUpdate = false;
+        this.updateViewport();
+    };
+
+    private cameraMoveStartHandler = () => {
+        this.cameraIsMoving = true;
+    };
+
+    private cameraMoveEndHandler = () => {
+        this.cameraIsMoving = false;
+    };
+
+    /**
+     * Component cleanup when destroyed
+     */
+    ngOnDestroy() {
+        console.log('ErdblickViewComponent: cleaning up resources');
+        
+        // Don't allow mode changes during destruction
+        this._isChangingMode = true;
+        
+        // Clean up resources without async to avoid hanging
+        if (this.mouseHandler) {
+            try {
+                if (!this.mouseHandler.isDestroyed()) {
+                    this.mouseHandler.destroy();
+                }
+            } catch (e) {
+                console.warn('Error destroying mouse handler:', e);
+            }
+            this.mouseHandler = null;
+        }
+        
+        if (this.viewer) {
+            try {
+                if (typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed()) {
+                    // Remove event listeners before destroying
+                    if (this.viewer.camera) {
+                        try {
+                            this.viewer.camera.changed.removeEventListener(this.cameraChangedHandler);
+                            this.viewer.camera.moveStart.removeEventListener(this.cameraMoveStartHandler);
+                            this.viewer.camera.moveEnd.removeEventListener(this.cameraMoveEndHandler);
+                        } catch (e) {
+                            console.warn('Error removing camera event listeners in ngOnDestroy:', e);
+                        }
+                    }
+                    
+                    this.viewer.destroy();
+                }
+            } catch (e) {
+                console.warn('Error destroying viewer in ngOnDestroy:', e);
+            }
+            this.viewer = null as any;
+        }
+        
+        // Clear all references
+        this.mouseHandler = null;
+        this.openStreetMapLayer = null;
+        this.markerCollection = null;
+        this.tileOutlineEntity = null;
+        this.viewerState = null;
+        
+        // Reset flags
+        this._isChangingMode = false;
+        this._isDestroyingViewer = false;
     }
 }

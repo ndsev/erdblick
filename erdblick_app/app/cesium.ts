@@ -79,6 +79,10 @@ export const HeadingPitchRange = Cesium.HeadingPitchRange;
 export type BoundingSphere = Cesium.BoundingSphere;
 export const BoundingSphere = Cesium.BoundingSphere;
 export const SceneMode = Cesium.SceneMode;
+export type  WebMercatorProjection = Cesium.WebMercatorProjection;
+export const WebMercatorProjection = Cesium.WebMercatorProjection;
+export type  GeographicProjection = Cesium.GeographicProjection;
+export const GeographicProjection = Cesium.GeographicProjection;
 
 // Math is a namespace.
 
