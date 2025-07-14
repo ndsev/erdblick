@@ -533,6 +533,66 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         let sizeLon = east - west;
         let sizeLat = north - south;
 
+        // For WebMercator mode, we need to handle both coordinate accuracy and zoom level accuracy
+        if (this.is2DMode) {
+            // Sample viewport corners to get accurate geographic bounds for positioning
+            const samplePoints = [
+                new Cartesian2(0, 0),                                    // top-left
+                new Cartesian2(canvas.clientWidth, 0),                  // top-right  
+                new Cartesian2(canvas.clientWidth, canvas.clientHeight), // bottom-right
+                new Cartesian2(0, canvas.clientHeight),                 // bottom-left
+                new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2) // center
+            ];
+            
+            let minLon = Infinity, maxLon = -Infinity;
+            let minLat = Infinity, maxLat = -Infinity;
+            
+            for (const point of samplePoints) {
+                const cartesian = this.viewer.camera.pickEllipsoid(point);
+                if (cartesian) {
+                    const cartographic = Cartographic.fromCartesian(cartesian);
+                    const lon = CesiumMath.toDegrees(cartographic.longitude);
+                    const lat = CesiumMath.toDegrees(cartographic.latitude);
+                    
+                    minLon = Math.min(minLon, lon);
+                    maxLon = Math.max(maxLon, lon);
+                    minLat = Math.min(minLat, lat);
+                    maxLat = Math.max(maxLat, lat);
+                }
+            }
+            
+            // Use the sampled bounds for accurate positioning
+            if (isFinite(minLon) && isFinite(maxLon) && isFinite(minLat) && isFinite(maxLat)) {
+                west = minLon;
+                east = maxLon;
+                south = minLat;
+                north = maxLat;
+                
+                // Update center to match the actual geographic center
+                centerLon = (west + east) / 2;
+                centerLat = (south + north) / 2;
+                
+                // Calculate effective dimensions for zoom level calculation
+                // The key insight: at higher latitudes, WebMercator shows less area than geographic bounds suggest
+                // We need to compress the dimensions to represent the true visual zoom level
+                
+                // Calculate the center latitude for distortion factor
+                const centerLatRad = CesiumMath.toRadians(centerLat);
+                
+                // WebMercator distortion factor at this latitude
+                // At higher latitudes, a degree of longitude covers less visual distance
+                const lonDistortionFactor = Math.cos(centerLatRad);
+                
+                // Calculate effective dimensions that represent true visual zoom level
+                sizeLon = (east - west) * lonDistortionFactor;
+                sizeLat = (north - south); // Latitude distortion is minimal for zoom level calculation
+                
+                // Apply reasonable bounds to prevent extreme values
+                sizeLon = Math.max(0.001, Math.min(360, sizeLon));
+                sizeLat = Math.max(0.001, Math.min(180, sizeLat));
+            }
+        }
+
         // Don't handle antimeridian - let Cesium's continuous chaining work naturally
         // The sizeLon can be any value in continuous 2D mode
 
@@ -628,88 +688,72 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-            this.featureSearchService.visualization.removeAll();
-            const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-            let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
+        this.featureSearchService.visualization.removeAll();
+        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
+        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
             
-            // Use the level parameter directly - viewport compensation is handled in updateViewport()
-            const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+        // Use the level parameter directly - backend now receives correct viewport coordinates
+        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
             
-            for (const node of nodes) {
-                if (node.markers.length) {
-                    markers.push(...node.markers);
-                } else if (node.count > 0 && node.center) {
-                    // Get the correct position for the current projection
-                    let clusterPosition: Cartesian3;
-                    if (this.is2DMode) {
-                        // In 2D mode, convert the cluster center position to be appropriate for the current projection
-                        const clusterCartographic = Cartographic.fromCartesian(node.center);
-                        clusterPosition = Cartesian3.fromRadians(
-                            clusterCartographic.longitude,
-                            clusterCartographic.latitude,
-                            clusterCartographic.height
-                        );
-                    } else {
-                        // In 3D mode, use the original center position
-                        clusterPosition = node.center;
-                    }
-
-                    const params: MarkersParams = {
-                        position: clusterPosition,
-                        image: this.featureSearchService.getPinGraphics(node.count),
-                        width: 64,
-                        height: 64
-                    };
-                    if (this.is2DMode) {
-                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                    } else {
-                        params.eyeOffset = new Cartesian3(0, 0, -50);
-                    }
-                    this.featureSearchService.visualization.add(params);
+        for (const node of nodes) {
+            if (node.markers.length) {
+                markers.push(...node.markers);
+            } else if (node.count > 0 && node.center) {
+                // For cluster centers, always use the center position directly
+                // The backend coordinates are now correctly aligned with the projection
+                const params: MarkersParams = {
+                    position: node.center,
+                    image: this.featureSearchService.getPinGraphics(node.count),
+                    width: 64,
+                    height: 64
+                };
+                if (this.is2DMode) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
                 }
+                this.featureSearchService.visualization.add(params);
             }
+        }
 
-            if (markers.length) {
-                markers.forEach(marker => {
-                    // Get the correct position for the current projection
-                    let markerPosition: Cartesian3;
-                    if (this.is2DMode && marker[1].cartographicRad) {
-                        // In 2D mode, recreate position from cartographicRad to ensure 
-                        // it's positioned correctly for the current projection
-                        const cartographicRad = marker[1].cartographicRad;
-                        markerPosition = Cartesian3.fromRadians(
-                            cartographicRad.longitude,
-                            cartographicRad.latitude,
-                            cartographicRad.height
-                        );
-                    } else {
-                        // In 3D mode, use the original cartesian coordinates
-                        markerPosition = marker[1].cartesian as Cartesian3;
-                    }
+        if (markers.length) {
+            markers.forEach(marker => {
+                // Always use cartographicRad if available, otherwise fall back to cartesian
+                // This ensures consistent positioning across projections
+                let markerPosition: Cartesian3;
+                if (marker[1].cartographicRad) {
+                    markerPosition = Cartesian3.fromRadians(
+                        marker[1].cartographicRad.longitude,
+                        marker[1].cartographicRad.latitude,
+                        marker[1].cartographicRad.height
+                    );
+                } else {
+                    markerPosition = marker[1].cartesian as Cartesian3;
+                }
 
-                    const params: MarkersParams = {
-                        id: marker[0],
-                        position: markerPosition,
-                        image: this.featureSearchService.markerGraphics(),
-                        width: 32,
-                        height: 32,
-                        color: color
-                    };
-                    if (this.is2DMode) {
-                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                    } else {
-                        params.pixelOffset = new Cartesian2(0, -10);
-                        params.eyeOffset = new Cartesian3(0, 0, -50);
-                    }
-                    this.featureSearchService.visualization.add(params);
-                });
-            }
+                const params: MarkersParams = {
+                    id: marker[0],
+                    position: markerPosition,
+                    image: this.featureSearchService.markerGraphics(),
+                    width: 32,
+                    height: 32,
+                    color: color
+                };
+                if (this.is2DMode) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.pixelOffset = new Cartesian2(0, -10);
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
+                }
+                this.featureSearchService.visualization.add(params);
+            });
+        }
                 
-            if (this.viewer && this.viewer.scene && this.viewer.scene.primitives) {
-                this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
-            }
+        if (this.viewer && this.viewer.scene && this.viewer.scene.primitives) {
+            this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
+        }
         } catch (error) {
-            console.warn('Error rendering feature search results:', error);
+            console.error('Error rendering feature search result tree:', error);
         }
     }
 
@@ -1487,9 +1531,11 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Calculate the minimum view rectangle height for 2D mode (1 meter in degrees)
      */
     private getMinViewRectangleHeight(): number {
-        // 1 degree of latitude ≈ 111,320 meters
-        // 0.25 meter ≈ 1/111,320 ≈ 0.000002245 degrees
-        return 0.25 / 111320;
+        // Minimum corresponds to about 100 meters altitude using natural scaling
+        // This provides a reasonable minimum zoom level
+        const earthRadius = 6378137.0; // Earth's radius in meters
+        const minAltitude = 100; // meters
+        return 2 * Math.atan(minAltitude / (2 * earthRadius));
     }
 
     /**
@@ -1508,24 +1554,23 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * @returns The height of the view rectangle in radians that shows equivalent area
      */
     private altitude3DToViewRectangle2D(altitude: number, pitch: number): number {
-        // Simple conversion from altitude to view rectangle height
-        // Base scaling factor that works well across different latitudes
-        const scalingFactor = 0.3;
+        // Use Cesium's natural relationship between altitude and view rectangle
+        // Based on the relationship: higher altitude = larger view rectangle
+        // This creates a more natural zoom level mapping
         
-        // Convert altitude to degrees
-        const visibleDegrees = (altitude * scalingFactor) / 111320;
-        const viewRectHeight = CesiumMath.toRadians(visibleDegrees);
+        // Convert altitude to angular view size
+        // At sea level, 1 degree ≈ 111320 meters, but we use a more natural scaling
+        // that accounts for the fact that in 2D mode, the view is more direct
+        const earthRadius = 6378137.0; // Earth's radius in meters
+        const viewAngle = 2 * Math.atan(altitude / (2 * earthRadius));
         
-        // Apply bounds without clamping to preserve reversibility
+        // Apply bounds
         const minHeight = this.getMinViewRectangleHeight();
         const maxHeight = this.getMaxViewRectangleHeight();
         
-        // Only warn if out of bounds, but don't clamp to avoid drift
-        if (viewRectHeight < minHeight || viewRectHeight > maxHeight) {
-            console.warn(`View rectangle height ${viewRectHeight} is outside bounds [${minHeight}, ${maxHeight}]`);
-        }
+        const clampedHeight = Math.max(minHeight, Math.min(maxHeight, viewAngle));
         
-        return viewRectHeight;
+        return clampedHeight;
     }
 
     /**
@@ -1535,24 +1580,19 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * @returns The altitude in meters that shows equivalent area
      */
     private viewRectangle2DToAltitude3D(viewRectHeight: number, desiredPitch: number = CesiumMath.toRadians(-45)): number {
-        // Simple conversion from view rectangle height to altitude
-        // Base scaling factor that matches the 3D to 2D conversion
-        const scalingFactor = 0.3;
+        // Reverse the altitude to view rectangle calculation
+        // Use Cesium's natural relationship
         
-        // Convert view rectangle to altitude
-        const visibleDegrees = CesiumMath.toDegrees(viewRectHeight);
-        const altitude = (visibleDegrees * 111320) / scalingFactor;
+        const earthRadius = 6378137.0; // Earth's radius in meters
+        const altitude = (2 * earthRadius) * Math.tan(viewRectHeight / 2);
         
-        // Apply bounds without clamping to preserve reversibility
+        // Apply bounds
         const minAltitude = 100;
         const maxAltitude = 50000000;
         
-        // Only warn if out of bounds, but don't clamp to avoid drift
-        if (altitude < minAltitude || altitude > maxAltitude) {
-            console.warn(`Altitude ${altitude} is outside bounds [${minAltitude}, ${maxAltitude}]`);
-        }
+        const clampedAltitude = Math.max(minAltitude, Math.min(maxAltitude, altitude));
         
-        return altitude;
+        return clampedAltitude;
     }
 
     /**
@@ -1612,14 +1652,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         const currentHeight = camera.positionCartographic.height;
         const newHeight = currentHeight * zoomFactor;
         
-        // Convert height to equivalent view rectangle height for limit checking
-        // Use the same conversion as our mode switching functions
-        const scalingFactor = 0.3;
-        const currentViewRectHeightDegrees = (currentHeight * scalingFactor) / 111320;
-        const currentViewRectHeight = CesiumMath.toRadians(currentViewRectHeightDegrees);
-        
-        const newViewRectHeightDegrees = (newHeight * scalingFactor) / 111320;
-        const newViewRectHeight = CesiumMath.toRadians(newViewRectHeightDegrees);
+        // Convert height to equivalent view rectangle height using natural relationship
+        const earthRadius = 6378137.0; // Earth's radius in meters
+        const newViewRectHeight = 2 * Math.atan(newHeight / (2 * earthRadius));
         
         // Apply zoom limits based on view rectangle height
         const minViewRectHeight = this.getMinViewRectangleHeight();
@@ -1629,10 +1664,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             console.warn('Zoom blocked by view rectangle limits');
             return;
         }
-        
-        // DON'T clear cache during zoom - preserve it to prevent altitude drift
-        // this.modeSwitch2DState = null;
-        // this.modeSwitch3DState = null;
         
         // Set new camera height directly while preserving position
         const currentPos = camera.positionCartographic;
