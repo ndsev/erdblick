@@ -83,6 +83,8 @@ export type  WebMercatorProjection = Cesium.WebMercatorProjection;
 export const WebMercatorProjection = Cesium.WebMercatorProjection;
 export type  GeographicProjection = Cesium.GeographicProjection;
 export const GeographicProjection = Cesium.GeographicProjection;
+export type  Ellipsoid = Cesium.Ellipsoid;
+export const Ellipsoid = Cesium.Ellipsoid;
 
 // Math is a namespace.
 

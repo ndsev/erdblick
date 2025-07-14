@@ -19,7 +19,8 @@ import {
     defined,
     Matrix3,
     WebMercatorProjection,
-    GeographicProjection
+    GeographicProjection,
+    Ellipsoid
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
 import {AfterViewInit, Component, OnDestroy, OnInit} from "@angular/core";
@@ -36,6 +37,7 @@ import {coreLib} from "./wasm";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "./app-mode.service";
+import {Subject} from "rxjs";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -228,7 +230,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Initialize viewer with appropriate projection
         this.createViewer(this.is2DMode).then(() => {
             // Continue with the rest of the initialization
-            this.initializeAfterViewer();
+            this.completeViewerInitialization();
         }).catch((error) => {
             console.error('Failed to initialize viewer:', error);
             // Show user-friendly error or fallback behavior
@@ -237,9 +239,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Initialize components after viewer is created
+     * Complete the viewer initialization process after viewer is created
      */
-    private initializeAfterViewer() {
+    private completeViewerInitialization() {
         // Setup parameter subscriptions and event handlers
         this.setupParameterSubscriptions();
         this.setupEventHandlers();
@@ -297,15 +299,27 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     console.error('Failed to change scene mode:', error);
                 });
             }
+            
+            // Handle marker parameters - try immediately, but don't retry here
+            // The viewerReinitializationComplete subscription will handle restoration after mode changes
             if (parameters.marker && parameters.markedPosition.length == 2) {
-                this.addMarker(Cartesian3.fromDegrees(
+                const markerPosition = Cartesian3.fromDegrees(
                     Number(parameters.markedPosition[0]),
-                    Number(parameters.markedPosition[1]))
+                    Number(parameters.markedPosition[1])
                 );
+                
+                this.addMarker(markerPosition);
             } else {
+                // Clear markers when marker is disabled or no position
                 if (this.markerCollection) {
-                    this.markerCollection.removeAll();
-                    this.viewer.scene.requestRender();
+                    try {
+                        this.markerCollection.removeAll();
+                        if (this.viewer && this.viewer.scene) {
+                            this.viewer.scene.requestRender();
+                        }
+                    } catch (e) {
+                        console.warn('Error clearing markers:', e);
+                    }
                 }
             }
         });
@@ -632,21 +646,21 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Ensure collection and viewer exist
         if (!this.markerCollection || !this.viewer || !this.viewer.scene) {
             console.warn('Cannot add marker: MarkerCollection or viewer not initialized');
-            return;
+            return false;
         }
 
         // Check if viewer is destroyed
         if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
             console.warn('Cannot add marker: viewer is destroyed');
-            return;
+            return false;
         }
         
         // Clear any existing markers in the collection
         try {
-        this.markerCollection.removeAll();
+            this.markerCollection.removeAll();
         } catch (e) {
             console.warn('Error clearing markers:', e);
-            return;
+            return false;
         }
         
         // Add marker using same approach as search results
@@ -664,14 +678,27 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 params.eyeOffset = new Cartesian3(0, 0, -50);
                 params.heightReference = HeightReference.CLAMP_TO_GROUND;
             }
-            this.markerCollection.add(params);
+            
+            const marker = this.markerCollection.add(params);
+            
+            // Ensure the marker collection is properly added to the scene
+            if (this.viewer.scene.primitives && !this.viewer.scene.primitives.contains(this.markerCollection)) {
+                this.viewer.scene.primitives.add(this.markerCollection);
+            }
             
             if (this.viewer.scene.primitives) {
-            this.viewer.scene.primitives.raiseToTop(this.markerCollection);
+                this.viewer.scene.primitives.raiseToTop(this.markerCollection);
             }
-            // this.viewer.scene.requestRender();
+            
+            // Request a render to ensure the marker is visible
+            this.viewer.scene.requestRender();
+            
+            console.debug('Focus marker added successfully');
+            return true;
+            
         } catch (e) {
             console.error('Error adding marker:', e);
+            return false;
         }
     }
 
@@ -928,12 +955,11 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         this._isChangingMode = true;
         
         try {
-            // Reinitialize viewer with appropriate projection
-            await this.reinitializeViewer(is2D);
-            
+            // Recreate viewer with appropriate projection
+            await this.recreateViewerForMode(is2D);
             // Update mode flag only after successful reinitialization
-        this.setupSceneMode(is2D);
-
+            this.setupSceneMode(is2D);
+            this.restoreParameterMarker();
         } catch (error) {
             console.error('Error during scene mode change:', error);
             // Show user-friendly message
@@ -952,10 +978,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private _isDestroyingViewer = false;
 
     /**
-     * Reinitialize the viewer with different projection for 2D/3D modes
+     * Recreate the viewer with different projection for 2D/3D modes
      * This is necessary because Cesium doesn't support dynamic projection switching
      */
-    private async reinitializeViewer(is2D: boolean) {
+    private async recreateViewerForMode(is2D: boolean) {
         // Prevent multiple simultaneous reinitializations
         if (this.viewerState) {
             console.warn('Viewer reinitialization already in progress');
@@ -1196,8 +1222,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 // Small delay to ensure viewer is fully initialized
                 setTimeout(async () => {
                     try {
-                        // Reinitialize all viewer components
-                        await this.initializeViewerComponents();
+                        // Setup all viewer components
+                        await this.setupViewerComponents();
                         resolve();
                     } catch (error) {
                         console.error('Error initializing viewer components:', error);
@@ -1213,9 +1239,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Initialize viewer components after creation
+     * Setup viewer components after creation
      */
-    private async initializeViewerComponents(): Promise<void> {
+    private async setupViewerComponents(): Promise<void> {
         try {
             // Initialize scene mode constraints
             this.setupSceneMode(this.is2DMode);
@@ -1261,6 +1287,30 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         } catch (error) {
             console.error('Error during viewer component initialization:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Restore markers based on current parameters
+     * This handles the case where parameter subscriptions fired before markerCollection was ready
+     */
+    private restoreParameterMarker() {
+        try {
+            const currentParams = this.parameterService.parameters.getValue();
+            if (currentParams.marker && currentParams.markedPosition.length === 2) {
+                const markerPosition = Cartesian3.fromDegrees(
+                    Number(currentParams.markedPosition[0]),
+                    Number(currentParams.markedPosition[1])
+                );
+                const success = this.addMarker(markerPosition);
+                if (success) {
+                    console.debug('Parameter-driven focus marker restored after viewer reinitialization');
+                } else {
+                    console.warn('Failed to restore parameter-driven focus marker');
+                }
+            }
+        } catch (error) {
+            console.warn('Error restoring parameter markers:', error);
         }
     }
 
@@ -1533,7 +1583,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private getMinViewRectangleHeight(): number {
         // Minimum corresponds to about 100 meters altitude using natural scaling
         // This provides a reasonable minimum zoom level
-        const earthRadius = 6378137.0; // Earth's radius in meters
+        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
         const minAltitude = 100; // meters
         return 2 * Math.atan(minAltitude / (2 * earthRadius));
     }
@@ -1561,7 +1611,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Convert altitude to angular view size
         // At sea level, 1 degree ≈ 111320 meters, but we use a more natural scaling
         // that accounts for the fact that in 2D mode, the view is more direct
-        const earthRadius = 6378137.0; // Earth's radius in meters
+        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
         const viewAngle = 2 * Math.atan(altitude / (2 * earthRadius));
         
         // Apply bounds
@@ -1583,7 +1633,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Reverse the altitude to view rectangle calculation
         // Use Cesium's natural relationship
         
-        const earthRadius = 6378137.0; // Earth's radius in meters
+        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
         const altitude = (2 * earthRadius) * Math.tan(viewRectHeight / 2);
         
         // Apply bounds
@@ -1653,7 +1703,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         const newHeight = currentHeight * zoomFactor;
         
         // Convert height to equivalent view rectangle height using natural relationship
-        const earthRadius = 6378137.0; // Earth's radius in meters
+        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
         const newViewRectHeight = 2 * Math.atan(newHeight / (2 * earthRadius));
         
         // Apply zoom limits based on view rectangle height
