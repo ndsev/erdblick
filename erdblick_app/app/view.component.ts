@@ -132,8 +132,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private tileOutlineEntity: Entity | null = null;
     menuItems: MenuItem[] = [];
     private cameraIsMoving: boolean = false;
-    is2DMode: boolean;
     private ignoreNextCameraUpdate: boolean = false;
+    is2DMode: boolean;
+    private debugHeartbeatInterval: any = null;
+    private lastUpdateTime: number = 0;
     
     // Cache to prevent drift when switching between modes
     private modeSwitch3DState: {altitude: number, centerLon: number, centerLat: number} | null = null;
@@ -251,6 +253,39 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         if (spinner) {
             spinner.style.display = 'none';
         }
+        
+        console.log('Debug: ErdblickViewComponent initialization completed');
+        
+        // Start debug heartbeat to monitor system responsiveness
+        this.startDebugHeartbeat();
+    }
+
+    private startDebugHeartbeat() {
+        // Clear any existing heartbeat
+        if (this.debugHeartbeatInterval) {
+            clearInterval(this.debugHeartbeatInterval);
+        }
+        
+        this.debugHeartbeatInterval = setInterval(() => {
+            const now = Date.now();
+            const timeSinceLastUpdate = now - this.lastUpdateTime;
+            
+            if (timeSinceLastUpdate > 10000) { // 10 seconds
+                console.warn('Debug: No viewport updates for over 10 seconds - system may be stuck');
+                
+                // Log current viewer state when there's an issue
+                if (this.viewer && this.viewer.camera) {
+                    try {
+                        const cameraPos = this.viewer.camera.positionCartographic;
+                        const lon = CesiumMath.toDegrees(cameraPos.longitude);
+                        const lat = CesiumMath.toDegrees(cameraPos.latitude);
+                        console.log(`Debug: Camera stuck at ${lon.toFixed(3)}, ${lat.toFixed(3)}`);
+                    } catch (error) {
+                        console.error('Debug: Error getting camera position:', error);
+                    }
+                }
+            }
+        }, 5000); // Every 5 seconds
     }
 
     /**
@@ -501,6 +536,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Update the visible viewport, and communicate it to the model.
      */
     updateViewport() {
+        console.log('Debug: === updateViewport() ENTRY ===');
+        this.lastUpdateTime = Date.now(); // Track last update time for heartbeat
+        
         // Safety check for viewer existence
         if (!this.viewer || !this.viewer.scene || !this.viewer.camera) {
             console.warn('Cannot update viewport: viewer not available');
@@ -514,31 +552,71 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
+            console.log('Debug: Viewer validation passed');
+
         let canvas = this.viewer.scene.canvas;
         if (!canvas) {
             console.warn('Cannot update viewport: canvas not available');
             return;
         }
 
+        console.log('Debug: Canvas validation passed, dimensions:', { width: canvas.clientWidth, height: canvas.clientHeight });
+
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
         let centerLon, centerLat;
+
+        console.log('Debug: Center cartesian:', centerCartesian);
 
         if (centerCartesian !== undefined) {
             let centerCartographic = Cartographic.fromCartesian(centerCartesian);
             centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
             centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
+            console.log('Debug: Center from pickEllipsoid:', { centerLon, centerLat });
         } else {
             let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
             centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
             centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
+            console.log('Debug: Center from camera position:', { centerLon, centerLat });
         }
 
+        console.log('Debug: About to compute view rectangle');
         let rectangle = this.viewer.camera.computeViewRectangle();
         if (!rectangle) {
-            // This might happen when looking into space.
-            return;
+            console.warn('Debug: computeViewRectangle returned null, using fallback calculation');
+            
+            // Fallback: Calculate viewport from camera position and height
+            const cameraCartographic = this.viewer.camera.positionCartographic;
+            const cameraLon = CesiumMath.toDegrees(cameraCartographic.longitude);
+            const cameraLat = CesiumMath.toDegrees(cameraCartographic.latitude);
+            const cameraHeight = cameraCartographic.height;
+            
+            // Calculate viewport size based on camera height
+            const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+            const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
+            const visualScale = CesiumMath.toDegrees(visualAngularSize);
+            
+            // Create a reasonable viewport around camera position
+            const halfWidth = visualScale / 2;
+            const halfHeight = visualScale * (canvas.clientHeight / canvas.clientWidth) / 2;
+            
+            // Create fallback rectangle
+            rectangle = Rectangle.fromDegrees(
+                cameraLon - halfWidth,
+                cameraLat - halfHeight,
+                cameraLon + halfWidth,
+                cameraLat + halfHeight
+            );
+            
+            console.log('Debug: Fallback rectangle created:', {
+                west: CesiumMath.toDegrees(rectangle.west),
+                south: CesiumMath.toDegrees(rectangle.south),
+                east: CesiumMath.toDegrees(rectangle.east),
+                north: CesiumMath.toDegrees(rectangle.north)
+            });
         }
+
+        console.log('Debug: View rectangle computed successfully');
 
         let west = CesiumMath.toDegrees(rectangle.west);
         let south = CesiumMath.toDegrees(rectangle.south);
@@ -547,8 +625,17 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         let sizeLon = east - west;
         let sizeLat = north - south;
 
+        console.log('Debug: Basic rectangle:', { west, south, east, north, sizeLon, sizeLat });
+
+        // Check for longitude wrapping issues
+        if (Math.abs(sizeLon) > 360 || Math.abs(sizeLat) > 180) {
+            console.error('Debug: Suspicious viewport dimensions:', { sizeLon, sizeLat });
+        }
+
         // For WebMercator mode, we need to handle both coordinate accuracy and zoom level accuracy
         if (this.is2DMode) {
+            console.log('Debug: Starting 2D mode viewport calculation');
+            
             // Sample viewport corners to get accurate geographic bounds for positioning
             const samplePoints = [
                 new Cartesian2(0, 0),                                    // top-left
@@ -560,23 +647,39 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             
             let minLon = Infinity, maxLon = -Infinity;
             let minLat = Infinity, maxLat = -Infinity;
+            let validSampleCount = 0;
             
             for (const point of samplePoints) {
-                const cartesian = this.viewer.camera.pickEllipsoid(point);
-                if (cartesian) {
-                    const cartographic = Cartographic.fromCartesian(cartesian);
-                    const lon = CesiumMath.toDegrees(cartographic.longitude);
-                    const lat = CesiumMath.toDegrees(cartographic.latitude);
-                    
-                    minLon = Math.min(minLon, lon);
-                    maxLon = Math.max(maxLon, lon);
-                    minLat = Math.min(minLat, lat);
-                    maxLat = Math.max(maxLat, lat);
+                try {
+                    const cartesian = this.viewer.camera.pickEllipsoid(point);
+                    if (cartesian) {
+                        const cartographic = Cartographic.fromCartesian(cartesian);
+                        const lon = CesiumMath.toDegrees(cartographic.longitude);
+                        const lat = CesiumMath.toDegrees(cartographic.latitude);
+                        
+                        // Validate coordinates are within reasonable bounds
+                        if (isFinite(lon) && isFinite(lat) && 
+                            lon >= -180 && lon <= 180 && 
+                            lat >= -85 && lat <= 85) {
+                            
+                            minLon = Math.min(minLon, lon);
+                            maxLon = Math.max(maxLon, lon);
+                            minLat = Math.min(minLat, lat);
+                            maxLat = Math.max(maxLat, lat);
+                            validSampleCount++;
+                        } else {
+                            console.warn('Invalid coordinate sample:', { lon, lat, point });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error sampling viewport point:', point, error);
                 }
             }
             
+            console.log(`Debug: Valid samples: ${validSampleCount}, bounds: [${minLon}, ${minLat}, ${maxLon}, ${maxLat}]`);
+            
             // Use the sampled bounds for accurate positioning
-            if (isFinite(minLon) && isFinite(maxLon) && isFinite(minLat) && isFinite(maxLat)) {
+            if (validSampleCount >= 2 && isFinite(minLon) && isFinite(maxLon) && isFinite(minLat) && isFinite(maxLat)) {
                 west = minLon;
                 east = maxLon;
                 south = minLat;
@@ -586,35 +689,112 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 centerLon = (west + east) / 2;
                 centerLat = (south + north) / 2;
                 
-                // Calculate effective dimensions for zoom level calculation
-                // The key insight: at higher latitudes, WebMercator shows less area than geographic bounds suggest
-                // We need to compress the dimensions to represent the true visual zoom level
+                console.log('Debug: Using sampled bounds for center calculation');
+            } else {
+                console.warn('Insufficient valid samples, falling back to camera-based calculation');
+                // Fallback to camera position if sampling fails
+                const cameraCartographic = this.viewer.camera.positionCartographic;
+                centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
+                centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
                 
-                // Calculate the center latitude for distortion factor
-                const centerLatRad = CesiumMath.toRadians(centerLat);
+                // Use a reasonable viewport size based on camera height
+                const cameraHeight = cameraCartographic.height;
+                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+                const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
+                const visualScale = CesiumMath.toDegrees(visualAngularSize);
                 
-                // WebMercator distortion factor at this latitude
-                // At higher latitudes, a degree of longitude covers less visual distance
-                const lonDistortionFactor = Math.cos(centerLatRad);
+                west = centerLon - visualScale / 2;
+                east = centerLon + visualScale / 2;
+                south = centerLat - visualScale / 2;
+                north = centerLat + visualScale / 2;
                 
-                // Calculate effective dimensions that represent true visual zoom level
-                sizeLon = (east - west) * lonDistortionFactor;
-                sizeLat = (north - south); // Latitude distortion is minimal for zoom level calculation
+                console.log('Debug: Using camera-based fallback calculation');
+            }
+            
+            // Debug: Log the center coordinates being calculated
+            console.log('2D Viewport Debug:', {
+                originalCenter: { lon: centerLon, lat: centerLat },
+                bounds: { west, east, south, north },
+                computedViewRect: {
+                    west: CesiumMath.toDegrees(rectangle.west),
+                    east: CesiumMath.toDegrees(rectangle.east),
+                    south: CesiumMath.toDegrees(rectangle.south),
+                    north: CesiumMath.toDegrees(rectangle.north)
+                },
+                cameraPosition: {
+                    lon: CesiumMath.toDegrees(this.viewer.camera.positionCartographic.longitude),
+                    lat: CesiumMath.toDegrees(this.viewer.camera.positionCartographic.latitude)
+                }
+            });
+            
+            // Calculate dimensions that represent the visual scale for accurate zoom level detection
+            // In WebMercator at high latitudes, geographic bounds are larger than visual area
+            // Use camera height to derive visual scale factor
+            const cameraHeight = this.viewer.camera.positionCartographic.height;
+            const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+            
+            // Validate camera height is reasonable
+            if (!isFinite(cameraHeight) || cameraHeight <= 0) {
+                console.error('Invalid camera height:', cameraHeight);
+                return; // Skip this update if camera height is invalid
+            }
+            
+            try {
+                // Derive visual scale from camera height
+                // This represents the visual angular size regardless of projection distortion
+                const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
+                const visualScale = CesiumMath.toDegrees(visualAngularSize);
+                
+                // Validate visual scale is reasonable
+                if (!isFinite(visualScale) || visualScale <= 0) {
+                    console.error('Invalid visual scale:', visualScale);
+                    return;
+                }
+                
+                // Use visual scale for dimensions to ensure correct zoom level calculation
+                // This makes the backend think we're at the visual zoom level, not the geographic zoom level
+                sizeLon = visualScale;
+                sizeLat = visualScale * (canvas.clientHeight / canvas.clientWidth); // Maintain aspect ratio
                 
                 // Apply reasonable bounds to prevent extreme values
                 sizeLon = Math.max(0.001, Math.min(360, sizeLon));
                 sizeLat = Math.max(0.001, Math.min(180, sizeLat));
+                
+                console.log('Debug: Visual scale calculation completed:', { cameraHeight, visualScale, sizeLon, sizeLat });
+                
+            } catch (error) {
+                console.error('Error in visual scale calculation:', error);
+                // Use geographic bounds as fallback
+                sizeLon = east - west;
+                sizeLat = north - south;
+                console.log('Debug: Using geographic bounds as fallback:', { sizeLon, sizeLat });
             }
         }
 
         // Don't handle antimeridian - let Cesium's continuous chaining work naturally
         // The sizeLon can be any value in continuous 2D mode
 
+        // Final validation of all viewport parameters
+        if (!isFinite(centerLon) || !isFinite(centerLat) || 
+            !isFinite(west) || !isFinite(east) || !isFinite(south) || !isFinite(north) ||
+            !isFinite(sizeLon) || !isFinite(sizeLat)) {
+            console.error('Invalid viewport parameters detected, skipping update:', {
+                centerLon, centerLat, west, east, south, north, sizeLon, sizeLat
+            });
+            return;
+        }
+
+        // Ensure dimensions are positive
+        if (sizeLon <= 0 || sizeLat <= 0) {
+            console.error('Invalid viewport dimensions:', { sizeLon, sizeLat });
+            return;
+        }
+
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
         let expandLat = sizeLat * 0.25;
         
-        this.mapService.setViewport({
+        const viewportData = {
             south: south - expandLat,
             west: west - expandLon,
             width: sizeLon + expandLon * 2,
@@ -622,9 +802,28 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             camPosLon: centerLon,
             camPosLat: centerLat,
             orientation: -this.viewer.camera.heading + Math.PI * .5,
-        });
+        };
+        
+        // Final validation of viewport data
+        if (!isFinite(viewportData.south) || !isFinite(viewportData.west) ||
+            !isFinite(viewportData.width) || !isFinite(viewportData.height) ||
+            !isFinite(viewportData.camPosLon) || !isFinite(viewportData.camPosLat) ||
+            !isFinite(viewportData.orientation)) {
+            console.error('Invalid viewport data calculated, skipping update:', viewportData);
+            return;
+        }
+        
+        // Debug: Log the viewport data being sent to backend
+        console.log('Viewport being sent to backend:', viewportData);
+        
+        console.log('Debug: About to call mapService.setViewport()');
+        this.mapService.setViewport(viewportData);
+        console.log('Debug: mapService.setViewport() completed');
+        console.log('Debug: === updateViewport() EXIT ===');
+        
         } catch (error) {
             console.error('Error updating viewport:', error);
+            console.error('Error stack:', (error as Error)?.stack || 'No stack trace available');
         }
     }
 
@@ -1736,25 +1935,64 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
     // Store event handler references for proper cleanup
     private cameraChangedHandler = () => {
-        if (!this.ignoreNextCameraUpdate) {
-            this.modeSwitch2DState = null;
-            this.modeSwitch3DState = null;
-            
-            if (this.is2DMode) {
-                this.parameterService.set2DCameraState(this.viewer.camera);
-            } else {
-                this.parameterService.setCameraState(this.viewer.camera);
+        console.log('Debug: cameraChangedHandler called, ignoreNextCameraUpdate =', this.ignoreNextCameraUpdate);
+        
+        try {
+            // Check if viewer is still valid
+            if (!this.viewer || !this.viewer.camera) {
+                console.error('Debug: cameraChangedHandler - viewer or camera is null');
+                return;
             }
+            
+            if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
+                console.error('Debug: cameraChangedHandler - viewer is destroyed');
+                return;
+            }
+            
+            // Log camera position for debugging
+            const cameraPos = this.viewer.camera.positionCartographic;
+            const lon = CesiumMath.toDegrees(cameraPos.longitude);
+            const lat = CesiumMath.toDegrees(cameraPos.latitude);
+            console.log('Debug: Camera position:', { lon, lat, height: cameraPos.height });
+            
+            // Check for extreme coordinates that might cause issues
+            if (!isFinite(lon) || !isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) {
+                console.error('Debug: Invalid camera coordinates detected:', { lon, lat });
+                return;
+            }
+            
+            if (!this.ignoreNextCameraUpdate) {
+                this.modeSwitch2DState = null;
+                this.modeSwitch3DState = null;
+                
+                console.log('Debug: Processing camera update');
+                
+                if (this.is2DMode) {
+                    this.parameterService.set2DCameraState(this.viewer.camera);
+                } else {
+                    this.parameterService.setCameraState(this.viewer.camera);
+                }
+            } else {
+                console.log('Debug: Ignoring camera update (ignoreNextCameraUpdate = true)');
+            }
+            
+            this.ignoreNextCameraUpdate = false;
+            console.log('Debug: About to call updateViewport()');
+            this.updateViewport();
+            console.log('Debug: updateViewport() completed successfully');
+            
+        } catch (error) {
+            console.error('Debug: Error in cameraChangedHandler:', error);
         }
-        this.ignoreNextCameraUpdate = false;
-        this.updateViewport();
     };
 
     private cameraMoveStartHandler = () => {
+        console.log('Debug: cameraMoveStartHandler called');
         this.cameraIsMoving = true;
     };
 
     private cameraMoveEndHandler = () => {
+        console.log('Debug: cameraMoveEndHandler called');
         this.cameraIsMoving = false;
     };
 
@@ -1766,6 +2004,12 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         
         // Don't allow mode changes during destruction
         this._isChangingMode = true;
+        
+        // Clean up debug heartbeat
+        if (this.debugHeartbeatInterval) {
+            clearInterval(this.debugHeartbeatInterval);
+            this.debugHeartbeatInterval = null;
+        }
         
         // Clean up resources without async to avoid hanging
         if (this.mouseHandler) {

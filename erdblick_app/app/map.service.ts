@@ -499,18 +499,33 @@ export class MapService {
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.tileBorders : false;
     }
 
+    private debugTileId(tileId: bigint): string {
+        try {
+            const tileBox = coreLib.getTileBox(tileId) as Array<number>;
+            const tilePos = coreLib.getTilePosition(tileId) as unknown as Array<number>;
+            const level = tileId & 0xFFFFn;
+            const y = (tileId >> 16n) & 0xFFFFn;
+            const x = tileId >> 32n;
+            return `ID=${tileId} (x=${x}, y=${y}, level=${level}) box=[${tileBox[0].toFixed(3)}, ${tileBox[1].toFixed(3)}, ${tileBox[2].toFixed(3)}, ${tileBox[3].toFixed(3)}] pos=[${tilePos[0].toFixed(3)}, ${tilePos[1].toFixed(3)}]`;
+        } catch (e) {
+            return `ID=${tileId} (decode error: ${e})`;
+        }
+    }
+
     async update() {
         // Get the tile IDs for the current viewport.
         this.currentVisibleTileIds = new Set<bigint>();
         this.currentHighDetailTileIds = new Set<bigint>();
         // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
+        console.log('Debug: update() called with currentViewport:', this.currentViewport);
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
                 const allViewportTileIds = coreLib.getTileIds(
                     this.currentViewport,
                     level,
                     this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
+                console.log(`Debug: Level ${level}, getTileIds returned:`, allViewportTileIds.map(id => this.debugTileId(id)));
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
                     ...this.currentVisibleTileIds,
@@ -919,13 +934,45 @@ export class MapService {
     }
 
     setTileLevelForViewport() {
-        for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-            if (coreLib.getNumTileIds(this.currentViewport, level) >= 48) {
-                this.zoomLevel.next(level);
-                return;
-            }
+        console.log('Debug: setTileLevelForViewport called with viewport:', this.currentViewport);
+        
+        // Validate viewport data
+        if (!this.currentViewport || 
+            !isFinite(this.currentViewport.south) || !isFinite(this.currentViewport.west) ||
+            !isFinite(this.currentViewport.width) || !isFinite(this.currentViewport.height) ||
+            !isFinite(this.currentViewport.camPosLon) || !isFinite(this.currentViewport.camPosLat)) {
+            console.error('Invalid viewport data in setTileLevelForViewport:', this.currentViewport);
+            return;
         }
-        this.zoomLevel.next(MAX_ZOOM_LEVEL);
+        
+        try {
+            for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
+                try {
+                    const numTileIds = coreLib.getNumTileIds(this.currentViewport, level);
+                    console.log(`Debug: Level ${level}, numTileIds: ${numTileIds}`);
+                    
+                    if (!isFinite(numTileIds) || numTileIds < 0) {
+                        console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
+                        continue;
+                    }
+                    
+                    if (numTileIds >= 48) {
+                        console.log(`Debug: Setting zoom level to ${level} (numTileIds: ${numTileIds})`);
+                        this.zoomLevel.next(level);
+                        return;
+                    }
+                } catch (error) {
+                    console.error(`Error calculating tiles for level ${level}:`, error);
+                    continue;
+                }
+            }
+            console.log(`Debug: Setting zoom level to MAX_ZOOM_LEVEL (${MAX_ZOOM_LEVEL})`);
+            this.zoomLevel.next(MAX_ZOOM_LEVEL);
+        } catch (error) {
+            console.error('Error in setTileLevelForViewport:', error);
+            // Fallback to a safe zoom level
+            this.zoomLevel.next(10);
+        }
     }
 
     *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
