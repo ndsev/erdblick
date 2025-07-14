@@ -501,10 +501,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
 
         let canvas = this.viewer.scene.canvas;
-            if (!canvas) {
-                console.warn('Cannot update viewport: canvas not available');
-                return;
-            }
+        if (!canvas) {
+            console.warn('Cannot update viewport: canvas not available');
+            return;
+        }
 
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
@@ -539,6 +539,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Grow the viewport rectangle by 25%
         let expandLon = sizeLon * 0.25;
         let expandLat = sizeLat * 0.25;
+        
         this.mapService.setViewport({
             south: south - expandLat,
             west: west - expandLon,
@@ -549,7 +550,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             orientation: -this.viewer.camera.heading + Math.PI * .5,
         });
         } catch (error) {
-            console.warn('Error updating viewport:', error);
+            console.error('Error updating viewport:', error);
         }
     }
 
@@ -627,51 +628,85 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-        this.featureSearchService.visualization.removeAll();
-        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
-        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
-        for (const node of nodes) {
-            if (node.markers.length) {
-                markers.push(...node.markers);
-            } else if (node.count > 0 && node.center) {
-                const params: MarkersParams = {
-                    position: node.center,
-                    image: this.featureSearchService.getPinGraphics(node.count),
-                    width: 64,
-                    height: 64
-                };
-                if (this.is2DMode) {
-                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                } else {
-                    params.eyeOffset = new Cartesian3(0, 0, -50);
-                }
-                this.featureSearchService.visualization.add(params);
-            }
-        }
-
-        if (markers.length) {
-            markers.forEach(marker => {
-                const params: MarkersParams = {
-                    id: marker[0],
-                    position: marker[1].cartesian as Cartesian3,
-                    image: this.featureSearchService.markerGraphics(),
-                    width: 32,
-                    height: 32,
-                    color: color
-                };
-                if (this.is2DMode) {
-                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                } else {
-                    params.pixelOffset = new Cartesian2(0, -10);
-                    params.eyeOffset = new Cartesian3(0, 0, -50);
-                }
-                this.featureSearchService.visualization.add(params);
-            });
-        }
+            this.featureSearchService.visualization.removeAll();
+            const color = Color.fromCssColorString(this.featureSearchService.pointColor);
+            let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
             
+            // Use the level parameter directly - viewport compensation is handled in updateViewport()
+            const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+            
+            for (const node of nodes) {
+                if (node.markers.length) {
+                    markers.push(...node.markers);
+                } else if (node.count > 0 && node.center) {
+                    // Get the correct position for the current projection
+                    let clusterPosition: Cartesian3;
+                    if (this.is2DMode) {
+                        // In 2D mode, convert the cluster center position to be appropriate for the current projection
+                        const clusterCartographic = Cartographic.fromCartesian(node.center);
+                        clusterPosition = Cartesian3.fromRadians(
+                            clusterCartographic.longitude,
+                            clusterCartographic.latitude,
+                            clusterCartographic.height
+                        );
+                    } else {
+                        // In 3D mode, use the original center position
+                        clusterPosition = node.center;
+                    }
+
+                    const params: MarkersParams = {
+                        position: clusterPosition,
+                        image: this.featureSearchService.getPinGraphics(node.count),
+                        width: 64,
+                        height: 64
+                    };
+                    if (this.is2DMode) {
+                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                    } else {
+                        params.eyeOffset = new Cartesian3(0, 0, -50);
+                    }
+                    this.featureSearchService.visualization.add(params);
+                }
+            }
+
+            if (markers.length) {
+                markers.forEach(marker => {
+                    // Get the correct position for the current projection
+                    let markerPosition: Cartesian3;
+                    if (this.is2DMode && marker[1].cartographicRad) {
+                        // In 2D mode, recreate position from cartographicRad to ensure 
+                        // it's positioned correctly for the current projection
+                        const cartographicRad = marker[1].cartographicRad;
+                        markerPosition = Cartesian3.fromRadians(
+                            cartographicRad.longitude,
+                            cartographicRad.latitude,
+                            cartographicRad.height
+                        );
+                    } else {
+                        // In 3D mode, use the original cartesian coordinates
+                        markerPosition = marker[1].cartesian as Cartesian3;
+                    }
+
+                    const params: MarkersParams = {
+                        id: marker[0],
+                        position: markerPosition,
+                        image: this.featureSearchService.markerGraphics(),
+                        width: 32,
+                        height: 32,
+                        color: color
+                    };
+                    if (this.is2DMode) {
+                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                    } else {
+                        params.pixelOffset = new Cartesian2(0, -10);
+                        params.eyeOffset = new Cartesian3(0, 0, -50);
+                    }
+                    this.featureSearchService.visualization.add(params);
+                });
+            }
+                
             if (this.viewer && this.viewer.scene && this.viewer.scene.primitives) {
-        this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
+                this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
             }
         } catch (error) {
             console.warn('Error rendering feature search results:', error);
@@ -1026,6 +1061,15 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.tileOutlineEntity = null;
                 this.openStreetMapLayer = null;
                 
+                // Clean up feature search visualization collection
+                if (this.featureSearchService.visualization && !this.featureSearchService.visualization.isDestroyed()) {
+                    try {
+                        this.featureSearchService.visualization.destroy();
+                    } catch (e) {
+                        console.warn('Error destroying feature search visualization:', e);
+                    }
+                }
+                
                 // Destroy viewer with multiple safety checks
                 if (this.viewer) {
                     try {
@@ -1159,8 +1203,16 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             });
             this.viewer.scene.primitives.add(this.markerCollection);
 
-            // Re-add feature search visualization
+            // Recreate feature search visualization collection for new viewer
+            this.featureSearchService.visualization = new BillboardCollection({
+                scene: this.viewer.scene
+            });
             this.viewer.scene.primitives.add(this.featureSearchService.visualization);
+
+            // Re-render existing search results if any
+            if (this.featureSearchService.searchResults.length > 0) {
+                this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+            }
             
         } catch (error) {
             console.error('Error during viewer component initialization:', error);
@@ -1450,54 +1502,17 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Calculate appropriate movement distance for 2D mode based on current view size
-     * Returns movement distance as a percentage of the current view rectangle
-     */
-    private get2DMovementDistance(): {longitudeOffset: number, latitudeOffset: number} {
-        const currentView = this.viewer.camera.computeViewRectangle();
-        if (!currentView) {
-            // Fallback to default movement if view can't be computed
-            return {
-                longitudeOffset: this.parameterService.cameraMoveUnits,
-                latitudeOffset: this.parameterService.cameraMoveUnits
-            };
-        }
-
-        const currentWidth = currentView.east - currentView.west;
-        const currentHeight = currentView.north - currentView.south;
-        
-        // Move by 10% of the current view size (adjust this percentage as needed)
-        const movementPercentage = 0.1;
-        
-        // Calculate movement distances
-        let longitudeOffset = CesiumMath.toDegrees(currentWidth * movementPercentage);
-        let latitudeOffset = CesiumMath.toDegrees(currentHeight * movementPercentage);
-        
-        // Clamp longitude movement to reasonable values for continuous chaining
-        // This prevents extremely large movements when view spans multiple worlds
-        const maxLonMovement = 45; // Maximum 45 degrees longitude movement
-        const minLonMovement = 0.001; // Minimum movement to prevent getting stuck
-        
-        longitudeOffset = Math.max(minLonMovement, Math.min(maxLonMovement, Math.abs(longitudeOffset))) * Math.sign(longitudeOffset || 1);
-        
-        // Latitude movement is naturally bounded by the view height
-        latitudeOffset = Math.max(0.001, Math.abs(latitudeOffset)) * Math.sign(latitudeOffset || 1);
-        
-        return {
-            longitudeOffset: longitudeOffset,
-            latitudeOffset: latitudeOffset
-        };
-    }
-
-    /**
      * Convert 3D camera altitude to appropriate 2D view rectangle size
      * @param altitude The 3D camera altitude in meters
      * @param pitch The 3D camera pitch angle in radians (negative for looking down)
      * @returns The height of the view rectangle in radians that shows equivalent area
      */
     private altitude3DToViewRectangle2D(altitude: number, pitch: number): number {
-        // Use a direct linear mapping for perfect reversibility
+        // Simple conversion from altitude to view rectangle height
+        // Base scaling factor that works well across different latitudes
         const scalingFactor = 0.3;
+        
+        // Convert altitude to degrees
         const visibleDegrees = (altitude * scalingFactor) / 111320;
         const viewRectHeight = CesiumMath.toRadians(visibleDegrees);
         
@@ -1520,9 +1535,12 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * @returns The altitude in meters that shows equivalent area
      */
     private viewRectangle2DToAltitude3D(viewRectHeight: number, desiredPitch: number = CesiumMath.toRadians(-45)): number {
-        // Exact inverse of the 3D to 2D conversion
+        // Simple conversion from view rectangle height to altitude
+        // Base scaling factor that matches the 3D to 2D conversion
+        const scalingFactor = 0.3;
+        
+        // Convert view rectangle to altitude
         const visibleDegrees = CesiumMath.toDegrees(viewRectHeight);
-        const scalingFactor = 0.3; // Same scaling factor as used in altitude3DToViewRectangle2D
         const altitude = (visibleDegrees * 111320) / scalingFactor;
         
         // Apply bounds without clamping to preserve reversibility
@@ -1535,6 +1553,41 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
         
         return altitude;
+    }
+
+    /**
+     * Get movement distance for 2D mode based on current viewport
+     */
+    private get2DMovementDistance(): {longitudeOffset: number, latitudeOffset: number} {
+        const currentView = this.viewer.camera.computeViewRectangle();
+        if (!currentView) {
+            // Fallback to default movement if view can't be computed
+            return {
+                longitudeOffset: this.parameterService.cameraMoveUnits,
+                latitudeOffset: this.parameterService.cameraMoveUnits
+            };
+        }
+
+        const currentWidth = currentView.east - currentView.west;
+        const currentHeight = currentView.north - currentView.south;
+        
+        // Move by 10% of the current view size (adjust this percentage as needed)
+        const movementPercentage = 0.1;
+        
+        // Calculate movement distances
+        const longitudeOffset = CesiumMath.toDegrees(currentWidth * movementPercentage);
+        const latitudeOffset = CesiumMath.toDegrees(currentHeight * movementPercentage);
+        
+        // Clamp movements to reasonable values
+        const maxLonMovement = 45; // Maximum 45 degrees longitude movement
+        const minLonMovement = 0.001;
+        const maxLatMovement = 45; // Maximum 45 degrees latitude movement
+        const minLatMovement = 0.001;
+        
+        return {
+            longitudeOffset: Math.max(minLonMovement, Math.min(maxLonMovement, longitudeOffset)),
+            latitudeOffset: Math.max(minLatMovement, Math.min(maxLatMovement, latitudeOffset))
+        };
     }
 
     /**
