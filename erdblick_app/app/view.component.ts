@@ -581,11 +581,22 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         console.log('Debug: About to compute view rectangle');
-        let rectangle = this.viewer.camera.computeViewRectangle();
+        
+        // First try: Pass ellipsoid explicitly (workaround #1)
+        let rectangle = this.viewer.camera.computeViewRectangle(this.viewer.scene.globe.ellipsoid);
+        
         if (!rectangle) {
-            console.warn('Debug: computeViewRectangle returned null, using fallback calculation');
+            console.warn('Debug: computeViewRectangle returned null even with ellipsoid, using robust calculation');
             
-            // Fallback: Calculate viewport from camera position and height
+            // Workaround #3: Robust rectangle calculation with multiple sample points
+            // Instead of just 4 corners, sample along edges to find valid intersections
+            rectangle = this.computeRobustViewRectangle(canvas);
+        }
+        
+        if (!rectangle) {
+            console.warn('Debug: Robust calculation failed, using camera-based fallback');
+            
+            // Final fallback: Calculate viewport from camera position and height
             const cameraCartographic = this.viewer.camera.positionCartographic;
             const cameraLon = CesiumMath.toDegrees(cameraCartographic.longitude);
             const cameraLat = CesiumMath.toDegrees(cameraCartographic.latitude);
@@ -608,13 +619,17 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 cameraLat + halfHeight
             );
             
-            console.log('Debug: Fallback rectangle created:', {
-                west: CesiumMath.toDegrees(rectangle.west),
-                south: CesiumMath.toDegrees(rectangle.south),
-                east: CesiumMath.toDegrees(rectangle.east),
-                north: CesiumMath.toDegrees(rectangle.north)
-            });
+            console.log('Debug: Camera-based fallback rectangle created');
         }
+        
+        // Workaround #2: Clamp to valid WebMercator range (±85.05113°)
+        const maxLat = 85.05113; // WebMercatorProjection.MaximumLatitude
+        rectangle = new Rectangle(
+            rectangle.west,
+            Math.max(rectangle.south, CesiumMath.toRadians(-maxLat)),
+            rectangle.east,
+            Math.min(rectangle.north, CesiumMath.toRadians(maxLat))
+        );
 
         console.log('Debug: View rectangle computed successfully');
 
@@ -2055,5 +2070,113 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Reset flags
         this._isChangingMode = false;
         this._isDestroyingViewer = false;
+    }
+
+    /**
+     * Compute viewport rectangle using robust sampling along edges
+     * Workaround for Cesium's computeViewRectangle failing in 2D WebMercator
+     */
+    private computeRobustViewRectangle(canvas: HTMLCanvasElement): Rectangle | undefined {
+        try {
+            const samplePoints: Array<{x: number, y: number}> = [];
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            const steps = 10; // Sample every 10th pixel along edges
+            
+            // Sample along top edge
+            for (let x = 0; x <= width; x += Math.max(1, Math.floor(width / steps))) {
+                samplePoints.push({x, y: 0});
+            }
+            
+            // Sample along bottom edge
+            for (let x = 0; x <= width; x += Math.max(1, Math.floor(width / steps))) {
+                samplePoints.push({x, y: height});
+            }
+            
+            // Sample along left edge
+            for (let y = 0; y <= height; y += Math.max(1, Math.floor(height / steps))) {
+                samplePoints.push({x: 0, y});
+            }
+            
+            // Sample along right edge
+            for (let y = 0; y <= height; y += Math.max(1, Math.floor(height / steps))) {
+                samplePoints.push({x: width, y});
+            }
+            
+            // Add some interior points for better coverage
+            samplePoints.push({x: width/2, y: height/2}); // center
+            samplePoints.push({x: width/4, y: height/4}); // quarter points
+            samplePoints.push({x: 3*width/4, y: height/4});
+            samplePoints.push({x: width/4, y: 3*height/4});
+            samplePoints.push({x: 3*width/4, y: 3*height/4});
+            
+            const validCoordinates: Array<{lon: number, lat: number}> = [];
+            
+            // Try to pick ellipsoid intersection for each sample point
+            for (const point of samplePoints) {
+                try {
+                    const cartesian = this.viewer.camera.pickEllipsoid(
+                        new Cartesian2(point.x, point.y), 
+                        this.viewer.scene.globe.ellipsoid
+                    );
+                    
+                    if (cartesian) {
+                        const cartographic = Cartographic.fromCartesian(cartesian);
+                        const lon = CesiumMath.toDegrees(cartographic.longitude);
+                        const lat = CesiumMath.toDegrees(cartographic.latitude);
+                        
+                        // Validate coordinates
+                        if (isFinite(lon) && isFinite(lat) && 
+                            lon >= -180 && lon <= 180 && 
+                            lat >= -90 && lat <= 90) {
+                            validCoordinates.push({lon, lat});
+                        }
+                    }
+                } catch (error) {
+                    // Skip invalid points
+                }
+            }
+            
+            if (validCoordinates.length < 3) {
+                console.warn(`Debug: Robust calculation found only ${validCoordinates.length} valid points`);
+                return undefined;
+            }
+            
+            // Find bounding box of valid coordinates
+            const lons = validCoordinates.map(coord => coord.lon);
+            const lats = validCoordinates.map(coord => coord.lat);
+            
+            let minLon = Math.min(...lons);
+            let maxLon = Math.max(...lons);
+            let minLat = Math.min(...lats);
+            let maxLat = Math.max(...lats);
+            
+            // Handle longitude wrapping around ±180°
+            if (maxLon - minLon > 180) {
+                // Likely crossing antimeridian, use camera position as reference
+                const cameraPos = this.viewer.camera.positionCartographic;
+                const cameraLon = CesiumMath.toDegrees(cameraPos.longitude);
+                
+                // Filter coordinates to be within ±180° of camera
+                const filteredCoords = validCoordinates.filter(coord => {
+                    const deltaLon = Math.abs(coord.lon - cameraLon);
+                    return deltaLon <= 180;
+                });
+                
+                if (filteredCoords.length >= 3) {
+                    const filteredLons = filteredCoords.map(coord => coord.lon);
+                    minLon = Math.min(...filteredLons);
+                    maxLon = Math.max(...filteredLons);
+                }
+            }
+            
+            console.log(`Debug: Robust calculation found ${validCoordinates.length} valid points, bounds: [${minLon.toFixed(3)}, ${minLat.toFixed(3)}, ${maxLon.toFixed(3)}, ${maxLat.toFixed(3)}]`);
+            
+            return Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat);
+            
+        } catch (error) {
+            console.error('Debug: Error in robust rectangle calculation:', error);
+            return undefined;
+        }
     }
 }
