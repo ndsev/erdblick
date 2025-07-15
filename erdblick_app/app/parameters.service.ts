@@ -210,6 +210,9 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
 /** Set of parameter keys allowed in visualization-only mode */
 // TODO: Reflect this in the parameter descriptors, instead
 // of having a separate set.
+// NOTE: Currently parameter access restrictions for visualization-only mode are maintained
+// in this hardcoded set. Should be integrated into the parameter descriptor system for
+// better maintainability and to avoid duplication.
 const VISUALIZATION_ONLY_ALLOWED = new Set([
     'heading',
     'pitch',

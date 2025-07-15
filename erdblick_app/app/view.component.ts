@@ -134,8 +134,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private cameraIsMoving: boolean = false;
     private ignoreNextCameraUpdate: boolean = false;
     is2DMode: boolean;
-    private debugHeartbeatInterval: any = null;
-    private lastUpdateTime: number = 0;
     
     // Cache to prevent drift when switching between modes
     private modeSwitch3DState: {altitude: number, centerLon: number, centerLat: number} | null = null;
@@ -253,39 +251,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         if (spinner) {
             spinner.style.display = 'none';
         }
-        
-        console.log('Debug: ErdblickViewComponent initialization completed');
-        
-        // Start debug heartbeat to monitor system responsiveness
-        this.startDebugHeartbeat();
-    }
-
-    private startDebugHeartbeat() {
-        // Clear any existing heartbeat
-        if (this.debugHeartbeatInterval) {
-            clearInterval(this.debugHeartbeatInterval);
-        }
-        
-        this.debugHeartbeatInterval = setInterval(() => {
-            const now = Date.now();
-            const timeSinceLastUpdate = now - this.lastUpdateTime;
-            
-            if (timeSinceLastUpdate > 10000) { // 10 seconds
-                console.warn('Debug: No viewport updates for over 10 seconds - system may be stuck');
-                
-                // Log current viewer state when there's an issue
-                if (this.viewer && this.viewer.camera) {
-                    try {
-                        const cameraPos = this.viewer.camera.positionCartographic;
-                        const lon = CesiumMath.toDegrees(cameraPos.longitude);
-                        const lat = CesiumMath.toDegrees(cameraPos.latitude);
-                        console.log(`Debug: Camera stuck at ${lon.toFixed(3)}, ${lat.toFixed(3)}`);
-                    } catch (error) {
-                        console.error('Debug: Error getting camera position:', error);
-                    }
-                }
-            }
-        }, 5000); // Every 5 seconds
     }
 
     /**
@@ -536,9 +501,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Update the visible viewport, and communicate it to the model.
      */
     updateViewport() {
-        console.log('Debug: === updateViewport() ENTRY ===');
-        this.lastUpdateTime = Date.now(); // Track last update time for heartbeat
-        
         // Safety check for viewer existence
         if (!this.viewer || !this.viewer.scene || !this.viewer.camera) {
             console.warn('Cannot update viewport: viewer not available');
@@ -552,50 +514,35 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
-            console.log('Debug: Viewer validation passed');
-
         let canvas = this.viewer.scene.canvas;
         if (!canvas) {
             console.warn('Cannot update viewport: canvas not available');
             return;
         }
 
-        console.log('Debug: Canvas validation passed, dimensions:', { width: canvas.clientWidth, height: canvas.clientHeight });
-
         let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
         let centerCartesian = this.viewer.camera.pickEllipsoid(center);
         let centerLon, centerLat;
-
-        console.log('Debug: Center cartesian:', centerCartesian);
 
         if (centerCartesian !== undefined) {
             let centerCartographic = Cartographic.fromCartesian(centerCartesian);
             centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
             centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
-            console.log('Debug: Center from pickEllipsoid:', { centerLon, centerLat });
         } else {
             let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
             centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
             centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
-            console.log('Debug: Center from camera position:', { centerLon, centerLat });
         }
 
-        console.log('Debug: About to compute view rectangle');
-        
-        // First try: Pass ellipsoid explicitly (workaround #1)
+        // First try: Pass ellipsoid explicitly (workaround for Cesium issue)
         let rectangle = this.viewer.camera.computeViewRectangle(this.viewer.scene.globe.ellipsoid);
         
         if (!rectangle) {
-            console.warn('Debug: computeViewRectangle returned null even with ellipsoid, using robust calculation');
-            
-            // Workaround #3: Robust rectangle calculation with multiple sample points
-            // Instead of just 4 corners, sample along edges to find valid intersections
+            // Workaround: Robust rectangle calculation with multiple sample points
             rectangle = this.computeRobustViewRectangle(canvas);
         }
         
         if (!rectangle) {
-            console.warn('Debug: Robust calculation failed, using camera-based fallback');
-            
             // Final fallback: Calculate viewport from camera position and height
             const cameraCartographic = this.viewer.camera.positionCartographic;
             const cameraLon = CesiumMath.toDegrees(cameraCartographic.longitude);
@@ -611,18 +558,15 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             const halfWidth = visualScale / 2;
             const halfHeight = visualScale * (canvas.clientHeight / canvas.clientWidth) / 2;
             
-            // Create fallback rectangle
             rectangle = Rectangle.fromDegrees(
                 cameraLon - halfWidth,
                 cameraLat - halfHeight,
                 cameraLon + halfWidth,
                 cameraLat + halfHeight
             );
-            
-            console.log('Debug: Camera-based fallback rectangle created');
         }
         
-        // Workaround #2: Clamp to valid WebMercator range (±85.05113°)
+        // Clamp to valid WebMercator range (±85.05113°)
         const maxLat = 85.05113; // WebMercatorProjection.MaximumLatitude
         rectangle = new Rectangle(
             rectangle.west,
@@ -631,8 +575,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             Math.min(rectangle.north, CesiumMath.toRadians(maxLat))
         );
 
-        console.log('Debug: View rectangle computed successfully');
-
         let west = CesiumMath.toDegrees(rectangle.west);
         let south = CesiumMath.toDegrees(rectangle.south);
         let east = CesiumMath.toDegrees(rectangle.east);
@@ -640,118 +582,22 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         let sizeLon = east - west;
         let sizeLat = north - south;
 
-        console.log('Debug: Basic rectangle:', { west, south, east, north, sizeLon, sizeLat });
-
-        // Check for longitude wrapping issues
+        // Check for suspicious viewport dimensions
         if (Math.abs(sizeLon) > 360 || Math.abs(sizeLat) > 180) {
-            console.error('Debug: Suspicious viewport dimensions:', { sizeLon, sizeLat });
+            console.error('Suspicious viewport dimensions:', { sizeLon, sizeLat });
         }
 
-        // For WebMercator mode, we need to handle both coordinate accuracy and zoom level accuracy
+        // For WebMercator 2D mode, use visual scale for proper zoom level calculation
         if (this.is2DMode) {
-            console.log('Debug: Starting 2D mode viewport calculation');
-            
-            // Sample viewport corners to get accurate geographic bounds for positioning
-            const samplePoints = [
-                new Cartesian2(0, 0),                                    // top-left
-                new Cartesian2(canvas.clientWidth, 0),                  // top-right  
-                new Cartesian2(canvas.clientWidth, canvas.clientHeight), // bottom-right
-                new Cartesian2(0, canvas.clientHeight),                 // bottom-left
-                new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2) // center
-            ];
-            
-            let minLon = Infinity, maxLon = -Infinity;
-            let minLat = Infinity, maxLat = -Infinity;
-            let validSampleCount = 0;
-            
-            for (const point of samplePoints) {
-                try {
-                    const cartesian = this.viewer.camera.pickEllipsoid(point);
-                    if (cartesian) {
-                        const cartographic = Cartographic.fromCartesian(cartesian);
-                        const lon = CesiumMath.toDegrees(cartographic.longitude);
-                        const lat = CesiumMath.toDegrees(cartographic.latitude);
-                        
-                        // Validate coordinates are within reasonable bounds
-                        if (isFinite(lon) && isFinite(lat) && 
-                            lon >= -180 && lon <= 180 && 
-                            lat >= -85 && lat <= 85) {
-                            
-                            minLon = Math.min(minLon, lon);
-                            maxLon = Math.max(maxLon, lon);
-                            minLat = Math.min(minLat, lat);
-                            maxLat = Math.max(maxLat, lat);
-                            validSampleCount++;
-                        } else {
-                            console.warn('Invalid coordinate sample:', { lon, lat, point });
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error sampling viewport point:', point, error);
-                }
-            }
-            
-            console.log(`Debug: Valid samples: ${validSampleCount}, bounds: [${minLon}, ${minLat}, ${maxLon}, ${maxLat}]`);
-            
-            // Use the sampled bounds for accurate positioning
-            if (validSampleCount >= 2 && isFinite(minLon) && isFinite(maxLon) && isFinite(minLat) && isFinite(maxLat)) {
-                west = minLon;
-                east = maxLon;
-                south = minLat;
-                north = maxLat;
-                
-                // Update center to match the actual geographic center
-                centerLon = (west + east) / 2;
-                centerLat = (south + north) / 2;
-                
-                console.log('Debug: Using sampled bounds for center calculation');
-            } else {
-                console.warn('Insufficient valid samples, falling back to camera-based calculation');
-                // Fallback to camera position if sampling fails
-                const cameraCartographic = this.viewer.camera.positionCartographic;
-                centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
-                centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
-                
-                // Use a reasonable viewport size based on camera height
-                const cameraHeight = cameraCartographic.height;
-                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
-                const visualScale = CesiumMath.toDegrees(visualAngularSize);
-                
-                west = centerLon - visualScale / 2;
-                east = centerLon + visualScale / 2;
-                south = centerLat - visualScale / 2;
-                north = centerLat + visualScale / 2;
-                
-                console.log('Debug: Using camera-based fallback calculation');
-            }
-            
-            // Debug: Log the center coordinates being calculated
-            console.log('2D Viewport Debug:', {
-                originalCenter: { lon: centerLon, lat: centerLat },
-                bounds: { west, east, south, north },
-                computedViewRect: {
-                    west: CesiumMath.toDegrees(rectangle.west),
-                    east: CesiumMath.toDegrees(rectangle.east),
-                    south: CesiumMath.toDegrees(rectangle.south),
-                    north: CesiumMath.toDegrees(rectangle.north)
-                },
-                cameraPosition: {
-                    lon: CesiumMath.toDegrees(this.viewer.camera.positionCartographic.longitude),
-                    lat: CesiumMath.toDegrees(this.viewer.camera.positionCartographic.latitude)
-                }
-            });
-            
             // Calculate dimensions that represent the visual scale for accurate zoom level detection
             // In WebMercator at high latitudes, geographic bounds are larger than visual area
-            // Use camera height to derive visual scale factor
             const cameraHeight = this.viewer.camera.positionCartographic.height;
             const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
             
             // Validate camera height is reasonable
             if (!isFinite(cameraHeight) || cameraHeight <= 0) {
                 console.error('Invalid camera height:', cameraHeight);
-                return; // Skip this update if camera height is invalid
+                return;
             }
             
             try {
@@ -767,22 +613,18 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 }
                 
                 // Use visual scale for dimensions to ensure correct zoom level calculation
-                // This makes the backend think we're at the visual zoom level, not the geographic zoom level
                 sizeLon = visualScale;
-                sizeLat = visualScale * (canvas.clientHeight / canvas.clientWidth); // Maintain aspect ratio
+                sizeLat = visualScale * (canvas.clientHeight / canvas.clientWidth);
                 
                 // Apply reasonable bounds to prevent extreme values
                 sizeLon = Math.max(0.001, Math.min(360, sizeLon));
                 sizeLat = Math.max(0.001, Math.min(180, sizeLat));
-                
-                console.log('Debug: Visual scale calculation completed:', { cameraHeight, visualScale, sizeLon, sizeLat });
                 
             } catch (error) {
                 console.error('Error in visual scale calculation:', error);
                 // Use geographic bounds as fallback
                 sizeLon = east - west;
                 sizeLat = north - south;
-                console.log('Debug: Using geographic bounds as fallback:', { sizeLon, sizeLat });
             }
         }
 
@@ -828,13 +670,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             return;
         }
         
-        // Debug: Log the viewport data being sent to backend
-        console.log('Viewport being sent to backend:', viewportData);
-        
-        console.log('Debug: About to call mapService.setViewport()');
         this.mapService.setViewport(viewportData);
-        console.log('Debug: mapService.setViewport() completed');
-        console.log('Debug: === updateViewport() EXIT ===');
         
         } catch (error) {
             console.error('Error updating viewport:', error);
@@ -1551,7 +1387,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
                     return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
                 }));
-        } else {
+            } else {
                 this.menuService.tileIdsForSourceData.next([]);
             }
         }, ScreenSpaceEventType.RIGHT_DOWN);
@@ -1950,29 +1786,24 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
     // Store event handler references for proper cleanup
     private cameraChangedHandler = () => {
-        console.log('Debug: cameraChangedHandler called, ignoreNextCameraUpdate =', this.ignoreNextCameraUpdate);
-        
         try {
             // Check if viewer is still valid
             if (!this.viewer || !this.viewer.camera) {
-                console.error('Debug: cameraChangedHandler - viewer or camera is null');
+                console.error('cameraChangedHandler: viewer or camera is null');
                 return;
             }
             
             if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
-                console.error('Debug: cameraChangedHandler - viewer is destroyed');
+                console.error('cameraChangedHandler: viewer is destroyed');
                 return;
             }
             
-            // Log camera position for debugging
+            // Check for extreme coordinates that might cause issues
             const cameraPos = this.viewer.camera.positionCartographic;
             const lon = CesiumMath.toDegrees(cameraPos.longitude);
             const lat = CesiumMath.toDegrees(cameraPos.latitude);
-            console.log('Debug: Camera position:', { lon, lat, height: cameraPos.height });
-            
-            // Check for extreme coordinates that might cause issues
             if (!isFinite(lon) || !isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) {
-                console.error('Debug: Invalid camera coordinates detected:', { lon, lat });
+                console.error('Invalid camera coordinates detected:', { lon, lat });
                 return;
             }
             
@@ -1980,34 +1811,26 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.modeSwitch2DState = null;
                 this.modeSwitch3DState = null;
                 
-                console.log('Debug: Processing camera update');
-                
                 if (this.is2DMode) {
                     this.parameterService.set2DCameraState(this.viewer.camera);
                 } else {
                     this.parameterService.setCameraState(this.viewer.camera);
                 }
-            } else {
-                console.log('Debug: Ignoring camera update (ignoreNextCameraUpdate = true)');
             }
             
             this.ignoreNextCameraUpdate = false;
-            console.log('Debug: About to call updateViewport()');
             this.updateViewport();
-            console.log('Debug: updateViewport() completed successfully');
             
         } catch (error) {
-            console.error('Debug: Error in cameraChangedHandler:', error);
+            console.error('Error in cameraChangedHandler:', error);
         }
     };
 
     private cameraMoveStartHandler = () => {
-        console.log('Debug: cameraMoveStartHandler called');
         this.cameraIsMoving = true;
     };
 
     private cameraMoveEndHandler = () => {
-        console.log('Debug: cameraMoveEndHandler called');
         this.cameraIsMoving = false;
     };
 
@@ -2019,12 +1842,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         
         // Don't allow mode changes during destruction
         this._isChangingMode = true;
-        
-        // Clean up debug heartbeat
-        if (this.debugHeartbeatInterval) {
-            clearInterval(this.debugHeartbeatInterval);
-            this.debugHeartbeatInterval = null;
-        }
         
         // Clean up resources without async to avoid hanging
         if (this.mouseHandler) {
@@ -2083,29 +1900,19 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             const height = canvas.clientHeight;
             const steps = 10; // Sample every 10th pixel along edges
             
-            // Sample along top edge
+            // Sample along edges and add interior points
             for (let x = 0; x <= width; x += Math.max(1, Math.floor(width / steps))) {
-                samplePoints.push({x, y: 0});
+                samplePoints.push({x, y: 0});      // top edge
+                samplePoints.push({x, y: height}); // bottom edge
             }
-            
-            // Sample along bottom edge
-            for (let x = 0; x <= width; x += Math.max(1, Math.floor(width / steps))) {
-                samplePoints.push({x, y: height});
-            }
-            
-            // Sample along left edge
             for (let y = 0; y <= height; y += Math.max(1, Math.floor(height / steps))) {
-                samplePoints.push({x: 0, y});
+                samplePoints.push({x: 0, y});      // left edge
+                samplePoints.push({x: width, y});  // right edge
             }
             
-            // Sample along right edge
-            for (let y = 0; y <= height; y += Math.max(1, Math.floor(height / steps))) {
-                samplePoints.push({x: width, y});
-            }
-            
-            // Add some interior points for better coverage
-            samplePoints.push({x: width/2, y: height/2}); // center
-            samplePoints.push({x: width/4, y: height/4}); // quarter points
+            // Add interior points for better coverage
+            samplePoints.push({x: width/2, y: height/2});   // center
+            samplePoints.push({x: width/4, y: height/4});   // quarter points
             samplePoints.push({x: 3*width/4, y: height/4});
             samplePoints.push({x: width/4, y: 3*height/4});
             samplePoints.push({x: 3*width/4, y: 3*height/4});
@@ -2138,7 +1945,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
             
             if (validCoordinates.length < 3) {
-                console.warn(`Debug: Robust calculation found only ${validCoordinates.length} valid points`);
                 return undefined;
             }
             
@@ -2170,12 +1976,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 }
             }
             
-            console.log(`Debug: Robust calculation found ${validCoordinates.length} valid points, bounds: [${minLon.toFixed(3)}, ${minLat.toFixed(3)}, ${maxLon.toFixed(3)}, ${maxLat.toFixed(3)}]`);
-            
             return Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat);
             
         } catch (error) {
-            console.error('Debug: Error in robust rectangle calculation:', error);
+            console.error('Error in robust rectangle calculation:', error);
             return undefined;
         }
     }

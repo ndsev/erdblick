@@ -436,6 +436,8 @@ export class MapPanelComponent {
             this.osmOpacityValue = parameters.osmOpacity;
         });
         // TODO: Use parameter service to store the state of the groups
+        // NOTE: Group expansion/collapse state should be persisted via parameter service
+        // to maintain user's preferred view state across sessions.
         this.mapService.mapGroups.subscribe(mapGroups => {
             for (const [groupId, mapItems] of mapGroups.entries()) {
                 if (groupId !== "ungrouped") {
@@ -470,6 +472,8 @@ export class MapPanelComponent {
     }
 
     // TODO: Refactor these into a generic solution
+    // NOTE: Multiple similar toggle menu methods exist. Should create a generic
+    // toggle menu service or component to reduce code duplication.
     showOptionsToggleMenu(event: MouseEvent, style: ErdblickStyle, optionId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [

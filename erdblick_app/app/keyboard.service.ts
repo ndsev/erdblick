@@ -45,6 +45,8 @@ export class KeyboardService {
             // TODO: Ensure that tab and escape, when pressed in a text area,
             //  result in a tab character/autocomplete cancelation rather than
             //  focusing another control/closing the enclosing dialog.
+            // NOTE: This affects UX when editing text - currently these keys may trigger
+            // unintended focus changes or dialog closures instead of normal text editing behavior.
 
             // Let non-ctrl key events or text editing shortcuts do their default things.
             if (isInput && this.preventOnInputShortcuts.has(key)) {

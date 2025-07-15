@@ -52,6 +52,8 @@ const tileUrl = "tiles";
 const abortUrl = "abort";
 
 /** Redefinition of coreLib.Viewport. TODO: Check if needed. */
+// NOTE: This type duplicates the Viewport interface from coreLib. Investigation needed
+// to determine if this redefinition is actually necessary or if coreLib.Viewport can be used directly.
 type ViewportProperties = {
     orientation: number;
     camPosLon: number;
@@ -499,18 +501,7 @@ export class MapService {
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.tileBorders : false;
     }
 
-    private debugTileId(tileId: bigint): string {
-        try {
-            const tileBox = coreLib.getTileBox(tileId) as Array<number>;
-            const tilePos = coreLib.getTilePosition(tileId) as unknown as Array<number>;
-            const level = tileId & 0xFFFFn;
-            const y = (tileId >> 16n) & 0xFFFFn;
-            const x = tileId >> 32n;
-            return `ID=${tileId} (x=${x}, y=${y}, level=${level}) box=[${tileBox[0].toFixed(3)}, ${tileBox[1].toFixed(3)}, ${tileBox[2].toFixed(3)}, ${tileBox[3].toFixed(3)}] pos=[${tilePos[0].toFixed(3)}, ${tilePos[1].toFixed(3)}]`;
-        } catch (e) {
-            return `ID=${tileId} (decode error: ${e})`;
-        }
-    }
+
 
     async update() {
         // Get the tile IDs for the current viewport.
@@ -518,14 +509,14 @@ export class MapService {
         this.currentHighDetailTileIds = new Set<bigint>();
         // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
-        console.log('Debug: update() called with currentViewport:', this.currentViewport);
+
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
                 const allViewportTileIds = coreLib.getTileIds(
                     this.currentViewport,
                     level,
                     this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
-                console.log(`Debug: Level ${level}, getTileIds returned:`, allViewportTileIds.map(id => this.debugTileId(id)));
+
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
                     ...this.currentVisibleTileIds,
@@ -822,6 +813,8 @@ export class MapService {
         let result = new Map<string, FeatureTile>();
 
         // TODO: Optimize this loop to make just a single update call.
+        // NOTE: Currently each missing tile triggers a separate update() call, which is inefficient.
+        // Should batch all missing tiles and make a single update call for better performance.
         for (let tileKey of tileKeys) {
             if (!tileKey) {
                 continue;
@@ -923,6 +916,8 @@ export class MapService {
         }
 
         // TODO: Focus on bounding box of all features?
+        // NOTE: Currently only focuses on the first feature. Should calculate bounding box
+        // of all selected features and focus on that area for better UX when multiple features are selected.
         if (focus && features.length) {
             this.focusOnFeature(features[0]);
         }
@@ -934,8 +929,6 @@ export class MapService {
     }
 
     setTileLevelForViewport() {
-        console.log('Debug: setTileLevelForViewport called with viewport:', this.currentViewport);
-        
         // Validate viewport data
         if (!this.currentViewport || 
             !isFinite(this.currentViewport.south) || !isFinite(this.currentViewport.west) ||
@@ -949,7 +942,6 @@ export class MapService {
             for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
                 try {
                     const numTileIds = coreLib.getNumTileIds(this.currentViewport, level);
-                    console.log(`Debug: Level ${level}, numTileIds: ${numTileIds}`);
                     
                     if (!isFinite(numTileIds) || numTileIds < 0) {
                         console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
@@ -957,7 +949,6 @@ export class MapService {
                     }
                     
                     if (numTileIds >= 48) {
-                        console.log(`Debug: Setting zoom level to ${level} (numTileIds: ${numTileIds})`);
                         this.zoomLevel.next(level);
                         return;
                     }
@@ -966,8 +957,7 @@ export class MapService {
                     continue;
                 }
             }
-            console.log(`Debug: Setting zoom level to MAX_ZOOM_LEVEL (${MAX_ZOOM_LEVEL})`);
-            this.zoomLevel.next(MAX_ZOOM_LEVEL);
+                    this.zoomLevel.next(MAX_ZOOM_LEVEL);
         } catch (error) {
             console.error('Error in setTileLevelForViewport:', error);
             // Fallback to a safe zoom level
