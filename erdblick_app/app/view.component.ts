@@ -60,8 +60,9 @@ interface MarkersParams {
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
-            <p-button
-                [icon]="is2DMode ? 'pi pi-globe' : 'pi pi-map'"
+            <p-button 
+                [ngClass]="{'blue': is2DMode}"
+                [label]="is2DMode ? '2D' : '3D'"
                 [pTooltip]="is2DMode ? 'Switch to 3D' : 'Switch to 2D'"
                 tooltipPosition="left"
                 (onClick)="toggleSceneMode()"
@@ -97,29 +98,29 @@ interface MarkersParams {
         }
         .scene-mode-toggle {
             position: absolute;
-            bottom: 30px;
-            right: 75px;
-            z-index: 1;
+            bottom: 0.5em;
+            right: 1em;
+            z-index: 110;
         }
         .navigation-controls {
             position: absolute;
-            bottom: 30px;
-            right: 10px;
+            bottom: 4.5em;
+            right: 0.5em;
             z-index: 1;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 0.5em;
             align-items: center;
         }
         .nav-control-group {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 0.25em;
             align-items: center;
         }
         .nav-horizontal {
             display: flex;
-            gap: 5px;
+            gap: 0.25em;
         }
     `],
     standalone: false
@@ -207,18 +208,58 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 return;
             }
             
-            // Convert lon/lat to Cartesian3 using current camera altitude.
-            this.parameterService.setView(
-                Cartesian3.fromDegrees(
-                    pos.x,
-                    pos.y,
-                    pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
-                {
-                    heading: CesiumMath.toRadians(0), // East, in radians.
-                    pitch: CesiumMath.toRadians(-90), // Directly looking down.
-                    roll: 0 // No rotation.
+            if (this.is2DMode) {
+                // In 2D mode, create a Rectangle centered on the target position
+                // Use current view rectangle height or calculate from camera height
+                const currentRect = this.viewer.camera.computeViewRectangle();
+                let viewHeight: number;
+                
+                if (currentRect) {
+                    viewHeight = currentRect.north - currentRect.south;
+                } else {
+                    // Calculate from camera height as fallback
+                    const cameraHeight = this.viewer.camera.positionCartographic.height;
+                    const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+                    viewHeight = 2 * Math.atan(cameraHeight / (2 * earthRadius));
                 }
-            );
+                
+                // Create aspect ratio based on canvas dimensions
+                const canvas = this.viewer.scene.canvas;
+                const aspectRatio = canvas.clientWidth / canvas.clientHeight;
+                const viewWidth = viewHeight * aspectRatio;
+                
+                // Center the rectangle on the target position
+                const centerLon = CesiumMath.toRadians(pos.x);
+                const centerLat = CesiumMath.toRadians(pos.y);
+                const halfWidth = viewWidth / 2;
+                const halfHeight = viewHeight / 2;
+                
+                const rectangle = new Rectangle(
+                    centerLon - halfWidth,
+                    centerLat - halfHeight,
+                    centerLon + halfWidth,
+                    centerLat + halfHeight
+                );
+                
+                // Ignore the camera change event to preserve mode switch cache
+                this.ignoreNextCameraUpdate = true;
+                this.viewer.camera.setView({
+                    destination: rectangle
+                });
+            } else {
+                // 3D mode - use current implementation
+                this.parameterService.setView(
+                    Cartesian3.fromDegrees(
+                        pos.x,
+                        pos.y,
+                        pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
+                    {
+                        heading: CesiumMath.toRadians(0), // East, in radians.
+                        pitch: CesiumMath.toRadians(-90), // Directly looking down.
+                        roll: 0 // No rotation.
+                    }
+                );
+            }
         });
 
         this.menuService.menuItems.subscribe(items => {
@@ -369,10 +410,12 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                         });
                     }
                 } else {
+                    // Convert Cartesian3 position to WGS84 degrees
+                    const cartographic = Cartographic.fromCartesian(feature.primitive.position);
                     this.mapService.moveToWgs84PositionTopic.next({
-                        x: feature.primitive.position.x,
-                        y: feature.primitive.position.y,
-                        z: feature.primitive.position.z + 1000
+                        x: CesiumMath.toDegrees(cartographic.longitude),
+                        y: CesiumMath.toDegrees(cartographic.latitude),
+                        z: cartographic.height + 1000
                     });
                 }
             }
@@ -1409,10 +1452,12 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                         });
                     }
             } else {
+                    // Convert Cartesian3 position to WGS84 degrees
+                    const cartographic = Cartographic.fromCartesian(feature.primitive.position);
                     this.mapService.moveToWgs84PositionTopic.next({
-                        x: feature.primitive.position.x,
-                        y: feature.primitive.position.y,
-                        z: feature.primitive.position.z + 1000
+                        x: CesiumMath.toDegrees(cartographic.longitude),
+                        y: CesiumMath.toDegrees(cartographic.latitude),
+                        z: cartographic.height + 1000
                     });
                 }
             }
