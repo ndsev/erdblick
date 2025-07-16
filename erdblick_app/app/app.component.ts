@@ -18,11 +18,11 @@ import {AppModeService} from "./app-mode.service";
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
-        <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
-            {{ copyright }}
-        </div>
         <div id="info">
             {{ title }} {{ version }}
+        </div>
+        <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
+            {{ copyright }}
         </div>
         <router-outlet></router-outlet>
     `,

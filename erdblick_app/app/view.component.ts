@@ -707,7 +707,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         
         // Clear any existing markers in the collection
         try {
-            this.markerCollection.removeAll();
+        this.markerCollection.removeAll();
         } catch (e) {
             console.warn('Error clearing markers:', e);
             return false;
@@ -737,7 +737,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
             
             if (this.viewer.scene.primitives) {
-                this.viewer.scene.primitives.raiseToTop(this.markerCollection);
+            this.viewer.scene.primitives.raiseToTop(this.markerCollection);
             }
             
             // Request a render to ensure the marker is visible
@@ -827,7 +827,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
                 
         if (this.viewer && this.viewer.scene && this.viewer.scene.primitives) {
-            this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
+        this.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
         }
         } catch (error) {
             console.error('Error rendering feature search result tree:', error);
@@ -1008,7 +1008,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             // Recreate viewer with appropriate projection
             await this.recreateViewerForMode(is2D);
             // Update mode flag only after successful reinitialization
-            this.setupSceneMode(is2D);
+        this.setupSceneMode(is2D);
             this.restoreParameterMarker();
         } catch (error) {
             console.error('Error during scene mode change:', error);
@@ -1355,7 +1355,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 const success = this.addMarker(markerPosition);
                 if (success) {
                     console.debug('Parameter-driven focus marker restored after viewer reinitialization');
-                } else {
+            } else {
                     console.warn('Failed to restore parameter-driven focus marker');
                 }
             }
@@ -1387,7 +1387,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
                     return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
                 }));
-            } else {
+                } else {
                 this.menuService.tileIdsForSourceData.next([]);
             }
         }, ScreenSpaceEventType.RIGHT_DOWN);

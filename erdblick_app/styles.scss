@@ -74,7 +74,7 @@ body {
 #info {
   position: absolute;
   right: 0;
-  bottom: 0;
+  top: 0;
   justify-content: center;
   display: flex;
   font-size: 0.8em;
@@ -92,7 +92,7 @@ body {
 #copyright-info {
   position: absolute;
   right: 0;
-  bottom: 1.75em;
+  top: 1.75em;
   justify-content: center;
   display: flex;
   font-size: 0.8em;
@@ -152,6 +152,21 @@ body {
   .p-button {
     border-radius: 50%;
     padding: 0.8em 0;
+  }
+}
+
+.scene-mode-toggle {
+  .p-button {
+    width: 3em;
+    height: 3em;
+  }
+
+  .blue {
+    button {
+      background-color: var(--p-primary-500) !important;
+      border-color: var(--p-primary-500) !important;
+      color: white !important;
+    }
   }
 }
 
@@ -507,30 +522,30 @@ body {
       font-size: 1em;
       color: white;
     }
+  }
 
-    .blue {
-      background-color: var(--p-primary-500);
-    }
+  .blue {
+    background-color: var(--p-primary-500);
+  }
 
-    .red {
-      background-color: indianred;
-    }
+  .red {
+    background-color: indianred !important;
+  }
 
-    .orange {
-      background-color: darkorange;
-    }
+  .orange {
+    background-color: darkorange !important;
+  }
 
-    .green {
-      background-color: limegreen;
-    }
+  .green {
+    background-color: limegreen !important;
+  }
 
-    .grey {
-      background-color: darkgrey;
-    }
+  .grey {
+    background-color: darkgrey !important;
+  }
 
-    .violet {
-      background-color: blueviolet;
-    }
+  .violet {
+    background-color: blueviolet !important;
   }
 }
 
