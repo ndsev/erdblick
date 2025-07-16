@@ -60,7 +60,7 @@ interface MarkersParams {
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
-            <p-button 
+            <p-button
                 [ngClass]="{'blue': is2DMode}"
                 [label]="is2DMode ? '2D' : '3D'"
                 [pTooltip]="is2DMode ? 'Switch to 3D' : 'Switch to 2D'"
@@ -210,55 +210,59 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             
             if (this.is2DMode) {
                 // In 2D mode, create a Rectangle centered on the target position
-                // Use current view rectangle height or calculate from camera height
-                const currentRect = this.viewer.camera.computeViewRectangle();
-                let viewHeight: number;
+                // Use current view rectangle to preserve exact zoom level
+                const canvas = this.viewer.scene.canvas;
+                let currentRect = this.viewer.camera.computeViewRectangle(this.viewer.scene.globe.ellipsoid);
                 
-                if (currentRect) {
-                    viewHeight = currentRect.north - currentRect.south;
-                } else {
-                    // Calculate from camera height as fallback
-                    const cameraHeight = this.viewer.camera.positionCartographic.height;
-                    const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                    viewHeight = 2 * Math.atan(cameraHeight / (2 * earthRadius));
+                // If computeViewRectangle fails, use robust calculation
+                if (!currentRect) {
+                    currentRect = this.computeRobustViewRectangle(canvas);
                 }
                 
-                // Create aspect ratio based on canvas dimensions
-                const canvas = this.viewer.scene.canvas;
-                const aspectRatio = canvas.clientWidth / canvas.clientHeight;
-                const viewWidth = viewHeight * aspectRatio;
-                
-                // Center the rectangle on the target position
-                const centerLon = CesiumMath.toRadians(pos.x);
-                const centerLat = CesiumMath.toRadians(pos.y);
-                const halfWidth = viewWidth / 2;
-                const halfHeight = viewHeight / 2;
-                
-                const rectangle = new Rectangle(
-                    centerLon - halfWidth,
-                    centerLat - halfHeight,
-                    centerLon + halfWidth,
-                    centerLat + halfHeight
-                );
-                
-                // Ignore the camera change event to preserve mode switch cache
-                this.ignoreNextCameraUpdate = true;
-                this.viewer.camera.setView({
-                    destination: rectangle
-                });
+                if (currentRect) {
+                    // Calculate the current view size
+                    const currentWidth = currentRect.east - currentRect.west;
+                    const currentHeight = currentRect.north - currentRect.south;
+                    
+                    // Center the rectangle on the target position with same dimensions
+                    const centerLon = CesiumMath.toRadians(pos.x);
+                    const centerLat = CesiumMath.toRadians(pos.y);
+                    const halfWidth = currentWidth / 2;
+                    const halfHeight = currentHeight / 2;
+                    
+                    const rectangle = new Rectangle(
+                        centerLon - halfWidth,
+                        centerLat - halfHeight,
+                        centerLon + halfWidth,
+                        centerLat + halfHeight
+                    );
+                    
+                    // Ignore the camera change event to preserve mode switch cache
+                    this.ignoreNextCameraUpdate = true;
+                    this.viewer.camera.setView({
+                        destination: rectangle
+                    });
+                } else {
+                    // Fallback: use position-only movement without changing zoom
+                    const cameraHeight = this.viewer.camera.positionCartographic.height;
+                    this.ignoreNextCameraUpdate = true;
+                    this.viewer.camera.setView({
+                        destination: Cartesian3.fromDegrees(pos.x, pos.y, cameraHeight)
+                    });
+                }
             } else {
                 // 3D mode - use current implementation
-                this.parameterService.setView(
-                    Cartesian3.fromDegrees(
-                        pos.x,
-                        pos.y,
-                        pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
-                    {
-                        heading: CesiumMath.toRadians(0), // East, in radians.
-                        pitch: CesiumMath.toRadians(-90), // Directly looking down.
-                        roll: 0 // No rotation.
-                    }
-                );
+            this.parameterService.setView(
+                Cartesian3.fromDegrees(
+                    pos.x,
+                    pos.y,
+                    pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
+                {
+                    heading: CesiumMath.toRadians(0), // East, in radians.
+                    pitch: CesiumMath.toRadians(-90), // Directly looking down.
+                    roll: 0 // No rotation.
+                }
+            );
             }
         });
 
