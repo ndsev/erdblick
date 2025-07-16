@@ -1805,9 +1805,22 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         const minViewRectHeight = this.getMinViewRectangleHeight();
         const maxViewRectHeight = this.getMaxViewRectangleHeight();
         
-        if (newViewRectHeight < minViewRectHeight || newViewRectHeight > maxViewRectHeight) {
-            console.warn('Zoom blocked by view rectangle limits');
-            return;
+        let clampedViewRectHeight = newViewRectHeight;
+        let wasClampedToLimit = false;
+        
+        if (newViewRectHeight < minViewRectHeight) {
+            clampedViewRectHeight = minViewRectHeight;
+            wasClampedToLimit = true;
+        } else if (newViewRectHeight > maxViewRectHeight) {
+            clampedViewRectHeight = maxViewRectHeight;
+            wasClampedToLimit = true;
+        }
+        
+        // Convert the clamped view rectangle height back to camera height
+        const clampedHeight = (2 * earthRadius) * Math.tan(clampedViewRectHeight / 2);
+        
+        if (wasClampedToLimit) {
+            console.debug('Zoom clamped to view rectangle limits');
         }
         
         // Set new camera height directly while preserving position
@@ -1815,7 +1828,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         const newPosition = Cartesian3.fromRadians(
             currentPos.longitude,
             currentPos.latitude,
-            newHeight
+            clampedHeight
         );
         
         // Ignore the camera change event for this programmatic zoom
