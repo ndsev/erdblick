@@ -17,16 +17,14 @@ import {
     BillboardCollection,
     Rectangle,
     defined,
-    Matrix3,
     WebMercatorProjection,
-    GeographicProjection,
-    Ellipsoid
+    GeographicProjection
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {AfterViewInit, Component, OnDestroy, OnInit} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, OnDestroy, ViewChild} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
-import {FeatureSearchService, MAX_ZOOM_LEVEL, SearchResultPrimitiveId} from "./feature.search.service";
+import {FeatureSearchService, SearchResultPrimitiveId} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
 import {distinctUntilChanged} from "rxjs";
@@ -37,7 +35,6 @@ import {coreLib} from "./wasm";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "./app-mode.service";
-import {Subject} from "rxjs";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -59,18 +56,6 @@ interface MarkersParams {
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
-            <p-button
-                [ngClass]="{'blue': is2DMode}"
-                [label]="is2DMode ? '2D' : '3D'"
-                [pTooltip]="is2DMode ? 'Switch to 3D' : 'Switch to 2D'"
-                tooltipPosition="left"
-                (onClick)="toggleSceneMode()"
-                [rounded]="true"
-                severity="secondary"
-                size="large">
-            </p-button>
-        </div>
         <div class="navigation-controls" *ngIf="!appModeService.isVisualizationOnly">
             <div class="nav-control-group">
                 <p-button icon="pi pi-plus" (onClick)="zoomIn()" [rounded]="true" severity="secondary" size="small" pTooltip="Zoom In (Q)"></p-button>
@@ -85,6 +70,25 @@ interface MarkersParams {
                 <p-button icon="pi pi-arrow-down" (onClick)="moveDown()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
             </div>
             <p-button icon="pi pi-refresh" (onClick)="resetOrientation()" [rounded]="true" severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
+        </div>
+        <div class="compass-circle">
+            <div class="compass-label north">N</div>
+            <div class="compass-label east">E</div>
+            <div class="compass-label south">S</div>
+            <div class="compass-label west">W</div>
+            <div class="compass-needle" #compassNeedle></div>
+        </div>
+        <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
+            <p-button
+                    [ngClass]="{'blue': is2DMode}"
+                    [label]="is2DMode ? '2D' : '3D'"
+                    [pTooltip]="is2DMode ? 'Switch to 3D' : 'Switch to 2D'"
+                    tooltipPosition="left"
+                    (onClick)="toggleSceneMode()"
+                    [rounded]="true"
+                    severity="secondary"
+                    size="large">
+            </p-button>
         </div>
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
@@ -126,6 +130,8 @@ interface MarkersParams {
     standalone: false
 })
 export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
+    @ViewChild('compassNeedle', { static: true }) needleRef!: ElementRef<HTMLElement>;
+
     viewer!: Viewer;
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
@@ -135,10 +141,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private cameraIsMoving: boolean = false;
     private ignoreNextCameraUpdate: boolean = false;
     is2DMode: boolean;
-    
-    // Cache to prevent drift when switching between modes
-    private modeSwitch3DState: {altitude: number, centerLon: number, centerLat: number} | null = null;
-    private modeSwitch2DState: {viewRectHeight: number, centerLon: number, centerLat: number} | null = null;
     
     // State to preserve during viewer reinitialization
     private viewerState: {
@@ -156,6 +158,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * @param featureSearchService
      * @param parameterService The parameter service, used to update
      * @param jumpService
+     * @param inspectionService
+     * @param keyboardService
+     * @param menuService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
      * @param appModeService
      */
@@ -210,7 +215,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             
             if (this.is2DMode) {
                 // In 2D mode, create a Rectangle centered on the target position
-                // Use current view rectangle to preserve exact zoom level
+                // Use current view rectangle to preserve the exact zoom level
                 const canvas = this.viewer.scene.canvas;
                 let currentRect = this.viewer.camera.computeViewRectangle(this.viewer.scene.globe.ellipsoid);
                 
@@ -284,12 +289,14 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Complete the viewer initialization process after viewer is created
+     * Complete the viewer initialization process after the viewer is created
      */
     private completeViewerInitialization() {
         // Setup parameter subscriptions and event handlers
         this.setupParameterSubscriptions();
         this.setupEventHandlers();
+        this.setupAdditionalSubscriptions();
+        this.setupKeyboardShortcuts();
         
         // Hide the global loading spinner
         const spinner = document.getElementById('global-spinner-container');
@@ -371,7 +378,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Setup event handlers and subscriptions
+     * Setup event handlers and subscriptions for mouse handler
      */
     private setupEventHandlers() {
         if (!this.mouseHandler) return;
@@ -443,12 +450,12 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
-            // Do not handle mouse move here, if the first element
+            // Do not handle mouse move here if the first element
             // under the cursor is not the Cesium view.
             if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
                 return;
             }
-            // Do not handle mouse move here, if the camera is currently being moved.
+            // Do not handle mouse move here if the camera is currently being moved.
             if (this.cameraIsMoving) {
                 return;
             }
@@ -469,9 +476,13 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
-        // Setup additional subscriptions and services
-        this.setupAdditionalSubscriptions();
-        this.setupKeyboardShortcuts();
+        const needle = this.needleRef.nativeElement;
+        this.viewer.clock.onTick.addEventListener(() => {
+            if (needle) {
+                const headingRad = this.viewer.camera.heading;
+                needle.style.transform = `rotate(${headingRad}rad)`;
+            }
+        });
     }
 
     /**
@@ -555,7 +566,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-            // Check if viewer is destroyed
+            // Check if the viewer is destroyed
             if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
                 console.warn('Cannot update viewport: viewer is destroyed');
                 return;
@@ -637,7 +648,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // For WebMercator 2D mode, use visual scale for proper zoom level calculation
         if (this.is2DMode) {
             // Calculate dimensions that represent the visual scale for accurate zoom level detection
-            // In WebMercator at high latitudes, geographic bounds are larger than visual area
+            // In WebMercator at high latitudes, geographic bounds are larger than the visual area
             const cameraHeight = this.viewer.camera.positionCartographic.height;
             const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
             
@@ -746,7 +757,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             return false;
         }
 
-        // Check if viewer is destroyed
+        // Check if the viewer is destroyed
         if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
             console.warn('Cannot add marker: viewer is destroyed');
             return false;
@@ -760,7 +771,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             return false;
         }
         
-        // Add marker using same approach as search results
+        // Add marker using the same approach as search results
         try {
             const params: MarkersParams = {
                 position: cartesian,
@@ -776,7 +787,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 params.heightReference = HeightReference.CLAMP_TO_GROUND;
             }
             
-            const marker = this.markerCollection.add(params);
+            this.markerCollection.add(params);
             
             // Ensure the marker collection is properly added to the scene
             if (this.viewer.scene.primitives && !this.viewer.scene.primitives.contains(this.markerCollection)) {
@@ -805,7 +816,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        // Check if viewer is destroyed
+        // Check if the viewer is destroyed
         if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
             console.warn('Cannot render feature search results: viewer is destroyed');
             return;
@@ -925,7 +936,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-            // Check if viewer is destroyed
+            // Check if the viewer is destroyed
             if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
                 console.warn('Cannot move camera: viewer is destroyed');
                 return;
@@ -1054,23 +1065,17 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         try {
             // Recreate viewer with appropriate projection
             await this.recreateViewerForMode(is2D);
-            // Update mode flag only after successful reinitialization
-        this.setupSceneMode(is2D);
+            this.setupSceneMode(is2D);
             this.restoreParameterMarker();
         } catch (error) {
             console.error('Error during scene mode change:', error);
-            // Show user-friendly message
             console.warn('Scene mode change failed. Retrying with fallback...');
-            
-            // Don't throw the error, just log it and continue
-            // The viewer should still be in a usable state due to fallback creation
-            
         } finally {
             this._isChangingMode = false;
         }
     }
 
-    // Add flag to prevent concurrent mode changes
+    // Add a flag to prevent concurrent mode changes
     private _isChangingMode = false;
     private _isDestroyingViewer = false;
 
@@ -1092,21 +1097,13 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-            // Save current state
             this.saveViewerState();
 
-            // Destroy current viewer
             await this.destroyViewer();
-
-            // Small delay to ensure DOM is ready
             await new Promise(resolve => setTimeout(resolve, 150));
-
-            // Create new viewer with appropriate projection
             await this.createViewer(is2D);
 
-            // Restore state
             this.restoreViewerState();
-            
         } catch (error) {
             console.error('Error during viewer reinitialization:', error);
             // Reset state on error to prevent future issues
@@ -1134,7 +1131,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         }
 
         try {
-            // Check if viewer is destroyed
             if (typeof this.viewer.isDestroyed === 'function' && this.viewer.isDestroyed()) {
                 console.warn('Cannot save viewer state: viewer is destroyed');
                 return;
@@ -1164,12 +1160,11 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             };
         } catch (error) {
             console.warn('Error saving viewer state:', error);
-            // Don't throw, just continue without saving state
         }
     }
 
     /**
-     * Get current camera state for preservation
+     * Get the current camera state for preservation
      */
     private getCurrentCameraState() {
         if (!this.viewer || !this.viewer.camera) return null;
@@ -1218,7 +1213,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                             this.mouseHandler.destroy();
                         }
                     } catch (e) {
-                        console.warn('Error destroying mouse handler:', e);
+                        console.warn('Error destroying mouse handler');
+                        console.debug(e);
                     }
                     this.mouseHandler = null;
                 }
@@ -1228,19 +1224,20 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.tileOutlineEntity = null;
                 this.openStreetMapLayer = null;
                 
-                // Clean up feature search visualization collection
+                // Clean the feature search visualization collection up
                 if (this.featureSearchService.visualization && !this.featureSearchService.visualization.isDestroyed()) {
                     try {
                         this.featureSearchService.visualization.destroy();
                     } catch (e) {
-                        console.warn('Error destroying feature search visualization:', e);
+                        console.warn('Error destroying feature search visualization');
+                        console.debug(e);
                     }
                 }
                 
                 // Destroy viewer with multiple safety checks
                 if (this.viewer) {
                     try {
-                        // Check if viewer is still valid before operations
+                        // Check if the viewer is still valid before operations
                         if (typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed()) {
                             // Remove event listeners first
                             if (this.viewer.camera) {
@@ -1249,21 +1246,24 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                                     this.viewer.camera.moveStart.removeEventListener(this.cameraMoveStartHandler);
                                     this.viewer.camera.moveEnd.removeEventListener(this.cameraMoveEndHandler);
                                 } catch (e) {
-                                    console.warn('Error removing camera event listeners:', e);
+                                    console.warn('Error removing camera event listeners');
+                                    console.debug(e);
                                 }
                             }
 
-                                                // Destroy the viewer - final safety check with try-catch
+                            // Destroy the viewer - final safety check with try-catch
                             if (typeof this.viewer.destroy === 'function' && !this.viewer.isDestroyed()) {
                                 try {
                                     this.viewer.destroy();
                                 } catch (e) {
-                                    console.warn('Error calling viewer.destroy() - viewer may have been destroyed already:', e);
+                                    console.warn('Error calling viewer.destroy() - viewer may have been destroyed already:');
+                                    console.debug(e);
                                 }
                             }
                         }
                     } catch (e) {
-                        console.warn('Error during viewer destruction:', e);
+                        console.warn('Error during viewer destruction:');
+                        console.debug(e);
                     }
                     
                     // Clear viewer reference regardless
@@ -1316,7 +1316,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     mapProjection: mapProjection
                 });
 
-                // Small delay to ensure viewer is fully initialized
+                // Small delay to ensure the viewer is fully initialized
                 setTimeout(async () => {
                     try {
                         // Setup all viewer components
@@ -1340,7 +1340,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      */
     private async setupViewerComponents(): Promise<void> {
         try {
-            // Initialize scene mode constraints
             this.setupSceneMode(this.is2DMode);
 
             // Recreate OpenStreetMap layer
@@ -1348,12 +1347,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             
             // Recreate mouse handler
             this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-            this.setupMouseHandlers();
-
-            // Setup camera event handlers
+            this.setupEventHandlers();
             this.setupCameraHandlers();
-
-            // Setup custom wheel handler for 2D mode
             this.setupWheelHandler();
 
             // Set globe appearance
@@ -1412,102 +1407,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Setup mouse event handlers
-     */
-    private setupMouseHandlers() {
-        if (!this.mouseHandler) return;
-
-        // Right click handler
-        this.mouseHandler.setInputAction((movement: any) => {
-            if (this.appModeService.isVisualizationOnly) return;
-
-            const position = movement.position;
-            const cartesian = this.viewer.camera.pickEllipsoid(
-                new Cartesian2(position.x, position.y),
-                this.viewer.scene.globe.ellipsoid
-            );
-            if (defined(cartesian)) {
-                const cartographic = Cartographic.fromCartesian(cartesian);
-                const longitude = CesiumMath.toDegrees(cartographic.longitude);
-                const latitude = CesiumMath.toDegrees(cartographic.latitude);
-                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
-                    const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
-                    return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
-                }));
-                } else {
-                this.menuService.tileIdsForSourceData.next([]);
-            }
-        }, ScreenSpaceEventType.RIGHT_DOWN);
-
-        // Left click handler
-        this.mouseHandler.setInputAction((movement: any) => {
-            if (this.appModeService.isVisualizationOnly) return;
-
-            const position = movement.position;
-            let feature = this.viewer.scene.pick(position);
-            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
-                if (feature.primitive.id) {
-                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
-                    if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId, featureInfo.featureId).then(() => {
-                            if (this.inspectionService.selectedFeatures) {
-                                this.inspectionService.zoomToFeature();
-                            }
-                        });
-                    }
-            } else {
-                    // Convert Cartesian3 position to WGS84 degrees
-                    const cartographic = Cartographic.fromCartesian(feature.primitive.position);
-                    this.mapService.moveToWgs84PositionTopic.next({
-                        x: CesiumMath.toDegrees(cartographic.longitude),
-                        y: CesiumMath.toDegrees(cartographic.latitude),
-                        z: cartographic.height + 1000
-                    });
-                }
-            }
-            if (!defined(feature)) {
-                this.inspectionService.isInspectionPanelVisible = false;
-                this.menuService.tileOutline.next(null);
-            }
-            this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? feature.id : [feature?.id],
-                false,
-                coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
-            // Handle position update after highlighting
-            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-            if (coordinates !== undefined) {
-                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
-            }
-        }, ScreenSpaceEventType.LEFT_CLICK);
-
-        // Mouse move handler
-        this.mouseHandler.setInputAction((movement: any) => {
-            const position = movement.endPosition;
-            if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
-                return;
-            }
-            if (this.cameraIsMoving) {
-                return;
-            }
-
-            if (!this.appModeService.isVisualizationOnly) {
-                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
-                if (coordinates !== undefined) {
-                    this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
-                }
-            }
-
-            if (!this.appModeService.isVisualizationOnly) {
-                let feature = this.viewer.scene.pick(position);
-                this.mapService.highlightFeatures(
-                    Array.isArray(feature?.id) ? feature.id : [feature?.id],
-                    false,
-                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
-            }
-        }, ScreenSpaceEventType.MOUSE_MOVE);
-    }
-
-    /**
      * Setup camera event handlers
      */
     private setupCameraHandlers() {
@@ -1527,13 +1426,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 event.stopPropagation();
                 
                 const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9;
-                const rect = this.viewer.scene.canvas.getBoundingClientRect();
-                const mousePosition = new Cartesian2(
-                    event.clientX - rect.left,
-                    event.clientY - rect.top
-                );
                 
-                this.zoom2D(zoomFactor, mousePosition);
+                this.zoom2D(zoomFactor);
             }
         });
     }
@@ -1680,7 +1574,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Calculate the minimum view rectangle height for 2D mode (1 meter in degrees)
      */
     private getMinViewRectangleHeight(): number {
-        // Minimum corresponds to about 100 meters altitude using natural scaling
+        // The Minimum corresponds to about 100 meters altitude using natural scaling
         // This provides a reasonable minimum zoom level
         const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
         const minAltitude = 100; // meters
@@ -1694,54 +1588,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Limit to 45 degrees to prevent excessive zoom out
         // This provides a reasonable world view without black bars
         return CesiumMath.toRadians(45);
-    }
-
-    /**
-     * Convert 3D camera altitude to appropriate 2D view rectangle size
-     * @param altitude The 3D camera altitude in meters
-     * @param pitch The 3D camera pitch angle in radians (negative for looking down)
-     * @returns The height of the view rectangle in radians that shows equivalent area
-     */
-    private altitude3DToViewRectangle2D(altitude: number, pitch: number): number {
-        // Use Cesium's natural relationship between altitude and view rectangle
-        // Based on the relationship: higher altitude = larger view rectangle
-        // This creates a more natural zoom level mapping
-        
-        // Convert altitude to angular view size
-        // At sea level, 1 degree ≈ 111320 meters, but we use a more natural scaling
-        // that accounts for the fact that in 2D mode, the view is more direct
-        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
-        const viewAngle = 2 * Math.atan(altitude / (2 * earthRadius));
-        
-        // Apply bounds
-        const minHeight = this.getMinViewRectangleHeight();
-        const maxHeight = this.getMaxViewRectangleHeight();
-        
-        const clampedHeight = Math.max(minHeight, Math.min(maxHeight, viewAngle));
-        
-        return clampedHeight;
-    }
-
-    /**
-     * Convert 2D view rectangle size to appropriate 3D camera altitude
-     * @param viewRectHeight The height of the view rectangle in radians
-     * @param desiredPitch The desired 3D camera pitch angle in radians (negative for looking down)
-     * @returns The altitude in meters that shows equivalent area
-     */
-    private viewRectangle2DToAltitude3D(viewRectHeight: number, desiredPitch: number = CesiumMath.toRadians(-45)): number {
-        // Reverse the altitude to view rectangle calculation
-        // Use Cesium's natural relationship
-        
-        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius; // Use viewer's ellipsoid maximum radius
-        const altitude = (2 * earthRadius) * Math.tan(viewRectHeight / 2);
-        
-        // Apply bounds
-        const minAltitude = 100;
-        const maxAltitude = 50000000;
-        
-        const clampedAltitude = Math.max(minAltitude, Math.min(maxAltitude, altitude));
-        
-        return clampedAltitude;
     }
 
     /**
@@ -1782,7 +1628,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     /**
      * 2D zoom using height-based approach with proper limit conversion
      */
-    private zoom2D(zoomFactor: number, cursorPosition?: Cartesian2): void {
+    private zoom2D(zoomFactor: number): void {
         if (!this.viewer || !this.viewer.camera) {
             console.warn('Cannot zoom in 2D: viewer not available');
             return;
@@ -1870,9 +1716,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
             
             if (!this.ignoreNextCameraUpdate) {
-                this.modeSwitch2DState = null;
-                this.modeSwitch3DState = null;
-                
                 if (this.is2DMode) {
                     this.parameterService.set2DCameraState(this.viewer.camera);
                 } else {
@@ -2024,17 +1867,21 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 // Likely crossing antimeridian, use camera position as reference
                 const cameraPos = this.viewer.camera.positionCartographic;
                 const cameraLon = CesiumMath.toDegrees(cameraPos.longitude);
-                
-                // Filter coordinates to be within ±180° of camera
-                const filteredCoords = validCoordinates.filter(coord => {
-                    const deltaLon = Math.abs(coord.lon - cameraLon);
-                    return deltaLon <= 180;
-                });
-                
-                if (filteredCoords.length >= 3) {
-                    const filteredLons = filteredCoords.map(coord => coord.lon);
-                    minLon = Math.min(...filteredLons);
-                    maxLon = Math.max(...filteredLons);
+
+                const areLonsCorrect = validCoordinates.every(coord => Math.abs(coord.lon - cameraLon) <= 180);
+
+                if (!areLonsCorrect) {
+                    const reprojectedLons = validCoordinates.map(coord => {
+                        let lon = coord.lon;
+                        if (lon - cameraLon > 180) {
+                            lon -= 360;
+                        } else if (cameraLon - lon > 180) {
+                            lon += 360;
+                        }
+                        return lon;
+                    });
+                    minLon = Math.min(...reprojectedLons);
+                    maxLon = Math.max(...reprojectedLons);
                 }
             }
             

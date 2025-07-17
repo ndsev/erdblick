@@ -110,6 +110,41 @@ body {
   cursor: pointer;
 }
 
+.compass-circle {
+  position: absolute;
+  top: 2em;
+  right: 0.5em;
+  width: 4em;
+  height: 4em;
+  border: 0.15em solid var(--p-button-secondary-border-color);
+  border-radius: 50%;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: sans-serif;
+  color: var(--p-button-secondary-border-color);
+  z-index: 110;
+}
+
+.compass-label {
+  position: absolute;
+  font-size: 0.75em;
+  font-weight: bolder;
+}
+.compass-label.north { top: 0.2em; }
+.compass-label.east  { right: 0.2em; }
+.compass-label.south { bottom: 0.2em; }
+.compass-label.west  { left: 0.2em; }
+
+.compass-needle {
+  width: 0.75em;
+  height: 1.5em;
+  background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  transform-origin: 50% 50%;
+}
+
 .help-button {
   width: 3em;
   height: 3em;
