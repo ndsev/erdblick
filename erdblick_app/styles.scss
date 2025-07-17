@@ -1001,6 +1001,77 @@ body {
   }
 }
 
+.feature-search-tabs {
+  .p-tab {
+    padding: 0.5em 1.5em;
+    margin: 0;
+    font-size: 0.9em;
+  }
+
+  .p-tabpanels {
+    padding: 0.5em 0 0 0;
+    font-size: 0.9em;
+  }
+
+  .results-listbox {
+    li {
+      padding: 0.5em 0.5em;
+      font-size: 1em;
+    }
+
+    .p-scroller {
+      height: calc(100vh - 23em) !important;
+    }
+  }
+
+  #searchDiagnosticsPanel,
+  #searchTracesPanel {
+    & > * {
+      padding-top: 0.5em;
+    }
+
+    .section-heading {
+      font-weight: 700;
+    }
+
+    ul {
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      margin: 0;
+
+      li {
+        display: flex;
+        flex-direction: row;
+        gap: 0.5em;
+        padding: 0.5em;
+        margin: 0;
+        border-radius: 0.5em;
+      }
+
+      li:hover {
+        background-color: var(--p-highlight-background);
+        cursor: pointer;
+      }
+
+      /* Spans are styled as horizontally padded items, the last item getting stretched
+         to the full dialog width.
+       */
+
+      li > span:last-child {
+        flex: 1;
+        text-align: right;
+      }
+
+      /* The first div gets stretched to fill the dialogs width. */
+
+      li > div:first-child {
+        flex: 1;
+      }
+    }
+  }
+}
+
 .p-colorpicker {
   input {
     height: 1em;
@@ -1117,59 +1188,6 @@ body {
       flex-direction: row;
       flex-wrap: nowrap;
       gap: 0.5em;
-    }
-  }
-}
-
-.results-listbox {
-  li {
-    padding: 0.5em 0.75em;
-    font-size: 0.9em;
-  }
-
-  .p-scroller {
-    height: calc(100vh - 23em) !important;
-  }
-}
-
-#searchDiagnosticsPanel,
-#searchTracesPanel {
-  .section-heading {
-    font-weight: 700;
-  }
-
-  ul {
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-
-    li {
-      display: flex;
-      flex-direction: row;
-      gap: 6px;
-      padding: 6px;
-      margin: 0;
-      border-radius: 6px;
-    }
-
-    li:hover {
-      background-color: var(--p-highlight-background);
-      cursor: pointer;
-    }
-
-    /* Spans are styled as horizontally padded items, the last item getting stretched
-       to the full dialog width.
-     */
-
-    li > span:last-child {
-      flex: 1;
-      text-align: right;
-    }
-
-    /* The first div gets stretched to fill the dialogs width. */
-
-    li > div:first-child {
-      flex: 1;
     }
   }
 }
