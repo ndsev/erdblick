@@ -574,12 +574,15 @@ export class SearchPanelComponent implements AfterViewInit {
         const textarea = this.textarea.nativeElement;
         const rect = textarea.getBoundingClientRect();
         const cursor = textarea.selectionStart || 0;
+        const style = window.getComputedStyle(textarea);
+        const fontSizePx = parseFloat(style.fontSize);
+        const offset = (1 + 0.75) * fontSizePx; // Text height + padding height
 
         this.cursorPosition = cursor;
 
         const caret = getCaretCoordinates(textarea, cursor);
         if (caret) {
-            this.completion.top = rect.top + caret.top + caret.height;
+            this.completion.top = rect.top + caret.top + offset;
             this.completion.left = rect.left + caret.left;
         } else {
             this.completion.top = rect.bottom;
@@ -750,10 +753,6 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!clickedInsideComponent && !clickedOnInteractiveElement) {
             this.dialog.close(event);
         }
-    }
-
-    onFileSelected($event: any) {
-        alert($event)
     }
 
     completeQuery(query: string, point: number | undefined) {
