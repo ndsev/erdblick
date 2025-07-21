@@ -27,36 +27,39 @@ interface Versions {
             {{ copyright }}
         </div>
         <div id="info">
-            <span *ngIf="!distributionVersions.length">{{ title }} {{ erdblickVersion }}</span>
-            <span *ngIf="distributionVersions.length" style="cursor: pointer" (click)="showExposedVersions()">
-                {{ distributionVersions[0].name }} {{ distributionVersions[0].tag }}
+            <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
+            <span *ngIf="distributionVersions.length" style="cursor: pointer; z-index: 110" (click)="showExposedVersions()">
+                {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
             </span>
         </div>
         <p-dialog header="Distribution Version Information" [(visible)]="distributionVersionsDialogVisible" 
                   [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
             <div class="dialog-content">
-                <table class="stats-table">
-                    <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Version</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr *ngFor="let version of distributionVersions">
-                        <td>{{ version.name }}</td>
-                        <td>{{ version.tag }}</td>
-                    </tr>
-                    </tbody>
-                </table>
-                <button pButton type="button" label="Close" icon="pi pi-cross" 
-                        (click)="distributionVersionsDialogVisible = false">
-                </button>
+                <p-table [value]="distributionVersions" [tableStyle]="{ 'min-width': '20em' }">
+                    <ng-template #header>
+                        <tr>
+                            <th>Name</th>
+                            <th>Version</th>
+                        </tr>
+                    </ng-template>
+                    <ng-template #body let-version>
+                        <tr>
+                            <td>{{ version.name }}</td>
+                            <td>{{ version.tag }}</td>
+                        </tr>
+                    </ng-template>
+                </p-table>
             </div>
+            <p-button type="button" label="Close" icon="pi pi-times" (click)="distributionVersionsDialogVisible = false">
+            </p-button>
         </p-dialog>
         <router-outlet></router-outlet>
     `,
     styles: [`
+        .dialog-content {
+            margin-bottom: 0.5em;
+        }
+        
         @media only screen and (max-width: 56em) {
             .elevated {
                 bottom: 3.5em;
@@ -81,10 +84,6 @@ export class AppComponent {
                 public mapService: MapService,
                 public appModeService: AppModeService,
                 public parametersService: ParametersService) {
-        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
-            data => {
-                this.erdblickVersion = data.toString();
-            });
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
@@ -98,16 +97,23 @@ export class AppComponent {
                                 this.distributionVersions = versions;
                             }).catch((error) => {
                                 console.error(error);
+                                this.getBasicVersion();
                             });
                             return;
+                        } else {
+                            this.getBasicVersion();
                         }
+                    } else {
+                        this.getBasicVersion();
                     }
                 } catch (error) {
                     console.error(error);
+                    this.getBasicVersion();
                 }
             },
             error: error => {
                 console.error(error);
+                this.getBasicVersion();
             }
         });
         this.init();
@@ -158,6 +164,15 @@ export class AppComponent {
     }
 
     showExposedVersions() {
-        console.log(this.distributionVersions);
+        if (this.distributionVersions.length) {
+            this.distributionVersionsDialogVisible = true;
+        }
+    }
+
+    getBasicVersion() {
+        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
+            data => {
+                this.erdblickVersion = `${this.title} ${data.toString()}`;
+            });
     }
 }
