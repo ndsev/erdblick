@@ -63,6 +63,7 @@ import {FloatLabelModule} from "primeng/floatlabel";
 import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./keyboard.service";
 import {SelectModule} from 'primeng/select';
+import {AutoCompleteModule} from 'primeng/autocomplete';
 import {
     ArrayTypeComponent,
     DatasourcesComponent,
@@ -256,6 +257,7 @@ export const initializeServices = () => {
         BreadcrumbModule,
         TableModule,
         SelectModule,
+        AutoCompleteModule,
         ReactiveFormsModule,
         FormlyPrimeNGModule,
         ProgressBarModule,
