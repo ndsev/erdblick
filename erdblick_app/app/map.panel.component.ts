@@ -35,6 +35,9 @@ import {DataSourcesService} from "./datasources.service";
                     </p-button>
                     <div *ngIf="osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="osmOpacityString"
+                               (input)="onOsmOpacityInput($event)"
+                               (keydown.enter)="updateOSMOverlay()"
+                               (blur)="updateOSMOverlay()"
                                class="w-full slider-input" tabindex="0"/>
                         <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
                                   class="w-full" tabindex="-1">
@@ -282,6 +285,42 @@ export class MapPanelComponent {
 
     get osmOpacityString(): string {
         return 'Opacity: ' + this.osmOpacityValue;
+    }
+
+    set osmOpacityString(value: string) {
+        const match = value.match(/(\d+(?:\.\d+)?)/);
+        if (match) {
+            const numValue = parseFloat(match[1]);
+            if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
+                this.osmOpacityValue = numValue;
+            }
+        }
+    }
+
+    onOsmOpacityInput(event: any) {
+        const inputElement = event.target as HTMLInputElement;
+        const value = inputElement.value;
+        
+        // Extract only numerical characters and decimal points
+        const numericalOnly = value.replace(/[^0-9.]/g, '');
+        let numValue = parseFloat(numericalOnly);
+        
+        // Validate and clamp the value
+        if (isNaN(numValue) || numValue < 0) {
+            numValue = 0;
+        } else if (numValue > 100) {
+            numValue = 100;
+        }
+
+        this.osmOpacityValue = numValue;
+        // Always show "Opacity: X"
+        const formattedValue = 'Opacity: ' + numValue;
+        if (inputElement.value !== formattedValue) {
+            inputElement.value = formattedValue;
+            inputElement.dispatchEvent(new Event('input'));
+        }
+
+        this.updateOSMOverlay();
     }
 
     // TODO: Refactor these into a generic solution

@@ -733,12 +733,21 @@ export class SearchPanelComponent implements AfterViewInit {
     handleClickOut(event: MouseEvent): void {
         const clickedInsideComponent = this.elRef.nativeElement.contains(event.target as Node);
 
-        // Check if the clicked element is a button or a file input
-        const clickedOnButton = event.target instanceof HTMLElement && event.target.tagName === 'BUTTON';
-        const clickedOnUploader = event.target instanceof HTMLElement &&
-            (event.target.tagName === 'INPUT' && event.target.getAttribute('type') === 'file');
+        // Check if the clicked element is a form control or interactive element
+        const clickedOnInteractiveElement = event.target instanceof HTMLElement && (
+            event.target.tagName === 'BUTTON' ||
+            event.target.tagName === 'INPUT' ||
+            event.target.tagName === 'TEXTAREA' ||
+            event.target.tagName === 'SELECT' ||
+            event.target.isContentEditable ||
+            event.target.closest('p-dropdown') ||
+            event.target.closest('p-multiselect') ||
+            event.target.closest('p-calendar') ||
+            event.target.closest('p-inputnumber') ||
+            event.target.closest('.p-component')
+        );
 
-        if (!clickedInsideComponent && !clickedOnButton && !clickedOnUploader) {
+        if (!clickedInsideComponent && !clickedOnInteractiveElement) {
             this.dialog.close(event);
         }
     }
