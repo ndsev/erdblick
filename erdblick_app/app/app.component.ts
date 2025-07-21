@@ -6,6 +6,11 @@ import {ParametersService} from "./parameters.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
+interface Versions {
+    name: string;
+    tag: string;
+}
+
 @Component({
     selector: 'app-root',
     template: `
@@ -22,11 +27,39 @@ import {AppModeService} from "./app-mode.service";
             {{ copyright }}
         </div>
         <div id="info">
-            {{ title }} {{ version }}
+            <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
+            <span *ngIf="distributionVersions.length" style="cursor: pointer; z-index: 110" (click)="showExposedVersions()">
+                {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
+            </span>
         </div>
+        <p-dialog header="Distribution Version Information" [(visible)]="distributionVersionsDialogVisible" 
+                  [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
+            <div class="dialog-content">
+                <p-table [value]="distributionVersions" [tableStyle]="{ 'min-width': '20em' }">
+                    <ng-template #header>
+                        <tr>
+                            <th>Name</th>
+                            <th>Version</th>
+                        </tr>
+                    </ng-template>
+                    <ng-template #body let-version>
+                        <tr>
+                            <td>{{ version.name }}</td>
+                            <td>{{ version.tag }}</td>
+                        </tr>
+                    </ng-template>
+                </p-table>
+            </div>
+            <p-button type="button" label="Close" icon="pi pi-times" (click)="distributionVersionsDialogVisible = false">
+            </p-button>
+        </p-dialog>
         <router-outlet></router-outlet>
     `,
     styles: [`
+        .dialog-content {
+            margin-bottom: 0.5em;
+        }
+        
         @media only screen and (max-width: 56em) {
             .elevated {
                 bottom: 3.5em;
@@ -39,8 +72,11 @@ import {AppModeService} from "./app-mode.service";
 export class AppComponent {
 
     title: string = "erdblick";
-    version: string = "";
+    erdblickVersion: string = "";
     copyright: string = "";
+    distributionVersions: Array<Versions> = [];
+    distributionVersionsDialogVisible: boolean = false;
+
 
     constructor(private httpClient: HttpClient,
                 private router: Router,
@@ -48,10 +84,38 @@ export class AppComponent {
                 public mapService: MapService,
                 public appModeService: AppModeService,
                 public parametersService: ParametersService) {
-        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
-            data => {
-                this.version = data.toString();
-            });
+        this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
+            next: (data: any) => {
+                try {
+                    if (data && data["extensionModules"] && data["extensionModules"]["distribVersions"]) {
+                        let distribVersions = data["extensionModules"]["distribVersions"];
+                        if (distribVersions !== undefined) {
+                            // Using string interpolation so webpack can trace imports from the location
+                            import(`../../config/${distribVersions}.js`).then(function (plugin) {
+                                return plugin.default() as Array<Versions>;
+                            }).then((versions: Array<Versions>) => {
+                                this.distributionVersions = versions;
+                            }).catch((error) => {
+                                console.error(error);
+                                this.getBasicVersion();
+                            });
+                            return;
+                        } else {
+                            this.getBasicVersion();
+                        }
+                    } else {
+                        this.getBasicVersion();
+                    }
+                } catch (error) {
+                    console.error(error);
+                    this.getBasicVersion();
+                }
+            },
+            error: error => {
+                console.error(error);
+                this.getBasicVersion();
+            }
+        });
         this.init();
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.copyright = "";
@@ -97,5 +161,18 @@ export class AppComponent {
 
     openLegalInfo() {
         this.parametersService.legalInfoDialogVisible = true;
+    }
+
+    showExposedVersions() {
+        if (this.distributionVersions.length) {
+            this.distributionVersionsDialogVisible = true;
+        }
+    }
+
+    getBasicVersion() {
+        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
+            data => {
+                this.erdblickVersion = `${this.title} ${data.toString()}`;
+            });
     }
 }

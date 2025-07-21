@@ -30,6 +30,7 @@ body {
   overflow: hidden;
   height: 100vh !important;
   width: 100vw !important;
+  margin: 0;
 
   .p-multiselect-header {
     padding: 0.5em 0.75em;
@@ -86,7 +87,7 @@ body {
   padding-bottom: 0.25em;
   border-radius: 5px 0 0 0;
   height: 1.75em;
-  width: 10em;
+  min-width: 10em;
 }
 
 #copyright-info {
@@ -400,6 +401,7 @@ body {
     }
 
     textarea.single-line {
+      padding-top: 0.75em;
       min-height: 3em;
       width: 22em !important;
       white-space: nowrap;
@@ -1355,7 +1357,7 @@ body {
       textarea.single-line {
         width: 100% !important;
         height: 100%;
-        padding-left: 1em;
+        padding-left: 2em;
         border-radius: 0;
         border: none;
         white-space: nowrap;
