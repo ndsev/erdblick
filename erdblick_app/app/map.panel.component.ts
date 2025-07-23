@@ -705,6 +705,7 @@ export class MapPanelComponent {
 
     toggleLayer(mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
+        this.updateGroupVisibilityForMap(mapName);
     }
 
     expandStyle(styleId: string) {
@@ -842,16 +843,8 @@ export class MapPanelComponent {
             this.mapService.toggleMapLayerVisibility(mapId, "", state)
             return;
         }
-        if (mapId.includes('/')) {
-            const groupId = mapId.split('/')[0];
-            if (this.mapService.mapGroups.getValue().has(groupId)) {
-                const mapItems = this.mapService.mapGroups.getValue().get(groupId)!;
-                const groupVisibility = mapItems.some(mapItem => mapItem.visible);
-                const mapsVisibility = mapItems.every(mapItem => mapItem.visible);
-                this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
-            }
-        }
         this.mapService.toggleMapLayerVisibility(mapId);
+        this.updateGroupVisibilityForMap(mapId);
     }
 
     toggleGroup(groupId: string) {
@@ -870,5 +863,17 @@ export class MapPanelComponent {
         this.mapService.mapGroups.getValue().get(groupId)!.forEach(mapItem => {
             this.toggleMap(mapItem.mapId, groupId);
         });
+    }
+
+    private updateGroupVisibilityForMap(mapId: string) {
+        if (mapId.includes('/')) {
+            const groupId = mapId.split('/')[0];
+            if (this.mapService.mapGroups.getValue().has(groupId)) {
+                const mapItems = this.mapService.mapGroups.getValue().get(groupId)!;
+                const groupVisibility = mapItems.some(mapItem => mapItem.visible);
+                const mapsVisibility = mapItems.every(mapItem => mapItem.visible);
+                this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
+            }
+        }
     }
 }
