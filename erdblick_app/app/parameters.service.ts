@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
@@ -217,6 +217,10 @@ export class ParametersService {
     private _replaceUrl: boolean = true;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
+    
+    // Observable that emits when initialization is complete
+    private ready = new Subject<void>();
+    public ready$ = this.ready.asObservable();
 
     // Store filtered parameter descriptors based on mode
     private parameterDescriptors: Record<string, ParameterDescriptor>;
@@ -517,6 +521,9 @@ export class ParametersService {
 
         this.parameters.next(updatedParameters);
         this.initialQueryParamsSet = true;
+        
+        // Emit ready signal for subscribers waiting for initialization
+        this.ready.next();
     }
 
     resetStorage() {
