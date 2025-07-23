@@ -427,6 +427,7 @@ export class MapPanelComponent {
 
     mapGroupsVisibility: Map<string, [boolean, boolean]> = new Map<string, [boolean, boolean]>();
     metadataMenusEntries: Map<string, {label: string, command: () => void }[]> = new Map();
+    private reinitializationScheduled = false;
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
@@ -462,7 +463,21 @@ export class MapPanelComponent {
                             }
                     })
                 ));
-                this.parameterService.pruneMapLayerConfig(mapItems);
+                
+                // If all layers were pruned (complete config change), reinitialize default maps
+                if (this.parameterService.pruneMapLayerConfig(mapItems)) {
+                    console.debug("🔄 All layers pruned - reinitializing default maps");
+                    // Prevent multiple reinitializations from being scheduled
+                    if (!this.reinitializationScheduled) {
+                        this.reinitializationScheduled = true;
+                        // Defer the call to allow UI to update checkbox states first
+                        // Use forceExecution=true to override recursion guard
+                        setTimeout(() => {
+                            this.reinitializationScheduled = false;
+                            this.mapService.processMapsUpdate(true);
+                        }, 0);
+                    }
+                }
             }
         });
         this.sidePanelService.observable().subscribe(activePanel => {

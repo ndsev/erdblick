@@ -144,6 +144,9 @@ export class MapService {
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
     clientId: string = "";
 
+    private initialParameterConfigApplied = false;
+    private inMapsSubscriptionCallback = false;
+
     constructor(public styleService: StyleService,
                 public parameterService: ParametersService,
                 private sidePanelService: SidePanelService,
@@ -188,67 +191,18 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        this.maps.subscribe(mapItems => {
-            const initRun = this.mapGroups.getValue().size == 0;
-            const groups = new Map<string, Array<MapInfoItem>>();
-            const ungrouped: Array<MapInfoItem> = []; // Maintain this group as the last inserted item to simplify ordering
-            let firstGroup = "";
-            for (const [mapId, mapItem] of mapItems) {
-                if (mapId.includes('/')) {
-                    const prefix = mapId.split('/')[0];
-                    if (groups.has(prefix)) {
-                        groups.get(prefix)!.push(mapItem);
-                        continue;
+        this.maps.subscribe(_ => {
+            // Wait for initial parameters to be processed if not yet done
+            // to avoid race conditions with URL parameter loading.
+            if (!this.parameterService.initialQueryParamsSet) {
+                setTimeout(() => {
+                    if (this.parameterService.initialQueryParamsSet) {
+                        this.processMapsUpdate();
                     }
-                    groups.set(prefix, [mapItem]);
-                    if (!firstGroup) {
-                        firstGroup = prefix;
-                    }
-                } else {
-                    ungrouped.push(mapItem);
-                }
+                }, 100);
+                return;
             }
-            if (!initRun) {
-                for (const [groupId, mapItems] of groups) {
-                    if (!this.mapGroups.getValue().has(groupId)) {
-                        for (const mapItem of mapItems) {
-                            mapItem.visible = true;
-                            this.toggleMapLayerVisibility(mapItem.mapId);
-                        }
-                    } else {
-                        const prevGroup = this.mapGroups.getValue().get(groupId)!;
-                        for (const mapItem of mapItems) {
-                            if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
-                                mapItem.visible = true;
-                                this.toggleMapLayerVisibility(mapItem.mapId);
-                            }
-                        }
-                    }
-                }
-            } else if (firstGroup) {
-                for (const mapItem of groups.get(firstGroup)!) {
-                    mapItem.visible = true;
-                    this.toggleMapLayerVisibility(mapItem.mapId);
-                }
-            }
-            if (ungrouped.length > 0) {
-                if (!initRun) {
-                    if (this.mapGroups.getValue().has("ungrouped")) {
-                        const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
-                        for (const mapItem of ungrouped) {
-                            if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
-                                mapItem.visible = true;
-                                this.toggleMapLayerVisibility(mapItem.mapId);
-                            }
-                        }
-                    }
-                } else if (!firstGroup) {
-                    ungrouped[0].visible = true;
-                    this.toggleMapLayerVisibility(ungrouped[0].mapId);
-                }
-                groups.set("ungrouped", ungrouped);
-            }
-            this.mapGroups.next(groups);
+            this.processMapsUpdate();
         });
 
         // Initial call to processTileStream: will keep calling itself
@@ -270,8 +224,10 @@ export class MapService {
         });
 
         this.parameterService.parameters.subscribe(params => {
-            if (this.parameterService.initialQueryParamsSet)
+            if (this.parameterService.initialQueryParamsSet || this.initialParameterConfigApplied)
                 return;
+                
+            this.initialParameterConfigApplied = true;
             for (let [mapId, mapInfo] of this.maps.getValue()) {
                 for (let [layerId, layer] of mapInfo.layers) {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
@@ -298,6 +254,105 @@ export class MapService {
             this.statsDialogNeedsUpdate.next();
         }, true);
     }
+
+    private activateDefaultMaps (groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>, firstGroup: string) {
+        // No parameter layers - activate first group or first ungrouped map as default
+        if (firstGroup && groups.has(firstGroup)) {
+            for (const mapItem of groups.get(firstGroup)!) {
+                mapItem.visible = true;
+                this.toggleMapLayerVisibility(mapItem.mapId);
+            }
+        } else if (ungrouped.length > 0) {
+            ungrouped[0].visible = true;
+            this.toggleMapLayerVisibility(ungrouped[0].mapId);
+        }
+    };
+
+    private activateNewMaps(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>) {
+        // Check for new groups and activate them
+        for (const [groupId, mapItems] of groups) {
+            if (!this.mapGroups.getValue().has(groupId)) {
+                // New group - activate all maps in it
+                for (const mapItem of mapItems) {
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            } else {
+                // Existing group - check for new maps within it
+                const prevGroup = this.mapGroups.getValue().get(groupId)!;
+                for (const mapItem of mapItems) {
+                    if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
+                        // New map in existing group - activate it
+                        mapItem.visible = true;
+                        this.toggleMapLayerVisibility(mapItem.mapId);
+                    }
+                }
+            }
+        }
+
+        // Handle new ungrouped maps
+        if (ungrouped.length > 0 && this.mapGroups.getValue().has("ungrouped")) {
+            const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
+            for (const mapItem of ungrouped) {
+                if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
+                    // New ungrouped map - activate it
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            }
+        }
+    };
+
+    public processMapsUpdate(forceExecution: boolean = false) {
+        if (this.inMapsSubscriptionCallback && !forceExecution) {
+            return;
+        }
+        this.inMapsSubscriptionCallback = true;
+        
+        try {
+            const isFirstLoad = this.mapGroups.getValue().size === 0;
+            const hasParameterLayers = this.parameterService.p().layers.length > 0;
+            
+            const groups = new Map<string, Array<MapInfoItem>>();
+            const ungrouped: Array<MapInfoItem> = [];
+            let firstGroup = "";
+            
+            // Organize maps into groups
+            for (const [mapId, mapItem] of this.maps.getValue()) {
+                if (mapId.includes('/')) {
+                    const prefix = mapId.split('/')[0];
+                    if (groups.has(prefix)) {
+                        groups.get(prefix)!.push(mapItem);
+                        continue;
+                    }
+                    groups.set(prefix, [mapItem]);
+                    if (!firstGroup) {
+                        firstGroup = prefix;
+                    }
+                } else {
+                    ungrouped.push(mapItem);
+                }
+            }
+            
+            if (isFirstLoad) {
+                if (!hasParameterLayers) {
+                    // Activate default maps (first group or first ungrouped)
+                    this.activateDefaultMaps(groups, ungrouped, firstGroup);
+                }
+            } else {
+                // Handle new maps added to existing setup - activate them
+                this.activateNewMaps(groups, ungrouped);
+            }
+            
+            if (ungrouped.length > 0) {
+                groups.set("ungrouped", ungrouped);
+            }
+            
+            this.mapGroups.next(groups);
+        } finally {
+            this.inMapsSubscriptionCallback = false;
+        }
+    };
 
     private processTileStream() {
         const startTime = Date.now();
@@ -373,6 +428,7 @@ export class MapService {
                     let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
+                        let isAnyLayerVisible = false;
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
@@ -381,10 +437,11 @@ export class MapService {
                                 layerInfo.visible,
                                 layerInfo.tileBorders
                             ]);
+                            isAnyLayerVisible = isAnyLayerVisible || layerInfo.visible;
                             layers.set(layerId, layerInfo);
                         }
                         mapInfo.layers = layers;
-                        mapInfo.visible = false;
+                        mapInfo.visible = isAnyLayerVisible;
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
