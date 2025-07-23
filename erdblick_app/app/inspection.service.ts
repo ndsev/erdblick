@@ -334,22 +334,19 @@ export class InspectionService {
      * @param isMetadata Matches the metadata SourceDataLayers
      */
     layerNameForSourceDataLayerId(layerId: string, isMetadata: boolean = false) {
-        let match: RegExpMatchArray | null;
-        if (isMetadata) {
-            match = layerId.match(/^Metadata-(.+)-(.+)/);
-        } else {
-            match = layerId.match(/^SourceData-(.+\.)([^.]+)/);
+        const match = isMetadata ?
+            layerId.match(/^Metadata-(.+)-(.+)/) :
+            layerId.match(/^SourceData-(.+\.)([^.]+)/);
+        if (!match) {
+            return layerId;
         }
-        if (match) {
-            return `${match[2]}`.replace('-', '.');
-        }
-        return layerId;
+        return `${match[2]}`.replace('-', '.');
     }
 
     /**
      * Returns an internal layerId for a human-readable layer name.
      *
-     * @param layerId Layer id to get the name for
+     * @param layerName Layer id to get the name for
      */
     sourceDataLayerIdForLayerName(layerName: string) {
         for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
