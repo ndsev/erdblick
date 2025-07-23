@@ -620,7 +620,7 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapInfoItem>) {
+    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
@@ -629,6 +629,8 @@ export class ParametersService {
         });
 
         this.p().layers = this.p().layers.filter(layer => mapLayerIds.has(layer[0]));
+        const hasLayersAfterPruning = this.p().layers.length > 0;
         this.parameters.next(this.p());
+        return !hasLayersAfterPruning; // Need to reinitialise the layers if none configured anymore
     }
 }
