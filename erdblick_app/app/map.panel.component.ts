@@ -81,6 +81,7 @@ import {InspectionService} from "./inspection.service";
                                                      (click)="mapItem.visible = !mapItem.visible; toggleMap(mapItem.mapId)">
                                                 <span>
                                                     <p-checkbox [(ngModel)]="mapItem.visible"
+                                                                (click)="$event.stopPropagation()"
                                                                 (ngModelChange)="toggleMap(mapItem.mapId)"
                                                                 [binary]="true"
                                                                 [inputId]="mapItem.mapId"
@@ -117,6 +118,7 @@ import {InspectionService} from "./inspection.service";
                                                              (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.mapId, mapLayer.key)">
                                                         <span>
                                                             <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                                        (click)="$event.stopPropagation()"
                                                                         (ngModelChange)="toggleLayer(mapItem.mapId, mapLayer.key)"
                                                                         [binary]="true"
                                                                         [inputId]="mapLayer.key"
@@ -179,6 +181,7 @@ import {InspectionService} from "./inspection.service";
                                          (click)="mapItem.visible = !mapItem.visible; toggleMap(mapItem.mapId)">
                                     <span>
                                         <p-checkbox [(ngModel)]="mapItem.visible"
+                                                    (click)="$event.stopPropagation()"
                                                     (ngModelChange)="toggleMap(mapItem.mapId)"
                                                     [binary]="true"
                                                     [inputId]="mapItem.mapId"
@@ -210,6 +213,7 @@ import {InspectionService} from "./inspection.service";
                                                  (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.mapId, mapLayer.key)">
                                         <span>
                                             <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                        (click)="$event.stopPropagation()"
                                                         (ngModelChange)="toggleLayer(mapItem.mapId, mapLayer.key)"
                                                         [binary]="true"
                                                         [inputId]="mapLayer.key"
@@ -285,6 +289,7 @@ import {InspectionService} from "./inspection.service";
                                      tabindex="0">
                                     <span>
                                         <p-checkbox [(ngModel)]="style.value.params.visible"
+                                                    (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(style.value)"
                                                     [binary]="true"
                                                     [inputId]="style.key"

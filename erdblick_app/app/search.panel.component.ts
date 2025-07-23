@@ -743,6 +743,7 @@ export class SearchPanelComponent implements AfterViewInit {
             event.target.tagName === 'TEXTAREA' ||
             event.target.tagName === 'SELECT' ||
             event.target.isContentEditable ||
+            event.target.closest('p-checkbox') ||
             event.target.closest('p-dropdown') ||
             event.target.closest('p-multiselect') ||
             event.target.closest('p-calendar') ||
