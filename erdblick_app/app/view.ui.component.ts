@@ -90,7 +90,7 @@ export class ErdblickViewUIComponent implements AfterViewInit {
                 const needle = this.needleRef.nativeElement;
                 let currentRotationDeg = 0;
                 this.viewStateService.viewer.clock.onTick.addEventListener(() => {
-                    if (needle) {
+                    if (needle && this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
                         let headingDeg = CesiumMath.toDegrees(this.viewStateService.viewer.camera.heading);
                         headingDeg = (headingDeg % 360 + 360) % 360; // Normalize the heading to [0, 360)
 

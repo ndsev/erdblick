@@ -61,17 +61,14 @@ export class MarkerService {
             this.markerCollection.add(params);
 
             // Ensure the marker collection is properly added to the scene
-            if (this.viewStateService.viewer.scene.primitives &&
-                !this.viewStateService.viewer.scene.primitives.contains(this.markerCollection)) {
-                this.viewStateService.viewer.scene.primitives.add(this.markerCollection);
-            }
-
-            if (this.viewStateService.viewer.scene.primitives) {
+            if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed() &&
+                this.viewStateService.viewer.scene.primitives) {
+                if (!this.viewStateService.viewer.scene.primitives.contains(this.markerCollection)) {
+                    this.viewStateService.viewer.scene.primitives.add(this.markerCollection);
+                }
                 this.viewStateService.viewer.scene.primitives.raiseToTop(this.markerCollection);
+                this.viewStateService.viewer.scene.requestRender();
             }
-
-            // Request a render to ensure the marker is visible
-            this.viewStateService.viewer.scene.requestRender();
 
             console.debug('Focus marker added successfully');
             return true;
@@ -163,7 +160,8 @@ export class MarkerService {
                 });
             }
 
-            if (!this.viewStateService.isUnavailable() && this.viewStateService.viewer.scene.primitives) {
+            if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed() &&
+                this.viewStateService.viewer.scene.primitives) {
                 this.viewStateService.viewer.scene.primitives.raiseToTop(this.featureSearchService.visualization);
             }
         } catch (error) {

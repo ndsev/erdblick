@@ -400,6 +400,12 @@ export class ParametersService {
         }
     }
 
+    setCompleteMapLayerConfig(mapLayerConfig: Array<[string, number, boolean, boolean]>) {
+        // TODO: Add checks
+        this.p().layers = mapLayerConfig;
+        this.parameters.next(this.p());
+    }
+
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
         const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
         if (conf !== undefined && conf[2]) {

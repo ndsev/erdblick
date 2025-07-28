@@ -26,7 +26,7 @@ import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
 import {FeatureSearchService} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
-import {distinctUntilChanged} from "rxjs";
+import {distinctUntilChanged, Subscription} from "rxjs";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
@@ -64,6 +64,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     private tileOutlineEntity: Entity | null = null;
+    private subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
 
     /**
@@ -76,16 +77,20 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * @param keyboardService
      * @param menuService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
+     * @param viewStateService
+     * @param viewService
+     * @param cameraService
+     * @param markerService
      * @param appModeService
      */
     constructor(private mapService: MapService,
+                private featureSearchService: FeatureSearchService,
                 private parameterService: ParametersService,
                 private jumpService: JumpTargetService,
                 private inspectionService: InspectionService,
                 private keyboardService: KeyboardService,
                 private menuService: RightClickMenuService,
                 private coordinatesService: CoordinatesService,
-                private featureSearchService: FeatureSearchService,
                 private viewStateService: ViewStateService,
                 private viewService: ViewService,
                 private cameraService: CameraService,
@@ -99,11 +104,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
 
             tileVis.render(this.viewStateService.viewer).then(wasRendered => {
-                if (wasRendered && this.viewStateService.viewer && this.viewStateService.viewer.scene) {
-                    // Double-check viewer is still available after async operation
-                    if (this.viewStateService.isDestroyed()) {
-                        this.viewStateService.viewer.scene.requestRender();
-                    }
+                if (wasRendered && this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+                    this.viewStateService.viewer.scene.requestRender();
                 }
             });
         });
@@ -116,7 +118,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
 
             tileVis.destroy(this.viewStateService.viewer);
-            if (this.viewStateService.viewer && this.viewStateService.viewer.scene) {
+            if (this.viewStateService.isAvailable()) {
                 this.viewStateService.viewer.scene.requestRender();
             }
         });
@@ -277,7 +279,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     Number(parameters.markedPosition[0]),
                     Number(parameters.markedPosition[1])
                 );
-
                 this.markerService.addMarker(markerPosition);
             } else {
                 // Clear markers when marker is disabled or no position
@@ -397,53 +398,76 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Add debug API that can be easily called from browser's debug console
         window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
 
-        this.featureSearchService.visualizationChanged.subscribe(_ => {
-            this.markerService.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
-            this.viewStateService.viewer.scene.requestRender();
-        });
-
-        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.markerService.renderFeatureSearchResultTree(level);
-        });
-
-        this.jumpService.markedPosition.subscribe(position => {
-            if (position.length >= 2) {
-                this.parameterService.setMarkerState(true);
-                this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
-            }
-        });
-
-        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
-            const [origin, normal] = values;
-            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
-            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
-            Cartesian3.normalize(direction, direction);
-            Cartesian3.negate(direction, direction);
-            const up = this.viewStateService.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(
-                endPoint, new Cartesian3()
-            );
-            const right = Cartesian3.cross(direction, up, new Cartesian3());
-            Cartesian3.normalize(right, right);
-            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
-            Cartesian3.normalize(cameraUp, cameraUp);
-            this.viewStateService.viewer.camera.flyTo({
-                destination: endPoint,
-                orientation: {
-                    direction: direction,
-                    up: cameraUp,
+        this.subscriptions.push(
+            this.featureSearchService.visualizationChanged.subscribe(_ => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+                    this.markerService.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+                    this.viewStateService.viewer.scene.requestRender();
                 }
-            });
-        });
+            })
+        );
 
-        this.menuService.tileOutline.subscribe(entity => {
-            if (entity) {
-                this.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
-                this.viewStateService.viewer.scene.requestRender();
-            } else if (this.tileOutlineEntity) {
-                this.viewStateService.viewer.entities.remove(this.tileOutlineEntity);
-                this.viewStateService.viewer.scene.requestRender();
-            }
-        });
+        this.subscriptions.push(
+            this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+                this.markerService.renderFeatureSearchResultTree(level);
+            })
+        );
+
+        this.subscriptions.push(
+            this.jumpService.markedPosition.subscribe(position => {
+                if (position.length >= 2) {
+                    this.parameterService.setMarkerState(true);
+                    this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
+                }
+            })
+        );
+
+        this.subscriptions.push(
+            this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                    return;
+                }
+
+                const [origin, normal] = values;
+                const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+                const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+                Cartesian3.normalize(direction, direction);
+                Cartesian3.negate(direction, direction);
+                const up = this.viewStateService.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(
+                    endPoint, new Cartesian3()
+                );
+                const right = Cartesian3.cross(direction, up, new Cartesian3());
+                Cartesian3.normalize(right, right);
+                const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+                Cartesian3.normalize(cameraUp, cameraUp);
+                this.viewStateService.viewer.camera.flyTo({
+                    destination: endPoint,
+                    orientation: {
+                        direction: direction,
+                        up: cameraUp,
+                    }
+                });
+            })
+        );
+
+        this.subscriptions.push(
+            this.menuService.tileOutline.subscribe(entity => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                    return;
+                }
+
+                if (entity) {
+                    this.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
+                    this.viewStateService.viewer.scene.requestRender();
+                } else if (this.tileOutlineEntity) {
+                    this.viewStateService.viewer.entities.remove(this.tileOutlineEntity);
+                    this.viewStateService.viewer.scene.requestRender();
+                }
+            })
+        );
     }
 
     /**
@@ -531,11 +555,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
         try {
             this.saveViewerState();
-
             await this.destroyViewer();
             await new Promise(resolve => setTimeout(resolve, 150));
             await this.createViewer(is2D);
-
             this.restoreViewerState();
         } catch (error) {
             console.error('Error during viewer reinitialization:', error);
@@ -605,6 +627,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
         return new Promise((resolve) => {
             try {
+                // Clean up subscriptions FIRST to prevent race conditions
+                this.subscriptions.forEach(sub => sub.unsubscribe());
+                this.subscriptions = [];
+
                 // Clean up mouse handler first
                 if (this.mouseHandler) {
                     if (!this.mouseHandler.isDestroyed()) {
@@ -625,6 +651,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
                 // Destroy viewer with multiple safety checks
                 if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
+                    try {
                         // Remove event listeners first
                         if (this.viewStateService.viewer.camera) {
                             this.viewStateService.viewer.camera.changed.removeEventListener(
@@ -637,11 +664,17 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                                 this.cameraService.cameraMoveEndHandler
                             );
                         }
-                        this.viewStateService.viewer.destroy();
-
-                    // Clear viewer reference regardless
-                    this.viewStateService.viewer = null as any;
+                        // Check if still not destroyed before calling destroy
+                        if (!this.viewStateService.viewer.isDestroyed()) {
+                            this.viewStateService.viewer.destroy();
+                        }
+                    } catch (error) {
+                        console.warn('Error during viewer destruction, continuing cleanup:', error);
+                    }
                 }
+
+                // Clear viewer reference regardless
+                this.viewStateService.viewer = null as any;
 
                 // Small delay to ensure DOM cleanup completes
                 setTimeout(() => {
@@ -753,6 +786,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.markerService.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
             }
 
+            // Recreate subscriptions for new viewer
+            this.setupAdditionalSubscriptions();
+
         } catch (error) {
             console.error('Error during viewer component initialization:', error);
             throw error;
@@ -850,6 +886,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         // Don't allow mode changes during destruction
         this.viewStateService.isChangingMode = true;
 
+        // Clean up subscriptions first
+        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions = [];
+
         // Clean up resources without async to avoid hanging
         try {
             if (this.mouseHandler) {
@@ -860,19 +900,26 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             }
 
             if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
-                // Remove event listeners before destroying
-                if (this.viewStateService.viewer.camera) {
-                    this.viewStateService.viewer.camera.changed.removeEventListener(
-                        this.viewService.updateOnCameraChangedHandler
-                    );
-                    this.viewStateService.viewer.camera.moveStart.removeEventListener(
-                        this.cameraService.cameraMoveStartHandler
-                    );
-                    this.viewStateService.viewer.camera.moveEnd.removeEventListener(
-                        this.cameraService.cameraMoveEndHandler
-                    );
+                try {
+                    // Remove event listeners before destroying
+                    if (this.viewStateService.viewer.camera) {
+                        this.viewStateService.viewer.camera.changed.removeEventListener(
+                            this.viewService.updateOnCameraChangedHandler
+                        );
+                        this.viewStateService.viewer.camera.moveStart.removeEventListener(
+                            this.cameraService.cameraMoveStartHandler
+                        );
+                        this.viewStateService.viewer.camera.moveEnd.removeEventListener(
+                            this.cameraService.cameraMoveEndHandler
+                        );
+                    }
+                    // Check if still not destroyed before calling destroy
+                    if (!this.viewStateService.viewer.isDestroyed()) {
+                        this.viewStateService.viewer.destroy();
+                    }
+                } catch (error) {
+                    console.warn('Error during component destruction, continuing cleanup:', error);
                 }
-                this.viewStateService.viewer.destroy();
                 this.viewStateService.viewer = null as any;
             }
         } catch (e) {

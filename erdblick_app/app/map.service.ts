@@ -271,16 +271,21 @@ export class MapService {
             }
         });
 
-        this.parameterService.parameters.subscribe(params => {
+        this.parameterService.parameters.subscribe(_ => {
             if (this.parameterService.initialQueryParamsSet)
                 return;
             for (let [mapId, mapInfo] of this.maps.getValue()) {
+                let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
+                    if (layer.visible) {
+                        isAnyLayerVisible = true;
+                    }
                 }
+                mapInfo.visible = isAnyLayerVisible;
             }
             this.update().then();
-        })
+        });
 
         await this.reloadDataSources();
 
@@ -500,8 +505,6 @@ export class MapService {
         }
         return mapItem.layers.has(layerId) ? mapItem.layers.get(layerId)!.tileBorders : false;
     }
-
-
 
     async update() {
         // Get the tile IDs for the current viewport.

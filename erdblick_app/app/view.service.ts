@@ -11,6 +11,12 @@ export class ViewService {
                 private parameterService: ParametersService,
                 private viewStateService: ViewStateService,
                 private cameraService: CameraService) {
+        this.viewStateService.isViewerInit.subscribe(initialised => {
+            // After switching the mode, make sure we reload the maps and layers
+            if (initialised) {
+                this.cycleMapLayers();
+            }
+        });
     }
 
     toggleSceneMode() {
@@ -19,8 +25,32 @@ export class ViewService {
             console.debug('Mode change already in progress, ignoring toggle request');
             return;
         }
-
         this.parameterService.setCameraMode(!this.viewStateService.is2DMode);
+    }
+
+    // Disable all maps/layers and then restore their state
+    cycleMapLayers() {
+        this.viewStateService.layers = [];
+        this.parameterService.parameters.getValue().layers.forEach(layer => {
+            this.viewStateService.layers.push([layer[0], layer[1], layer[2], layer[3]]);
+        });
+        this.disableMapLayers().then(() => {
+            if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+                this.viewStateService.viewer.scene.requestRender();
+            }
+        });
+        this.parameterService.setCompleteMapLayerConfig(this.viewStateService.layers);
+    }
+
+    private async disableMapLayers(): Promise<void> {
+        return new Promise((resolve) => {
+            const layers = this.parameterService.parameters.getValue().layers;
+            for (const layer of layers) {
+                layer[2] = false;
+            }
+            this.parameterService.setCompleteMapLayerConfig(layers);
+            setTimeout(resolve, 50);
+        });
     }
 
     setup2DModeConstraints() {
