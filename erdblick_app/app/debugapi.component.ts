@@ -1,8 +1,9 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./wasm";
 import {MapService} from "./map.service";
-import {ErdblickViewComponent} from "./view.component";
 import {ParametersService} from "./parameters.service";
-import {Cartesian3} from "./cesium";
+import {Cartesian3, CesiumMath} from "./cesium";
+import {CameraService} from "./camera.service";
+import {ViewStateService} from "./view.state.service";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -19,16 +20,13 @@ export interface DebugWindow extends Window {
  * GUI.
  */
 export class ErdblickDebugApi {
-    private view: any;
-
     /**
      * Initialize a new ErdblickDebugApi instance.
-     * @param mapView Reference to a ErdblickView instance
      */
-    constructor(public mapService: MapService,
-                public parametersService: ParametersService,
-                mapView: ErdblickViewComponent) {
-        this.view = mapView;
+    constructor(private mapService: MapService,
+                private parametersService: ParametersService,
+                private viewStateService: ViewStateService,
+                private cameraService: CameraService) {
     }
 
     /**
@@ -56,9 +54,9 @@ export class ErdblickDebugApi {
     getCamera() {
         const destination = this.parametersService.getCameraPosition();
         const position = [
-           destination.x,
-           destination.y,
-           destination.z,
+            destination.x,
+            destination.y,
+            destination.z,
         ];
         const orientation = this.parametersService.getCameraOrientation();
         return JSON.stringify({position, orientation});
@@ -99,5 +97,50 @@ export class ErdblickDebugApi {
                 search.delete();
             })
         }
+    }
+
+    /**
+     * Diagnostic method to show WebMercator distortion factors at different latitudes
+     * Useful for debugging altitude compensation issues
+     */
+    showMercatorDistortion() {
+        // Show current camera position distortion first
+        if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+            const currentPos = this.viewStateService.viewer.camera.positionCartographic;
+            const currentLatDeg = CesiumMath.toDegrees(currentPos.latitude);
+            const currentFactor = this.cameraService.calculateMercatorDistortionFactor(currentPos.latitude);
+            const currentHeight = currentPos.height;
+
+            console.log('🎯 CURRENT POSITION:');
+            console.log(`  Latitude: ${currentLatDeg.toFixed(3)}°`);
+            console.log(`  Altitude: ${Math.round(currentHeight)}m`);
+            console.log(`  Distortion Factor: ${currentFactor.toFixed(3)}x`);
+            console.log(`  Mode: ${this.viewStateService.is2DMode ? '2D' : '3D'}`);
+
+            if (this.viewStateService.is2DMode) {
+                const equivalent3D = currentHeight / currentFactor;
+                console.log(`  Equivalent 3D altitude: ${Math.round(equivalent3D)}m`);
+            } else {
+                const equivalent2D = currentHeight * currentFactor;
+                console.log(`  Equivalent 2D altitude: ${Math.round(equivalent2D)}m`);
+            }
+        }
+
+        console.log('📊 WebMercator Distortion Factors by Latitude:');
+        const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
+        testLatitudes.forEach(latDeg => {
+            const latRad = CesiumMath.toRadians(latDeg);
+            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
+            console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
+        });
+
+        console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
+        testLatitudes.forEach(latDeg => {
+            const latRad = CesiumMath.toRadians(latDeg);
+            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
+            const altitude3D = 10000; // 10km
+            const altitude2D = altitude3D * factor;
+            console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
+        });
     }
 }

@@ -103,10 +103,13 @@ export class ViewService {
                 const cameraLat = CesiumMath.toDegrees(cameraCartographic.latitude);
                 const cameraHeight = cameraCartographic.height;
 
-                // Calculate viewport size based on camera height
+                // Calculate viewport size based on camera height with distortion compensation
                 const earthRadius = this.viewStateService.viewer.scene.globe.ellipsoid.maximumRadius;
-                const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
-                const visualScale = CesiumMath.toDegrees(visualAngularSize);
+                const visualScale = this.cameraService.heightToVisualScale(
+                    cameraHeight,
+                    cameraCartographic.latitude,
+                    earthRadius
+                );
 
                 // Create a reasonable viewport around camera position
                 const halfWidth = visualScale / 2;
@@ -120,13 +123,13 @@ export class ViewService {
                 );
             }
 
-            // Clamp to valid WebMercator range (±85.05113°)
-            const maxLat = 85.05113; // WebMercatorProjection.MaximumLatitude
+            // Clamp to valid WebMercator range using camera service constants
+            const maxLatRad = this.cameraService.getWebMercatorMaxLatitudeRad();
             rectangle = new Rectangle(
                 rectangle.west,
-                Math.max(rectangle.south, CesiumMath.toRadians(-maxLat)),
+                Math.max(rectangle.south, -maxLatRad),
                 rectangle.east,
-                Math.min(rectangle.north, CesiumMath.toRadians(maxLat))
+                Math.min(rectangle.north, maxLatRad)
             );
 
             let west = CesiumMath.toDegrees(rectangle.west);
@@ -155,10 +158,15 @@ export class ViewService {
                 }
 
                 try {
-                    // Derive visual scale from camera height
-                    // This represents the visual angular size regardless of projection distortion
-                    const visualAngularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
-                    const visualScale = CesiumMath.toDegrees(visualAngularSize);
+                    // Get camera position for distortion compensation
+                    const cameraCartographic = this.viewStateService.viewer.camera.positionCartographic;
+
+                    // Use camera service's distortion-compensated visual scale calculation
+                    const visualScale = this.cameraService.heightToVisualScale(
+                        cameraHeight,
+                        cameraCartographic.latitude,
+                        earthRadius
+                    );
 
                     // Validate visual scale is reasonable
                     if (!isFinite(visualScale) || visualScale <= 0) {
@@ -170,9 +178,10 @@ export class ViewService {
                     sizeLon = visualScale;
                     sizeLat = visualScale * (canvas.clientHeight / canvas.clientWidth);
 
-                    // Apply reasonable bounds to prevent extreme values
-                    sizeLon = Math.max(0.001, Math.min(360, sizeLon));
-                    sizeLat = Math.max(0.001, Math.min(180, sizeLat));
+                    // Apply reasonable bounds using camera service constants
+                    const bounds = this.cameraService.getSizeBounds();
+                    sizeLon = Math.max(bounds.minLon, Math.min(bounds.maxLon, sizeLon));
+                    sizeLat = Math.max(bounds.minLat, Math.min(bounds.maxLat, sizeLat));
 
                 } catch (error) {
                     console.error('Error in visual scale calculation:', error);

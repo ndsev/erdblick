@@ -11,18 +11,25 @@ import {CesiumMath} from "./cesium";
     template: `
         <div class="navigation-controls" *ngIf="!appModeService.isVisualizationOnly">
             <div class="nav-control-group">
-                <p-button icon="pi pi-plus" (onClick)="cameraService.zoomIn()" [rounded]="true" severity="secondary" size="small" pTooltip="Zoom In (Q)"></p-button>
-                <p-button icon="pi pi-minus" (onClick)="cameraService.zoomOut()" [rounded]="true" severity="secondary" size="small" pTooltip="Zoom Out (E)"></p-button>
+                <p-button icon="pi pi-plus" (onClick)="cameraService.zoomIn()" [rounded]="true" severity="secondary"
+                          size="small" pTooltip="Zoom In (Q)"></p-button>
+                <p-button icon="pi pi-minus" (onClick)="cameraService.zoomOut()" [rounded]="true" severity="secondary"
+                          size="small" pTooltip="Zoom Out (E)"></p-button>
             </div>
             <div class="nav-control-group">
-                <p-button icon="pi pi-arrow-up" (onClick)="cameraService.moveUp()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Up (W)"></p-button>
+                <p-button icon="pi pi-arrow-up" (onClick)="cameraService.moveUp()" [rounded]="true" severity="secondary"
+                          size="small" pTooltip="Move Up (W)"></p-button>
                 <div class="nav-horizontal">
-                    <p-button icon="pi pi-arrow-left" (onClick)="cameraService.moveLeft()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Left (A)"></p-button>
-                    <p-button icon="pi pi-arrow-right" (onClick)="cameraService.moveRight()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Right (D)"></p-button>
+                    <p-button icon="pi pi-arrow-left" (onClick)="cameraService.moveLeft()" [rounded]="true"
+                              severity="secondary" size="small" pTooltip="Move Left (A)"></p-button>
+                    <p-button icon="pi pi-arrow-right" (onClick)="cameraService.moveRight()" [rounded]="true"
+                              severity="secondary" size="small" pTooltip="Move Right (D)"></p-button>
                 </div>
-                <p-button icon="pi pi-arrow-down" (onClick)="cameraService.moveDown()" [rounded]="true" severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
+                <p-button icon="pi pi-arrow-down" (onClick)="cameraService.moveDown()" [rounded]="true"
+                          severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
             </div>
-            <p-button icon="pi pi-refresh" (onClick)="cameraService.resetOrientation()" [rounded]="true" severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
+            <p-button icon="pi pi-refresh" (onClick)="cameraService.resetOrientation()" [rounded]="true"
+                      severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
         </div>
         <div class="compass-circle" *ngIf="!appModeService.isVisualizationOnly">
             <div class="compass-label north">N</div>
@@ -51,6 +58,7 @@ import {CesiumMath} from "./cesium";
             right: 1em;
             z-index: 110;
         }
+
         .navigation-controls {
             position: absolute;
             bottom: 4.5em;
@@ -61,12 +69,14 @@ import {CesiumMath} from "./cesium";
             gap: 0.5em;
             align-items: center;
         }
+
         .nav-control-group {
             display: flex;
             flex-direction: column;
             gap: 0.25em;
             align-items: center;
         }
+
         .nav-horizontal {
             display: flex;
             gap: 0.25em;
@@ -75,7 +85,7 @@ import {CesiumMath} from "./cesium";
     standalone: false
 })
 export class ErdblickViewUIComponent implements AfterViewInit {
-    @ViewChild('compassNeedle', { static: false }) needleRef!: ElementRef<HTMLElement>;
+    @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
     constructor(public viewStateService: ViewStateService,
                 public viewService: ViewService,

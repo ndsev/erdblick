@@ -96,6 +96,14 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 private cameraService: CameraService,
                 private markerService: MarkerService,
                 public appModeService: AppModeService) {
+        // Add debug API that can be easily called from browser's debug console
+        window.ebDebug = new ErdblickDebugApi(
+            this.mapService,
+            this.parameterService,
+            this.viewStateService,
+            this.cameraService
+        );
+
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
             // Safety check: ensure viewer exists and is not destroyed
             if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
@@ -395,9 +403,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Setup additional subscriptions for services
      */
     private setupAdditionalSubscriptions() {
-        // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
-
         this.subscriptions.push(
             this.featureSearchService.visualizationChanged.subscribe(_ => {
                 // Add safety check before accessing viewer

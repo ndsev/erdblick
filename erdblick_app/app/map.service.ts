@@ -24,11 +24,11 @@ export interface CoverageRectItem extends Record<string, any> {
 export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
-    coverage: Array<number|CoverageRectItem>;
-    featureTypes: Array<{name: string, uniqueIdCompositions: Array<any>}>;
+    coverage: Array<number | CoverageRectItem>;
+    featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
     type: string;
-    version: {major: number, minor: number, patch: number};
+    version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
     level: number;
     visible: boolean;
@@ -42,7 +42,7 @@ export interface MapInfoItem extends Record<string, any> {
     mapId: string;
     maxParallelJobs: number;
     nodeId: string;
-    protocolVersion: {major: number, minor: number, patch: number};
+    protocolVersion: { major: number, minor: number, patch: number };
     addOn: boolean;
     visible: boolean;
 }
@@ -91,8 +91,8 @@ export class MapService {
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private visualizedTileLayers: Map<string, TileVisualization[]>;
-    private currentFetch: Fetch|null = null;
-    private currentFetchAbort: Fetch|null = null;
+    private currentFetch: Fetch | null = null;
+    private currentFetchAbort: Fetch | null = null;
     private currentFetchId: number = 0;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
@@ -102,10 +102,10 @@ export class MapService {
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
 
-    tileParser: TileLayerParser|null = null;
+    tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    moveToWgs84PositionTopic: Subject<{x: number, y: number, z?: number}>;
+    moveToWgs84PositionTopic: Subject<{ x: number, y: number, z?: number }>;
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
 
@@ -131,6 +131,7 @@ export class MapService {
             this.preserveSidePanel = false;
         }
     }
+
     selectionTileRequest: {
         remoteRequest: {
             mapId: string,
@@ -138,8 +139,8 @@ export class MapService {
             tileIds: Array<number>
         },
         tileKey: string,
-        resolve: null|((tile: FeatureTile)=>void),
-        reject: null|((why: any)=>void),
+        resolve: null | ((tile: FeatureTile) => void),
+        reject: null | ((why: any) => void),
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     statsDialogVisible: boolean = false;
@@ -151,8 +152,7 @@ export class MapService {
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
-                private keyboardService: KeyboardService)
-    {
+                private keyboardService: KeyboardService) {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -179,7 +179,7 @@ export class MapService {
         this.tileVisualizationDestructionTopic = new Subject<any>(); // {FeatureTile}
 
         // Triggered when the user requests to zoom to a map layer.
-        this.moveToWgs84PositionTopic = new Subject<{x: number, y: number}>();
+        this.moveToWgs84PositionTopic = new Subject<{ x: number, y: number }>();
 
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.
@@ -300,7 +300,7 @@ export class MapService {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
 
-        this.keyboardService.registerShortcut("Ctrl+x", ()=>{
+        this.keyboardService.registerShortcut("Ctrl+x", () => {
             this.statsDialogVisible = true;
             this.statsDialogNeedsUpdate.next();
         }, true);
@@ -318,7 +318,7 @@ export class MapService {
 
             let [message, messageType] = this.tileStreamParsingQueue.shift();
             if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                uint8ArrayToWasm( (wasmBuffer: any) => {
+                uint8ArrayToWasm((wasmBuffer: any) => {
                     this.tileParser!.readFieldDictUpdate(wasmBuffer);
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
@@ -440,7 +440,13 @@ export class MapService {
             if (state !== undefined) {
                 mapItem.visible = state;
             }
-            const params: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[] = []
+            const params: {
+                mapId: string,
+                layerId: string,
+                level: number,
+                visible: boolean,
+                tileBorders: boolean
+            }[] = []
             for (const [_, layer] of mapItem.layers) {
                 if (layer.type !== "SourceData") {
                     layer.visible = mapItem.visible;
@@ -485,7 +491,7 @@ export class MapService {
         this.update().then();
     }
 
-    *allLevels() {
+    * allLevels() {
         for (let [_, map] of this.maps.getValue())
             for (let [_, layer] of map.layers)
                 yield layer.level;
@@ -616,8 +622,7 @@ export class MapService {
                     // fetches' body to null.
                     this.currentFetch.bodyJson = null;
                 }
-            }
-            else {
+            } else {
                 this.selectionTileRequest.reject!("Map layer is not available.");
             }
         }
@@ -766,7 +771,7 @@ export class MapService {
         this.statsDialogNeedsUpdate.next();
     }
 
-    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
+    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle | FeatureLayerStyle, styleId: string = "") {
         let wasmStyle = (style as ErdblickStyle).featureLayerStyle ? (style as ErdblickStyle).featureLayerStyle : style as FeatureLayerStyle;
         if (!wasmStyle)
             return;
@@ -778,7 +783,7 @@ export class MapService {
         let visu = new TileVisualization(
             tileLayer,
             this.pointMergeService,
-            (tileKey: string)=>this.getFeatureTile(tileKey),
+            (tileKey: string) => this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
             coreLib.HighlightMode.NO_HIGHLIGHT,
@@ -800,7 +805,7 @@ export class MapService {
     }
 
     getPrioritisedTiles() {
-        let tiles  = new Array<[number, FeatureTile]>();
+        let tiles = new Array<[number, FeatureTile]>();
         for (const [_, tile] of this.loadedTileLayers) {
             tiles.push([coreLib.getTilePriorityById(this.currentViewport, tile.tileId), tile]);
         }
@@ -808,11 +813,11 @@ export class MapService {
         return tiles.map(val => val[1]);
     }
 
-    getFeatureTile(tileKey: string): FeatureTile|null {
+    getFeatureTile(tileKey: string): FeatureTile | null {
         return this.loadedTileLayers.get(tileKey) || null;
     }
 
-    async loadTiles(tileKeys: Set<string|null>): Promise<Map<string, FeatureTile>> {
+    async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
         let result = new Map<string, FeatureTile>();
 
         // TODO: Optimize this loop to make just a single update call.
@@ -841,7 +846,7 @@ export class MapService {
                 reject: null,
             }
 
-            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
+            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject) => {
                 this.selectionTileRequest!.resolve = resolve;
                 this.selectionTileRequest!.reject = reject;
             })
@@ -854,7 +859,7 @@ export class MapService {
         return result;
     }
 
-    async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightFeatures(tileFeatureIds: (TileFeatureId | null | string)[], focus: boolean = false, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Load the tiles for the selection.
         const tiles = await this.loadTiles(
             new Set(tileFeatureIds.filter(s => s && typeof s !== "string").map(s => (s as TileFeatureId).mapTileKey)));
@@ -868,8 +873,7 @@ export class MapService {
                 // info here, a hover highlight can be turned into a selection.
                 if (id == "hover-highlight") {
                     features = this.hoverTopic.getValue();
-                }
-                else if (id == "selection-highlight") {
+                } else if (id == "selection-highlight") {
                     features = this.selectionTopic.getValue();
                 }
                 continue;
@@ -904,8 +908,7 @@ export class MapService {
                 return;
             }
             this.hoverTopic.next(features);
-        }
-        else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+        } else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
             if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
                 return;
             }
@@ -913,8 +916,7 @@ export class MapService {
                 this.hoverTopic.next([]);
             }
             this.selectionTopic.next(features);
-        }
-        else {
+        } else {
             console.error(`Unsupported highlight mode!`);
         }
 
@@ -933,24 +935,24 @@ export class MapService {
 
     setTileLevelForViewport() {
         // Validate viewport data
-        if (!this.currentViewport || 
+        if (!this.currentViewport ||
             !isFinite(this.currentViewport.south) || !isFinite(this.currentViewport.west) ||
             !isFinite(this.currentViewport.width) || !isFinite(this.currentViewport.height) ||
             !isFinite(this.currentViewport.camPosLon) || !isFinite(this.currentViewport.camPosLat)) {
             console.error('Invalid viewport data in setTileLevelForViewport:', this.currentViewport);
             return;
         }
-        
+
         try {
             for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
                 try {
                     const numTileIds = coreLib.getNumTileIds(this.currentViewport, level);
-                    
+
                     if (!isFinite(numTileIds) || numTileIds < 0) {
                         console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
                         continue;
                     }
-                    
+
                     if (numTileIds >= 48) {
                         this.zoomLevel.next(level);
                         return;
@@ -960,7 +962,7 @@ export class MapService {
                     continue;
                 }
             }
-                    this.zoomLevel.next(MAX_ZOOM_LEVEL);
+            this.zoomLevel.next(MAX_ZOOM_LEVEL);
         } catch (error) {
             console.error('Error in setTileLevelForViewport:', error);
             // Fallback to a safe zoom level
@@ -968,7 +970,7 @@ export class MapService {
         }
     }
 
-    *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
+    * tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
         for (const tile of this.loadedTileLayers.values()) {
             if (tile.tileId == tileId) {
                 yield tile;
@@ -986,7 +988,8 @@ export class MapService {
                 visualizationCollection = this.selectionVisualizations;
                 break;
             case coreLib.HighlightMode.HOVER_HIGHLIGHT:
-                visualizationCollection = this.hoverVisualizations; break;
+                visualizationCollection = this.hoverVisualizations;
+                break;
             default:
                 console.error(`Bad visualization mode ${mode}!`);
                 return;
@@ -1007,7 +1010,7 @@ export class MapService {
                 let visu = new TileVisualization(
                     featureTile,
                     this.pointMergeService,
-                    (tileKey: string)=>this.getFeatureTile(tileKey),
+                    (tileKey: string) => this.getFeatureTile(tileKey),
                     style.featureLayerStyle,
                     true,
                     mode,
@@ -1072,13 +1075,13 @@ export class MapService {
             }
         }
         this.loadedTileLayers.clear();
-        
+
         // Abort any ongoing fetch to prevent race conditions
         if (this.currentFetch) {
             this.currentFetch.abort();
             this.currentFetch = null;
         }
-        
+
         // Clear tile parsing queue to prevent rendering stale tiles
         this.tileStreamParsingQueue = [];
     }
