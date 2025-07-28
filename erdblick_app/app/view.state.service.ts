@@ -20,7 +20,6 @@ export class ViewStateService {
     isDestroyingViewer = false;
     viewer!: Viewer;
     isViewerInit: Subject<boolean> = new Subject<boolean>();
-    layers: Array<[string, number, boolean, boolean]> = [];
 
     // State to preserve during viewer reinitialization
     viewerState: ViewState | null = null;

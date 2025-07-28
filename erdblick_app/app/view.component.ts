@@ -649,6 +649,13 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     this.featureSearchService.visualization.destroy();
                 }
 
+                // CRITICAL: Clean up all tiles and visualizations bound to the old viewer
+                // This ensures they can be recreated for the new viewer
+                if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
+                    this.mapService.clearAllTileVisualizations(this.viewStateService.viewer);
+                }
+                this.mapService.clearAllLoadedTiles();
+
                 // Destroy viewer with multiple safety checks
                 if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
                     try {
@@ -853,6 +860,9 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
             // Clear saved state
             this.viewStateService.viewerState = null;
+
+            // Trigger viewport update to fetch tiles for the new viewer
+            this.viewService.updateViewport();
 
             // Force a render to ensure everything is displayed
             if (this.viewStateService.viewer && this.viewStateService.viewer.scene) {

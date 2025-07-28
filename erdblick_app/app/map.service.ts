@@ -1040,4 +1040,46 @@ export class MapService {
         this.legalInformationPerMap.clear();
         this.legalInformationUpdated.next(true);
     }
+
+    /**
+     * Clean up all tile visualizations - used during viewer recreation
+     */
+    clearAllTileVisualizations(viewer: any): void {
+        for (const [styleId, tileVisualizations] of this.visualizedTileLayers) {
+            tileVisualizations.forEach(tileVisu => {
+                try {
+                    tileVisu.destroy(viewer);
+                } catch (error) {
+                    console.warn('Error destroying tile visualization:', error);
+                }
+            });
+        }
+        this.visualizedTileLayers.clear();
+        this.tileVisualizationQueue = [];
+    }
+
+    /**
+     * Force clear all loaded tiles - used during viewer recreation
+     * This ensures tiles bound to old viewer context are evicted and refetched
+     */
+    clearAllLoadedTiles(): void {
+        // Destroy all loaded tiles since they're bound to old viewer context
+        for (const tileLayer of this.loadedTileLayers.values()) {
+            try {
+                tileLayer.destroy();
+            } catch (error) {
+                console.warn('Error destroying loaded tile:', error);
+            }
+        }
+        this.loadedTileLayers.clear();
+        
+        // Abort any ongoing fetch to prevent race conditions
+        if (this.currentFetch) {
+            this.currentFetch.abort();
+            this.currentFetch = null;
+        }
+        
+        // Clear tile parsing queue to prevent rendering stale tiles
+        this.tileStreamParsingQueue = [];
+    }
 }
