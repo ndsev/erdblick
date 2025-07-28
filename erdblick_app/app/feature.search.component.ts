@@ -165,6 +165,8 @@ export class FeatureSearchComponent {
         });
         this.searchService.diagnosticsMessages.subscribe(value => {
             this.diagnostics = value;
+            if (this.diagnostics.length > 0 && this.results.length === 0)
+                this.resultPanelIndex = 'diagnostics';
         })
     }
 
