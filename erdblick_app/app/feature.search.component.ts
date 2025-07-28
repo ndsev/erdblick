@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef} from "@angular/core";
+import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {InspectionService} from "./inspection.service";
@@ -7,6 +7,8 @@ import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Listbox} from "primeng/listbox";
 import {InfoMessageService} from "./info.service";
 import {KeyboardService} from "./keyboard.service";
+import {DiagnosticsMessage, TraceResult} from "./featurefilter.worker";
+import {SearchPanelComponent} from "./search.panel.component";
 
 @Component({
     selector: "feature-search",
@@ -32,31 +34,88 @@ import {KeyboardService} from "./keyboard.service";
                     <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                               pTooltip="Stop search" tooltipPosition="bottom"></p-button>
                 </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                    <span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                    <span>Features:</span><span>{{ searchService.totalFeatureCount }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                    <span>Matched:</span><span>{{ searchService.searchResults.length }}</span>
-                </div>
-                <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                    <span>Highlight colour:</span>
-                    <span><p-colorPicker [(ngModel)]="searchService.pointColor"
-                                         (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
-                </div>
-                <p-accordion *ngIf="traceResults.length" class="trace-entries" [multiple]="true">
-                    <p-accordionTab [header]="trace.name" *ngFor="let trace of traceResults">
-                        <span>{{ trace.content }}</span>
-                    </p-accordionTab>
-                </p-accordion>
-                <p-listbox class="results-listbox" [options]="placeholder" [(ngModel)]="selectedResult"
-                           optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
-                           [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
-                           emptyMessage="No features matched."
-                           #listbox
-                />
+
+                <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+                    <p-tablist>
+                        <p-tab value="results">
+                            <span>Results</span>
+                            <p-badge [value]="results.length" />
+                        </p-tab>
+                        <p-tab value="diagnostics">
+                            <span>Diagnostics</span>
+                            <p-badge [value]="diagnostics.length" />
+                        </p-tab>
+                        <p-tab value="traces" *ngIf="traces.length > 0">
+                            <span>Traces</span>
+                            <p-badge [value]="traces.length" />
+                        </p-tab>
+                    </p-tablist>
+
+                    <p-tabpanels>
+                        <!-- Results -->
+                        <p-tabpanel value="results">
+                            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                                <span>Highlight colour:</span>
+                                <span><p-colorPicker [(ngModel)]="searchService.pointColor"
+                                                    (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
+                            </div>
+                            <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
+                                    optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
+                                    [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
+                                    emptyMessage="No features matched."
+                                    #listbox
+                            />
+                        </p-tabpanel>
+
+                        <!-- Diagnostics -->
+                        <p-tabpanel value="diagnostics">
+                            <div id="searchDiagnosticsPanel">
+                                <div>
+                                    <span class="section-heading">Results</span>
+                                    <ul>
+                                        <li><span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span></li>
+                                        <li><span>Features:</span><span>{{ searchService.totalFeatureCount }}</span></li>
+                                        <li><span>Matched:</span><span>{{ searchService.searchResults.length }}</span></li>
+                                    </ul>
+                                </div>
+                                <div *ngIf="diagnostics.length > 0">
+                                    <span class="section-heading">Diagnostics</span>
+                                    <ul>
+                                        @for (message of diagnostics; track message; let first = $first) {
+                                            <li>
+                                                <div>
+                                                    <span>{{ message.message }}</span>
+                                                    <div><span>Here: </span><code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:25"></code></div>
+                                                </div>
+                                                <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            </div>
+                        </p-tabpanel>
+
+                        <!-- Traces -->
+                        <p-tabpanel value="traces">
+                            <div id="searchTracesPanel">
+                                <table>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Calls</th>
+                                        <th>Time</th>
+                                    </tr>
+                                    @for (trace of traces; track trace; let first = $first) {
+                                        <tr>
+                                            <td>{{ trace.name }}</td>
+                                            <td>{{ trace.calls }}</td>
+                                            <td>{{ trace.totalus }} &mu;s</td>
+                                        </tr>
+                                    }
+                                </table>
+                            </div>
+                        </p-tabpanel>
+                    </p-tabpanels>
+                </p-tabs>
             </p-dialog>
         </div>
         <div #alert></div>
@@ -67,12 +126,18 @@ import {KeyboardService} from "./keyboard.service";
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
     placeholder: Array<any> = [];
-    traceResults: Array<any> = [];
+    traces: Array<TraceResult> = [];
     selectedResult: any;
+    diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
+    results: Array<any> = [];
 
+    // Active result panel index
+    resultPanelIndex: any = 0;
+
+    @Input() searchPanelComponent!: SearchPanelComponent;
     @ViewChild('listbox') listbox!: Listbox;
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
 
@@ -90,24 +155,57 @@ export class FeatureSearchComponent {
             if (isActive) {
                 this.placeholder = [{label: "Loading..."}];
                 this.canPauseStopSearch = isActive;
-            } else {
-                this.listbox.options = this.searchService.searchResults;
             }
         });
         this.searchService.progress.subscribe(value => {
             this.percentDone = value;
             if (value >= 100) {
-                this.listbox.options = this.searchService.searchResults;
-                this.canPauseStopSearch = false;
-                if (this.searchService.errors.size) {
-                    this.infoMessageService.showAlertDialog(
-                        this.alertContainer,
-                        'Feature Search Errors',
-                        Array.from(searchService.errors).join('\n'))
-                }
+                this.searchResultReady();
             }
         });
     }
+
+    searchResultReady() {
+        const results = this.searchService.searchResults;
+        const diagnostics = this.searchService.diagnosticsResults.slice(0, 25);
+        const traces = this.searchService.traceResults;
+        const errors = this.searchService.errors;
+
+        this.canPauseStopSearch = false;
+        this.resultPanelIndex = 'results';
+
+        if (errors.size) {
+            this.infoMessageService.showAlertDialog(
+                this.alertContainer,
+                'Feature Search Errors',
+                Array.from(errors).join('\n'))
+
+        } else if (results.length == 0) {
+            if (diagnostics.length > 0)
+                this.resultPanelIndex = 'diagnostics';
+            else if (traces.length > 0)
+                this.resultPanelIndex = 'traces';
+        }
+
+        this.diagnostics = this.deduplicateDiagnosticMessages(diagnostics);
+        this.traces = traces
+        this.results = results;
+    }
+
+    deduplicateDiagnosticMessages(list: Array<DiagnosticsMessage>) {
+        const seen = new Set<string>();
+        return list.filter(msg => {
+            const key = [
+                msg.message,
+                msg.location.offset,
+                msg.location.size,
+                msg.fix ?? ''
+            ].join('|');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
 
     selectResult(event: any) {
         if (event.value && event.value.mapId && event.value.featureId) {
@@ -156,5 +254,11 @@ export class FeatureSearchComponent {
     onShow(event: any) {
         this.sidePanelService.featureSearchOpen = true;
         this.keyboardService.dialogOnShow(event);
+    }
+
+    onApplyFix(message: DiagnosticsMessage) {
+        if (message.fix) {
+            this.searchPanelComponent.setSearchValue(message.fix);
+        }
     }
 }

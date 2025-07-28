@@ -9,7 +9,9 @@ import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
 import {AnimateOnScroll} from "primeng/animateonscroll";
 import {FormsModule} from "@angular/forms";
 import {ScrollPanelModule} from "primeng/scrollpanel";
+import {BadgeModule} from "primeng/badge";
 import {TreeModule} from "primeng/tree";
+import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
 import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
@@ -54,12 +56,14 @@ import {ButtonGroupModule} from "primeng/buttongroup";
 import {BreadcrumbModule} from "primeng/breadcrumb";
 import {TableModule} from "primeng/table";
 import {HighlightSearch} from "./highlight.pipe";
+import {HighlightRegion} from "./highlight.region.pipe";
 import {TreeTableFilterPatchDirective} from "./treetablefilter-patch.directive";
 import {Textarea} from "primeng/textarea";
 import {FloatLabelModule} from "primeng/floatlabel";
-import {TabViewModule} from "primeng/tabview";
+import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./keyboard.service";
 import {SelectModule} from 'primeng/select';
+import {AutoCompleteModule} from 'primeng/autocomplete';
 import {
     ArrayTypeComponent,
     DatasourcesComponent,
@@ -87,6 +91,11 @@ import {provideAnimationsAsync} from "@angular/platform-browser/animations/async
 import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
+import {ErdblickViewUIComponent} from "./view.ui.component";
+import {ViewService} from "./view.service";
+import {CameraService} from "./camera.service";
+import {MarkerService} from "./marker.service";
+import {ViewStateService} from "./view.state.service";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -184,10 +193,12 @@ export const initializeServices = () => {
         ObjectTypeComponent,
         MultiSchemaTypeComponent,
         HighlightSearch,
+        HighlightRegion,
         TreeTableFilterPatchDirective,
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
-        LegalInfoDialogComponent
+        LegalInfoDialogComponent,
+        ErdblickViewUIComponent
     ],
     bootstrap: [
         AppComponent
@@ -224,10 +235,12 @@ export const initializeServices = () => {
         DialogModule,
         FormsModule,
         ScrollPanelModule,
+        BadgeModule,
         TreeModule,
         AccordionModule,
         OverlayPanelModule,
         DividerModule,
+        TabsModule,
         PanelMenuModule,
         TreeTableModule,
         ToastModule,
@@ -244,13 +257,13 @@ export const initializeServices = () => {
         ListboxModule,
         MultiSelectModule,
         FloatLabelModule,
-        TabViewModule,
+        MessageModule,
         Textarea,
         ButtonGroupModule,
         BreadcrumbModule,
         TableModule,
         SelectModule,
-        TableModule,
+        AutoCompleteModule,
         ReactiveFormsModule,
         FormlyPrimeNGModule,
         ProgressBarModule,
@@ -276,6 +289,10 @@ export const initializeServices = () => {
         EditorService,
         DataSourcesService,
         RightClickMenuService,
+        ViewStateService,
+        CameraService,
+        ViewService,
+        MarkerService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

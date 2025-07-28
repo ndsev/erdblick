@@ -1,6 +1,5 @@
 #pragma once
 
-#include "cesium-interface/object.h"
 #include "layer.h"
 
 namespace erdblick
@@ -18,11 +17,23 @@ class FeatureLayerSearch
 public:
     explicit FeatureLayerSearch(TileFeatureLayer& tfl);
 
-    /** Returns a list of Tuples of (Map Tile Key, Feature ID). */
+    /** Returns a resuct dictionary of the following structure:
+     *
+     *  {
+     *    result: [[map tile key, feature id], ...],
+     *    traces: map<string, {calls: int, values: [string, ...], totalus: int}>,
+     *    diagnostics: [{message: "...", location: [offset, size], fix: null | "..."}, ...],
+     *  }
+     */
     NativeJsValue filter(std::string const& q);
 
-    /** Returns list of Tuples of (Trace Name, Trace Values). */
-    NativeJsValue traceResults();
+    /** Returns a list of completion candidates of the following structure:
+     *
+     * [
+     *   {text: string, range: [begin, end]}, ...
+     * ]
+     */
+    NativeJsValue complete(std::string const& q, int point, NativeJsValue const& options);
 
 private:
     TileFeatureLayer& tfl_;

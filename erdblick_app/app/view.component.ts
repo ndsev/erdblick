@@ -11,26 +11,32 @@ import {
     ScreenSpaceEventType,
     UrlTemplateImageryProvider,
     Viewer,
-    HeightReference,
+    SceneMode,
     Billboard,
-    defined
+    BillboardCollection,
+    Rectangle,
+    defined,
+    WebMercatorProjection,
+    GeographicProjection
 } from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {AfterViewInit, Component, OnInit} from "@angular/core";
+import {AfterViewInit, Component, OnDestroy} from "@angular/core";
 import {MapService} from "./map.service";
 import {DebugWindow, ErdblickDebugApi} from "./debugapi.component";
-import {StyleService} from "./style.service";
-import {FeatureSearchService, MAX_ZOOM_LEVEL, SearchResultPrimitiveId} from "./feature.search.service";
+import {FeatureSearchService} from "./feature.search.service";
 import {CoordinatesService} from "./coordinates.service";
 import {JumpTargetService} from "./jump.service";
-import {distinctUntilChanged} from "rxjs";
-import {SearchResultPosition} from "./featurefilter.worker";
+import {distinctUntilChanged, Subscription} from "rxjs";
 import {InspectionService} from "./inspection.service";
 import {KeyboardService} from "./keyboard.service";
 import {coreLib} from "./wasm";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "./app-mode.service";
+import {ViewService} from "./view.service";
+import {CameraService} from "./camera.service";
+import {MarkerService} from "./marker.service";
+import {ViewStateService} from "./view.state.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -39,8 +45,10 @@ declare let window: DebugWindow;
     selector: 'erdblick-view',
     template: `
         <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" />
+        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
+                       (onHide)="onContextMenuHide()"/>
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
+        <erdblick-view-ui></erdblick-view-ui>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -52,62 +60,144 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
-export class ErdblickViewComponent implements AfterViewInit {
-    viewer!: Viewer;
+export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
-    private marker: Entity | null = null;
     private tileOutlineEntity: Entity | null = null;
+    private subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
-    private cameraIsMoving: boolean = false;
 
     /**
      * Construct a Cesium View with a Model.
      * @param mapService The map model service providing access to data
-     * @param styleService
      * @param featureSearchService
      * @param parameterService The parameter service, used to update
      * @param jumpService
+     * @param inspectionService
+     * @param keyboardService
+     * @param menuService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
+     * @param viewStateService
+     * @param viewService
+     * @param cameraService
+     * @param markerService
      * @param appModeService
      */
-    constructor(public mapService: MapService,
-                public styleService: StyleService,
-                public featureSearchService: FeatureSearchService,
-                public parameterService: ParametersService,
-                public jumpService: JumpTargetService,
-                public inspectionService: InspectionService,
-                public keyboardService: KeyboardService,
-                public menuService: RightClickMenuService,
-                public coordinatesService: CoordinatesService,
+    constructor(private mapService: MapService,
+                private featureSearchService: FeatureSearchService,
+                private parameterService: ParametersService,
+                private jumpService: JumpTargetService,
+                private inspectionService: InspectionService,
+                private keyboardService: KeyboardService,
+                private menuService: RightClickMenuService,
+                private coordinatesService: CoordinatesService,
+                private viewStateService: ViewStateService,
+                private viewService: ViewService,
+                private cameraService: CameraService,
+                private markerService: MarkerService,
                 public appModeService: AppModeService) {
+        // Add debug API that can be easily called from browser's debug console
+        window.ebDebug = new ErdblickDebugApi(
+            this.mapService,
+            this.parameterService,
+            this.viewStateService,
+            this.cameraService
+        );
 
         this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
-            tileVis.render(this.viewer).then(wasRendered => {
-                if (wasRendered) {
-                    this.viewer.scene.requestRender();
+            // Safety check: ensure viewer exists and is not destroyed
+            if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                console.debug('Cannot render tile visualization: viewer not available');
+                return;
+            }
+
+            tileVis.render(this.viewStateService.viewer).then(wasRendered => {
+                if (wasRendered && this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+                    this.viewStateService.viewer.scene.requestRender();
                 }
             });
         });
 
         this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-            tileVis.destroy(this.viewer);
-            this.viewer.scene.requestRender();
+            // Safety check: ensure viewer exists and is not destroyed
+            if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                console.debug('Cannot destroy tile visualization: viewer not available');
+                return;
+            }
+
+            tileVis.destroy(this.viewStateService.viewer);
+            if (this.viewStateService.isAvailable()) {
+                this.viewStateService.viewer.scene.requestRender();
+            }
         });
 
-        this.mapService.moveToWgs84PositionTopic.subscribe((pos: {x: number, y: number, z?: number}) => {
-            // Convert lon/lat to Cartesian3 using current camera altitude.
-            this.parameterService.setView(
-                Cartesian3.fromDegrees(
-                    pos.x,
-                    pos.y,
-                    pos.z !== undefined? pos.z : Cartographic.fromCartesian(this.viewer.camera.position).height),
-                {
-                    heading: CesiumMath.toRadians(0), // East, in radians.
-                    pitch: CesiumMath.toRadians(-90), // Directly looking down.
-                    roll: 0 // No rotation.
+        this.mapService.moveToWgs84PositionTopic.subscribe((pos: { x: number, y: number, z?: number }) => {
+            // Safety check: ensure viewer exists and is not destroyed
+            if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                console.debug('Cannot move to WGS84 position: viewer not available');
+                return;
+            }
+
+            if (this.viewStateService.is2DMode) {
+                // In 2D mode, create a Rectangle centered on the target position
+                // Use current view rectangle to preserve the exact zoom level
+                const canvas = this.viewStateService.viewer.scene.canvas;
+                let currentRect = this.viewStateService.viewer.camera.computeViewRectangle(
+                    this.viewStateService.viewer.scene.globe.ellipsoid
+                );
+
+                // If computeViewRectangle fails, use robust calculation
+                if (!currentRect) {
+                    currentRect = this.cameraService.computeRobustViewRectangle(canvas);
                 }
-            );
+
+                if (currentRect) {
+                    // Calculate the current view size
+                    const currentWidth = currentRect.east - currentRect.west;
+                    const currentHeight = currentRect.north - currentRect.south;
+
+                    // Center the rectangle on the target position with same dimensions
+                    const centerLon = CesiumMath.toRadians(pos.x);
+                    const centerLat = CesiumMath.toRadians(pos.y);
+                    const halfWidth = currentWidth / 2;
+                    const halfHeight = currentHeight / 2;
+
+                    const rectangle = new Rectangle(
+                        centerLon - halfWidth,
+                        centerLat - halfHeight,
+                        centerLon + halfWidth,
+                        centerLat + halfHeight
+                    );
+
+                    // Ignore the camera change event to preserve mode switch cache
+                    this.cameraService.ignoreNextCameraUpdate = true;
+                    this.viewStateService.viewer.camera.setView({
+                        destination: rectangle
+                    });
+                } else {
+                    // Fallback: use position-only movement without changing zoom
+                    const cameraHeight = this.viewStateService.viewer.camera.positionCartographic.height;
+                    this.cameraService.ignoreNextCameraUpdate = true;
+                    this.viewStateService.viewer.camera.setView({
+                        destination: Cartesian3.fromDegrees(pos.x, pos.y, cameraHeight)
+                    });
+                }
+            } else {
+                // 3D mode - use current implementation
+                this.parameterService.setView(
+                    Cartesian3.fromDegrees(
+                        pos.x,
+                        pos.y,
+                        pos.z !== undefined ? pos.z : Cartographic.fromCartesian(
+                            this.viewStateService.viewer.camera.position
+                        ).height),
+                    {
+                        heading: CesiumMath.toRadians(0), // East, in radians.
+                        pitch: CesiumMath.toRadians(-90), // Directly looking down.
+                        roll: 0 // No rotation.
+                    }
+                );
+            }
         });
 
         this.menuService.menuItems.subscribe(items => {
@@ -116,36 +206,108 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
-        this.viewer = new Viewer("mapViewContainer",
-            {
-                baseLayerPicker: false,
-                animation: false,
-                geocoder: false,
-                homeButton: false,
-                sceneModePicker: false,
-                selectionIndicator: false,
-                timeline: false,
-                navigationHelpButton: false,
-                navigationInstructionsInitiallyVisible: false,
-                requestRenderMode: true,
-                maximumRenderTimeChange: Infinity,
-                infoBox: false,
-                baseLayer: false
-            }
-        );
+        // Initialize viewer with appropriate projection
+        this.createViewer(this.viewStateService.is2DMode).then(() => {
+            this.viewStateService.isViewerInit.next(true);
+            this.completeViewerInitialization();
+        }).catch((error) => {
+            console.error('Failed to initialize viewer:', error);
+            // Show user-friendly error or fallback behavior
+            alert('Failed to initialize the map viewer. Please refresh the page.');
+        });
+    }
 
-        this.openStreetMapLayer = this.viewer.imageryLayers.addImageryProvider(this.getOpenStreetMapLayerProvider());
-        this.openStreetMapLayer.alpha = 0.3;
-        this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
-        this.cameraIsMoving = false;
+    /**
+     * Complete the viewer initialization process after the viewer is created
+     */
+    private completeViewerInitialization() {
+        this.setupParameterSubscriptions();
+        this.setupEventHandlers();
+        this.setupAdditionalSubscriptions();
+        this.setupKeyboardShortcuts();
+
+        // Hide the global loading spinner
+        const spinner = document.getElementById('global-spinner-container');
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Setup parameter subscriptions
+     */
+    private setupParameterSubscriptions() {
+        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
+            this.cameraService.ignoreNextCameraUpdate = true;
+            if (this.viewStateService.is2DMode) {
+                // In 2D mode, check if we have a view rectangle in parameters
+                const params = this.parameterService.p();
+                if (params.viewRectangle && params.viewRectangle.length === 4) {
+                    this.viewStateService.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(...params.viewRectangle)
+                    });
+                } else {
+                    // Fallback to center position
+                    const cartographic = Cartographic.fromCartesian(cameraData.destination);
+                    this.viewStateService.viewer.camera.setView({
+                        destination: Rectangle.fromDegrees(
+                            CesiumMath.toDegrees(cartographic.longitude) - 1,
+                            CesiumMath.toDegrees(cartographic.latitude) - 1,
+                            CesiumMath.toDegrees(cartographic.longitude) + 1,
+                            CesiumMath.toDegrees(cartographic.latitude) + 1
+                        )
+                    });
+                }
+            } else {
+                // 3D mode
+                this.viewStateService.viewer.camera.setView({
+                    destination: cameraData.destination,
+                    orientation: cameraData.orientation
+                });
+            }
+            this.viewService.updateViewport();
+        });
+
+        this.parameterService.parameters.subscribe(parameters => {
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = parameters.osm;
+                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
+            }
+            if (this.viewStateService.viewer && this.viewStateService.is2DMode !== parameters.mode2d) {
+                // Handle async mode change properly
+                this.applySceneModeChange(parameters.mode2d).catch(error => {
+                    console.error('Failed to change scene mode:', error);
+                });
+            }
+
+            // Handle marker parameters - try immediately, but don't retry here
+            // The viewerReinitializationComplete subscription will handle restoration after mode changes
+            if (parameters.marker && parameters.markedPosition.length == 2) {
+                const markerPosition = Cartesian3.fromDegrees(
+                    Number(parameters.markedPosition[0]),
+                    Number(parameters.markedPosition[1])
+                );
+                this.markerService.addMarker(markerPosition);
+            } else {
+                // Clear markers when marker is disabled or no position
+                this.markerService.clearMarkers();
+            }
+        });
+    }
+
+    /**
+     * Setup event handlers and subscriptions for mouse handler
+     */
+    private setupEventHandlers() {
+        if (!this.mouseHandler) return;
 
         this.mouseHandler.setInputAction((movement: any) => {
             if (this.appModeService.isVisualizationOnly) return;
 
             const position = movement.position;
-            const cartesian = this.viewer.camera.pickEllipsoid(
+            const cartesian = this.viewStateService.viewer.camera.pickEllipsoid(
                 new Cartesian2(position.x, position.y),
-                this.viewer.scene.globe.ellipsoid
+                this.viewStateService.viewer.scene.globe.ellipsoid
             );
             if (defined(cartesian)) {
                 const cartographic = Cartographic.fromCartesian(cartesian);
@@ -165,7 +327,7 @@ export class ErdblickViewComponent implements AfterViewInit {
             if (this.appModeService.isVisualizationOnly) return;
 
             const position = movement.position;
-            let feature = this.viewer.scene.pick(position);
+            let feature = this.viewStateService.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
@@ -177,10 +339,12 @@ export class ErdblickViewComponent implements AfterViewInit {
                         });
                     }
                 } else {
+                    // Convert Cartesian3 position to WGS84 degrees
+                    const cartographic = Cartographic.fromCartesian(feature.primitive.position);
                     this.mapService.moveToWgs84PositionTopic.next({
-                        x: feature.primitive.position.x,
-                        y: feature.primitive.position.y,
-                        z: feature.primitive.position.z + 1000
+                        x: CesiumMath.toDegrees(cartographic.longitude),
+                        y: CesiumMath.toDegrees(cartographic.latitude),
+                        z: cartographic.height + 1000
                     });
                 }
             }
@@ -195,7 +359,9 @@ export class ErdblickViewComponent implements AfterViewInit {
             // Handle position update after highlighting, because otherwise
             // there is a race condition between the parameter updates for
             // feature selection and position update.
-            const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+            const coordinates = this.viewStateService.viewer.camera.pickEllipsoid(
+                position, this.viewStateService.viewer.scene.globe.ellipsoid
+            );
             if (coordinates !== undefined) {
                 this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
             }
@@ -204,191 +370,124 @@ export class ErdblickViewComponent implements AfterViewInit {
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
-            // Do not handle mouse move here, if the first element
+            // Do not handle mouse move here if the first element
             // under the cursor is not the Cesium view.
             if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
                 return;
             }
-            // Do not handle mouse move here, if the camera is currently being moved.
-            if (this.cameraIsMoving) {
+            // Do not handle mouse move here if the camera is currently being moved.
+            if (this.cameraService.cameraIsMoving) {
                 return;
             }
 
             if (!this.appModeService.isVisualizationOnly) {
-                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
+                const coordinates = this.viewStateService.viewer.camera.pickEllipsoid(
+                    position, this.viewStateService.viewer.scene.globe.ellipsoid
+                );
                 if (coordinates !== undefined) {
                     this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
                 }
             }
 
             if (!this.appModeService.isVisualizationOnly) {
-                let feature = this.viewer.scene.pick(position);
+                let feature = this.viewStateService.viewer.scene.pick(position);
                 this.mapService.highlightFeatures(
                     Array.isArray(feature?.id) ? feature.id : [feature?.id],
                     false,
                     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
-
-        // Add a handler for camera movement.
-        this.viewer.camera.percentageChanged = 0.1;
-        this.viewer.camera.changed.addEventListener(() => {
-            this.parameterService.setCameraState(this.viewer.camera);
-            this.updateViewport();
-        });
-        this.viewer.camera.moveStart.addEventListener(() => {
-            this.cameraIsMoving = true;
-        });
-        this.viewer.camera.moveEnd.addEventListener(() => {
-            this.cameraIsMoving = false;
-        });
-        this.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
-
-        // Remove fullscreen button as unnecessary
-        this.viewer.fullscreenButton.destroy();
-
-        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.viewer.camera.setView({
-                destination: cameraData.destination,
-                orientation: cameraData.orientation
-            });
-            this.updateViewport();
-        });
-
-        this.parameterService.parameters.subscribe(parameters => {
-            if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = parameters.osm;
-                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
-            }
-            if (parameters.marker && parameters.markedPosition.length == 2) {
-                this.addMarker(Cartesian3.fromDegrees(
-                    Number(parameters.markedPosition[0]),
-                    Number(parameters.markedPosition[1]))
-                );
-            } else {
-                if (this.marker) {
-                    this.viewer.entities.remove(this.marker);
-                }
-            }
-        });
-
-        // Add debug API that can be easily called from browser's debug console
-        window.ebDebug = new ErdblickDebugApi(this.mapService, this.parameterService, this);
-
-        this.viewer.scene.primitives.add(this.featureSearchService.visualization);
-        this.featureSearchService.visualizationChanged.subscribe(_ => {
-            this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
-            this.viewer.scene.requestRender();
-        });
-
-        this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-            this.renderFeatureSearchResultTree(level);
-        });
-
-        this.jumpService.markedPosition.subscribe(position => {
-            if (position.length >= 2) {
-                this.parameterService.setMarkerState(true);
-                this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
-            }
-        });
-
-        this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
-            const [origin, normal] = values;
-            const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
-            const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
-            Cartesian3.normalize(direction, direction);
-            Cartesian3.negate(direction, direction);
-            const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(endPoint, new Cartesian3());
-            const right = Cartesian3.cross(direction, up, new Cartesian3());
-            Cartesian3.normalize(right, right);
-            const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
-            Cartesian3.normalize(cameraUp, cameraUp);
-            this.viewer.camera.flyTo({
-                destination: endPoint,
-                orientation: {
-                    direction: direction,
-                    up: cameraUp,
-                }
-            });
-        });
-
-        if (!this.appModeService.isVisualizationOnly) {
-            this.keyboardService.registerShortcut('q', this.zoomIn.bind(this), true);
-            this.keyboardService.registerShortcut('e', this.zoomOut.bind(this), true);
-            this.keyboardService.registerShortcut('w', this.moveUp.bind(this), true);
-            this.keyboardService.registerShortcut('a', this.moveLeft.bind(this), true);
-            this.keyboardService.registerShortcut('s', this.moveDown.bind(this), true);
-            this.keyboardService.registerShortcut('d', this.moveRight.bind(this), true);
-            this.keyboardService.registerShortcut('r', this.resetOrientation.bind(this), true);
-        }
-
-        // Hide the global loading spinner.
-        const spinner = document.getElementById('global-spinner-container');
-        if (spinner) {
-            spinner.style.display = 'none';
-        }
-
-        this.menuService.tileOutline.subscribe(entity => {
-            if (entity) {
-                this.tileOutlineEntity = this.viewer.entities.add(entity);
-                this.viewer.scene.requestRender();
-            } else if (this.tileOutlineEntity) {
-                this.viewer.entities.remove(this.tileOutlineEntity);
-                this.viewer.scene.requestRender();
-            }
-        });
     }
 
     /**
-     * Update the visible viewport, and communicate it to the model.
+     * Setup additional subscriptions for services
      */
-    updateViewport() {
-        let canvas = this.viewer.scene.canvas;
-        let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-        let centerCartesian = this.viewer.camera.pickEllipsoid(center);
-        let centerLon, centerLat;
+    private setupAdditionalSubscriptions() {
+        this.subscriptions.push(
+            this.featureSearchService.visualizationChanged.subscribe(_ => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
+                    this.markerService.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+                    this.viewStateService.viewer.scene.requestRender();
+                }
+            })
+        );
 
-        if (centerCartesian !== undefined) {
-            let centerCartographic = Cartographic.fromCartesian(centerCartesian);
-            centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
-            centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
-        } else {
-            let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
-            centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
-            centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
+        this.subscriptions.push(
+            this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+                this.markerService.renderFeatureSearchResultTree(level);
+            })
+        );
+
+        this.subscriptions.push(
+            this.jumpService.markedPosition.subscribe(position => {
+                if (position.length >= 2) {
+                    this.parameterService.setMarkerState(true);
+                    this.parameterService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
+                }
+            })
+        );
+
+        this.subscriptions.push(
+            this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                    return;
+                }
+
+                const [origin, normal] = values;
+                const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+                const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+                Cartesian3.normalize(direction, direction);
+                Cartesian3.negate(direction, direction);
+                const up = this.viewStateService.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(
+                    endPoint, new Cartesian3()
+                );
+                const right = Cartesian3.cross(direction, up, new Cartesian3());
+                Cartesian3.normalize(right, right);
+                const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+                Cartesian3.normalize(cameraUp, cameraUp);
+                this.viewStateService.viewer.camera.flyTo({
+                    destination: endPoint,
+                    orientation: {
+                        direction: direction,
+                        up: cameraUp,
+                    }
+                });
+            })
+        );
+
+        this.subscriptions.push(
+            this.menuService.tileOutline.subscribe(entity => {
+                // Add safety check before accessing viewer
+                if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                    return;
+                }
+
+                if (entity) {
+                    this.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
+                    this.viewStateService.viewer.scene.requestRender();
+                } else if (this.tileOutlineEntity) {
+                    this.viewStateService.viewer.entities.remove(this.tileOutlineEntity);
+                    this.viewStateService.viewer.scene.requestRender();
+                }
+            })
+        );
+    }
+
+    /**
+     * Setup keyboard shortcuts
+     */
+    private setupKeyboardShortcuts() {
+        if (!this.appModeService.isVisualizationOnly) {
+            this.keyboardService.registerShortcut('q', this.cameraService.zoomIn.bind(this), true);
+            this.keyboardService.registerShortcut('e', this.cameraService.zoomOut.bind(this), true);
+            this.keyboardService.registerShortcut('w', this.cameraService.moveUp.bind(this), true);
+            this.keyboardService.registerShortcut('a', this.cameraService.moveLeft.bind(this), true);
+            this.keyboardService.registerShortcut('s', this.cameraService.moveDown.bind(this), true);
+            this.keyboardService.registerShortcut('d', this.cameraService.moveRight.bind(this), true);
+            this.keyboardService.registerShortcut('r', this.cameraService.resetOrientation.bind(this), true);
         }
-
-        let rectangle = this.viewer.camera.computeViewRectangle();
-        if (!rectangle) {
-            // This might happen when looking into space.
-            return;
-        }
-
-        let west = CesiumMath.toDegrees(rectangle.west);
-        let south = CesiumMath.toDegrees(rectangle.south);
-        let east = CesiumMath.toDegrees(rectangle.east);
-        let north = CesiumMath.toDegrees(rectangle.north);
-        let sizeLon = east - west;
-        let sizeLat = north - south;
-
-        // Handle the antimeridian.
-        // TODO: Must also handle north pole.
-        if (west > -180 && sizeLon > 180.0) {
-            sizeLon = 360.0 - sizeLon;
-        }
-
-        // Grow the viewport rectangle by 25%
-        let expandLon = sizeLon * 0.25;
-        let expandLat = sizeLat * 0.25;
-        this.mapService.setViewport({
-            south: south - expandLat,
-            west: west - expandLon,
-            width: sizeLon + expandLon * 2,
-            height: sizeLat + expandLat * 2,
-            camPosLon: centerLon,
-            camPosLat: centerLat,
-            orientation: -this.viewer.camera.heading + Math.PI * .5,
-        });
     }
 
     private getOpenStreetMapLayerProvider() {
@@ -399,110 +498,458 @@ export class ErdblickViewComponent implements AfterViewInit {
     }
 
     updateOpenStreetMapLayer(opacity: number) {
-        if (this.openStreetMapLayer) {
+        if (this.openStreetMapLayer && this.viewStateService.viewer && this.viewStateService.viewer.scene) {
             this.openStreetMapLayer.alpha = opacity;
-            this.viewer.scene.requestRender();
+            this.viewStateService.viewer.scene.requestRender();
         }
-    }
-
-    addMarker(cartesian: Cartesian3) {
-        if (this.marker) {
-            this.viewer.entities.remove(this.marker);
-        }
-
-        this.marker = this.viewer.entities.add({
-            position: cartesian,
-            billboard: {
-                image: this.featureSearchService.markerGraphics(),
-                width: 32,
-                height: 32,
-                heightReference: HeightReference.CLAMP_TO_GROUND,
-                pixelOffset: new Cartesian2(0, -12),
-                eyeOffset: new Cartesian3(0, 0, -100)
-            }
-        });
-    }
-
-    renderFeatureSearchResultTree(level: number) {
-        this.featureSearchService.visualization.removeAll();
-        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
-        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
-        for (const node of nodes) {
-            if (node.markers.length) {
-                markers.push(...node.markers);
-            } else if (node.count > 0 && node.center) {
-                this.featureSearchService.visualization.add({
-                    position: node.center,
-                    image: this.featureSearchService.getPinGraphics(node.count),
-                    width: 64,
-                    height: 64,
-                    eyeOffset: new Cartesian3(0, 0, -50)
-                });
-            }
-        }
-
-        if (markers.length) {
-            markers.forEach(marker => {
-                this.featureSearchService.visualization.add({
-                    id: marker[0],
-                    position: marker[1].cartesian as Cartesian3,
-                    image: this.featureSearchService.markerGraphics(),
-                    width: 32,
-                    height: 32,
-                    pixelOffset: new Cartesian2(0, -10),
-                    eyeOffset: new Cartesian3(0, 0, -20),
-                    color: color
-                });
-            });
-        }
-    }
-
-    moveUp() {
-        this.moveCameraOnSurface(0, this.parameterService.cameraMoveUnits);
-    }
-
-    moveDown() {
-        this.moveCameraOnSurface(0, -this.parameterService.cameraMoveUnits);
-    }
-
-    moveLeft() {
-        this.moveCameraOnSurface(-this.parameterService.cameraMoveUnits, 0);
-    }
-
-    moveRight() {
-        this.moveCameraOnSurface(this.parameterService.cameraMoveUnits, 0);
-    }
-
-    private moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
-        // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
-        const cameraPosition = this.viewer.camera.positionCartographic;
-        const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
-        const lat = cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset);
-        const alt = cameraPosition.height;
-        const newPosition = Cartesian3.fromRadians(lon, lat, alt);
-        this.parameterService.setView(newPosition, this.parameterService.getCameraOrientation());
-    }
-
-    zoomIn() {
-        this.viewer.camera.zoomIn(this.parameterService.cameraZoomUnits);
-    }
-
-    zoomOut() {
-        this.viewer.camera.zoomOut(this.parameterService.cameraZoomUnits);
-    }
-
-    resetOrientation() {
-        this.parameterService.setView(this.parameterService.getCameraPosition(), {
-            heading: CesiumMath.toRadians(0.0),
-            pitch: CesiumMath.toRadians(-90.0),
-            roll: 0.0
-        });
     }
 
     onContextMenuHide() {
         if (!this.menuService.tileSourceDataDialogVisible) {
             this.menuService.tileOutline.next(null)
         }
+    }
+
+    /**
+     * Updated scene mode change to use viewer reinitialization
+     */
+    private async applySceneModeChange(is2D: boolean) {
+        // Prevent multiple mode changes at once
+        if (this.viewStateService.isChangingMode) {
+            console.debug('Mode change already in progress');
+            return;
+        }
+
+        // Prevent mode change during destruction
+        if (this.viewStateService.isDestroyingViewer) {
+            console.debug('Mode change prevented: viewer destruction in progress');
+            return;
+        }
+
+        this.viewStateService.isChangingMode = true;
+
+        try {
+            // Recreate viewer with appropriate projection
+            await this.recreateViewerForMode(is2D);
+            this.setupSceneMode(is2D);
+            this.markerService.restoreParameterMarker();
+        } catch (error) {
+            console.error('Error during scene mode change:', error);
+            console.debug('Scene mode change failed. Retrying with fallback...');
+        } finally {
+            this.viewStateService.isChangingMode = false;
+        }
+    }
+
+    /**
+     * Recreate the viewer with different projection for 2D/3D modes
+     * This is necessary because Cesium doesn't support dynamic projection switching
+     */
+    private async recreateViewerForMode(is2D: boolean) {
+        // Prevent multiple simultaneous reinitializations
+        if (this.viewStateService.viewerState) {
+            console.debug('Viewer reinitialization already in progress');
+            return;
+        }
+
+        // Also check if we're currently destroying
+        if (this.viewStateService.isDestroyingViewer) {
+            console.debug('Cannot reinitialize: viewer destruction in progress');
+            return;
+        }
+
+        try {
+            this.saveViewerState();
+            await this.destroyViewer();
+            await new Promise(resolve => setTimeout(resolve, 150));
+            await this.createViewer(is2D);
+            this.restoreViewerState();
+        } catch (error) {
+            console.error('Error during viewer reinitialization:', error);
+            // Reset state on error to prevent future issues
+            this.viewStateService.viewerState = null;
+            this.viewStateService.isDestroyingViewer = false;
+
+            // Try to create a basic viewer as fallback
+            try {
+                console.warn('Attempting fallback viewer creation...');
+                await this.createViewer(is2D);
+            } catch (fallbackError) {
+                console.error('Fallback viewer creation failed:', fallbackError);
+                throw new Error('Failed to create viewer. Please refresh the page.');
+            }
+        }
+    }
+
+    /**
+     * Save the current viewer state before reinitialization
+     */
+    private saveViewerState() {
+        try {
+            if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                console.debug('Cannot save viewer state: viewer is destroyed or unavailable');
+                return;
+            }
+
+            const markerPositions: Cartesian3[] = [];
+            if (this.markerService.markerCollection) {
+                for (let i = 0; i < this.markerService.markerCollection.length; i++) {
+                    const marker = this.markerService.markerCollection.get(i);
+                    if (marker && marker.position) {
+                        markerPositions.push(marker.position);
+                    }
+                }
+            }
+
+            this.viewStateService.viewerState = {
+                openStreetMapLayerAlpha: this.openStreetMapLayer?.alpha || 0.3,
+                openStreetMapLayerShow: this.openStreetMapLayer?.show || false,
+                markerPositions: markerPositions,
+                tileOutlineEntity: this.tileOutlineEntity,
+                cameraState: this.cameraService.getCurrentCameraState(),
+                menuItems: [...this.menuItems]
+            };
+        } catch (error) {
+            console.error('Error saving viewer state:', error);
+        }
+    }
+
+    /**
+     * Destroy the current viewer and clean up resources
+     */
+    private async destroyViewer(): Promise<void> {
+        // Early return if viewer is already null or destroyed
+        if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+            console.debug('Viewer already null or destroyed, skipping destruction');
+            return;
+        }
+
+        if (this.viewStateService.isDestroyingViewer) {
+            console.debug('Viewer already in destruction process.');
+            return;
+        }
+        this.viewStateService.isDestroyingViewer = true;
+
+        return new Promise((resolve) => {
+            try {
+                // Clean up subscriptions FIRST to prevent race conditions
+                this.subscriptions.forEach(sub => sub.unsubscribe());
+                this.subscriptions = [];
+
+                // Clean up mouse handler first
+                if (this.mouseHandler) {
+                    if (!this.mouseHandler.isDestroyed()) {
+                        this.mouseHandler.destroy();
+                    }
+                    this.mouseHandler = null;
+                }
+
+                // Clean up collections and entities references
+                this.markerService.markerCollection = null;
+                this.tileOutlineEntity = null;
+                this.openStreetMapLayer = null;
+
+                // Clean the feature search visualization collection up
+                if (this.featureSearchService.visualization && !this.featureSearchService.visualization.isDestroyed()) {
+                    this.featureSearchService.visualization.destroy();
+                }
+
+                // CRITICAL: Clean up all tiles and visualizations bound to the old viewer
+                // This ensures they can be recreated for the new viewer
+                if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
+                    this.mapService.clearAllTileVisualizations(this.viewStateService.viewer);
+                }
+                this.mapService.clearAllLoadedTiles();
+
+                // Destroy viewer with multiple safety checks
+                if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
+                    try {
+                        // Remove event listeners first
+                        if (this.viewStateService.viewer.camera) {
+                            this.viewStateService.viewer.camera.changed.removeEventListener(
+                                this.viewService.updateOnCameraChangedHandler
+                            );
+                            this.viewStateService.viewer.camera.moveStart.removeEventListener(
+                                this.cameraService.cameraMoveStartHandler
+                            );
+                            this.viewStateService.viewer.camera.moveEnd.removeEventListener(
+                                this.cameraService.cameraMoveEndHandler
+                            );
+                        }
+                        // Check if still not destroyed before calling destroy
+                        if (!this.viewStateService.viewer.isDestroyed()) {
+                            this.viewStateService.viewer.destroy();
+                        }
+                    } catch (error) {
+                        console.warn('Error during viewer destruction, continuing cleanup:', error);
+                    }
+                }
+
+                // Clear viewer reference regardless
+                this.viewStateService.viewer = null as any;
+
+                // Small delay to ensure DOM cleanup completes
+                setTimeout(() => {
+                    this.viewStateService.isDestroyingViewer = false;
+                    resolve();
+                }, 100);
+
+            } catch (error) {
+                console.error('Error during viewer destruction:', error);
+                this.viewStateService.isDestroyingViewer = false;
+                // Clear references even on error
+                this.viewStateService.viewer = null as any;
+                this.mouseHandler = null;
+                this.markerService.markerCollection = null;
+                this.tileOutlineEntity = null;
+                this.openStreetMapLayer = null;
+                resolve(); // Continue anyway
+            }
+        });
+    }
+
+    /**
+     * Create a new viewer with appropriate projection
+     */
+    private async createViewer(is2D: boolean): Promise<void> {
+        return new Promise((resolve, reject) => {
+            try {
+                const mapProjection = is2D ? new WebMercatorProjection() : new GeographicProjection();
+
+                this.viewStateService.viewer = new Viewer("mapViewContainer", {
+                    baseLayerPicker: false,
+                    animation: false,
+                    geocoder: false,
+                    homeButton: false,
+                    sceneModePicker: false,
+                    selectionIndicator: false,
+                    timeline: false,
+                    navigationHelpButton: false,
+                    navigationInstructionsInitiallyVisible: false,
+                    requestRenderMode: true,
+                    maximumRenderTimeChange: Infinity,
+                    infoBox: false,
+                    baseLayer: false,
+                    sceneMode: is2D ? SceneMode.SCENE2D : SceneMode.SCENE3D,
+                    mapProjection: mapProjection
+                });
+
+                // Small delay to ensure the viewer is fully initialized
+                setTimeout(async () => {
+                    try {
+                        // Setup all viewer components
+                        this.viewStateService.isViewerInit.next(true);
+                        await this.setupViewerComponents();
+                        resolve();
+                    } catch (error) {
+                        console.error('Error initializing viewer components:', error);
+                        reject(error);
+                    }
+                }, 100);
+
+            } catch (error) {
+                console.error('Error creating viewer:', error);
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Setup viewer components after creation
+     */
+    private async setupViewerComponents(): Promise<void> {
+        try {
+            this.setupSceneMode(this.viewStateService.is2DMode);
+
+            // Recreate OpenStreetMap layer
+            this.openStreetMapLayer = this.viewStateService.viewer.imageryLayers.addImageryProvider(
+                this.getOpenStreetMapLayerProvider()
+            );
+
+            // Recreate mouse handler
+            this.mouseHandler = new ScreenSpaceEventHandler(this.viewStateService.viewer.scene.canvas);
+            this.setupEventHandlers();
+            this.setupCameraHandlers();
+            this.setupWheelHandler();
+
+            // Set globe appearance
+            this.viewStateService.viewer.scene.globe.baseColor = new Color(0.1, 0.1, 0.1, 1);
+
+            // Remove fullscreen button
+            if (this.viewStateService.viewer.fullscreenButton &&
+                !this.viewStateService.viewer.fullscreenButton.isDestroyed()) {
+                this.viewStateService.viewer.fullscreenButton.destroy();
+            }
+
+            // Recreate marker collection
+            this.markerService.markerCollection = new BillboardCollection({
+                scene: this.viewStateService.viewer.scene
+            });
+            this.viewStateService.viewer.scene.primitives.add(this.markerService.markerCollection);
+
+            // Recreate feature search visualization collection for new viewer
+            this.featureSearchService.visualization = new BillboardCollection({
+                scene: this.viewStateService.viewer.scene
+            });
+            this.viewStateService.viewer.scene.primitives.add(this.featureSearchService.visualization);
+
+            // Re-render existing search results if any
+            if (this.featureSearchService.searchResults.length > 0) {
+                this.markerService.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+            }
+
+            // Recreate subscriptions for new viewer
+            this.setupAdditionalSubscriptions();
+
+        } catch (error) {
+            console.error('Error during viewer component initialization:', error);
+            throw error;
+        }
+    }
+
+
+    /**
+     * Setup camera event handlers
+     */
+    private setupCameraHandlers() {
+        this.viewStateService.viewer.camera.percentageChanged = 0.1;
+        this.viewStateService.viewer.camera.changed.addEventListener(this.viewService.updateOnCameraChangedHandler);
+        this.viewStateService.viewer.camera.moveStart.addEventListener(this.cameraService.cameraMoveStartHandler);
+        this.viewStateService.viewer.camera.moveEnd.addEventListener(this.cameraService.cameraMoveEndHandler);
+    }
+
+    /**
+     * Setup custom wheel handler for 2D mode
+     */
+    private setupWheelHandler() {
+        this.viewStateService.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
+            if (this.viewStateService.is2DMode) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9;
+
+                this.cameraService.zoom2D(zoomFactor);
+            }
+        });
+    }
+
+    /**
+     * Restore viewer state after reinitialization
+     */
+    private restoreViewerState() {
+        if (!this.viewStateService.viewerState || !this.viewStateService.viewer) {
+            console.debug('Cannot restore viewer state: missing state or viewer');
+            return;
+        }
+
+        try {
+            // Restore OpenStreetMap layer
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.alpha = this.viewStateService.viewerState.openStreetMapLayerAlpha;
+                this.openStreetMapLayer.show = this.viewStateService.viewerState.openStreetMapLayerShow;
+            }
+
+            // Restore markers
+            if (this.markerService.markerCollection && this.viewStateService.viewerState.markerPositions.length > 0) {
+                this.viewStateService.viewerState.markerPositions.forEach(position => {
+                    this.markerService.addMarker(position);
+                });
+            }
+
+            // Restore camera state
+            this.cameraService.restoreCameraState(this.viewStateService.viewerState);
+
+            // Restore menu items
+            this.menuItems = this.viewStateService.viewerState.menuItems;
+
+            // Clear saved state
+            this.viewStateService.viewerState = null;
+
+            // Trigger viewport update to fetch tiles for the new viewer
+            this.viewService.updateViewport();
+
+            // Force a render to ensure everything is displayed
+            if (this.viewStateService.viewer && this.viewStateService.viewer.scene) {
+                this.viewStateService.viewer.scene.requestRender();
+            }
+
+        } catch (error) {
+            console.error('Error restoring viewer state:', error);
+            // Clear state on error to prevent future issues
+            this.viewStateService.viewerState = null;
+        }
+    }
+
+    private setupSceneMode(is2D: boolean) {
+        this.viewStateService.is2DMode = is2D;
+        if (this.viewStateService.is2DMode) {
+            this.viewStateService.viewer.scene.mode = SceneMode.SCENE2D;
+            this.viewService.setup2DModeConstraints();
+        } else {
+            this.viewStateService.viewer.scene.mode = SceneMode.SCENE3D;
+            this.viewService.setup3DModeConstraints();
+        }
+    }
+
+    /**
+     * Component cleanup when destroyed
+     */
+    ngOnDestroy() {
+        console.debug('ErdblickViewComponent: cleaning up resources');
+
+        // Don't allow mode changes during destruction
+        this.viewStateService.isChangingMode = true;
+
+        // Clean up subscriptions first
+        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions = [];
+
+        // Clean up resources without async to avoid hanging
+        try {
+            if (this.mouseHandler) {
+                if (!this.mouseHandler.isDestroyed()) {
+                    this.mouseHandler.destroy();
+                }
+                this.mouseHandler = null;
+            }
+
+            if (this.viewStateService.viewer && this.viewStateService.isNotDestroyed()) {
+                try {
+                    // Remove event listeners before destroying
+                    if (this.viewStateService.viewer.camera) {
+                        this.viewStateService.viewer.camera.changed.removeEventListener(
+                            this.viewService.updateOnCameraChangedHandler
+                        );
+                        this.viewStateService.viewer.camera.moveStart.removeEventListener(
+                            this.cameraService.cameraMoveStartHandler
+                        );
+                        this.viewStateService.viewer.camera.moveEnd.removeEventListener(
+                            this.cameraService.cameraMoveEndHandler
+                        );
+                    }
+                    // Check if still not destroyed before calling destroy
+                    if (!this.viewStateService.viewer.isDestroyed()) {
+                        this.viewStateService.viewer.destroy();
+                    }
+                } catch (error) {
+                    console.warn('Error during component destruction, continuing cleanup:', error);
+                }
+                this.viewStateService.viewer = null as any;
+            }
+        } catch (e) {
+            console.error('Error in ngOnDestroy:', e);
+        }
+
+        // Clear all references
+        this.mouseHandler = null;
+        this.openStreetMapLayer = null;
+        this.markerService.markerCollection = null;
+        this.tileOutlineEntity = null;
+        this.viewStateService.viewerState = null;
+
+        // Reset flags
+        this.viewStateService.isChangingMode = false;
+        this.viewStateService.isDestroyingViewer = false;
     }
 }

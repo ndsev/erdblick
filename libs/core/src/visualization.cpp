@@ -687,8 +687,11 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
     try
     {
         auto results = tile_->evaluate(expression, ctx, anyMode, autoWildcard);
-        if (!results.empty()) {
-            return std::move(results[0]);
+        if (!results)
+            std::cout << "Error evaluating " << expression << ": " << results.error().message << std::endl;
+
+        if (!results->values.empty()) {
+            return std::move(results->values[0]);
         }
     }
     catch (std::exception const& e) {

@@ -318,22 +318,35 @@ export class InspectionService {
         });
     }
 
+    loadSourceDataInspectionForService(mapId: string, layerId: string) {
+        this.isInspectionPanelVisible = true;
+        this.selectedSourceData.next({
+            tileId: 0,
+            layerId: layerId,
+            mapId: mapId
+        });
+    }
+
     /**
      * Returns a human-readable layer name for a layer id.
      *
      * @param layerId Layer id to get the name for
+     * @param isMetadata Matches the metadata SourceDataLayers
      */
-    layerNameForSourceDataLayerId(layerId: string) {
-        const match = layerId.match(/^SourceData-([^.]+\.)*(.*)-([\d]+)/);
-        if (match)
-            return `${match[2]}.${match[3]}`;
-        return layerId;
+    layerNameForSourceDataLayerId(layerId: string, isMetadata: boolean = false) {
+        const match = isMetadata ?
+            layerId.match(/^Metadata-(.+)-(.+)/) :
+            layerId.match(/^SourceData-(.+\.)([^.]+)/);
+        if (!match) {
+            return layerId;
+        }
+        return `${match[2]}`.replace('-', '.');
     }
 
     /**
      * Returns an internal layerId for a human-readable layer name.
      *
-     * @param layerId Layer id to get the name for
+     * @param layerName Layer id to get the name for
      */
     sourceDataLayerIdForLayerName(layerName: string) {
         for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
@@ -348,6 +361,24 @@ export class InspectionService {
             }
         }
         return null;
+    }
+
+    findLayersForMapId(mapId: string, isMetadata: boolean = false) {
+        const map = this.mapService.maps.getValue().get(mapId);
+        if (map) {
+            const prefix = isMetadata ? "Metadata" : "SourceData";
+            const dataLayers = new Set<string>();
+            for (const layer of map.layers.values()) {
+                if (layer.type == "SourceData" && layer.layerId.startsWith(prefix)) {
+                    dataLayers.add(layer.layerId);
+                }
+            }
+            return [...dataLayers].map(layerId => ({
+                id: layerId,
+                name: this.layerNameForSourceDataLayerId(layerId, isMetadata)
+            })).sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return [];
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;

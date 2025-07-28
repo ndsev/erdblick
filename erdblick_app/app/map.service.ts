@@ -3,7 +3,7 @@ import {Fetch} from "./fetch.model";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
-import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject, combineLatest, filter, startWith} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
 import {ParametersService, TileFeatureId} from "./parameters.service";
@@ -13,7 +13,6 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
 import * as uuid from 'uuid';
-import {Color} from "./cesium";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -25,11 +24,11 @@ export interface CoverageRectItem extends Record<string, any> {
 export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
-    coverage: Array<number|CoverageRectItem>;
-    featureTypes: Array<{name: string, uniqueIdCompositions: Array<any>}>;
+    coverage: Array<number | CoverageRectItem>;
+    featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
     type: string;
-    version: {major: number, minor: number, patch: number};
+    version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
     level: number;
     visible: boolean;
@@ -43,7 +42,7 @@ export interface MapInfoItem extends Record<string, any> {
     mapId: string;
     maxParallelJobs: number;
     nodeId: string;
-    protocolVersion: {major: number, minor: number, patch: number};
+    protocolVersion: { major: number, minor: number, patch: number };
     addOn: boolean;
     visible: boolean;
 }
@@ -53,6 +52,8 @@ const tileUrl = "tiles";
 const abortUrl = "abort";
 
 /** Redefinition of coreLib.Viewport. TODO: Check if needed. */
+// NOTE: This type duplicates the Viewport interface from coreLib. Investigation needed
+// to determine if this redefinition is actually necessary or if coreLib.Viewport can be used directly.
 type ViewportProperties = {
     orientation: number;
     camPosLon: number;
@@ -85,12 +86,13 @@ function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
+    public mapGroups: BehaviorSubject<Map<string, Array<MapInfoItem>>> = new BehaviorSubject<Map<string, Array<MapInfoItem>>>(new Map<string, Array<MapInfoItem>>());
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private visualizedTileLayers: Map<string, TileVisualization[]>;
-    private currentFetch: Fetch|null = null;
-    private currentFetchAbort: Fetch|null = null;
+    private currentFetch: Fetch | null = null;
+    private currentFetchAbort: Fetch | null = null;
     private currentFetchId: number = 0;
     private currentViewport: ViewportProperties;
     private currentVisibleTileIds: Set<bigint>;
@@ -100,10 +102,10 @@ export class MapService {
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
 
-    tileParser: TileLayerParser|null = null;
+    tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    moveToWgs84PositionTopic: Subject<{x: number, y: number, z?: number}>;
+    moveToWgs84PositionTopic: Subject<{ x: number, y: number, z?: number }>;
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
 
@@ -129,6 +131,7 @@ export class MapService {
             this.preserveSidePanel = false;
         }
     }
+
     selectionTileRequest: {
         remoteRequest: {
             mapId: string,
@@ -136,8 +139,8 @@ export class MapService {
             tileIds: Array<number>
         },
         tileKey: string,
-        resolve: null|((tile: FeatureTile)=>void),
-        reject: null|((why: any)=>void),
+        resolve: null | ((tile: FeatureTile) => void),
+        reject: null | ((why: any) => void),
     } | null = null;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     statsDialogVisible: boolean = false;
@@ -149,8 +152,7 @@ export class MapService {
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
-                private keyboardService: KeyboardService)
-    {
+                private keyboardService: KeyboardService) {
         this.loadedTileLayers = new Map();
         this.visualizedTileLayers = new Map();
         this.currentFetch = null;
@@ -177,7 +179,7 @@ export class MapService {
         this.tileVisualizationDestructionTopic = new Subject<any>(); // {FeatureTile}
 
         // Triggered when the user requests to zoom to a map layer.
-        this.moveToWgs84PositionTopic = new Subject<{x: number, y: number}>();
+        this.moveToWgs84PositionTopic = new Subject<{ x: number, y: number }>();
 
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.
@@ -188,7 +190,14 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        // Initial call to processTileStream, will keep calling itself
+        // Use combineLatest to coordinate maps loading with parameter initialization
+        combineLatest([this.maps, this.parameterService.ready$.pipe(startWith(null))]).pipe(
+            filter(_ => this.parameterService.initialQueryParamsSet)
+        ).subscribe(_ => {
+            this.processMapsUpdate();
+        });
+
+        // Initial call to processTileStream: will keep calling itself
         this.processTileStream();
         this.processVisualizationTasks();
 
@@ -206,16 +215,22 @@ export class MapService {
             }
         });
 
-        this.parameterService.parameters.subscribe(params => {
-            if (this.parameterService.initialQueryParamsSet)
-                return;
-            for (let [mapId, mapInfo] of this.maps.getValue()) {
+        // Apply initial parameter configuration once maps are loaded and parameters are ready
+        combineLatest([this.maps, this.parameterService.ready$]).pipe(
+            filter(([maps, _]) => maps.size > 0 && this.parameterService.initialQueryParamsSet),
+        ).subscribe(([maps, _]) => {
+            for (let [mapId, mapInfo] of maps) {
+                let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
+                    if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
+                        isAnyLayerVisible = true;
+                    }
                 }
+                mapInfo.visible = isAnyLayerVisible;
             }
             this.update().then();
-        })
+        });
 
         await this.reloadDataSources();
 
@@ -230,11 +245,127 @@ export class MapService {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
         });
 
-        this.keyboardService.registerShortcut("Ctrl+x", ()=>{
+        this.keyboardService.registerShortcut("Ctrl+x", () => {
             this.statsDialogVisible = true;
             this.statsDialogNeedsUpdate.next();
         }, true);
     }
+
+    private activateMapsByDefault(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>, first: string) {
+        // No parameter layers - activate the first group or the first ungrouped map as default
+        if (first && groups.has(first)) {
+            for (const mapItem of groups.get(first)!) {
+                mapItem.visible = true;
+                this.toggleMapLayerVisibility(mapItem.mapId);
+            }
+        } else if (ungrouped.length > 0) {
+            ungrouped[0].visible = true;
+            this.toggleMapLayerVisibility(ungrouped[0].mapId);
+        }
+    };
+
+    private activateMapsIfNew(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>) {
+        // Check for new groups and activate them
+        for (const [groupId, mapItems] of groups) {
+            if (!this.mapGroups.getValue().has(groupId)) {
+                // New group - activate all maps in it
+                for (const mapItem of mapItems) {
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            } else {
+                // Existing group - check for new maps within it
+                const prevGroup = this.mapGroups.getValue().get(groupId)!;
+                for (const mapItem of mapItems) {
+                    if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
+                        // New map in existing group - activate it
+                        mapItem.visible = true;
+                        this.toggleMapLayerVisibility(mapItem.mapId);
+                    }
+                }
+            }
+        }
+
+        // Handle new ungrouped maps
+        if (ungrouped.length > 0 && this.mapGroups.getValue().has("ungrouped")) {
+            const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
+            for (const mapItem of ungrouped) {
+                if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
+                    // New ungrouped map - activate it
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            }
+        }
+    };
+
+    // Pure function that computes new map groups
+    private computeMapGroups(): Map<string, Array<MapInfoItem>> {
+        const isInitLoad = this.mapGroups.getValue().size === 0;
+        const hasExistingLayers = this.parameterService.p().layers.length > 0;
+
+        const groups = new Map<string, Array<MapInfoItem>>();
+        const ungrouped: Array<MapInfoItem> = [];
+        let firstGroup = "";
+        for (const [mapId, mapItem] of this.maps.getValue()) {
+            if (mapId.includes('/')) {
+                const prefix = mapId.split('/')[0];
+                if (groups.has(prefix)) {
+                    groups.get(prefix)!.push(mapItem);
+                    continue;
+                }
+                groups.set(prefix, [mapItem]);
+                if (!firstGroup) {
+                    firstGroup = prefix;
+                }
+            } else {
+                ungrouped.push(mapItem);
+            }
+        }
+
+        if (!isInitLoad) {
+            this.activateMapsIfNew(groups, ungrouped); // Added new maps to the datasource so will activate them
+        } else if (!hasExistingLayers) {
+            this.activateMapsByDefault(groups, ungrouped, firstGroup); // Starting from a clean state
+        }
+
+        if (ungrouped.length > 0) {
+            groups.set("ungrouped", ungrouped);
+        }
+
+        return groups;
+    }
+
+    public processMapsUpdate() {
+        const newGroups = this.computeMapGroups();
+
+        // Only emit if groups actually changed to prevent unnecessary updates
+        const currentGroups = this.mapGroups.getValue();
+        if (!this.mapGroupsEqual(currentGroups, newGroups)) {
+            this.mapGroups.next(newGroups);
+        }
+    }
+
+    // Helper to compare map groups for equality
+    private mapGroupsEqual(a: Map<string, Array<MapInfoItem>>, b: Map<string, Array<MapInfoItem>>): boolean {
+        if (a.size !== b.size) {
+            return false;
+        }
+
+        for (const [key, valueA] of a) {
+            const valueB = b.get(key);
+            if (!valueB || valueA.length !== valueB.length) {
+                return false;
+            }
+
+            for (let i = 0; i < valueA.length; i++) {
+                if (valueA[i].mapId !== valueB[i].mapId || valueA[i].visible !== valueB[i].visible) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
 
     private processTileStream() {
         const startTime = Date.now();
@@ -248,7 +379,7 @@ export class MapService {
 
             let [message, messageType] = this.tileStreamParsingQueue.shift();
             if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                uint8ArrayToWasm( (wasmBuffer: any) => {
+                uint8ArrayToWasm((wasmBuffer: any) => {
                     this.tileParser!.readFieldDictUpdate(wasmBuffer);
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
@@ -310,6 +441,7 @@ export class MapService {
                     let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
+                        let isAnyLayerVisible = false;
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
@@ -318,10 +450,13 @@ export class MapService {
                                 layerInfo.visible,
                                 layerInfo.tileBorders
                             ]);
+                            if (!isAnyLayerVisible && layerInfo.type !== "SourceData" && layerInfo.visible) {
+                                isAnyLayerVisible = true;
+                            }
                             layers.set(layerId, layerInfo);
                         }
                         mapInfo.layers = layers;
-                        mapInfo.visible = true;
+                        mapInfo.visible = isAnyLayerVisible;
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
@@ -348,26 +483,54 @@ export class MapService {
         return false;
     }
 
-    toggleMapLayerVisibility(mapId: string, layerId: string) {
+    toggleMapLayerVisibility(mapId: string, layerId: string = "", state: boolean | undefined = undefined) {
         const mapItem = this.maps.getValue().get(mapId);
         if (mapItem === undefined) {
             return;
         }
         if (layerId) {
             const layer = mapItem.layers.get(layerId);
-            if (layer !== undefined) {
-                this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
-                if (!layer.visible) {
-                    this.clearSelectionForLayer(mapId, layerId);
+            if (layer === undefined || layer.type == "SourceData") {
+                return;
+            }
+            if (state !== undefined) {
+                layer.visible = state;
+            }
+            this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
+            if (!layer.visible) {
+                this.clearSelectionForLayer(mapId, layerId);
+            }
+            // Recalculate map visibility based on non-SourceData layers
+            mapItem.visible = Array.from(mapItem.layers.values()).some(layer =>
+                layer.type !== "SourceData" && layer.visible
+            );
+        } else {
+            if (state !== undefined) {
+                mapItem.visible = state;
+            }
+            const params: {
+                mapId: string,
+                layerId: string,
+                level: number,
+                visible: boolean,
+                tileBorders: boolean
+            }[] = []
+            for (const [_, layer] of mapItem.layers) {
+                if (layer.type !== "SourceData") {
+                    layer.visible = mapItem.visible;
+                    params.push({
+                        mapId: mapItem.mapId,
+                        layerId: layer.layerId,
+                        level: layer.level,
+                        visible: layer.visible,
+                        tileBorders: layer.tileBorders
+                    });
+                    if (!layer.visible) {
+                        this.clearSelectionForLayer(mapId, layer.layerId);
+                    }
                 }
             }
-        } else {
-            mapItem.layers.forEach(layer => {
-                this.parameterService.setMapLayerConfig(mapId, layer.layerId, layer.level, mapItem.visible, layer.tileBorders);
-                if (!mapItem.visible) {
-                    this.clearSelectionForLayer(mapId, layer.layerId);
-                }
-            });
+            this.parameterService.setMapConfig(params);
         }
         this.update().then();
     }
@@ -396,7 +559,7 @@ export class MapService {
         this.update().then();
     }
 
-    *allLevels() {
+    * allLevels() {
         for (let [_, map] of this.maps.getValue())
             for (let [_, layer] of map.layers)
                 yield layer.level;
@@ -423,12 +586,14 @@ export class MapService {
         this.currentHighDetailTileIds = new Set<bigint>();
         // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
+
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
                 const allViewportTileIds = coreLib.getTileIds(
                     this.currentViewport,
                     level,
                     this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
+
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
                     ...this.currentVisibleTileIds,
@@ -525,8 +690,7 @@ export class MapService {
                     // fetches' body to null.
                     this.currentFetch.bodyJson = null;
                 }
-            }
-            else {
+            } else {
                 this.selectionTileRequest.reject!("Map layer is not available.");
             }
         }
@@ -675,7 +839,7 @@ export class MapService {
         this.statsDialogNeedsUpdate.next();
     }
 
-    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle|FeatureLayerStyle, styleId: string = "") {
+    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle | FeatureLayerStyle, styleId: string = "") {
         let wasmStyle = (style as ErdblickStyle).featureLayerStyle ? (style as ErdblickStyle).featureLayerStyle : style as FeatureLayerStyle;
         if (!wasmStyle)
             return;
@@ -687,7 +851,7 @@ export class MapService {
         let visu = new TileVisualization(
             tileLayer,
             this.pointMergeService,
-            (tileKey: string)=>this.getFeatureTile(tileKey),
+            (tileKey: string) => this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || this.currentHighDetailTileIds.has(tileLayer.tileId),
             coreLib.HighlightMode.NO_HIGHLIGHT,
@@ -709,7 +873,7 @@ export class MapService {
     }
 
     getPrioritisedTiles() {
-        let tiles  = new Array<[number, FeatureTile]>();
+        let tiles = new Array<[number, FeatureTile]>();
         for (const [_, tile] of this.loadedTileLayers) {
             tiles.push([coreLib.getTilePriorityById(this.currentViewport, tile.tileId), tile]);
         }
@@ -717,14 +881,16 @@ export class MapService {
         return tiles.map(val => val[1]);
     }
 
-    getFeatureTile(tileKey: string): FeatureTile|null {
+    getFeatureTile(tileKey: string): FeatureTile | null {
         return this.loadedTileLayers.get(tileKey) || null;
     }
 
-    async loadTiles(tileKeys: Set<string|null>): Promise<Map<string, FeatureTile>> {
+    async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
         let result = new Map<string, FeatureTile>();
 
         // TODO: Optimize this loop to make just a single update call.
+        // NOTE: Currently each missing tile triggers a separate update() call, which is inefficient.
+        // Should batch all missing tiles and make a single update call for better performance.
         for (let tileKey of tileKeys) {
             if (!tileKey) {
                 continue;
@@ -748,7 +914,7 @@ export class MapService {
                 reject: null,
             }
 
-            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject)=>{
+            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject) => {
                 this.selectionTileRequest!.resolve = resolve;
                 this.selectionTileRequest!.reject = reject;
             })
@@ -761,7 +927,7 @@ export class MapService {
         return result;
     }
 
-    async highlightFeatures(tileFeatureIds: (TileFeatureId|null|string)[], focus: boolean=false, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightFeatures(tileFeatureIds: (TileFeatureId | null | string)[], focus: boolean = false, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Load the tiles for the selection.
         const tiles = await this.loadTiles(
             new Set(tileFeatureIds.filter(s => s && typeof s !== "string").map(s => (s as TileFeatureId).mapTileKey)));
@@ -775,8 +941,7 @@ export class MapService {
                 // info here, a hover highlight can be turned into a selection.
                 if (id == "hover-highlight") {
                     features = this.hoverTopic.getValue();
-                }
-                else if (id == "selection-highlight") {
+                } else if (id == "selection-highlight") {
                     features = this.selectionTopic.getValue();
                 }
                 continue;
@@ -811,8 +976,7 @@ export class MapService {
                 return;
             }
             this.hoverTopic.next(features);
-        }
-        else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+        } else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
             if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
                 return;
             }
@@ -820,12 +984,13 @@ export class MapService {
                 this.hoverTopic.next([]);
             }
             this.selectionTopic.next(features);
-        }
-        else {
+        } else {
             console.error(`Unsupported highlight mode!`);
         }
 
         // TODO: Focus on bounding box of all features?
+        // NOTE: Currently only focuses on the first feature. Should calculate bounding box
+        // of all selected features and focus on that area for better UX when multiple features are selected.
         if (focus && features.length) {
             this.focusOnFeature(features[0]);
         }
@@ -837,16 +1002,43 @@ export class MapService {
     }
 
     setTileLevelForViewport() {
-        for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-            if (coreLib.getNumTileIds(this.currentViewport, level) >= 48) {
-                this.zoomLevel.next(level);
-                return;
-            }
+        // Validate viewport data
+        if (!this.currentViewport ||
+            !isFinite(this.currentViewport.south) || !isFinite(this.currentViewport.west) ||
+            !isFinite(this.currentViewport.width) || !isFinite(this.currentViewport.height) ||
+            !isFinite(this.currentViewport.camPosLon) || !isFinite(this.currentViewport.camPosLat)) {
+            console.error('Invalid viewport data in setTileLevelForViewport:', this.currentViewport);
+            return;
         }
-        this.zoomLevel.next(MAX_ZOOM_LEVEL);
+
+        try {
+            for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
+                try {
+                    const numTileIds = coreLib.getNumTileIds(this.currentViewport, level);
+
+                    if (!isFinite(numTileIds) || numTileIds < 0) {
+                        console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
+                        continue;
+                    }
+
+                    if (numTileIds >= 48) {
+                        this.zoomLevel.next(level);
+                        return;
+                    }
+                } catch (error) {
+                    console.error(`Error calculating tiles for level ${level}:`, error);
+                    continue;
+                }
+            }
+            this.zoomLevel.next(MAX_ZOOM_LEVEL);
+        } catch (error) {
+            console.error('Error in setTileLevelForViewport:', error);
+            // Fallback to a safe zoom level
+            this.zoomLevel.next(10);
+        }
     }
 
-    *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
+    * tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
         for (const tile of this.loadedTileLayers.values()) {
             if (tile.tileId == tileId) {
                 yield tile;
@@ -864,7 +1056,8 @@ export class MapService {
                 visualizationCollection = this.selectionVisualizations;
                 break;
             case coreLib.HighlightMode.HOVER_HIGHLIGHT:
-                visualizationCollection = this.hoverVisualizations; break;
+                visualizationCollection = this.hoverVisualizations;
+                break;
             default:
                 console.error(`Bad visualization mode ${mode}!`);
                 return;
@@ -885,7 +1078,7 @@ export class MapService {
                 let visu = new TileVisualization(
                     featureTile,
                     this.pointMergeService,
-                    (tileKey: string)=>this.getFeatureTile(tileKey),
+                    (tileKey: string) => this.getFeatureTile(tileKey),
                     style.featureLayerStyle,
                     true,
                     mode,
@@ -917,5 +1110,47 @@ export class MapService {
     private clearAllLegalInfo(): void {
         this.legalInformationPerMap.clear();
         this.legalInformationUpdated.next(true);
+    }
+
+    /**
+     * Clean up all tile visualizations - used during viewer recreation
+     */
+    clearAllTileVisualizations(viewer: any): void {
+        for (const [styleId, tileVisualizations] of this.visualizedTileLayers) {
+            tileVisualizations.forEach(tileVisu => {
+                try {
+                    tileVisu.destroy(viewer);
+                } catch (error) {
+                    console.warn('Error destroying tile visualization:', error);
+                }
+            });
+        }
+        this.visualizedTileLayers.clear();
+        this.tileVisualizationQueue = [];
+    }
+
+    /**
+     * Force clear all loaded tiles - used during viewer recreation
+     * This ensures tiles bound to old viewer context are evicted and refetched
+     */
+    clearAllLoadedTiles(): void {
+        // Destroy all loaded tiles since they're bound to old viewer context
+        for (const tileLayer of this.loadedTileLayers.values()) {
+            try {
+                tileLayer.destroy();
+            } catch (error) {
+                console.warn('Error destroying loaded tile:', error);
+            }
+        }
+        this.loadedTileLayers.clear();
+
+        // Abort any ongoing fetch to prevent race conditions
+        if (this.currentFetch) {
+            this.currentFetch.abort();
+            this.currentFetch = null;
+        }
+
+        // Clear tile parsing queue to prevent rendering stale tiles
+        this.tileStreamParsingQueue = [];
     }
 }

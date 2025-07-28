@@ -115,18 +115,28 @@ export class InspectionPanelComponent
                 this.reset();
                 const map = this.mapService.maps.getValue().get(selection.mapId);
                 if (map) {
-                    this.layerMenuItems = Array.from(map.layers.values()).filter(item => item.type == "SourceData").map(item => {
-                        return {
-                            label: this.inspectionService.layerNameForSourceDataLayerId(item.layerId),
-                            disabled: item.layerId === selection.layerId,
-                            command: () => {
-                                let sourceData = {...selection};
-                                sourceData.layerId = item.layerId;
-                                sourceData.address = BigInt(0);
-                                this.inspectionService.selectedSourceData.next(sourceData);
-                            },
-                        };
-                    });
+                    // TODO: Fix missing entries for the metadata on tile 0
+                    this.layerMenuItems = Array.from(map.layers.values())
+                        .filter(item => item.type == "SourceData")
+                        .filter(item => {
+                            return item.layerId.startsWith("SourceData") ||
+                                (item.layerId.startsWith("Metadata") && selection.tileId === 0);
+                        })
+                        .map(item => {
+                            return {
+                                label: this.inspectionService.layerNameForSourceDataLayerId(
+                                    item.layerId,
+                                    item.layerId.startsWith("Metadata")
+                                ),
+                                disabled: item.layerId === selection.layerId,
+                                command: () => {
+                                    let sourceData = {...selection};
+                                    sourceData.layerId = item.layerId;
+                                    sourceData.address = BigInt(0);
+                                    this.inspectionService.selectedSourceData.next(sourceData);
+                                },
+                            };
+                    }).sort((a, b) => a.label.localeCompare(b.label));
                     this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
                 } else {
                     this.layerMenuItems = [];

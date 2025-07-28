@@ -6,6 +6,7 @@ cmake-build-debug-wsl
 clion-build-*
 cmake-build-*
 static
+static-visualization-only
 .angular
 node_modules
 config

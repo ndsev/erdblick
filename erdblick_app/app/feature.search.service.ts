@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
-import {SearchResultForTile, SearchResultPosition, SearchWorkerTask} from "./featurefilter.worker";
+import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./featurefilter.worker";
 import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
@@ -208,16 +208,17 @@ class FeatureSearchQuadTree {
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
-
     currentQuery: string = ""
+
     workers: Array<Worker> = []
+    workQueue: Array<WorkerTask> = [];
+    cachedWorkQueue: Array<WorkerTask> = [];
+
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     visualization: BillboardCollection = new BillboardCollection();
     visualizationPositions: Array<Cartesian3> = [];
     visualizationChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
-    workQueue: Array<FeatureTile> = [];
-    cachedWorkQueue: Array<FeatureTile> = [];
     totalTiles: number = 0;
     doneTiles: number = 0;
     isFeatureSearchActive: Subject<boolean> = new Subject<boolean>();
@@ -227,6 +228,13 @@ export class FeatureSearchService {
     progress: Subject<number> = new Subject<number>();
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     searchResults: Array<any> = [];
+    traceResults: Array<any> = [];
+    diagnosticsResults: Array<DiagnosticsMessage> = [];
+
+    completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
+    completionCandidateLimit: number = 15;
+    private completionCandidateList: CompletionCandidate[] = [];
+
     pinTiers = [
         10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,
@@ -253,13 +261,22 @@ export class FeatureSearchService {
         // Instantiate workers.
         const maxWorkers = navigator.hardwareConcurrency || 4;
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(new URL('./featurefilter.worker', import.meta.url));
+            const worker = new Worker(new URL('./featurefilter.worker', import.meta.url), {
+                type: 'module'
+            });
             this.workers.push(worker);
-            worker.onmessage = (ev: MessageEvent<SearchResultForTile>) => {
-                this.addSearchResult(ev.data);
+            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
+                switch (event.data.type) {
+                    case 'SearchResultForTile':
+                        this.addSearchResult(event.data as SearchResultForTile);
+                        break;
+                    case 'CompletionCandidatesForTile':
+                        this.addCompletionCandidates(event.data as CompletionCandidatesForTile);
+                        break;
+                }
+
                 if (this.workQueue.length > 0) {
-                    const tileToProcess = this.workQueue.pop()!;
-                    this.scheduleTileForWorker(worker, tileToProcess);
+                    this.scheduleTask(worker, this.workQueue.pop()!);
                 }
             };
         }
@@ -321,10 +338,28 @@ export class FeatureSearchService {
         }
         this.currentQuery = query;
 
+        const tileParser = this.mapService.tileParser;
+
+        function makeTask(tile: FeatureTile): SearchWorkerTask {
+            return {
+                type: 'SearchWorkerTask',
+                tileId: tile.tileId,
+                tileBlob: tile.tileFeatureLayerBlob as Uint8Array,
+                fieldDictBlob: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getFieldDict(buf, tile.nodeId)
+                })!,
+                query: query,
+                dataSourceInfo: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getDataSourceInfo(buf, tile.mapName)
+                })!,
+                nodeId: tile.nodeId
+            }
+        }
+
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
         if (!this.cachedWorkQueue.length) {
-            this.workQueue = this.mapService.getPrioritisedTiles();
+            this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
             this.totalTiles = this.workQueue.length;
             this.isFeatureSearchActive.next(true);
         } else {
@@ -335,13 +370,17 @@ export class FeatureSearchService {
             this.totalTiles = this.workQueue.length;
         }
 
-        // Send a task to each worker to start processing.
-        // Further tasks will be picked up in the worker's
-        // onMessage callback.
+        this.runWorkers();
+    }
+
+    // Send a task to each worker to start processing.
+    // Further tasks will be picked up in the worker's
+    // onMessage callback.
+    private runWorkers() {
         for (const worker of this.workers) {
             const tile = this.workQueue.pop();
             if (tile) {
-                this.scheduleTileForWorker(worker, tile);
+                this.scheduleTask(worker, tile);
             }
         }
     }
@@ -370,6 +409,8 @@ export class FeatureSearchService {
         this.doneTiles = 0;
         this.progress.next(0);
         this.searchResults = [];
+        this.traceResults = [];
+        this.diagnosticsResults = [];
         this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -377,6 +418,60 @@ export class FeatureSearchService {
         this.timeElapsed = this.formatTime(0);
         this.visualizationChanged.next();
         this.errors.clear();
+        this.completionCandidateList = [];
+        this.completionCandidates.next([]);
+    }
+
+    private clearTasksOfType(type: string) {
+        this.workQueue = this.workQueue.filter((task: WorkerTask) => {
+            return task.type != type;
+        })
+    }
+
+    public completeQuery(query: string, point: number | undefined) {
+        if (query === this.currentQuery) {
+            return;
+        }
+        this.currentQuery = query;
+
+        // Remove all pending completion tasks
+        this.clearTasksOfType('CompletionWorkerTask');
+
+        // Build one task per tile
+        const tileParser = this.mapService.tileParser;
+        const limit = this.completionCandidateLimit;
+        function makeTask(tile: FeatureTile): CompletionWorkerTask {
+            return {
+                type: 'CompletionWorkerTask',
+                blob: tile.tileFeatureLayerBlob as Uint8Array,
+                fieldDictBlob: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getFieldDict(buf, tile.nodeId)
+                })!,
+                dataSourceInfo: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getDataSourceInfo(buf, tile.mapName)
+                })!,
+                query: query,
+                point: point || query.length,
+                nodeId: tile.nodeId,
+                limit: limit,
+            }
+        }
+
+        this.completionCandidateList = [];
+        this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
+        this.runWorkers();
+    }
+
+    private addCompletionCandidates(candidates: CompletionCandidatesForTile) {
+        if (candidates.query == this.currentQuery) {
+            this.completionCandidateList = this.completionCandidateList
+                .concat(candidates.candidates)
+                .slice(0, this.completionCandidateLimit)
+                .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
+                .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+
+            this.completionCandidates.next(this.completionCandidateList);
+        }
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
@@ -388,6 +483,19 @@ export class FeatureSearchService {
         if (tileResult.query != this.currentQuery) {
             return;
         }
+
+        // Add trace results
+        for (let [key, trace] of Object.entries(tileResult.traces || {})) {
+            this.traceResults.push({
+                name: `${key}`,
+                calls: trace.calls,
+                totalus: trace.totalus,
+                values: trace.values,
+            })
+        }
+
+        // Add diagnostics
+        this.diagnosticsResults = this.diagnosticsResults.concat(tileResult.diagnostics);
 
         // Add visualizations and register the search result.
         if (tileResult.matches.length && tileResult.tileId) {
@@ -419,18 +527,8 @@ export class FeatureSearchService {
         this.visualizationChanged.next();
     }
 
-    private scheduleTileForWorker(worker: Worker, tileToProcess: FeatureTile) {
-        worker.postMessage({
-            tileBlob: tileToProcess.tileFeatureLayerBlob as Uint8Array,
-            fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                this.mapService.tileParser?.getFieldDict(buf, tileToProcess.nodeId)
-            })!,
-            query: this.currentQuery,
-            dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                this.mapService.tileParser?.getDataSourceInfo(buf, tileToProcess.mapName)
-            })!,
-            nodeId: tileToProcess.nodeId
-        } as SearchWorkerTask);
+    private scheduleTask(worker: Worker, task: WorkerTask) {
+        worker.postMessage(task);
     }
 
     updatePointColor() {
