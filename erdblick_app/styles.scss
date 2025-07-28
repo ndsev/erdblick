@@ -75,7 +75,7 @@ body {
 #info {
   position: absolute;
   right: 0;
-  bottom: 0;
+  top: 0;
   justify-content: center;
   display: flex;
   font-size: 0.8em;
@@ -93,7 +93,7 @@ body {
 #copyright-info {
   position: absolute;
   right: 0;
-  bottom: 1.75em;
+  top: 1.75em;
   justify-content: center;
   display: flex;
   font-size: 0.8em;
@@ -109,6 +109,41 @@ body {
   width: 10em;
   z-index: 100;
   cursor: pointer;
+}
+
+.compass-circle {
+  position: absolute;
+  top: 2em;
+  right: 0.5em;
+  width: 4em;
+  height: 4em;
+  border: 0.15em solid var(--p-button-secondary-border-color);
+  border-radius: 50%;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: sans-serif;
+  color: var(--p-button-secondary-border-color);
+  z-index: 110;
+}
+
+.compass-label {
+  position: absolute;
+  font-size: 0.75em;
+  font-weight: bolder;
+}
+.compass-label.north { top: 0.2em; }
+.compass-label.east  { right: 0.2em; }
+.compass-label.south { bottom: 0.2em; }
+.compass-label.west  { left: 0.2em; }
+
+.compass-needle {
+  width: 0.75em;
+  height: 1.5em;
+  background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  transform-origin: 50% 50%;
 }
 
 .help-button {
@@ -153,6 +188,21 @@ body {
   .p-button {
     border-radius: 50%;
     padding: 0.8em 0;
+  }
+}
+
+.scene-mode-toggle {
+  .p-button {
+    width: 3em;
+    height: 3em;
+  }
+
+  .blue {
+    button {
+      background-color: var(--p-primary-500) !important;
+      border-color: var(--p-primary-500) !important;
+      color: white !important;
+    }
   }
 }
 
@@ -546,30 +596,30 @@ body {
       font-size: 1em;
       color: white;
     }
+  }
 
-    .blue {
-      background-color: var(--p-primary-500);
-    }
+  .blue {
+    background-color: var(--p-primary-500);
+  }
 
-    .red {
-      background-color: indianred;
-    }
+  .red {
+    background-color: indianred !important;
+  }
 
-    .orange {
-      background-color: darkorange;
-    }
+  .orange {
+    background-color: darkorange !important;
+  }
 
-    .green {
-      background-color: limegreen;
-    }
+  .green {
+    background-color: limegreen !important;
+  }
 
-    .grey {
-      background-color: darkgrey;
-    }
+  .grey {
+    background-color: darkgrey !important;
+  }
 
-    .violet {
-      background-color: blueviolet;
-    }
+  .violet {
+    background-color: blueviolet !important;
   }
 }
 
@@ -990,6 +1040,77 @@ body {
   }
 }
 
+.feature-search-tabs {
+  .p-tab {
+    padding: 0.5em 1.5em;
+    margin: 0;
+    font-size: 0.9em;
+  }
+
+  .p-tabpanels {
+    padding: 0.5em 0 0 0;
+    font-size: 0.9em;
+  }
+
+  .results-listbox {
+    li {
+      padding: 0.5em 0.5em;
+      font-size: 1em;
+    }
+
+    .p-scroller {
+      height: calc(100vh - 23em) !important;
+    }
+  }
+
+  #searchDiagnosticsPanel,
+  #searchTracesPanel {
+    & > * {
+      padding-top: 0.5em;
+    }
+
+    .section-heading {
+      font-weight: 700;
+    }
+
+    ul {
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      margin: 0;
+
+      li {
+        display: flex;
+        flex-direction: row;
+        gap: 0.5em;
+        padding: 0.5em;
+        margin: 0;
+        border-radius: 0.5em;
+      }
+
+      li:hover {
+        background-color: var(--p-highlight-background);
+        cursor: pointer;
+      }
+
+      /* Spans are styled as horizontally padded items, the last item getting stretched
+         to the full dialog width.
+       */
+
+      li > span:last-child {
+        flex: 1;
+        text-align: right;
+      }
+
+      /* The first div gets stretched to fill the dialogs width. */
+
+      li > div:first-child {
+        flex: 1;
+      }
+    }
+  }
+}
+
 .p-colorpicker {
   input {
     height: 1em;
@@ -1106,59 +1227,6 @@ body {
       flex-direction: row;
       flex-wrap: nowrap;
       gap: 0.5em;
-    }
-  }
-}
-
-.results-listbox {
-  li {
-    padding: 0.5em 0.75em;
-    font-size: 0.9em;
-  }
-
-  .p-scroller {
-    height: calc(100vh - 23em) !important;
-  }
-}
-
-#searchDiagnosticsPanel,
-#searchTracesPanel {
-  .section-heading {
-    font-weight: 700;
-  }
-
-  ul {
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-
-    li {
-      display: flex;
-      flex-direction: row;
-      gap: 6px;
-      padding: 6px;
-      margin: 0;
-      border-radius: 6px;
-    }
-
-    li:hover {
-      background-color: var(--p-highlight-background);
-      cursor: pointer;
-    }
-
-    /* Spans are styled as horizontally padded items, the last item getting stretched
-       to the full dialog width.
-     */
-
-    li > span:last-child {
-      flex: 1;
-      text-align: right;
-    }
-
-    /* The first div gets stretched to fill the dialogs width. */
-
-    li > div:first-child {
-      flex: 1;
     }
   }
 }

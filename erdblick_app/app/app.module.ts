@@ -91,6 +91,11 @@ import {provideAnimationsAsync} from "@angular/platform-browser/animations/async
 import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
+import {ErdblickViewUIComponent} from "./view.ui.component";
+import {ViewService} from "./view.service";
+import {CameraService} from "./camera.service";
+import {MarkerService} from "./marker.service";
+import {ViewStateService} from "./view.state.service";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -192,7 +197,8 @@ export const initializeServices = () => {
         TreeTableFilterPatchDirective,
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
-        LegalInfoDialogComponent
+        LegalInfoDialogComponent,
+        ErdblickViewUIComponent
     ],
     bootstrap: [
         AppComponent
@@ -283,6 +289,10 @@ export const initializeServices = () => {
         EditorService,
         DataSourcesService,
         RightClickMenuService,
+        ViewStateService,
+        CameraService,
+        ViewService,
+        MarkerService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

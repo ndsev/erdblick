@@ -260,6 +260,8 @@ export class SearchPanelComponent implements AfterViewInit {
         // TODO: Get rid of map selection, as soon as we support
         //  multi-selection from different maps. Then we can
         //  just search all maps simultaneously.
+        // NOTE: Currently users must select specific maps to search. Once cross-map
+        // multi-selection is implemented, search can operate on all maps at once.
         jumpToTargetService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
@@ -301,6 +303,8 @@ export class SearchPanelComponent implements AfterViewInit {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
                 for (let i = 0; i < this.searchItems.length; i++) {
                     // TODO: Introduce a static ID for the action, so we can reference it directly.
+                    // NOTE: Currently relying on string name matching which is fragile. Should use
+                    // stable IDs for actions to avoid issues with name changes or localization.
                     if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
                         this.parametersService.setSearchHistoryState([i, value]);
                         break;

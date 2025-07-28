@@ -258,6 +258,8 @@ export class StyleService {
 
     deleteStyle(styleId: string) {
         // TODO: check if the style was modified and offer to export it
+        // NOTE: Should implement dirty checking to detect unsaved changes and prompt user
+        // with export option before deletion to prevent accidental loss of work.
         let style = this.styles.get(styleId);
         if (!style)
             return;

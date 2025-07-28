@@ -462,7 +462,7 @@ export class MapPanelComponent {
                             }
                     })
                 ));
-                
+
                 // If all layers were pruned (complete maps config change), reinitialize default maps
                 if (this.parameterService.pruneMapLayerConfig(mapItems)) {
                     this.mapService.processMapsUpdate();
@@ -494,11 +494,11 @@ export class MapPanelComponent {
     onOsmOpacityInput(event: any) {
         const inputElement = event.target as HTMLInputElement;
         const value = inputElement.value;
-        
+
         // Extract only numerical characters and decimal points
         const numericalOnly = value.replace(/[^0-9.]/g, '');
         let numValue = parseFloat(numericalOnly);
-        
+
         // Validate and clamp the value
         if (isNaN(numValue) || numValue < 0) {
             numValue = 0;

@@ -35,6 +35,8 @@ interface ErdblickParameters extends Record<string, any> {
     lon: number,
     lat: number,
     alt: number,
+    mode2d: boolean,
+    viewRectangle: [number, number, number, number] | null,  // [west, south, east, north] in degrees
     osm: boolean,
     osmOpacity: number,
     layers: Array<[string, number, boolean, boolean]>,
@@ -48,9 +50,9 @@ interface ErdblickParameters extends Record<string, any> {
 
 interface ParameterDescriptor {
     // Convert the setting to the correct type, e.g. Number.
-    converter: (val: any)=>any,
+    converter: (val: any) => any,
     // Check if the converted value is good, or the default must be used.
-    validator: (val: any)=>boolean,
+    validator: (val: any) => boolean,
     // Default value.
     default: any,
     // Include in the url
@@ -134,6 +136,18 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         default: 16000000,
         urlParam: true
     },
+    mode2d: {
+        converter: val => val === 'true',
+        validator: val => typeof val === 'boolean',
+        default: false,
+        urlParam: true
+    },
+    viewRectangle: {
+        converter: val => val === 'null' ? null : JSON.parse(val),
+        validator: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(v => typeof v === 'number')),
+        default: null,
+        urlParam: true
+    },
     osmOpacity: {
         converter: Number,
         validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
@@ -196,6 +210,9 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
 /** Set of parameter keys allowed in visualization-only mode */
 // TODO: Reflect this in the parameter descriptors, instead
 // of having a separate set.
+// NOTE: Currently parameter access restrictions for visualization-only mode are maintained
+// in this hardcoded set. Should be integrated into the parameter descriptor system for
+// better maintainability and to avoid duplication.
 const VISUALIZATION_ONLY_ALLOWED = new Set([
     'heading',
     'pitch',
@@ -225,8 +242,14 @@ export class ParametersService {
     // Store filtered parameter descriptors based on mode
     private parameterDescriptors: Record<string, ParameterDescriptor>;
 
-    cameraViewData: BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}> =
-        new BehaviorSubject<{destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}}>({
+    cameraViewData: BehaviorSubject<{
+        destination: Cartesian3,
+        orientation: { heading: number, pitch: number, roll: number }
+    }> =
+        new BehaviorSubject<{
+            destination: Cartesian3,
+            orientation: { heading: number, pitch: number, roll: number }
+        }>({
             destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),
             orientation: {
                 heading: 6.0,
@@ -253,7 +276,7 @@ export class ParametersService {
             ? Object.fromEntries(
                 Object.entries(erdblickParameters)
                     .filter(([key]) => VISUALIZATION_ONLY_ALLOWED.has(key))
-              )
+            )
             : erdblickParameters;
 
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
@@ -373,7 +396,7 @@ export class ParametersService {
         }
     }
 
-    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean=false) {
+    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
@@ -387,8 +410,14 @@ export class ParametersService {
         }
     }
 
+    setCompleteMapLayerConfig(mapLayerConfig: Array<[string, number, boolean, boolean]>) {
+        // TODO: Add checks
+        this.p().layers = mapLayerConfig;
+        this.parameters.next(this.p());
+    }
+
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
-        const conf = this.p().layers.find(ml => ml[0] == mapId+"/"+layerId);
+        const conf = this.p().layers.find(ml => ml[0] == mapId + "/" + layerId);
         if (conf !== undefined && conf[2]) {
             return [true, conf[1], conf[3]];
         }
@@ -399,7 +428,7 @@ export class ParametersService {
         if (layerId.includes("SourceData") || layerId.includes("Metadata")) {
             return;
         }
-        const mapLayerName = mapId+"/"+layerId;
+        const mapLayerName = mapId + "/" + layerId;
         let conf = this.p().layers.find(val => val[0] == mapLayerName);
         if (conf !== undefined) {
             conf[1] = level;
@@ -411,7 +440,13 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    setMapConfig(layerParams: {mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean}[]) {
+    setMapConfig(layerParams: {
+        mapId: string,
+        layerId: string,
+        level: number,
+        visible: boolean,
+        tileBorders: boolean
+    }[]) {
         layerParams.forEach(params => {
             if (!params.layerId.includes("SourceData") && !params.layerId.includes("Metadata")) {
                 const mapLayerName = params.mapId + "/" + params.layerId;
@@ -462,6 +497,47 @@ export class ParametersService {
         });
     }
 
+    set2DCameraState(camera: Camera) {
+        // In 2D mode, store the view rectangle AND altitude for proper mode switching
+        const viewRect = camera.computeViewRectangle();
+        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
+
+        if (viewRect) {
+            this.p().viewRectangle = [
+                CesiumMath.toDegrees(viewRect.west),
+                CesiumMath.toDegrees(viewRect.south),
+                CesiumMath.toDegrees(viewRect.east),
+                CesiumMath.toDegrees(viewRect.north)
+            ];
+            // Update center position for compatibility
+            const center = Cartographic.fromRadians(
+                (viewRect.west + viewRect.east) / 2,
+                (viewRect.north + viewRect.south) / 2
+            );
+            this.p().lon = CesiumMath.toDegrees(center.longitude);
+            this.p().lat = CesiumMath.toDegrees(center.latitude);
+        } else {
+            // Fallback if view rectangle can't be computed
+            this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
+            this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
+        }
+
+        // CRITICAL: Store altitude in 2D mode for consistent mode switching
+        this.p().alt = currentPositionCartographic.height;
+
+        // Store 2D-specific camera orientation (always top-down view)
+        this.p().heading = camera.heading;
+        this.p().pitch = camera.pitch;
+        this.p().roll = camera.roll;
+
+        this.parameters.next(this.p());
+    }
+
+    setCameraMode(isEnabled: boolean) {
+        this.p().mode2d = isEnabled;
+        this.parameters.next(this.p());
+    }
+
     loadSavedParameters(): ErdblickParameters | null {
         let parsedParameters: Record<string, any> = {};
         const parameters = localStorage.getItem('erdblickParameters');
@@ -491,7 +567,7 @@ export class ParametersService {
 
     parseAndApplyQueryParams(params: Params) {
         let currentParameters = this.p();
-        let updatedParameters: ErdblickParameters = { ...currentParameters };
+        let updatedParameters: ErdblickParameters = {...currentParameters};
 
         Object.keys(this.parameterDescriptors).forEach(key => {
             const descriptor = this.parameterDescriptors[key];
@@ -537,7 +613,7 @@ export class ParametersService {
         localStorage.setItem('erdblickParameters', JSON.stringify(this.p()));
     }
 
-    setView(destination: Cartesian3, orientation: {heading: number, pitch: number, roll: number}) {
+    setView(destination: Cartesian3, orientation: { heading: number, pitch: number, roll: number }) {
         this.cameraViewData.next({
             destination: destination,
             orientation: orientation

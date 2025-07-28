@@ -35,7 +35,7 @@ import {SearchPanelComponent} from "./search.panel.component";
                               pTooltip="Stop search" tooltipPosition="bottom"></p-button>
                 </div>
 
-                <p-tabs [(value)]="resultPanelIndex" scrollable>
+                <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
                     <p-tablist>
                         <p-tab value="results">
                             <span>Results</span>
@@ -187,10 +187,25 @@ export class FeatureSearchComponent {
                 this.resultPanelIndex = 'traces';
         }
 
-        this.diagnostics = diagnostics;
+        this.diagnostics = this.deduplicateDiagnosticMessages(diagnostics);
         this.traces = traces
         this.results = results;
     }
+
+    deduplicateDiagnosticMessages(list: Array<DiagnosticsMessage>) {
+        const seen = new Set<string>();
+        return list.filter(msg => {
+            const key = [
+                msg.message,
+                msg.location.offset,
+                msg.location.size,
+                msg.fix ?? ''
+            ].join('|');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
 
     selectResult(event: any) {
         if (event.value && event.value.mapId && event.value.featureId) {

@@ -23,9 +23,6 @@ interface Versions {
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
-        <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
-            {{ copyright }}
-        </div>
         <div id="info">
             <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
             <span *ngIf="distributionVersions.length" style="cursor: pointer; z-index: 110" (click)="showExposedVersions()">
