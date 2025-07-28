@@ -2,6 +2,8 @@
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
+#else
+    #include "base64.h"
 #endif
 
 

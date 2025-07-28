@@ -1,10 +1,11 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapService} from "./map.service";
-import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./featurefilter.worker";
+import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./featurefilter.worker";
 import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "./cesium";
 import {FeatureTile} from "./features.model";
 import {coreLib, uint8ArrayFromWasm} from "./wasm";
+import {JobGroup, JobGroupManager} from "./job-group";
 
 export const MAX_ZOOM_LEVEL = 15;
 
@@ -214,6 +215,11 @@ export class FeatureSearchService {
     workQueue: Array<WorkerTask> = [];
     cachedWorkQueue: Array<WorkerTask> = [];
 
+    jobGroupManager: JobGroupManager = new JobGroupManager();
+    currentSearchGroup: JobGroup | null = null;
+    taskIdCounter: number = 0;
+    taskGruoupIdCounter: number = 0;
+
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     visualization: BillboardCollection = new BillboardCollection();
     visualizationPositions: Array<Cartesian3> = [];
@@ -229,7 +235,10 @@ export class FeatureSearchService {
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     searchResults: Array<any> = [];
     traceResults: Array<any> = [];
-    diagnosticsResults: Array<DiagnosticsMessage> = [];
+
+    diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
+    diagnosticsMessageLimit: number = 25;
+    private diagnosticsMessagesList: DiagnosticsMessage[] = [];
 
     completionPending: Subject<boolean> = new Subject<boolean>();
     completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
@@ -267,12 +276,22 @@ export class FeatureSearchService {
             });
             this.workers.push(worker);
             worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-                switch (event.data.type) {
+                const result = event.data;
+
+                // Notify the job-group if the task has an id
+                if (result.taskId) {
+                    this.jobGroupManager.completeTask(result.taskId, result);
+                }
+
+                switch (result.type) {
                     case 'SearchResultForTile':
-                        this.addSearchResult(event.data as SearchResultForTile);
+                        this.addSearchResult(result as SearchResultForTile);
                         break;
                     case 'CompletionCandidatesForTile':
-                        this.addCompletionCandidates(event.data as CompletionCandidatesForTile);
+                        this.addCompletionCandidates(result as CompletionCandidatesForTile);
+                        break;
+                    case 'DiagnosticsResultsForTile':
+                        this.addDiagnostics(result as DiagnosticsResultsForTile);
                         break;
                 }
 
@@ -337,12 +356,21 @@ export class FeatureSearchService {
             this.clear();
             this.startTime = Date.now();
         }
+
         this.currentQuery = query;
+        this.currentSearchGroup = this.jobGroupManager.createGroup('search', query, this.generateTaskGroupId());
+
+        // Set up completion callback to trigger diagnostics after
+        // all tasks of the group are done.
+        this.currentSearchGroup.onComplete((group: JobGroup) => {
+            this.startDiagnosticsForCompletedSearch(group.query);
+        });
 
         const tileParser = this.mapService.tileParser;
-
-        function makeTask(tile: FeatureTile): SearchWorkerTask {
-            return {
+        const searchGroup = this.currentSearchGroup;
+        const makeTask = (tile: FeatureTile): SearchWorkerTask => {
+            const taskId = this.generateTaskId();
+            const task: SearchWorkerTask = {
                 type: 'SearchWorkerTask',
                 tileId: tile.tileId,
                 tileBlob: tile.tileFeatureLayerBlob as Uint8Array,
@@ -353,22 +381,30 @@ export class FeatureSearchService {
                 dataSourceInfo: uint8ArrayFromWasm((buf) => {
                     tileParser?.getDataSourceInfo(buf, tile.mapName)
                 })!,
-                nodeId: tile.nodeId
-            }
-        }
+                nodeId: tile.nodeId,
+                taskId: taskId,
+                groupId: searchGroup.id
+            };
+
+            this.jobGroupManager.addTaskToGroup(searchGroup.id, taskId, task);
+
+            return task;
+        };
 
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
         if (!this.cachedWorkQueue.length) {
-            this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
-            this.totalTiles = this.workQueue.length;
+            let tasks = this.mapService.getPrioritisedTiles().map(makeTask);
+
+            this.workQueue = this.workQueue.concat(tasks);
+            this.totalTiles += tasks.length;
             this.isFeatureSearchActive.next(true);
         } else {
             this.workQueue = [...this.cachedWorkQueue];
             this.cachedWorkQueue = [];
         }
         if (this.totalTiles == 0) {
-            this.totalTiles = this.workQueue.length;
+            this.totalTiles = this.getTasksOfType('SearchWorkerTask').length;
         }
 
         this.runWorkers();
@@ -411,7 +447,8 @@ export class FeatureSearchService {
         this.progress.next(0);
         this.searchResults = [];
         this.traceResults = [];
-        this.diagnosticsResults = [];
+        this.diagnosticsMessagesList = [];
+        this.diagnosticsMessages.next([]);
         this.isFeatureSearchActive.next(false);
         this.totalFeatureCount = 0;
         this.startTime = 0;
@@ -422,6 +459,60 @@ export class FeatureSearchService {
         this.completionCandidateList = [];
         this.completionPending.next(false);
         this.completionCandidates.next([]);
+        this.jobGroupManager.clearCompleted();
+        this.currentSearchGroup = null;
+    }
+
+    /// Generate a new task id
+    private generateTaskId(): string {
+        return `task_${Date.now()}_${++this.taskIdCounter}`;
+    }
+
+    /// Generate a new task-group id
+    private generateTaskGroupId(): string {
+        return `group_${Date.now()}_${++this.taskGruoupIdCounter}`;
+    }
+
+    private startDiagnosticsForCompletedSearch(query: string) {
+        if (!this.currentSearchGroup) {
+            return;
+        }
+
+        const diagnosticsGroup = this.jobGroupManager.createGroup('diagnostics', query, this.generateTaskGroupId());
+
+        const tileParser = this.mapService.tileParser;
+        const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask => {
+            const taskId = this.generateTaskId();
+            const task: DiagnosticsWorkerTask = {
+                type: 'DiagnosticsWorkerTask',
+                blob: tile.tileFeatureLayerBlob as Uint8Array,
+                fieldDictBlob: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getFieldDict(buf, tile.nodeId)
+                })!,
+                query: query,
+                dataSourceInfo: uint8ArrayFromWasm((buf) => {
+                    tileParser?.getDataSourceInfo(buf, tile.mapName)
+                })!,
+                nodeId: tile.nodeId,
+                diagnostics: Array.from(this.currentSearchGroup!.getDiagnostics()),
+                taskId: taskId,
+                groupId: diagnosticsGroup.id,
+            };
+
+            this.jobGroupManager.addTaskToGroup(diagnosticsGroup.id, taskId, task);
+
+            return task;
+        };
+
+        const diagTasks = this.mapService.getPrioritisedTiles().map(makeDiagnosticsTask);
+        this.workQueue = this.workQueue.concat(diagTasks);
+        this.runWorkers();
+    }
+
+    private getTasksOfType(type: string) {
+        return this.workQueue.filter((task: WorkerTask) => {
+            return task.type === type;
+        })
     }
 
     private clearTasksOfType(type: string) {
@@ -440,11 +531,15 @@ export class FeatureSearchService {
         // Remove all pending completion tasks
         this.clearTasksOfType('CompletionWorkerTask');
 
+        // Create completion job group
+        const completionGroup = this.jobGroupManager.createGroup('completion', query, this.generateTaskGroupId());
+
         // Build one task per tile
         const tileParser = this.mapService.tileParser;
         const limit = this.completionCandidateLimit;
-        function makeTask(tile: FeatureTile): CompletionWorkerTask {
-            return {
+        const makeTask = (tile: FeatureTile): CompletionWorkerTask => {
+            const taskId = this.generateTaskId();
+            const task: CompletionWorkerTask = {
                 type: 'CompletionWorkerTask',
                 blob: tile.tileFeatureLayerBlob as Uint8Array,
                 fieldDictBlob: uint8ArrayFromWasm((buf) => {
@@ -457,8 +552,14 @@ export class FeatureSearchService {
                 point: point || query.length,
                 nodeId: tile.nodeId,
                 limit: limit,
-            }
-        }
+                taskId: taskId,
+                groupId: completionGroup.id
+            };
+
+            this.jobGroupManager.addTaskToGroup(completionGroup.id, taskId, task);
+
+            return task;
+        };
 
         this.completionCandidateList = [];
         this.completionPending.next(true);
@@ -481,6 +582,14 @@ export class FeatureSearchService {
         }
     }
 
+    private addDiagnostics(result : DiagnosticsResultsForTile) {
+        this.diagnosticsMessagesList = this.diagnosticsMessagesList
+            .concat(result.messages)
+            .slice(0, this.diagnosticsMessageLimit)
+            .filter((item, index, array) => array.findIndex(other => other.message === item.message && other.location.offset === item.location.offset) === index);
+        this.diagnosticsMessages.next(this.diagnosticsMessagesList);
+    }
+
     private addSearchResult(tileResult: SearchResultForTile) {
         if (tileResult.error) {
             this.errors.add(tileResult.error);
@@ -501,8 +610,10 @@ export class FeatureSearchService {
             })
         }
 
-        // Add diagnostics
-        this.diagnosticsResults = this.diagnosticsResults.concat(tileResult.diagnostics);
+        // Add diagnostics to the current search group
+        if (tileResult.diagnostics && this.currentSearchGroup) {
+            this.currentSearchGroup.addDiagnostics(tileResult.diagnostics);
+        }
 
         // Add visualizations and register the search result.
         if (tileResult.matches.length && tileResult.tileId) {
@@ -535,6 +646,7 @@ export class FeatureSearchService {
     }
 
     private scheduleTask(worker: Worker, task: WorkerTask) {
+        console.debug(`Scheduling task id=${task.taskId || 'null'} group=${task.groupId || 'null'}`);
         worker.postMessage(task);
     }
 
