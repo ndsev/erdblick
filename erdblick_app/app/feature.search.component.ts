@@ -163,11 +163,13 @@ export class FeatureSearchComponent {
                 this.searchResultReady();
             }
         });
+        this.searchService.diagnosticsMessages.subscribe(value => {
+            this.diagnostics = value;
+        })
     }
 
     searchResultReady() {
         const results = this.searchService.searchResults;
-        const diagnostics = this.searchService.diagnosticsResults.slice(0, 25);
         const traces = this.searchService.traceResults;
         const errors = this.searchService.errors;
 
@@ -181,31 +183,15 @@ export class FeatureSearchComponent {
                 Array.from(errors).join('\n'))
 
         } else if (results.length == 0) {
-            if (diagnostics.length > 0)
+            if (this.diagnostics.length > 0)
                 this.resultPanelIndex = 'diagnostics';
             else if (traces.length > 0)
                 this.resultPanelIndex = 'traces';
         }
 
-        this.diagnostics = this.deduplicateDiagnosticMessages(diagnostics);
         this.traces = traces
         this.results = results;
     }
-
-    deduplicateDiagnosticMessages(list: Array<DiagnosticsMessage>) {
-        const seen = new Set<string>();
-        return list.filter(msg => {
-            const key = [
-                msg.message,
-                msg.location.offset,
-                msg.location.size,
-                msg.fix ?? ''
-            ].join('|');
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-    };
 
     selectResult(event: any) {
         if (event.value && event.value.mapId && event.value.featureId) {
