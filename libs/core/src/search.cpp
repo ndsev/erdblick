@@ -190,13 +190,14 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
     return obj.value_;
 }
 
-erdblick::NativeJsValue erdblick::FeatureLayerSearch::diagnostics(std::string const& q, NativeJsValue const& diagnostics)
+erdblick::NativeJsValue erdblick::FeatureLayerSearch::diagnostics(std::string const& q, NativeJsValue const& ndiagnostics)
 {
+    auto diagnostics = JsValue(ndiagnostics);
     simfil::Diagnostics merged;
 
     const auto length = diagnostics["length"].as<std::size_t>();
     for (auto i = 0; i < length; ++i) {
-        auto buffer = JsValue(diagnostics[i]).toUint8Array();
+        auto buffer = diagnostics.at(i).toUint8Array();
 
         Uint8StreamBuffer streamBuffer(buffer);
         std::istream stream(&streamBuffer);

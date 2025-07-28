@@ -2,7 +2,6 @@
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
-#else
     #include "base64.h"
 #endif
 
@@ -183,7 +182,7 @@ std::vector<std::uint8_t> JsValue::toUint8Array() const
                 throw std::range_error("Expected value <= 0xff");
             }
 
-            elements.push_back(static_cast<std::uint8_t>(value));
+            vec.push_back(static_cast<std::uint8_t>(value));
         }
     }
 
