@@ -1,5 +1,10 @@
 #include "cesium-interface/object.h"
 
+#if !defined(EMSCRIPTEN)
+    #include <stdexcept>
+#endif
+
+
 namespace erdblick
 {
 
@@ -55,17 +60,31 @@ JsValue JsValue::List(std::initializer_list<JsValue> initializers)
 #endif
 }
 
-JsValue JsValue::Float64Array(const std::vector<double>& coordinates)
+JsValue JsValue::Float64Array(const std::span<double>& data)
 {
 #ifdef EMSCRIPTEN
-    static thread_local auto JsFloat64ArrayType = emscripten::val::global("Float64Array");
-    // Create a typed memory view directly pointing to the vector's data
-    auto memoryView = emscripten::typed_memory_view(coordinates.size(), coordinates.data());
-    // Create a Float64Array from the memory view
-    auto float64Array = JsFloat64ArrayType.new_(memoryView);
-    return JsValue(float64Array);
+    static thread_local const auto type = emscripten::val::global("Float64Array");
+
+    auto buffer = type.new_(data.size());
+    buffer.call<void>("set", emscripten::typed_memory_view(data.size(), data.data()));
+
+    return JsValue(buffer);
 #else
-    return JsValue(coordinates);
+    return JsValue(data);
+#endif
+}
+
+JsValue JsValue::Uint8Array(const std::span<std::uint8_t>& data)
+{
+#ifdef EMSCRIPTEN
+    static thread_local const auto type = emscripten::val::global("Uint8Array");
+
+    auto buffer = type.new_(data.size());
+    buffer.call<void>("set", emscripten::typed_memory_view(data.size(), data.data()));
+
+    return JsValue(buffer);
+#else
+    return JsValue(base64::encode(data));
 #endif
 }
 
@@ -138,6 +157,35 @@ uint32_t JsValue::size() const {
     return value_["length"].as<uint32_t>();
 #else
     return value_.size();
+#endif
+}
+
+std::vector<std::uint8_t> JsValue::toUint8Array() const
+{
+#ifdef EMSCRIPTEN
+    return emscripten::convertJSArrayToNumberVector<std::uint8_t>(value_);
+#else
+    const auto len = size();
+    std::vector<std::uint8_t> vec(len);
+
+    if (value_.is_string()) {
+        return base64::decode(value_.get<std::string>());
+    } else if (value_.is_array()) {
+        for (const auto& element : value_) {
+            if (!element.is_number_unsigned()) {
+                throw std::range_error("Expected unsigned value");
+            }
+
+            auto value = element.get<std::uint64_t>();
+            if (value > 0xff) {
+                throw std::range_error("Expected value <= 0xff");
+            }
+
+            elements.push_back(static_cast<std::uint8_t>(value));
+        }
+    }
+
+    return vec;
 #endif
 }
 

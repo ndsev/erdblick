@@ -65,7 +65,13 @@ struct JsValue
      * Construct an Object as a new JS Float64 TypedArray.
      * @param coordinates Float64 buffer to fill the typed array.
      */
-    static JsValue Float64Array(std::vector<double> const& coordinates);
+    static JsValue Float64Array(std::span<double> const& data);
+
+    /**
+     * Construct a Uint8Array object, filled with the data passed.
+     * @param data Data to pass to the Uint8Array
+     */
+    static JsValue Uint8Array(std::span<std::uint8_t> const& data);
 
     /**
      * Construct an undefined value.
@@ -154,6 +160,11 @@ struct JsValue
      * the mock version.
      */
     [[nodiscard]] uint32_t size() const;
+
+    /**
+     * Get this value as vector<uint8_t>.
+     */
+    std::vector<std::uint8_t> toUint8Array() const;
 
     /**
      * Convert this JsValue to string representation.
