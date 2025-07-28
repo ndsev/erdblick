@@ -119,14 +119,15 @@ struct JsValue
 
     /**
      * Property access using operator[].
-     * Read-access to a non-existing mock property will add the property as an empty object.
+     * Read-access to a non-existing mock property will add the property as an empty object (if non-const).
      */
     JsValue operator[](std::string const& propertyName);
+    JsValue operator[](std::string const& propertyName) const;
 
     /**
      * Assuming this is a dict, check if the entry with the given key exists.
      */
-    bool has(std::string const& propertyName);
+    bool has(std::string const& propertyName) const;
 
     /**
      * Get the value at the specified index, assuming that this

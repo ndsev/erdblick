@@ -36,6 +36,9 @@ import {InspectionService} from "./inspection.service";
                     </p-button>
                     <div *ngIf="osmEnabled" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="osmOpacityString"
+                               (input)="onOsmOpacityInput($event)"
+                               (keydown.enter)="updateOSMOverlay()"
+                               (blur)="updateOSMOverlay()"
                                class="w-full slider-input" tabindex="0"/>
                         <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
                                   class="w-full" tabindex="-1">
@@ -78,6 +81,7 @@ import {InspectionService} from "./inspection.service";
                                                      (click)="mapItem.visible = !mapItem.visible; toggleMap(mapItem.mapId)">
                                                 <span>
                                                     <p-checkbox [(ngModel)]="mapItem.visible"
+                                                                (click)="$event.stopPropagation()"
                                                                 (ngModelChange)="toggleMap(mapItem.mapId)"
                                                                 [binary]="true"
                                                                 [inputId]="mapItem.mapId"
@@ -114,6 +118,7 @@ import {InspectionService} from "./inspection.service";
                                                              (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.mapId, mapLayer.key)">
                                                         <span>
                                                             <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                                        (click)="$event.stopPropagation()"
                                                                         (ngModelChange)="toggleLayer(mapItem.mapId, mapLayer.key)"
                                                                         [binary]="true"
                                                                         [inputId]="mapLayer.key"
@@ -176,6 +181,7 @@ import {InspectionService} from "./inspection.service";
                                          (click)="mapItem.visible = !mapItem.visible; toggleMap(mapItem.mapId)">
                                     <span>
                                         <p-checkbox [(ngModel)]="mapItem.visible"
+                                                    (click)="$event.stopPropagation()"
                                                     (ngModelChange)="toggleMap(mapItem.mapId)"
                                                     [binary]="true"
                                                     [inputId]="mapItem.mapId"
@@ -207,6 +213,7 @@ import {InspectionService} from "./inspection.service";
                                                  (click)="mapLayer.value.visible = !mapLayer.value.visible; toggleLayer(mapItem.mapId, mapLayer.key)">
                                         <span>
                                             <p-checkbox [(ngModel)]="mapLayer.value.visible"
+                                                        (click)="$event.stopPropagation()"
                                                         (ngModelChange)="toggleLayer(mapItem.mapId, mapLayer.key)"
                                                         [binary]="true"
                                                         [inputId]="mapLayer.key"
@@ -282,6 +289,7 @@ import {InspectionService} from "./inspection.service";
                                      tabindex="0">
                                     <span>
                                         <p-checkbox [(ngModel)]="style.value.params.visible"
+                                                    (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(style.value)"
                                                     [binary]="true"
                                                     [inputId]="style.key"
@@ -435,9 +443,7 @@ export class MapPanelComponent {
             this.osmEnabled = parameters.osm;
             this.osmOpacityValue = parameters.osmOpacity;
         });
-        // TODO: Use parameter service to store the state of the groups
-        // NOTE: Group expansion/collapse state should be persisted via parameter service
-        // to maintain user's preferred view state across sessions.
+        // TODO: Use parameter service to store the state of the groups?
         this.mapService.mapGroups.subscribe(mapGroups => {
             for (const [groupId, mapItems] of mapGroups.entries()) {
                 if (groupId !== "ungrouped") {
@@ -456,7 +462,11 @@ export class MapPanelComponent {
                             }
                     })
                 ));
-                this.parameterService.pruneMapLayerConfig(mapItems);
+
+                // If all layers were pruned (complete maps config change), reinitialize default maps
+                if (this.parameterService.pruneMapLayerConfig(mapItems)) {
+                    this.mapService.processMapsUpdate();
+                }
             }
         });
         this.sidePanelService.observable().subscribe(activePanel => {
@@ -471,9 +481,43 @@ export class MapPanelComponent {
         return 'Opacity: ' + this.osmOpacityValue;
     }
 
+    set osmOpacityString(value: string) {
+        const match = value.match(/(\d+(?:\.\d+)?)/);
+        if (match) {
+            const numValue = parseFloat(match[1]);
+            if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
+                this.osmOpacityValue = numValue;
+            }
+        }
+    }
+
+    onOsmOpacityInput(event: any) {
+        const inputElement = event.target as HTMLInputElement;
+        const value = inputElement.value;
+
+        // Extract only numerical characters and decimal points
+        const numericalOnly = value.replace(/[^0-9.]/g, '');
+        let numValue = parseFloat(numericalOnly);
+
+        // Validate and clamp the value
+        if (isNaN(numValue) || numValue < 0) {
+            numValue = 0;
+        } else if (numValue > 100) {
+            numValue = 100;
+        }
+
+        this.osmOpacityValue = numValue;
+        // Always show "Opacity: X"
+        const formattedValue = 'Opacity: ' + numValue;
+        if (inputElement.value !== formattedValue) {
+            inputElement.value = formattedValue;
+            inputElement.dispatchEvent(new Event('input'));
+        }
+
+        this.updateOSMOverlay();
+    }
+
     // TODO: Refactor these into a generic solution
-    // NOTE: Multiple similar toggle menu methods exist. Should create a generic
-    // toggle menu service or component to reduce code duplication.
     showOptionsToggleMenu(event: MouseEvent, style: ErdblickStyle, optionId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -484,7 +528,6 @@ export class MapPanelComponent {
                         this.styleService.toggleOption(style.id, id, id == optionId);
                     }
                     this.applyStyleConfig(style);
-                    // this.mapService.update();
                 }
             },
             {
@@ -494,7 +537,6 @@ export class MapPanelComponent {
                         this.styleService.toggleOption(style.id, id, id != optionId);
                     }
                     this.applyStyleConfig(style);
-                    // this.mapService.update();
                 }
             },
             {
@@ -504,7 +546,6 @@ export class MapPanelComponent {
                         this.styleService.toggleOption(style.id, id, false);
                     }
                     this.applyStyleConfig(style);
-                    // this.mapService.update();
                 }
             },
             {
@@ -514,7 +555,6 @@ export class MapPanelComponent {
                         this.styleService.toggleOption(style.id, id, true);
                     }
                     this.applyStyleConfig(style);
-                    // this.mapService.update();
                 }
             }
         ];
@@ -665,6 +705,7 @@ export class MapPanelComponent {
 
     toggleLayer(mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
+        this.updateGroupVisibilityForMap(mapName);
     }
 
     expandStyle(styleId: string) {
@@ -802,16 +843,8 @@ export class MapPanelComponent {
             this.mapService.toggleMapLayerVisibility(mapId, "", state)
             return;
         }
-        if (mapId.includes('/')) {
-            const groupId = mapId.split('/')[0];
-            if (this.mapService.mapGroups.getValue().has(groupId)) {
-                const mapItems = this.mapService.mapGroups.getValue().get(groupId)!;
-                const groupVisibility = mapItems.some(mapItem => mapItem.visible);
-                const mapsVisibility = mapItems.every(mapItem => mapItem.visible);
-                this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
-            }
-        }
         this.mapService.toggleMapLayerVisibility(mapId);
+        this.updateGroupVisibilityForMap(mapId);
     }
 
     toggleGroup(groupId: string) {
@@ -830,5 +863,17 @@ export class MapPanelComponent {
         this.mapService.mapGroups.getValue().get(groupId)!.forEach(mapItem => {
             this.toggleMap(mapItem.mapId, groupId);
         });
+    }
+
+    private updateGroupVisibilityForMap(mapId: string) {
+        if (mapId.includes('/')) {
+            const groupId = mapId.split('/')[0];
+            if (this.mapService.mapGroups.getValue().has(groupId)) {
+                const mapItems = this.mapService.mapGroups.getValue().get(groupId)!;
+                const groupVisibility = mapItems.some(mapItem => mapItem.visible);
+                const mapsVisibility = mapItems.every(mapItem => mapItem.visible);
+                this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
+            }
+        }
     }
 }

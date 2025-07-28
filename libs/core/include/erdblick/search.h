@@ -1,6 +1,5 @@
 #pragma once
 
-#include "cesium-interface/object.h"
 #include "layer.h"
 
 namespace erdblick
@@ -28,8 +27,13 @@ public:
      */
     NativeJsValue filter(std::string const& q);
 
-    /** Returns list of Tuples of (Trace Name, Trace Values). */
-    NativeJsValue traceResults();
+    /** Returns a list of completion candidates of the following structure:
+     *
+     * [
+     *   {text: string, range: [begin, end]}, ...
+     * ]
+     */
+    NativeJsValue complete(std::string const& q, int point, NativeJsValue const& options);
 
 private:
     TileFeatureLayer& tfl_;

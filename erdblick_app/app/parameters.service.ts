@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "./cesium";
 import {Params} from "@angular/router";
 import {SelectedSourceData} from "./inspection.service";
@@ -234,6 +234,10 @@ export class ParametersService {
     private _replaceUrl: boolean = true;
     parameters: BehaviorSubject<ErdblickParameters>;
     initialQueryParamsSet: boolean = false;
+    
+    // Observable that emits when initialization is complete
+    private ready = new Subject<void>();
+    public ready$ = this.ready.asObservable();
 
     // Store filtered parameter descriptors based on mode
     private parameterDescriptors: Record<string, ParameterDescriptor>;
@@ -593,6 +597,9 @@ export class ParametersService {
 
         this.parameters.next(updatedParameters);
         this.initialQueryParamsSet = true;
+        
+        // Emit ready signal for subscribers waiting for initialization
+        this.ready.next();
     }
 
     resetStorage() {
@@ -696,7 +703,7 @@ export class ParametersService {
         this.parameters.next(this.p());
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapInfoItem>) {
+    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
@@ -705,6 +712,8 @@ export class ParametersService {
         });
 
         this.p().layers = this.p().layers.filter(layer => mapLayerIds.has(layer[0]));
+        const hasLayersAfterPruning = this.p().layers.length > 0;
         this.parameters.next(this.p());
+        return !hasLayersAfterPruning; // Need to reinitialise the layers if none configured anymore
     }
 }

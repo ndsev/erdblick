@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, Renderer2, ViewChild} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
 import {Cartesian3} from "./cesium";
 import {InfoMessageService} from "./info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
@@ -7,8 +7,11 @@ import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
-import {distinctUntilChanged} from "rxjs";
+import {debounceTime, distinctUntilChanged, Subject} from "rxjs";
 import {RightClickMenuService} from "./rightclickmenu.service";
+import {FeatureSearchService} from "./feature.search.service";
+import getCaretCoordinates from "textarea-caret";
+import { CompletionCandidate } from "./featurefilter.worker";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -20,14 +23,30 @@ interface ExtendedSearchTarget extends SearchTarget {
         <div class="search-wrapper">
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
-                <textarea #textarea class="single-line" rows="1" pTextarea
+                <textarea #textarea class="single-line" pTextarea rows="1"
                           [(ngModel)]="searchInputValue"
                           (click)="showSearchOverlay()"
                           (ngModelChange)="setSearchValue(searchInputValue)"
                           (keydown)="onKeydown($event)"
+                          (keyup)="onKeyup($event)"
+                          (blur)="onBlur()"
+                          (scroll)="updateCursor()"
                           placeholder="Search">
                 </textarea>
+
+                <div class="completion-popup"
+                    *ngIf="completion.visible"
+                    (mousedown)="onCompletionPopupDown($event)"
+                    [style.top.px]="completion.top"
+                    [style.left.px]="completion.left">
+                    <div *ngFor="let item of completionItems; index as idx"
+                        [ngClass]="{'selected': idx === completion.selectionIndex}"
+                        (click)="applyCompletion(item.query)">
+                        <span>{{ item.text }}</span>
+                    </div>
+                </div>
             </div>
+
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
                           [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
@@ -45,6 +64,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                                 </div>
                             </div>
                         </div>
+
                         <div class="search-menu" *ngFor="let item of visibleSearchHistory; let i = index" >
                             <div onEnterClick (click)="selectHistoryEntry(i)" class="search-option-wrapper" tabindex="0">
                                 <div class="icon-circle violet">
@@ -105,13 +125,26 @@ export class SearchPanelComponent implements AfterViewInit {
     searchHistory: Array<any> = [];
     visibleSearchHistory: Array<any> = [];
 
+    /* Autocompletion */
+    private searchInputChanged: Subject<void> = new Subject<void>();
+    completionItems: Array<CompletionCandidate> = [];
+    completion = {
+        // Position of the popup
+        top: 0,
+        left: 0,
+        // Selected item
+        selectionIndex: 0,
+        // True if the popup is visible
+        visible: false,
+    };
+
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
 
-    @ViewChild('textarea') textarea!: ElementRef;
+    @ViewChild('textarea') textarea!: ElementRef<HTMLTextAreaElement>;
     @ViewChild('actionsdialog') dialog!: Dialog;
+
     cursorPosition: number = 0;
-    private clickListener: () => void;
 
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
@@ -205,9 +238,9 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                private sidePanelService: SidePanelService) {
+                private sidePanelService: SidePanelService,
+                private searchService: FeatureSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
-        this.clickListener = this.renderer.listen('document', 'click', this.handleClickOut.bind(this));
 
         this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
@@ -281,6 +314,23 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.reloadSearchHistory();
+
+        this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+            this.completionItems = value.filter((item, index, array) => {
+                // Discard any candidate that is equal to the current input
+                // or does not relate to the current input (e.g. delayed results).
+                return item.query !== this.searchInputValue && item.source === this.searchInputValue;
+            });
+
+            const length = this.completionItems.length
+            if (length <= this.completion.selectionIndex)
+                this.completion.selectionIndex = length;
+            this.completion.visible = length > 0;
+        });
+
+        this.searchInputChanged.pipe(debounceTime(150)).subscribe(() => {
+            this.completeQuery(this.searchInputValue, this.cursorPosition);
+        })
     }
 
     ngAfterViewInit() {
@@ -457,6 +507,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     showSearchOverlay() {
+        this.updateCursor();
         this.sidePanelService.panel = SidePanelState.SEARCH;
         this.setSearchValue(this.searchInputValue);
     }
@@ -523,22 +574,137 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
+    updateCursor() {
+        const textarea = this.textarea.nativeElement;
+        const rect = textarea.getBoundingClientRect();
+        const cursor = textarea.selectionStart || 0;
+        const style = window.getComputedStyle(textarea);
+        const fontSizePx = parseFloat(style.fontSize);
+        const offset = (1 + 0.75) * fontSizePx; // Text height + padding height
+
+        this.cursorPosition = cursor;
+
+        const caret = getCaretCoordinates(textarea, cursor);
+        if (caret) {
+            this.completion.top = rect.top + caret.top + offset;
+            this.completion.left = rect.left + caret.left;
+        } else {
+            this.completion.top = rect.bottom;
+            this.completion.left = rect.left;
+        }
+    }
+
+    onCompletionPopupDown(event: MouseEvent) {
+        event.preventDefault();
+    }
+
+    onBlur() {
+        setTimeout(() => {
+            this.completion.visible = false;
+        })
+    }
+
+    onKeyup(event: KeyboardEvent) {
+        this.updateCursor();
+
+        const ignoredKeys = [
+            'Home', 'End', 'PageUp', 'PageDown', 'Escape',
+            'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
+        ]
+        if (ignoredKeys.indexOf(event.key) == -1) {
+            this.searchInputChanged.next();
+        }
+    }
+
     onKeydown(event: KeyboardEvent) {
-        if (event.key === 'Enter') {
-            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
-            } else {
-                this.parametersService.setSearchHistoryState(null);
+        const textarea = this.textarea.nativeElement;
+        const dismissCompletionKeys = [
+            'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete'
+        ]
+
+        // Dismiss the completion pop-up for control-keys
+        if (dismissCompletionKeys.indexOf(event.key) >= 0) {
+            if (this.completion.visible)
+                event.preventDefault();
+            this.completion.visible = false;
+        }
+
+        // Prevent defaults if completion is active
+        if (this.completion.visible) {
+            if (['ArrowUp', 'ArrowDown', 'Tab'].indexOf(event.key) >= 0) {
+                event.preventDefault();
             }
-            this.textarea.nativeElement.blur();
+        }
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+
+            if (this.completion.visible) {
+                this.applyCompletion();
+                event.stopPropagation();
+            } else {
+                if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+                    this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
+                } else {
+                    this.parametersService.setSearchHistoryState(null);
+                }
+
+                textarea.blur();
+            }
         } else if (event.key === 'Escape') {
             event.stopPropagation();
             if (this.searchInputValue) {
                 this.setSearchValue("");
                 return;
             }
+
             this.dialog.close(event);
+        } else if (event.key === 'Tab') {
+            if (this.completion.visible) {
+                this.applyCompletion();
+            }
+        } else if (event.key === 'ArrowDown') {
+            if (this.completion.visible) {
+                this.selectNextCompletion(true);
+            }
+        } else if (event.key === 'ArrowUp') {
+            if (this.completion.visible) {
+                this.selectNextCompletion(false);
+            }
         }
+    }
+
+    applyCompletion(text: string | undefined = undefined) {
+        if (this.completion.visible || text) {
+            if (text !== undefined) {
+                this.setSearchValue(text);
+                this.textarea.nativeElement.focus();
+            } else {
+                this.setSearchValue(this.completionItems[this.completion.selectionIndex].query);
+            }
+
+            this.completionItems = [];
+            this.completion.visible = false;
+        }
+    }
+
+    selectNextCompletion(next: boolean = true) {
+        const direction = next && +1 || -1
+        const count = this.completionItems.length || 0;
+
+        let index = this.completion.selectionIndex
+        if (count == 0)
+            index = 0
+        else
+            index = index + direction
+
+        if (index < 0)
+            index = count - 1;
+        else if (index >= count)
+            index = 0
+
+        this.completion.selectionIndex = index;
+        this.completion.visible = count > 0;
     }
 
     selectHistoryEntry(index: number) {
@@ -566,30 +732,42 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     clickOnSearchToStart() {
-        // this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
+        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         this.textarea.nativeElement.click();
     }
 
+    @HostListener('document:mousedown', ['$event'])
     handleClickOut(event: MouseEvent): void {
-        const clickedInsideComponent = this.elRef.nativeElement.contains(event.target);
+        const clickedInsideComponent = this.elRef.nativeElement.contains(event.target as Node);
 
-        // Check if the clicked element is a button or a file input
-        const clickedOnButton = event.target instanceof HTMLElement && event.target.tagName === 'BUTTON';
-        const clickedOnUploader = event.target instanceof HTMLElement &&
-            (event.target.tagName === 'INPUT' && event.target.getAttribute('type') === 'file');
+        // Check if the clicked element is a form control or interactive element
+        const clickedOnInteractiveElement = event.target instanceof HTMLElement && (
+            event.target.tagName === 'BUTTON' ||
+            event.target.tagName === 'INPUT' ||
+            event.target.tagName === 'TEXTAREA' ||
+            event.target.tagName === 'SELECT' ||
+            event.target.isContentEditable ||
+            event.target.closest('p-checkbox') ||
+            event.target.closest('p-dropdown') ||
+            event.target.closest('p-multiselect') ||
+            event.target.closest('p-calendar') ||
+            event.target.closest('p-inputnumber') ||
+            event.target.closest('.p-component')
+        );
 
-        if (!clickedInsideComponent && !clickedOnButton && !clickedOnUploader) {
+        if (!clickedInsideComponent && !clickedOnInteractiveElement) {
             this.dialog.close(event);
         }
     }
 
-    ngOnDestroy(): void {
-        if (this.clickListener) {
-            this.clickListener();
+    completeQuery(query: string, point: number | undefined) {
+        if (!query) {
+            this.completion.visible = false;
+            this.completionItems = [];
+            return;
         }
-    }
 
-    onFileSelected($event: any) {
-        alert($event)
+        this.searchService.completeQuery(query, point || query.length);
+        this.completion.selectionIndex = 0;
     }
 }

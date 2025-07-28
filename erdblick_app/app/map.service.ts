@@ -3,7 +3,7 @@ import {Fetch} from "./fetch.model";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {TileVisualization} from "./visualization.model";
-import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, Subject, combineLatest, filter, startWith} from "rxjs";
 import {ErdblickStyle, StyleService} from "./style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
 import {ParametersService, TileFeatureId} from "./parameters.service";
@@ -190,67 +190,11 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        this.maps.subscribe(mapItems => {
-            const initRun = this.mapGroups.getValue().size == 0;
-            const groups = new Map<string, Array<MapInfoItem>>();
-            const ungrouped: Array<MapInfoItem> = []; // Maintain this group as the last inserted item to simplify ordering
-            let firstGroup = "";
-            for (const [mapId, mapItem] of mapItems) {
-                if (mapId.includes('/')) {
-                    const prefix = mapId.split('/')[0];
-                    if (groups.has(prefix)) {
-                        groups.get(prefix)!.push(mapItem);
-                        continue;
-                    }
-                    groups.set(prefix, [mapItem]);
-                    if (!firstGroup) {
-                        firstGroup = prefix;
-                    }
-                } else {
-                    ungrouped.push(mapItem);
-                }
-            }
-            if (!initRun) {
-                for (const [groupId, mapItems] of groups) {
-                    if (!this.mapGroups.getValue().has(groupId)) {
-                        for (const mapItem of mapItems) {
-                            mapItem.visible = true;
-                            this.toggleMapLayerVisibility(mapItem.mapId);
-                        }
-                    } else {
-                        const prevGroup = this.mapGroups.getValue().get(groupId)!;
-                        for (const mapItem of mapItems) {
-                            if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
-                                mapItem.visible = true;
-                                this.toggleMapLayerVisibility(mapItem.mapId);
-                            }
-                        }
-                    }
-                }
-            } else if (firstGroup) {
-                for (const mapItem of groups.get(firstGroup)!) {
-                    mapItem.visible = true;
-                    this.toggleMapLayerVisibility(mapItem.mapId);
-                }
-            }
-            if (ungrouped.length > 0) {
-                if (!initRun) {
-                    if (this.mapGroups.getValue().has("ungrouped")) {
-                        const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
-                        for (const mapItem of ungrouped) {
-                            if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
-                                mapItem.visible = true;
-                                this.toggleMapLayerVisibility(mapItem.mapId);
-                            }
-                        }
-                    }
-                } else if (!firstGroup) {
-                    ungrouped[0].visible = true;
-                    this.toggleMapLayerVisibility(ungrouped[0].mapId);
-                }
-                groups.set("ungrouped", ungrouped);
-            }
-            this.mapGroups.next(groups);
+        // Use combineLatest to coordinate maps loading with parameter initialization
+        combineLatest([this.maps, this.parameterService.ready$.pipe(startWith(null))]).pipe(
+            filter(_ => this.parameterService.initialQueryParamsSet)
+        ).subscribe(_ => {
+            this.processMapsUpdate();
         });
 
         // Initial call to processTileStream: will keep calling itself
@@ -271,14 +215,15 @@ export class MapService {
             }
         });
 
-        this.parameterService.parameters.subscribe(_ => {
-            if (this.parameterService.initialQueryParamsSet)
-                return;
-            for (let [mapId, mapInfo] of this.maps.getValue()) {
+        // Apply initial parameter configuration once maps are loaded and parameters are ready
+        combineLatest([this.maps, this.parameterService.ready$]).pipe(
+            filter(([maps, _]) => maps.size > 0 && this.parameterService.initialQueryParamsSet),
+        ).subscribe(([maps, _]) => {
+            for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
                     [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
-                    if (layer.visible) {
+                    if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
                         isAnyLayerVisible = true;
                     }
                 }
@@ -305,6 +250,122 @@ export class MapService {
             this.statsDialogNeedsUpdate.next();
         }, true);
     }
+
+    private activateMapsByDefault(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>, first: string) {
+        // No parameter layers - activate the first group or the first ungrouped map as default
+        if (first && groups.has(first)) {
+            for (const mapItem of groups.get(first)!) {
+                mapItem.visible = true;
+                this.toggleMapLayerVisibility(mapItem.mapId);
+            }
+        } else if (ungrouped.length > 0) {
+            ungrouped[0].visible = true;
+            this.toggleMapLayerVisibility(ungrouped[0].mapId);
+        }
+    };
+
+    private activateMapsIfNew(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>) {
+        // Check for new groups and activate them
+        for (const [groupId, mapItems] of groups) {
+            if (!this.mapGroups.getValue().has(groupId)) {
+                // New group - activate all maps in it
+                for (const mapItem of mapItems) {
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            } else {
+                // Existing group - check for new maps within it
+                const prevGroup = this.mapGroups.getValue().get(groupId)!;
+                for (const mapItem of mapItems) {
+                    if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
+                        // New map in existing group - activate it
+                        mapItem.visible = true;
+                        this.toggleMapLayerVisibility(mapItem.mapId);
+                    }
+                }
+            }
+        }
+
+        // Handle new ungrouped maps
+        if (ungrouped.length > 0 && this.mapGroups.getValue().has("ungrouped")) {
+            const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
+            for (const mapItem of ungrouped) {
+                if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
+                    // New ungrouped map - activate it
+                    mapItem.visible = true;
+                    this.toggleMapLayerVisibility(mapItem.mapId);
+                }
+            }
+        }
+    };
+
+    // Pure function that computes new map groups
+    private computeMapGroups(): Map<string, Array<MapInfoItem>> {
+        const isInitLoad = this.mapGroups.getValue().size === 0;
+        const hasExistingLayers = this.parameterService.p().layers.length > 0;
+
+        const groups = new Map<string, Array<MapInfoItem>>();
+        const ungrouped: Array<MapInfoItem> = [];
+        let firstGroup = "";
+        for (const [mapId, mapItem] of this.maps.getValue()) {
+            if (mapId.includes('/')) {
+                const prefix = mapId.split('/')[0];
+                if (groups.has(prefix)) {
+                    groups.get(prefix)!.push(mapItem);
+                    continue;
+                }
+                groups.set(prefix, [mapItem]);
+                if (!firstGroup) {
+                    firstGroup = prefix;
+                }
+            } else {
+                ungrouped.push(mapItem);
+            }
+        }
+
+        if (!isInitLoad) {
+            this.activateMapsIfNew(groups, ungrouped); // Added new maps to the datasource so will activate them
+        } else if (!hasExistingLayers) {
+            this.activateMapsByDefault(groups, ungrouped, firstGroup); // Starting from a clean state
+        }
+
+        if (ungrouped.length > 0) {
+            groups.set("ungrouped", ungrouped);
+        }
+
+        return groups;
+    }
+
+    public processMapsUpdate() {
+        const newGroups = this.computeMapGroups();
+
+        // Only emit if groups actually changed to prevent unnecessary updates
+        const currentGroups = this.mapGroups.getValue();
+        if (!this.mapGroupsEqual(currentGroups, newGroups)) {
+            this.mapGroups.next(newGroups);
+        }
+    }
+
+    // Helper to compare map groups for equality
+    private mapGroupsEqual(a: Map<string, Array<MapInfoItem>>, b: Map<string, Array<MapInfoItem>>): boolean {
+        if (a.size !== b.size) {
+            return false;
+        }
+
+        for (const [key, valueA] of a) {
+            const valueB = b.get(key);
+            if (!valueB || valueA.length !== valueB.length) {
+                return false;
+            }
+
+            for (let i = 0; i < valueA.length; i++) {
+                if (valueA[i].mapId !== valueB[i].mapId || valueA[i].visible !== valueB[i].visible) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
 
     private processTileStream() {
         const startTime = Date.now();
@@ -380,6 +441,7 @@ export class MapService {
                     let mapLayerLevels = new Array<[string, number, boolean, boolean]>();
                     let maps = new Map<string, MapInfoItem>(result.filter(m => !m.addOn).map(mapInfo => {
                         let layers = new Map<string, LayerInfoItem>();
+                        let isAnyLayerVisible = false;
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
                             [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
@@ -388,10 +450,13 @@ export class MapService {
                                 layerInfo.visible,
                                 layerInfo.tileBorders
                             ]);
+                            if (!isAnyLayerVisible && layerInfo.type !== "SourceData" && layerInfo.visible) {
+                                isAnyLayerVisible = true;
+                            }
                             layers.set(layerId, layerInfo);
                         }
                         mapInfo.layers = layers;
-                        mapInfo.visible = false;
+                        mapInfo.visible = isAnyLayerVisible;
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
@@ -435,7 +500,10 @@ export class MapService {
             if (!layer.visible) {
                 this.clearSelectionForLayer(mapId, layerId);
             }
-            mapItem.visible = mapItem.layers.values().some(layer => layer.visible);
+            // Recalculate map visibility based on non-SourceData layers
+            mapItem.visible = Array.from(mapItem.layers.values()).some(layer =>
+                layer.type !== "SourceData" && layer.visible
+            );
         } else {
             if (state !== undefined) {
                 mapItem.visible = state;

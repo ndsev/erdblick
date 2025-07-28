@@ -118,9 +118,10 @@ export class InspectionPanelComponent
                     // TODO: Fix missing entries for the metadata on tile 0
                     this.layerMenuItems = Array.from(map.layers.values())
                         .filter(item => item.type == "SourceData")
-                        .filter(item =>
-                            item.layerId.startsWith("SourceData") // || item.layerId.startsWith("Metadata"))
-                        )
+                        .filter(item => {
+                            return item.layerId.startsWith("SourceData") ||
+                                (item.layerId.startsWith("Metadata") && selection.tileId === 0);
+                        })
                         .map(item => {
                             return {
                                 label: this.inspectionService.layerNameForSourceDataLayerId(
