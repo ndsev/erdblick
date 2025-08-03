@@ -7,11 +7,11 @@ import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
-import {debounceTime, distinctUntilChanged, Subject} from "rxjs";
+import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
-import { CompletionCandidate } from "./featurefilter.worker";
+import {CompletionCandidate} from "./featurefilter.worker";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -35,10 +35,13 @@ interface ExtendedSearchTarget extends SearchTarget {
                 </textarea>
 
                 <div class="completion-popup"
-                    *ngIf="completion.visible"
+                    *ngIf="completion.visible || completion.pending"
                     (mousedown)="onCompletionPopupDown($event)"
                     [style.top.px]="completion.top"
                     [style.left.px]="completion.left">
+                    <p-progress-spinner *ngIf="completion.pending"
+                        aria-label="Loading completion candidates"
+                        [style]="{ height: '1em', width: '1em' }" />
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
@@ -136,6 +139,12 @@ export class SearchPanelComponent implements AfterViewInit {
         selectionIndex: 0,
         // True if the popup is visible
         visible: false,
+        // True if we are waiting for candidates
+        pending: false,
+        // Delay in ms to show the spinner
+        pendingDelay: 600,
+        // Delay for requesting completion candidates
+        completionDelay: 150,
     };
 
     mapSelectionVisible: boolean = false;
@@ -315,6 +324,14 @@ export class SearchPanelComponent implements AfterViewInit {
 
         this.reloadSearchHistory();
 
+        this.searchService.completionPending.pipe(
+            switchMap(pending => pending ? timer(this.completion.pendingDelay).pipe(map(() => true)) : of(false)),
+            startWith(false),
+            distinctUntilChanged()
+        ).subscribe((pending: boolean) => {
+            this.completion.pending = pending;
+        })
+
         this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
@@ -328,7 +345,7 @@ export class SearchPanelComponent implements AfterViewInit {
             this.completion.visible = length > 0;
         });
 
-        this.searchInputChanged.pipe(debounceTime(150)).subscribe(() => {
+        this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
             this.completeQuery(this.searchInputValue, this.cursorPosition);
         })
     }
