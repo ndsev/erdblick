@@ -46,7 +46,12 @@ interface ExtendedSearchTarget extends SearchTarget {
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
-                        <span>{{ item.text }}</span>
+                        <div class="row">
+                            <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
+                        </div>
+                        <div class="row hint" *ngIf="item.hint">
+                           {{ item.hint }}
+                        </div>
                     </div>
                 </div>
             </div>

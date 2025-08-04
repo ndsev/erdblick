@@ -158,8 +158,21 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
     }
 
     for (const auto& item : joinedResult) {
-        std::string query = q;
-        query.replace(item.location.offset, item.location.size, item.text);
+        auto text = item.text;
+        if (item.type == simfil::CompletionCandidate::Type::FUNCTION)
+            text += "(";
+
+        auto query = q;
+        query.replace(item.location.offset, item.location.size, text);
+
+        const auto type =
+            item.type == simfil::CompletionCandidate::Type::CONSTANT ? "Constant" :
+            item.type == simfil::CompletionCandidate::Type::FIELD ? "Field" :
+            item.type == simfil::CompletionCandidate::Type::FUNCTION ? "Function" :
+            "";
+
+        //const auto hint = item.hint.empty() ? JsValue::Undefined() : JsValue(item.hint);
+        const auto hint = JsValue::Undefined(); // TODO: Update simfils function information first.
 
         auto candidate = JsValue::Dict({
             {"text", JsValue(item.text)},
@@ -167,6 +180,8 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
                 JsValue((int)item.location.offset), JsValue((int)item.location.size)
             })},
             {"query", JsValue(query)},
+            {"type", JsValue(type)},
+            {"hint", std::move(hint)},
         });
 
         obj.push(std::move(candidate));
