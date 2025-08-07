@@ -663,7 +663,7 @@ export class MapPanelComponent {
         }
     }
 
-    focus(coverage: number|CoverageRectItem, event?: any) {
+    focus(coverage: number | CoverageRectItem, event?: any) {
         event?.stopPropagation();
         if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
             let coverageStruct = coverage as CoverageRectItem;

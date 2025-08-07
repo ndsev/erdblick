@@ -463,14 +463,12 @@ export class SearchPanelComponent implements AfterViewInit {
         let lat = coordinates[0];
         let lon = coordinates[1];
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
-        let position = Cartesian3.fromDegrees(lon, lat, alt);
-        let orientation = this.parametersService.getCameraOrientation();
-        if (orientation) {
-            this.parametersService.cameraViewData.next({
-                destination: position,
-                orientation: orientation
-            });
-        }
+
+        this.mapService.moveToWgs84PositionTopic.next({
+            x: lon,
+            y: lat,
+            z: alt
+        });
     }
 
     openInGM(value: string): number[] | undefined {

@@ -68,11 +68,9 @@ export class MarkerService {
                 }
                 this.viewStateService.viewer.scene.primitives.raiseToTop(this.markerCollection);
                 this.viewStateService.viewer.scene.requestRender();
+                console.debug('Focus marker added successfully');
             }
-
-            console.debug('Focus marker added successfully');
             return true;
-
         } catch (e) {
             console.error('Error adding marker:', e);
             return false;
