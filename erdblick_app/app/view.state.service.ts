@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {Cartesian3, Entity, Viewer} from "./cesium";
 import {ParametersService} from "./parameters.service";
-import {Subject} from "rxjs";
+import {Subject, Subscription} from "rxjs";
 import {MenuItem} from "primeng/api";
 
 export interface ViewState {
@@ -20,6 +20,7 @@ export class ViewStateService {
     isDestroyingViewer = false;
     viewer!: Viewer;
     isViewerInit: Subject<boolean> = new Subject<boolean>();
+    tileOutlineEntity: Entity | null = null;
 
     // State to preserve during viewer reinitialization
     viewerState: ViewState | null = null;
