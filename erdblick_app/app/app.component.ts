@@ -24,10 +24,15 @@ interface Versions {
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
         <div id="info">
-            <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
-            <span *ngIf="distributionVersions.length" style="cursor: pointer; z-index: 110" (click)="showExposedVersions()">
-                {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
-            </span>
+            <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
+                {{ copyright }}
+            </div>
+            <div>
+                <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
+                <span *ngIf="distributionVersions.length" style="cursor: pointer" (click)="showExposedVersions()">
+                    {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
+                </span>
+            </div>
         </div>
         <p-dialog header="Distribution Version Information" [(visible)]="distributionVersionsDialogVisible" 
                   [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">

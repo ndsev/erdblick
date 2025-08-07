@@ -30,6 +30,7 @@ interface ExtendedSearchTarget extends SearchTarget {
                           (keydown)="onKeydown($event)"
                           (keyup)="onKeyup($event)"
                           (blur)="onBlur()"
+                          (focus)="onFocus()"
                           (scroll)="updateCursor()"
                           placeholder="Search">
                 </textarea>
@@ -154,6 +155,11 @@ export class SearchPanelComponent implements AfterViewInit {
     @ViewChild('actionsdialog') dialog!: Dialog;
 
     cursorPosition: number = 0;
+
+    // Selection state preservation for text selection across focus changes
+    private savedSelectionStart: number = 0;
+    private savedSelectionEnd: number = 0;
+    private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
 
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
@@ -419,12 +425,14 @@ export class SearchPanelComponent implements AfterViewInit {
         }
 
         // WGS (degree)
-        if (isLonLat) {
-            exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
-        } else {
-            exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+        if (!isMatched) {
+            if (isLonLat) {
+                exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
+            } else {
+                exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+            }
+            matches = [...coordinateString.matchAll(exp)];
         }
-        matches = [...coordinateString.matchAll(exp)];
         if (!isMatched && matches.length > 0) {
             let matchResults = matches[0];
             if (matchResults.length >= 9) {
@@ -598,7 +606,6 @@ export class SearchPanelComponent implements AfterViewInit {
         const style = window.getComputedStyle(textarea);
         const fontSizePx = parseFloat(style.fontSize);
         const offset = (1 + 0.75) * fontSizePx; // Text height + padding height
-
         this.cursorPosition = cursor;
 
         const caret = getCaretCoordinates(textarea, cursor);
@@ -616,9 +623,23 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     onBlur() {
+        this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
+        this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
+        this.savedSelectionDirection = (this.textarea.nativeElement.selectionDirection as 'forward' | 'backward' | 'none') || 'none';
+        
         setTimeout(() => {
             this.completion.visible = false;
-        })
+        }, 0);
+    }
+
+    onFocus() {
+        setTimeout(() => {
+            this.textarea.nativeElement.setSelectionRange(
+                this.savedSelectionStart, 
+                this.savedSelectionEnd, 
+                this.savedSelectionDirection
+            );
+        }, 0);
     }
 
     onKeyup(event: KeyboardEvent) {
@@ -737,20 +758,19 @@ export class SearchPanelComponent implements AfterViewInit {
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         setTimeout(() => {
             this.textarea.nativeElement.focus();
-            this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         }, 100)
     }
 
     shrinkTextarea() {
-        this.cursorPosition = this.textarea.nativeElement.selectionStart;
+        this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
         this.sidePanelService.searchOpen = false;
     }
 
     clickOnSearchToStart() {
-        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         this.textarea.nativeElement.click();
+        this.textarea.nativeElement.focus();
     }
 
     @HostListener('document:mousedown', ['$event'])

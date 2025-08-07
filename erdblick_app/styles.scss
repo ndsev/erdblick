@@ -77,7 +77,6 @@ body {
   right: 0;
   top: 0;
   justify-content: center;
-  display: flex;
   font-size: 0.8em;
   background-color: rgba(#fff, 0.25);
   color: black;
@@ -85,30 +84,21 @@ body {
   padding-left: 0.5em;
   line-height: 1.5em;
   padding-bottom: 0.25em;
-  border-radius: 5px 0 0 0;
+  border-radius: 0 0 0 5px;
   height: 1.75em;
   min-width: 10em;
+  display: flex;
+  flex-direction: row;
+  gap: 0.5em;
 }
 
 #copyright-info {
-  position: absolute;
-  right: 0;
-  top: 1.75em;
-  justify-content: center;
-  display: flex;
-  font-size: 0.8em;
-  background-color: rgba(#fff, 0.25);
   color: black;
-  padding-right: 0.5em;
-  padding-left: 0.5em;
-  line-height: 1.5em;
-  padding-bottom: 0.25em;
-  border-radius: 5px 0 0 5px;
-  overflow: hidden;
-  height: 1.75em;
   width: 10em;
-  z-index: 100;
   cursor: pointer;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
 }
 
 .compass-circle {
@@ -126,6 +116,7 @@ body {
   font-family: sans-serif;
   color: var(--p-button-secondary-border-color);
   z-index: 110;
+  background-color: rgba(255, 255, 255, 0.25);
 }
 
 .compass-label {
