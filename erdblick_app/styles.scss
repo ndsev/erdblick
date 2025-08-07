@@ -481,7 +481,9 @@ body {
 
       div.selected {
         background: var(--p-primary-color);
-        color: var(--p-primary-contrast-color);
+        span {
+          color: var(--p-primary-contrast-color) !important;
+        }
       }
 
       .row {
