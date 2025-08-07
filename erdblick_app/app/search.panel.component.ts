@@ -804,6 +804,9 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!query) {
             this.completion.visible = false;
             this.completionItems = [];
+            // Reset the service's currentQuery to allow the same query to work again
+            // TODO: Share the state so we don't have to synchronise it.
+            this.searchService.currentQuery = "";
             return;
         }
 
