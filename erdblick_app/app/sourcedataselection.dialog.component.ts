@@ -102,7 +102,6 @@ export class SourceDataLayerSelectionDialogComponent {
         this.mapIds = [];
         this.sourceDataLayers = [];
         this.loading = false;
-        this.menuService.tileOutline.next(null);
 
         // Special case: There is a custom tile ID.
         if (customTileId) {
@@ -114,6 +113,7 @@ export class SourceDataLayerSelectionDialogComponent {
         if (!this.tileIds.length) {
             this.selectedTileId = undefined;
             this.errorString = "No tile IDs available for the clicked position!";
+            this.menuService.tileOutline.next(null);
             return;
         }
 
@@ -125,23 +125,26 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIdsPerTileId.set(id, maps);
         }
 
+        let tileIdSelection: SourceDataDropdownOption | undefined;
         if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
             const savedTileId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.tileId;
-            let tileIdSelection = this.tileIds.find(element =>
+            tileIdSelection = this.tileIds.find(element =>
                 Number(element.id) == savedTileId && !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
             );
             if (tileIdSelection) {
                 this.setCurrentTileId(tileIdSelection);
+                return;
             }
-            return;
         }
 
         // Pre-select the tile ID.
-        const tileIdSelection = this.tileIds.find(element =>
+        tileIdSelection = this.tileIds.find(element =>
             !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
         );
         if (tileIdSelection) {
             this.setCurrentTileId(tileIdSelection);
+        } else {
+            this.menuService.tileOutline.next(null);
         }
     }
 
@@ -163,6 +166,7 @@ export class SourceDataLayerSelectionDialogComponent {
         if (!tileIdString) {
             this.mapIds = [];
             this.sourceDataLayers = [];
+            this.menuService.tileOutline.next(null);
             return;
         }
 
@@ -231,7 +235,6 @@ export class SourceDataLayerSelectionDialogComponent {
     }
 
     outlineTheTileBox(tileId: bigint, color: Color) {
-        this.menuService.tileOutline.next(null);
         const tileBox = coreLib.getTileBox(tileId);
         const entity = {
             rectangle: {
@@ -295,7 +298,6 @@ export class SourceDataLayerSelectionDialogComponent {
         this.sourceDataLayers = [];
         this.showCustomTileIdInput = false;
         this.customTileId = "";
-        this.menuService.tileOutline.next(null);
     }
 
     close() {
