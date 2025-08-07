@@ -458,26 +458,22 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.push(
             this.menuService.tileOutline.subscribe(entity => {
-                console.log('Viewer received tileOutline entity:', entity);
                 if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
                     console.log('Viewer unavailable or destroyed, skipping outline update');
                     return;
                 }
                 if (entity) {
-                    console.log('Adding new outline entity to viewer');
                     if (this.viewStateService.tileOutlineEntity) {
-                        console.log('Removing existing outline entity');
                         this.viewStateService.viewer.entities.remove(this.viewStateService.tileOutlineEntity);
                         this.viewStateService.tileOutlineEntity = null;
                     }
                     this.viewStateService.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
-                    console.log('New outline entity added, requesting render');
-                    this.viewStateService.viewer.scene.requestRender();
+                    this.viewStateService.viewer.scene.render();
                 } else if (this.viewStateService.tileOutlineEntity) {
                     console.log('Clearing outline entity');
                     this.viewStateService.viewer.entities.remove(this.viewStateService.tileOutlineEntity);
                     this.viewStateService.tileOutlineEntity = null;
-                    this.viewStateService.viewer.scene.requestRender();
+                    this.viewStateService.viewer.scene.render();
                 }
             })
         );
