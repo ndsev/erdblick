@@ -328,7 +328,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
             const position = movement.position;
             let feature = this.viewStateService.viewer.scene.pick(position);
-            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
+            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
@@ -480,13 +480,13 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      */
     private setupKeyboardShortcuts() {
         if (!this.appModeService.isVisualizationOnly) {
-            this.keyboardService.registerShortcut('q', this.cameraService.zoomIn.bind(this), true);
-            this.keyboardService.registerShortcut('e', this.cameraService.zoomOut.bind(this), true);
-            this.keyboardService.registerShortcut('w', this.cameraService.moveUp.bind(this), true);
-            this.keyboardService.registerShortcut('a', this.cameraService.moveLeft.bind(this), true);
-            this.keyboardService.registerShortcut('s', this.cameraService.moveDown.bind(this), true);
-            this.keyboardService.registerShortcut('d', this.cameraService.moveRight.bind(this), true);
-            this.keyboardService.registerShortcut('r', this.cameraService.resetOrientation.bind(this), true);
+            this.keyboardService.registerShortcut('q', this.cameraService.zoomIn.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('e', this.cameraService.zoomOut.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('w', this.cameraService.moveUp.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('a', this.cameraService.moveLeft.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('s', this.cameraService.moveDown.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('d', this.cameraService.moveRight.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('r', this.cameraService.resetOrientation.bind(this.cameraService), true);
         }
     }
 

@@ -273,8 +273,7 @@ import {InspectionService} from "./inspection.service";
                             <div class="font-bold white-space-nowrap"
                                  style="margin-left: 0.5em; display: flex; align-items: center;">
                                 <span onEnterClick *ngIf="style.value.options.length" class="material-icons"
-                                      [ngClass]="{'rotated-icon': !style.value.params.showOptions || !style.value.params.visible, 
-                                                  'disabled': !style.value.params.visible}"
+                                      [ngClass]="{'rotated-icon': !style.value.params.showOptions}"
                                       style="font-size: 1.5em; margin-left: -0.75em; margin-right: -0.25em; cursor: pointer"
                                       (click)="expandStyle(style.key)" tabindex="0">
                                     expand_more
@@ -317,17 +316,18 @@ import {InspectionService} from "./inspection.service";
                                 </p-button>
                             </div>
                         </div>
-                        <div *ngIf="style.value.options.length && style.value.params.showOptions && style.value.params.visible">
+                        <div *ngIf="style.value.options.length && style.value.params.showOptions">
                             <div *ngFor="let option of style.value.options"
                                  style="margin-left: 2.25em; align-items: center; font-size: 0.9em; margin-top: 0.25em">
                                 <span onEnterClick class="material-icons"
                                       style="font-size: 1.5em; cursor: pointer"
-                                      (click)="showOptionsToggleMenu($event, style.value, option.id)" tabindex="0">
+                                      (click)="showOptionsToggleMenu($event, style.value, option.id)"
+                                      [ngClass]="{'disabled': !style.value.params.visible}" tabindex="0">
                                     more_vert
                                 </span>
                                 <div style="font-style: oblique; cursor: pointer; display: inline-block"
                                      (click)="style.value.params.options[option.id] = !style.value.params.options[option.id]; applyStyleConfig(style.value)"
-                                     tabindex="0">
+                                     [ngClass]="{'disabled': !style.value.params.visible}" tabindex="0">
                                     <span style="font-style: oblique">
                                         <p-checkbox [(ngModel)]="style.value.params.options[option.id]"
                                                     (ngModelChange)="applyStyleConfig(style.value)"
