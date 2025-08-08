@@ -231,6 +231,7 @@ export class FeatureSearchService {
     traceResults: Array<any> = [];
     diagnosticsResults: Array<DiagnosticsMessage> = [];
 
+    completionPending: Subject<boolean> = new Subject<boolean>();
     completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
     completionCandidateLimit: number = 15;
     private completionCandidateList: CompletionCandidate[] = [];
@@ -419,6 +420,7 @@ export class FeatureSearchService {
         this.visualizationChanged.next();
         this.errors.clear();
         this.completionCandidateList = [];
+        this.completionPending.next(false);
         this.completionCandidates.next([]);
     }
 
@@ -432,6 +434,7 @@ export class FeatureSearchService {
         if (query === this.currentQuery) {
             return;
         }
+
         this.currentQuery = query;
 
         // Remove all pending completion tasks
@@ -458,6 +461,9 @@ export class FeatureSearchService {
         }
 
         this.completionCandidateList = [];
+        this.completionPending.next(true);
+        this.completionCandidates.next([]);
+
         this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
         this.runWorkers();
     }
@@ -471,6 +477,7 @@ export class FeatureSearchService {
                 .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
 
             this.completionCandidates.next(this.completionCandidateList);
+            this.completionPending.next(false);
         }
     }
 

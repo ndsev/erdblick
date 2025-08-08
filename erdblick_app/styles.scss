@@ -481,7 +481,30 @@ body {
 
       div.selected {
         background: var(--p-primary-color);
-        color: var(--p-primary-contrast-color);
+        span {
+          color: var(--p-primary-contrast-color) !important;
+        }
+      }
+
+      .row {
+        background: none;
+
+        width: 100%;
+
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .type {
+        font-style: italic;
+        color: var(--p-surface-500);
+        padding-left: 0.5em;
+      }
+
+      .hint {
+        font-size: small;
+        color: var(--p-surface-500);
       }
     }
   }

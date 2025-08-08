@@ -55,10 +55,12 @@ export interface SearchResultForTile {
 
 export interface CompletionCandidate {
     text: string;   /// The completion
+    kind: string;   /// Type of the completion ("constant", "field", ...)
     begin: number;  /// Offset where to insert the completion
     end: number;    /// Length of the to be replaced input
     query: string;  /// Query with the completion applied
     source: string; /// Source query this candidate is for
+    hint: string;   /// Extra information
 }
 
 export interface CompletionCandidatesForTile {
@@ -157,6 +159,8 @@ function processCompletion(task: CompletionWorkerTask) {
                     end: item.range[1],
                     query: item.query,
                     source: task.query,
+                    kind: item.type,
+                    hint: item.hint,
                 }
             }),
         };
