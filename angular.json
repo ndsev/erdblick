@@ -49,6 +49,16 @@
                                 "glob": "VERSION",
                                 "input": ".",
                                 "output": "/bundle/"
+                            },
+                            {
+                                "glob": "LICENSE*",
+                                "input": "node_modules/@fontsource-variable/inter",
+                                "output": "/bundle/licenses/fonts/inter"
+                            },
+                            {
+                                "glob": "LICENSE*",
+                                "input": "node_modules/@fontsource/inter",
+                                "output": "/bundle/licenses/fonts/inter"
                             }
                         ],
                         "styles": [
@@ -103,6 +113,16 @@
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/@fontsource-variable/inter",
+                                    "output": "/bundle/licenses/fonts/inter"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/@fontsource/inter",
+                                    "output": "/bundle/licenses/fonts/inter"
                                 }
                             ],
                             "buildOptimizer": true,
@@ -180,6 +200,16 @@
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/@fontsource-variable/inter",
+                                    "output": "/bundle/licenses/fonts/inter"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/@fontsource/inter",
+                                    "output": "/bundle/licenses/fonts/inter"
                                 }
                             ],
                             "buildOptimizer": true,

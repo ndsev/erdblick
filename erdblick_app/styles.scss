@@ -1,4 +1,6 @@
 @import "primeicons/primeicons.css";
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource/inter/index.css";
 
 @layer primeng, erdblick;
 
@@ -9,7 +11,7 @@
 
 @supports (font-variation-settings: normal) {
   :root {
-    font-family: InterVariable, sans-serif;
+    font-family: 'Inter Variable', sans-serif;
   }
 }
 
