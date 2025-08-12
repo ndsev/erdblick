@@ -21,32 +21,36 @@ import {InspectionService} from "./inspection.service";
     selector: 'map-panel',
     template: `
         <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
-                  [position]="'topleft'" [draggable]="false" [resizable]="false">
-            <p-fieldset class="map-tab" legend="Maps and Layers">
-                <div class="osm-controls">
-                    <p-button onEnterClick (click)="openDatasources()" class="osm-button"
-                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
-                    <span style="font-size: 0.9em">OSM Overlay:</span>
-                    <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
-                              icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <div *ngIf="osmEnabled" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="osmOpacityString"
-                               (input)="onOsmOpacityInput($event)"
-                               (keydown.enter)="updateOSMOverlay()"
-                               (blur)="updateOSMOverlay()"
-                               class="w-full slider-input" tabindex="0"/>
-                        <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                                  class="w-full" tabindex="-1">
-                        </p-slider>
-                    </div>
+                  [position]="'topleft'" [draggable]="false" [resizable]="false" 
+                  [style]="{ 'height': '100%', 'max-height': '100%', 
+                  'border-top-left-radius': '0 !important',
+                  'border-bottom-left-radius': '0 !important' }">
+            <ng-container *ngIf="layerDialogVisible">
+                <search-panel></search-panel>
+            </ng-container>
+            <div class="osm-controls">
+                <p-button onEnterClick (click)="openDatasources()" class="osm-button"
+                            icon="pi pi-server" label="" pTooltip="Open datasources configuration"
+                            tooltipPosition="bottom" tabindex="0">
+                </p-button>
+                <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                <span style="font-size: 0.9em">OSM Overlay:</span>
+                <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
+                            icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                            label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
+                </p-button>
+                <div *ngIf="osmEnabled" style="display: inline-block">
+                    <input type="text" pInputText [(ngModel)]="osmOpacityString"
+                            (input)="onOsmOpacityInput($event)"
+                            (keydown.enter)="updateOSMOverlay()"
+                            (blur)="updateOSMOverlay()"
+                            class="w-full slider-input" tabindex="0"/>
+                    <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
+                                class="w-full" tabindex="-1">
+                    </p-slider>
                 </div>
-                <p-divider></p-divider>
-
+            </div>
+            <p-fieldset class="map-tab" legend="Maps and Layers" [toggleable]="true" [(collapsed)]="mapsCollapsed">
                 <ng-container *ngIf=" mapService.mapGroups | async as mapGroups">
                     <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
                         No maps loaded.
@@ -263,7 +267,7 @@ import {InspectionService} from "./inspection.service";
                     </div>
                 </ng-container>
             </p-fieldset>
-            <p-fieldset class="map-tab" legend="Styles">
+            <p-fieldset class="map-tab" legend="Styles" [toggleable]="true" [(collapsed)]="stylesCollapsed">
                 <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
                     No styles loaded.
                 </div>
@@ -360,10 +364,11 @@ import {InspectionService} from "./inspection.service";
                     </div>
                 </div>
             </p-fieldset>
+            <pref-components></pref-components>
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <p-button onEnterClick (click)="showLayerDialog()" label="" class="layers-button" tooltipPosition="right"
+        <p-button onEnterClick (click)="showLayerDialog()" label="" class="layers-button" [ngClass]="{'shifted': layerDialogVisible }" tooltipPosition="right"
                   pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}" tabindex="0">
         </p-button>
@@ -375,7 +380,7 @@ import {InspectionService} from "./inspection.service";
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>
                     <p-button (click)="closeEditorDialog($event)"
-                              [label]='this.sourceWasModified ? "Discard" : "Cancel"'
+                              [label]='sourceWasModified ? "Discard" : "Cancel"'
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
@@ -414,6 +419,8 @@ export class MapPanelComponent {
     editedStyleSourceSubscription: Subscription = new Subscription();
     savedStyleSourceSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
+    mapsCollapsed: boolean = false;
+    stylesCollapsed: boolean = false;
 
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;

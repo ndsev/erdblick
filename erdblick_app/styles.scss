@@ -209,6 +209,11 @@ body {
     height: 3em;
     box-shadow: none;
   }
+
+  &.shifted {
+    left: 25.5em !important;
+    z-index: 1000;
+  }
 }
 
 .card {
@@ -409,7 +414,7 @@ body {
   top: 0.5em;
   left: 4em;
   min-width: 22em;
-  min-height: 3.5em;
+  // min-height: 3.5em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
   z-index: 150;
@@ -445,8 +450,8 @@ body {
 
     textarea.single-line {
       padding-top: 0.75em;
-      min-height: 3em;
-      width: 22em !important;
+      min-height: 2.9em;
+      width: 24em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
@@ -645,14 +650,20 @@ body {
     min-width: 25.5em;
     margin: 0 !important;
     position: absolute;
-    top: 4em;
-    left: 0.5em;
+    top: 0;
+    left: 0;
     overflow: auto;
-    max-height: calc(100vh - 8em);
+    height: 100%;
   }
 
   .p-dialog-content {
     padding: 0.5em;
+
+    .search-wrapper {
+      position: relative;
+      top: 0;
+      left: 0em;
+    }  
   }
 
   .p-dialog-header {
@@ -665,6 +676,10 @@ body {
 
   .p-fieldset {
     padding: 0;
+
+    .p-fieldset-toggle-button {
+      padding: 0 !important;
+    }
 
     .p-accordionheader {
       padding: 0.5em 1em 0.5em 1em;
@@ -706,31 +721,31 @@ body {
   //}
 }
 
-.map-tab {
-  .osm-controls {
-    display: flex;
-    align-items: center;
-    gap: 1em;
-    margin: 0.5em 0.75em;
+.osm-controls {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin: -0.5em 0.25em 0.25em 0.25em;
 
-    button {
-      width: 2em;
-      height: 2em;
-      box-shadow: none;
-    }
-
-    .slider-input {
-      width: 11em;
-      font-size: 0.9em;
-      padding: 0.5em 0.75em;
-    }
-
-    .p-divider-vertical {
-      margin: 0;
-      padding: 0.5em 0;
-    }
+  button {
+    width: 2em;
+    height: 2em;
+    box-shadow: none;
   }
 
+  .slider-input {
+    width: 11em;
+    font-size: 0.9em;
+    padding: 0.5em 0.75em;
+  }
+
+  .p-divider-vertical {
+    margin: 0;
+    padding: 0.5em 0;
+  }
+}
+
+.map-tab {
   .grid-controls {
     display: flex;
     align-items: flex-start;
