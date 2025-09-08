@@ -231,6 +231,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::diagnostics(std::string co
         });
 
         result.push(JsValue::Dict({
+            {"query", JsValue(q)},
             {"message", JsValue(msg.message)},
             {"location", location},
             {"fix", fixValue},
