@@ -217,6 +217,7 @@ export class FeatureSearchService {
 
     jobGroupManager: JobGroupManager = new JobGroupManager();
     currentSearchGroup: JobGroup | null = null;
+    currentCompletionGroup: JobGroup | null = null;
     taskIdCounter: number = 0;
     taskGruoupIdCounter: number = 0;
 
@@ -258,7 +259,7 @@ export class FeatureSearchService {
 
     markerGraphics = () => {
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
-           <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" 
+           <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z"
             fill="white"/>
         </svg>`
         return `data:image/svg+xml;base64,${btoa(svg)}`;
@@ -357,17 +358,16 @@ export class FeatureSearchService {
             this.startTime = Date.now();
         }
 
-        this.currentQuery = query;
-        this.currentSearchGroup = this.jobGroupManager.createGroup('search', query, this.generateTaskGroupId());
+        const searchGroup = this.jobGroupManager.createGroup('search', query, this.generateTaskGroupId());
+        this.currentSearchGroup = searchGroup;
 
         // Set up completion callback to trigger diagnostics after
         // all tasks of the group are done.
-        this.currentSearchGroup.onComplete((group: JobGroup) => {
+        searchGroup.onComplete((group: JobGroup) => {
             this.startDiagnosticsForCompletedSearch(group.query);
         });
 
         const tileParser = this.mapService.tileParser;
-        const searchGroup = this.currentSearchGroup;
         const makeTask = (tile: FeatureTile): SearchWorkerTask => {
             const taskId = this.generateTaskId();
             const task: SearchWorkerTask = {
@@ -522,17 +522,12 @@ export class FeatureSearchService {
     }
 
     public completeQuery(query: string, point: number | undefined) {
-        if (query === this.currentQuery) {
-            return;
-        }
-
-        this.currentQuery = query;
-
         // Remove all pending completion tasks
         this.clearTasksOfType('CompletionWorkerTask');
 
         // Create completion job group
         const completionGroup = this.jobGroupManager.createGroup('completion', query, this.generateTaskGroupId());
+        this.currentCompletionGroup = completionGroup
 
         // Build one task per tile
         const tileParser = this.mapService.tileParser;
@@ -570,16 +565,16 @@ export class FeatureSearchService {
     }
 
     private addCompletionCandidates(candidates: CompletionCandidatesForTile) {
-        if (candidates.query == this.currentQuery) {
-            this.completionCandidateList = this.completionCandidateList
-                .concat(candidates.candidates)
-                .slice(0, this.completionCandidateLimit)
-                .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
-                .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+        if (candidates.groupId !== this.currentCompletionGroup?.id)
+            return;
 
-            this.completionCandidates.next(this.completionCandidateList);
-            this.completionPending.next(false);
-        }
+        this.completionCandidateList = this.completionCandidateList
+            .concat(candidates.candidates)
+            .slice(0, this.completionCandidateLimit)
+            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
+            .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+
+        this.completionCandidates.next(this.completionCandidateList);
     }
 
     private addDiagnostics(result : DiagnosticsResultsForTile) {
@@ -591,14 +586,12 @@ export class FeatureSearchService {
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
-        if (tileResult.error) {
-            this.errors.add(tileResult.error);
-        }
-
         // Ignore results that are not related to the ongoing query.
-        if (tileResult.query != this.currentQuery) {
+        if (tileResult.groupId !== this.currentSearchGroup?.id)
             return;
-        }
+
+        if (tileResult.error)
+            this.errors.add(tileResult.error);
 
         // Add trace results
         for (let [key, trace] of Object.entries(tileResult.traces || {})) {
