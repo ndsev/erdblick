@@ -209,8 +209,6 @@ class FeatureSearchQuadTree {
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
-    currentQuery: string = ""
-
     workers: Array<Worker> = []
     workQueue: Array<WorkerTask> = [];
     cachedWorkQueue: Array<WorkerTask> = [];
@@ -435,7 +433,6 @@ export class FeatureSearchService {
 
     clear() {
         this.stop();
-        this.currentQuery = "";
         this.resultTree = new FeatureSearchQuadTree();
         this.visualization.removeAll();
         this.visualizationPositions = [];

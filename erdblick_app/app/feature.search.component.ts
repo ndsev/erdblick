@@ -85,7 +85,7 @@ import {SearchPanelComponent} from "./search.panel.component";
                                             <li>
                                                 <div>
                                                     <span>{{ message.message }}</span>
-                                                    <div><span>Here: </span><code style="width: 100%;" [innerHTML]="searchService.currentQuery | highlightRegion:message.location.offset:message.location.size:25"></code></div>
+                                                    <div><span>Here: </span><code style="width: 100%;" [innerHTML]="message.query | highlightRegion:message.location.offset:message.location.size:25"></code></div>
                                                 </div>
                                                 <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
                                             </li>
@@ -207,14 +207,16 @@ export class FeatureSearchComponent {
 
     pauseSearch() {
         if (this.canPauseStopSearch) {
-            if (this.isSearchPaused) {
+            if (this.isSearchPaused && this.searchService.currentSearchGroup) {
+                const query = this.searchService.currentSearchGroup?.query;
+                console.log(`Resuming query '${query}'`);
                 this.isSearchPaused = false;
-                this.searchService.run(this.searchService.currentQuery, true);
-                return;
+                this.searchService.run(query, true);
+            } else {
+                this.searchService.pause();
+                this.listbox.options = this.searchService.searchResults;
+                this.isSearchPaused = true;
             }
-            this.searchService.pause();
-            this.listbox.options = this.searchService.searchResults;
-            this.isSearchPaused = true;
         }
     }
 
