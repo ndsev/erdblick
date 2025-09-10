@@ -12,6 +12,7 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
+import {MapInfoItem} from "./map.service";
 
 interface StyleConfigEntry {
     id: string,
@@ -21,9 +22,11 @@ interface StyleConfigEntry {
 export type FeatureStyleOptionWithStringType = {
     label: string,
     id: string,
-    type: FeatureStyleOptionType,
+    type: FeatureStyleOptionType | string,
     defaultValue: any,
-    description: string
+    description: string,
+    styleId?: string,
+    key?: string
 };
 
 export interface ErdblickStyle {
@@ -33,7 +36,17 @@ export interface ErdblickStyle {
     params: StyleParameters,
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
-    options: Array<FeatureStyleOptionWithStringType>
+    options: Array<FeatureStyleOptionWithStringType>,
+    key?: string,
+    type?: string,
+    children?: Array<FeatureStyleOptionWithStringType>
+}
+
+export interface ErdblickStyleGroup extends Record<string, any> {
+    key: string;
+    groupId: string;
+    type: string;
+    children: Array<ErdblickStyle>;
 }
 
 /**
@@ -99,7 +112,10 @@ export class StyleService {
                     params: this.parameterService.styleConfig(styleId),
                     source: styleString,
                     featureLayerStyle: null,
-                    options: []
+                    options: [],
+                    key: `${this.styles.size}`,
+                    type: "Style",
+                    children: []
                 });
                 this.builtinStylesCount++;
                 styleUrls.forEach(styleUrl => {
@@ -157,7 +173,10 @@ export class StyleService {
                             params: this.parameterService.styleConfig(styleId),
                             source: styleString,
                             featureLayerStyle: null,
-                            options: []
+                            options: [],
+                            key: `${this.styles.size}`,
+                            type: "Style",
+                            children: []
                         });
                         this.saveModifiedBuiltinStyles();
                         this.reapplyStyle(styleId);
@@ -247,7 +266,10 @@ export class StyleService {
             },
             source: styleData,
             featureLayerStyle: null,
-            options: []
+            options: [],
+            key: `${this.styles.size}`,
+            type: "Style",
+            children: []
         });
 
         ++this.importedStylesCount;
@@ -352,6 +374,10 @@ export class StyleService {
                         if (!style.params.options.hasOwnProperty(option.id)) {
                             style.params.options[option.id] = option.defaultValue;
                         }
+                        option.type = "Bool";
+                        option.key = `${style.key}-${i}`;
+                        option.styleId = style.id;
+                        style.children?.push(option);
                     }
                     options.delete();
                     return true;

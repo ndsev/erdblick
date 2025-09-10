@@ -22,10 +22,12 @@ export interface CoverageRectItem extends Record<string, any> {
 
 /** Expected structure of a list entry in the MapInfoItem's layer entry. */
 export interface LayerInfoItem extends Record<string, any> {
+    key?: string;
     canRead: boolean;
     canWrite: boolean;
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
+    mapId?: string;
     layerId: string;
     type: string;
     version: { major: number, minor: number, patch: number };
@@ -37,6 +39,7 @@ export interface LayerInfoItem extends Record<string, any> {
 
 /** Expected structure of a list entry in the /sources endpoint. */
 export interface MapInfoItem extends Record<string, any> {
+    key?: string;
     extraJsonAttachment: any;
     layers: Map<string, LayerInfoItem>;
     mapId: string;
@@ -45,6 +48,15 @@ export interface MapInfoItem extends Record<string, any> {
     protocolVersion: { major: number, minor: number, patch: number };
     addOn: boolean;
     visible: boolean;
+    type: string;
+    children?: Array<LayerInfoItem>;
+}
+
+export interface GroupInfoItem extends Record<string, any> {
+    key: string;
+    groupId: string;
+    type: string;
+    children: Array<MapInfoItem>;
 }
 
 const infoUrl = "sources";
@@ -86,7 +98,7 @@ function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
-    public mapGroups: BehaviorSubject<Map<string, Array<MapInfoItem>>> = new BehaviorSubject<Map<string, Array<MapInfoItem>>>(new Map<string, Array<MapInfoItem>>());
+    public mapGroups: BehaviorSubject<Map<string, GroupInfoItem>> = new BehaviorSubject<Map<string, GroupInfoItem>>(new Map<string, GroupInfoItem>());
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
@@ -251,10 +263,10 @@ export class MapService {
         }, true);
     }
 
-    private activateMapsByDefault(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>, first: string) {
+    private activateMapsByDefault(groups: Map<string, GroupInfoItem>, ungrouped: Array<MapInfoItem>, first: string) {
         // No parameter layers - activate the first group or the first ungrouped map as default
         if (first && groups.has(first)) {
-            for (const mapItem of groups.get(first)!) {
+            for (const mapItem of groups.get(first)!.children) {
                 mapItem.visible = true;
                 this.toggleMapLayerVisibility(mapItem.mapId);
             }
@@ -264,20 +276,20 @@ export class MapService {
         }
     };
 
-    private activateMapsIfNew(groups: Map<string, Array<MapInfoItem>>, ungrouped: Array<MapInfoItem>) {
+    private activateMapsIfNew(groups: Map<string, GroupInfoItem>, ungrouped: Array<MapInfoItem>) {
         // Check for new groups and activate them
-        for (const [groupId, mapItems] of groups) {
+        for (const [groupId, groupItems] of groups) {
             if (!this.mapGroups.getValue().has(groupId)) {
                 // New group - activate all maps in it
-                for (const mapItem of mapItems) {
+                for (const mapItem of groupItems.children) {
                     mapItem.visible = true;
                     this.toggleMapLayerVisibility(mapItem.mapId);
                 }
             } else {
                 // Existing group - check for new maps within it
                 const prevGroup = this.mapGroups.getValue().get(groupId)!;
-                for (const mapItem of mapItems) {
-                    if (!prevGroup.find(prev => prev.mapId === mapItem.mapId)) {
+                for (const mapItem of groupItems.children) {
+                    if (!prevGroup.children.find(prev => prev.mapId === mapItem.mapId)) {
                         // New map in existing group - activate it
                         mapItem.visible = true;
                         this.toggleMapLayerVisibility(mapItem.mapId);
@@ -290,7 +302,7 @@ export class MapService {
         if (ungrouped.length > 0 && this.mapGroups.getValue().has("ungrouped")) {
             const prevUngrouped = this.mapGroups.getValue().get("ungrouped")!;
             for (const mapItem of ungrouped) {
-                if (!prevUngrouped.find(prev => prev.mapId === mapItem.mapId)) {
+                if (!prevUngrouped.children.find(prev => prev.mapId === mapItem.mapId)) {
                     // New ungrouped map - activate it
                     mapItem.visible = true;
                     this.toggleMapLayerVisibility(mapItem.mapId);
@@ -299,27 +311,51 @@ export class MapService {
         }
     };
 
+    private setMapsLayersIdChildren(mapItem: MapInfoItem, key: string) {
+        mapItem.key = key;
+        mapItem.children = [];
+        let i = 0;
+        for (let layer of mapItem.layers.values()) {
+            if (layer.type !== "SourceData") {
+                layer.key = `${key}-${i}`;
+                layer.mapId = mapItem.mapId;
+                mapItem.children.push(layer);
+            }
+        }
+        return mapItem;
+    }
+
     // Pure function that computes new map groups
-    private computeMapGroups(): Map<string, Array<MapInfoItem>> {
+    private computeMapGroups(): Map<string, GroupInfoItem> {
         const isInitLoad = this.mapGroups.getValue().size === 0;
         const hasExistingLayers = this.parameterService.p().layers.length > 0;
 
-        const groups = new Map<string, Array<MapInfoItem>>();
+        const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
         let firstGroup = "";
         for (const [mapId, mapItem] of this.maps.getValue()) {
             if (mapId.includes('/')) {
                 const prefix = mapId.split('/')[0];
                 if (groups.has(prefix)) {
-                    groups.get(prefix)!.push(mapItem);
+                    const key = groups.get(prefix)!.key;
+                    groups.get(prefix)!.children.push(
+                        this.setMapsLayersIdChildren(mapItem, `${key}-${groups.get(prefix)!.children.length}`)
+                    );
                     continue;
                 }
-                groups.set(prefix, [mapItem]);
+                const key = groups.size.toString();
+                const group = {
+                    key: key,
+                    groupId: prefix,
+                    type: "Group",
+                    children: [this.setMapsLayersIdChildren(mapItem, `${key}-0`)]
+                };
+                groups.set(prefix, group);
                 if (!firstGroup) {
                     firstGroup = prefix;
                 }
             } else {
-                ungrouped.push(mapItem);
+                ungrouped.push(this.setMapsLayersIdChildren(mapItem, ungrouped.length.toString()));
             }
         }
 
@@ -330,7 +366,13 @@ export class MapService {
         }
 
         if (ungrouped.length > 0) {
-            groups.set("ungrouped", ungrouped);
+            const group = {
+                key: groups.size.toString(),
+                groupId: "ungrouped",
+                type: "Group",
+                children: ungrouped
+            };
+            groups.set("ungrouped", group);
         }
 
         return groups;
@@ -347,19 +389,19 @@ export class MapService {
     }
 
     // Helper to compare map groups for equality
-    private mapGroupsEqual(a: Map<string, Array<MapInfoItem>>, b: Map<string, Array<MapInfoItem>>): boolean {
+    private mapGroupsEqual(a: Map<string, GroupInfoItem>, b: Map<string, GroupInfoItem>): boolean {
         if (a.size !== b.size) {
             return false;
         }
 
         for (const [key, valueA] of a) {
             const valueB = b.get(key);
-            if (!valueB || valueA.length !== valueB.length) {
+            if (!valueB || valueA.children.length !== valueB.children.length) {
                 return false;
             }
 
-            for (let i = 0; i < valueA.length; i++) {
-                if (valueA[i].mapId !== valueB[i].mapId || valueA[i].visible !== valueB[i].visible) {
+            for (let i = 0; i < valueA.children.length; i++) {
+                if (valueA.children[i].mapId !== valueB.children[i].mapId || valueA.children[i].visible !== valueB.children[i].visible) {
                     return false;
                 }
             }
@@ -455,6 +497,7 @@ export class MapService {
                             }
                             layers.set(layerId, layerInfo);
                         }
+                        mapInfo.type = "Map";
                         mapInfo.layers = layers;
                         mapInfo.visible = isAnyLayerVisible;
                         return [mapInfo.mapId, mapInfo];

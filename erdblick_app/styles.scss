@@ -212,6 +212,7 @@ body {
 
   &.shifted {
     left: 25.5em !important;
+    top: 5em !important;
     z-index: 1000;
   }
 }
@@ -417,7 +418,11 @@ body {
   // min-height: 3.5em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
-  z-index: 150;
+  z-index: 1500;
+
+  &.shifted {
+    left: 0.5em !important;
+  }
 
   .resizable-container {
     min-width: 22em;
@@ -438,7 +443,6 @@ body {
     line-height: 0;
 
     textarea {
-      padding-top: 0.75em;
       width: 100% !important;
       transition: all 0.3s;
       resize: none;
@@ -449,7 +453,6 @@ body {
     }
 
     textarea.single-line {
-      padding-top: 0.75em;
       min-height: 2.9em;
       width: 24em !important;
       white-space: nowrap;
@@ -645,15 +648,22 @@ body {
 }
 
 .map-layer-dialog, .side-menu-dialog {
+  z-index: 1000 !important;
+
+  .p-dialog-mask {
+    z-index: 1000 !important;
+  }
+
   .p-dialog {
-    width: 25.5em;
+    width: 28em;
     min-width: 25.5em;
     margin: 0 !important;
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 0;
     overflow: auto;
-    height: 100%;
+    height: calc(100% - 4em);
+    z-index: 1000 !important;
   }
 
   .p-dialog-content {
@@ -662,8 +672,8 @@ body {
     .search-wrapper {
       position: relative;
       top: 0;
-      left: 0em;
-    }  
+      left: 0;
+    }
   }
 
   .p-dialog-header {
@@ -688,6 +698,10 @@ body {
     .p-accordioncontent-content {
       padding: 0;
     }
+  }
+
+  .p-tree-node-label {
+    width: 100%;
   }
 }
 
@@ -719,13 +733,17 @@ body {
   //    height: 1em;
   //  }
   //}
+
+  .p-tree {
+    padding: 0;
+  }
 }
 
 .osm-controls {
   display: flex;
   align-items: center;
-  gap: 1em;
-  margin: -0.5em 0.25em 0.25em 0.25em;
+  justify-content: space-around;
+  margin-bottom: 0.25em;
 
   button {
     width: 2em;
@@ -827,7 +845,7 @@ body {
     }
 
     .map-container {
-      padding: 0.5em 1em 0.5em 1em;
+      padding: 0;
 
       .map-header {
         font-size: 0.9em;
@@ -840,7 +858,7 @@ body {
   }
 
   .styles-container {
-    padding: 0.5em 1em 0.5em 1em;
+    padding-left: 0.75em;
     //margin-top: 0.25em;
     //padding-right: 0.75em;
     //margin-right: -0.75em;
@@ -929,7 +947,6 @@ body {
       gap: 0.5em;
       width: 4em;
       justify-content: flex-end;
-      transition: opacity 0s, visibility 0s;
 
       button {
         width: 2em;
@@ -991,9 +1008,9 @@ body {
 .bttn-container {
   position: absolute;
   left: 0;
-  bottom: 0;
+  top: 4em;
   display: flex;
-  flex-direction: row;
+  flex-direction: column-reverse;
   z-index: 110;
 }
 
@@ -1408,7 +1425,7 @@ body {
     min-height: 3.5em;
     max-width: 100%;
     max-height: calc(100vh - 5em);
-    z-index: 150;
+    z-index: 1500;
 
     .resizable-container {
       position: relative;
