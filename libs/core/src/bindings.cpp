@@ -26,6 +26,7 @@ const char *__asan_default_options() {
 #include "cesium-interface/object.h"
 #include "mapget/model/info.h"
 #include "mapget/model/sourcedatalayer.h"
+#include "mapget/model/simfilutil.h"
 #include "simfil/model/nodes.h"
 #include "visualization.h"
 #include "parser.h"
@@ -282,8 +283,8 @@ void setExceptionHandler(em::val handler) {
 
 /**  Validate provided SIMFIL query */
 void validateSimfil(const std::string &query) {
-    auto simfilEnv = std::make_shared<simfil::Environment>(simfil::Environment::WithNewStringCache);
-    simfil::compile(*simfilEnv, query, false, true);
+    auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
+    simfil::compile(*env, query, false, true);
 }
 
 }
