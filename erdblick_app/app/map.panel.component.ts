@@ -57,8 +57,6 @@ import {InspectionService} from "./inspection.service";
                             <div class="card" *ngIf="group.value.groupId != 'ungrouped'">
                                 <p-tree [value]="[group.value]">
                                     <ng-template let-node pTemplate="Group">
-                                        <div style="cursor: pointer; display: inline-block"
-                                             (click)="$event.stopPropagation(); toggleGroup(node.groupId)">
                                         <span>
                                             <p-checkbox [ngModel]="mapGroupsVisibility.get(node.groupId)![0]"
                                                         (click)="$event.stopPropagation()"
@@ -70,34 +68,30 @@ import {InspectionService} from "./inspection.service";
                                                 {{ node.groupId }}
                                             </label>
                                         </span>
-                                        </div>
                                     </ng-template>
                                     <ng-template let-node pTemplate="Map">
-                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)"
-                                                [popup]="true"
+                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)" [popup]="true"
                                                 appendTo="body"/>
                                         <div class="flex-container">
-                                            <div style="cursor: pointer; display: inline-block" (click)="node.visible = !node.visible; toggleMap(node.mapId)">
-                                                <span>
-                                                    <p-checkbox [(ngModel)]="node.visible"
-                                                                (click)="$event.stopPropagation()"
-                                                                (ngModelChange)="toggleMap(node.mapId)"
-                                                                [binary]="true"
-                                                                [inputId]="node.mapId"
-                                                                [name]="node.mapId" tabindex="0"/>
-                                                    <label [for]="node.mapId" style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
-                                                </span>
-                                            </div>
+                                        <span>
+                                            <p-checkbox [(ngModel)]="node.visible"
+                                                        (click)="$event.stopPropagation()"
+                                                        (ngModelChange)="toggleMap(node.mapId)"
+                                                        [binary]="true"
+                                                        [inputId]="node.mapId"
+                                                        [name]="node.mapId" tabindex="0"/>
+                                            <label [for]="node.mapId"
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
+                                        </span>
                                             <div class="map-controls">
                                                 <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
                                                           [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
                                                           tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0"
+                                                          [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0"
                                                           [disabled]="!metadataMenusEntries.get(node.mapId)?.length">
-                                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
-                                                        data_object
-                                                    </span>
+                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                                data_object
+                                            </span>
                                                 </p-button>
                                             </div>
                                         </div>
@@ -106,12 +100,11 @@ import {InspectionService} from "./inspection.service";
                                         <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                             <div class="font-bold white-space-nowrap"
                                                  style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
-                                      tabindex="0"
-                                      (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">more_vert</span>
-                                                <div style="cursor: pointer; display: inline-block"
-                                                     (click)="node.visible = !node.visible; toggleLayer(node.mapId, node.layerId)">
-                                            <span>
+                                            <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
+                                                  tabindex="0" (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
+                                                more_vert
+                                            </span>
+                                                <span>
                                             <p-checkbox [(ngModel)]="node.visible"
                                                         (click)="$event.stopPropagation()"
                                                         (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
@@ -121,7 +114,6 @@ import {InspectionService} from "./inspection.service";
                                             <label [for]="node.layerId"
                                                    style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
                                             </span>
-                                                </div>
                                             </div>
                                             <div class="layer-controls">
                                                 <p-button onEnterClick
@@ -167,19 +159,16 @@ import {InspectionService} from "./inspection.service";
                                     <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)" [popup]="true"
                                             appendTo="body"/>
                                     <div class="flex-container">
-                                        <div style="cursor: pointer; display: inline-block"
-                                             (click)="node.visible = !node.visible; toggleMap(node.mapId)">
-                                            <span>
-                                                <p-checkbox [(ngModel)]="node.visible"
-                                                            (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleMap(node.mapId)"
-                                                            [binary]="true"
-                                                            [inputId]="node.mapId"
-                                                            [name]="node.mapId" tabindex="0"/>
-                                                <label [for]="node.mapId"
-                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
-                                            </span>
-                                        </div>
+                                        <span>
+                                            <p-checkbox [(ngModel)]="node.visible"
+                                                        (click)="$event.stopPropagation()"
+                                                        (ngModelChange)="toggleMap(node.mapId)"
+                                                        [binary]="true"
+                                                        [inputId]="node.mapId"
+                                                        [name]="node.mapId" tabindex="0"/>
+                                            <label [for]="node.mapId"
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
+                                        </span>
                                         <div class="map-controls">
                                             <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
                                                       [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
@@ -197,11 +186,10 @@ import {InspectionService} from "./inspection.service";
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
                                              style="margin-left: 0.5em; display: flex; align-items: center;">
-                                <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
-                                      tabindex="0"
-                                      (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">more_vert</span>
-                                            <div style="cursor: pointer; display: inline-block"
-                                                 (click)="node.visible = !node.visible; toggleLayer(node.mapId, node.layerId)">
+                                            <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer" 
+                                                  tabindex="0" (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
+                                                more_vert
+                                            </span>
                                             <span>
                                             <p-checkbox [(ngModel)]="node.visible"
                                                         (click)="$event.stopPropagation()"
@@ -212,7 +200,6 @@ import {InspectionService} from "./inspection.service";
                                             <label [for]="node.layerId"
                                                    style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
                                             </span>
-                                            </div>
                                         </div>
                                         <div class="layer-controls">
                                             <p-button onEnterClick
@@ -254,97 +241,7 @@ import {InspectionService} from "./inspection.service";
                     </div>
                 </ng-container>
             </p-fieldset>
-            <p-fieldset class="map-tab" legend="Styles" [toggleable]="true" [(collapsed)]="stylesCollapsed">
-                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
-                    No styles loaded.
-                </div>
-                <div class="styles-container">
-                    <div *ngFor="let style of styleService.styles | keyvalue: unordered">
-                        <p-tree [value]="[style.value]">
-                            <ng-template let-node pTemplate="Style">
-                                <div class="flex-container">
-                                    <div class="font-bold white-space-nowrap" style="margin-left: 0.5em; display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons"
-                                              style="font-size: 1.5em; cursor: pointer"
-                                              (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                            more_vert
-                                        </span>
-                                        <div onEnterClick style="cursor: pointer; display: inline-block"
-                                             (click)="node.params.visible = !node.params.visible; applyStyleConfig(node)"
-                                             tabindex="0">
-                                        <span>
-                                            <p-checkbox [(ngModel)]="node.params.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="applyStyleConfig(node)"
-                                                        [binary]="true"
-                                                        [inputId]="node.id"
-                                                        [name]="node.id"/>
-                                            <label [for]="node.id"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
-                                        </span>
-                                        </div>
-                                    </div>
-                                    <div class="layer-controls style-controls">
-                                        <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
-                                                  icon="pi pi-trash"
-                                                  label="" pTooltip="Remove style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                        <p-button onEnterClick *ngIf="!node.imported" (click)="resetStyle(node.id)"
-                                                  icon="pi pi-refresh"
-                                                  label="" pTooltip="Reload style from storage"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                                  icon="pi pi-file-edit"
-                                                  label="" pTooltip="Edit style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                    </div>
-                                </div>
-                            </ng-template>
-                            <ng-template let-node pTemplate="Bool">
-                                <span onEnterClick class="material-icons"
-                                      style="font-size: 1.5em; cursor: pointer"
-                                      (click)="showOptionsToggleMenu($event, style.value, node.id)"
-                                      [ngClass]="{'disabled': !style.value.params.visible}" tabindex="0">
-                                    more_vert
-                                </span>
-                                <div style="font-style: oblique; cursor: pointer; display: inline-block"
-                                     (click)="style.value.params.options[node.id] = style.value.params.options[node.id]; applyStyleConfig(style.value)"
-                                     [ngClass]="{'disabled': style.value.params.visible}" tabindex="0">
-                                    <span style="font-style: oblique">
-                                        <p-checkbox [(ngModel)]="style.value.params.options[node.id]"
-                                                    (ngModelChange)="applyStyleConfig(style.value)"
-                                                    [binary]="true"
-                                                    [inputId]="style.value.id + '_' + node.id"
-                                                    [name]="style.value.id + '_' + node.id"/>
-                                        <label [for]="style.value.id + '_' + node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
-                                    </span>
-                                </div>
-                            </ng-template>
-                        </p-tree>
-                    </div>
-                </div>
-                <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
-                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                         class="flex-container">
-                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                            {{ message.key }}: {{ message.value }} (see console)
-                        </span>
-                    </div>
-                </div>
-                <div class="styles-container">
-                    <div class="styles-import">
-                        <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
-                                      accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
-                                      customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
-                                      class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
-                                      chooseLabel="Import Style" tabindex="0"/>
-                    </div>
-                </div>
-            </p-fieldset>
+            <style-panel></style-panel>
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
@@ -353,37 +250,6 @@ import {InspectionService} from "./inspection.service";
                   icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}" tabindex="0">
         </p-button>
         <pref-components></pref-components>
-        <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog">
-            <editor></editor>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                              [disabled]="!sourceWasModified"></p-button>
-                    <p-button (click)="closeEditorDialog($event)"
-                              [label]='sourceWasModified ? "Discard" : "Cancel"'
-                              icon="pi pi-times"></p-button>
-                    <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
-                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                        <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
-                    </div>
-                </div>
-                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                    <p-button (click)="exportStyle(styleService.selectedStyleIdForEditing)"
-                              [disabled]="sourceWasModified" label="Export" icon="pi pi-file-export"
-                              [style]="{margin: '0 0.5em'}">
-                    </p-button>
-                    <p-button (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
-                </div>
-            </div>
-        </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
-            <p>You have already edited the style data. Do you really want to discard the changes?</p>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="discardStyleEdits()" label="Yes"></p-button>
-                <p-button (click)="warningDialog.close($event)" label="No"></p-button>
-            </div>
-        </p-dialog>
         <datasources></datasources>
     `,
     styles: [`
@@ -396,12 +262,7 @@ import {InspectionService} from "./inspection.service";
 })
 export class MapPanelComponent {
     layerDialogVisible: boolean = false;
-    warningDialogVisible: boolean = false;
-    editedStyleSourceSubscription: Subscription = new Subscription();
-    savedStyleSourceSubscription: Subscription = new Subscription();
-    sourceWasModified: boolean = false;
     mapsCollapsed: boolean = false;
-    stylesCollapsed: boolean = false;
 
     osmEnabled: boolean = true;
     osmOpacityValue: number = 30;
@@ -409,21 +270,10 @@ export class MapPanelComponent {
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
-    @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
-    @ViewChild('editorDialog') editorDialog: Dialog | undefined;
     @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
 
     mapGroupsVisibility: Map<string, [boolean, boolean]> = new Map<string, [boolean, boolean]>();
     metadataMenusEntries: Map<string, {label: string, command: () => void }[]> = new Map();
-
-    // Trees
-    mapsTree: TreeNode[] = [];
-    mapsSelection: TreeNode[] = [];
-    private prevMapsSelectionKeys: Set<string> = new Set<string>();
-
-    stylesTree: TreeNode[] = [];
-    stylesSelection: TreeNode[] = [];
-    private prevStylesSelectionKeys: Set<string> = new Set<string>();
 
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
@@ -442,7 +292,7 @@ export class MapPanelComponent {
         });
         // TODO: Use parameter service to store the state of the groups?
         this.mapService.mapGroups.subscribe(mapGroups => {
-            for (const [groupId, group] of mapGroups.entries()) {
+            for (const [groupId, group] of mapGroups) {
                 if (groupId !== "ungrouped") {
                     const groupVisibility = group.children.some(mapItem => mapItem.visible);
                     const mapsVisibility = group.children.every(mapItem => mapItem.visible);
@@ -471,7 +321,6 @@ export class MapPanelComponent {
                 this.layerDialogVisible = false;
             }
         });
-        this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
     }
 
     get osmOpacityString(): string {
@@ -515,94 +364,6 @@ export class MapPanelComponent {
     }
 
     // TODO: Refactor these into a generic solution
-    showOptionsToggleMenu(event: MouseEvent, style: ErdblickStyle, optionId: string) {
-        this.toggleMenu.toggle(event);
-        this.toggleMenuItems = [
-            {
-                label: 'Toggle All off but This',
-                command: () => {
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, id == optionId);
-                    }
-                    this.applyStyleConfig(style);
-                }
-            },
-            {
-                label: 'Toggle All on but This',
-                command: () => {
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, id != optionId);
-                    }
-                    this.applyStyleConfig(style);
-                }
-            },
-            {
-                label: 'Toggle All Off',
-                command: () => {
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, false);
-                    }
-                    this.applyStyleConfig(style);
-                }
-            },
-            {
-                label: 'Toggle All On',
-                command: () => {
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, true);
-                    }
-                    this.applyStyleConfig(style);
-                }
-            }
-        ];
-    }
-
-    showStylesToggleMenu(event: MouseEvent, styleId: string) {
-        this.toggleMenu.toggle(event);
-        this.toggleMenuItems = [
-            {
-                label: 'Toggle All off but This',
-                command: () => {
-                    for (const id of this.styleService.styles.keys()) {
-                        this.styleService.toggleStyle(id, styleId == id, true);
-                    }
-                    this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
-                }
-            },
-            {
-                label: 'Toggle All on but This',
-                command: () => {
-                    for (const id of this.styleService.styles.keys()) {
-                        this.styleService.toggleStyle(id, styleId != id, true);
-                    }
-                    this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
-                }
-            },
-            {
-                label: 'Toggle All Off',
-                command: () => {
-                    for (const id of this.styleService.styles.keys()) {
-                        this.styleService.toggleStyle(id, false, true);
-                    }
-                    this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
-                }
-            },
-            {
-                label: 'Toggle All On',
-                command: () => {
-                    for (const id of this.styleService.styles.keys()) {
-                        this.styleService.toggleStyle(id, true, true);
-                    }
-                    this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
-                }
-            }
-        ];
-    }
-
     showLayersToggleMenu(event: MouseEvent, mapName: string, layerName: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
@@ -703,115 +464,6 @@ export class MapPanelComponent {
     toggleLayer(mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
         this.updateGroupVisibilityForMap(mapName);
-    }
-
-    expandStyle(styleId: string) {
-        const style = this.styleService.styles.get(styleId)!;
-        style.params.showOptions = !style.params.showOptions;
-        this.applyStyleConfig(style, false);
-    }
-
-    applyStyleConfig(style: ErdblickStyle, redraw: boolean=true) {
-        if (redraw) {
-            this.styleService.reapplyStyle(style.id);
-        }
-        this.parameterService.setStyleConfig(style.id, style.params);
-    }
-
-    resetStyle(styleId: string) {
-        this.styleService.reloadStyle(styleId);
-        this.styleService.toggleStyle(styleId, true);
-    }
-
-    exportStyle(styleId: string) {
-        if(!this.styleService.exportStyleYamlFile(styleId)) {
-            this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
-        }
-    }
-
-    importStyle(event: any) {
-        if (event.files && event.files.length > 0) {
-            const file: File = event.files[0];
-            let styleId = file.name;
-            if (styleId.toLowerCase().endsWith(".yaml")) {
-                styleId = styleId.slice(0, -5);
-            } else if (styleId.toLowerCase().endsWith(".yml")) {
-                styleId = styleId.slice(0, -4);
-            }
-            styleId = `${styleId} (Imported)`
-            this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader)
-                .then((ok) => {
-                    if (!ok) {
-                        this.messageService.showError(`Could not read empty data for: ${styleId}`);
-                    }
-                })
-                .catch((error) => {
-                    this.messageService.showError(`Error occurred while trying to import style: ${styleId}`);
-                    console.error(error);
-                });
-        }
-    }
-
-    removeStyle(styleId: string) {
-        this.styleService.deleteStyle(styleId);
-    }
-
-    showStyleEditor(styleId: string) {
-        this.styleService.selectedStyleIdForEditing = styleId;
-        this.editorService.datasourcesEditorVisible = false;
-        this.editorService.editableData = `${this.styleService.styles.get(styleId)?.source!}\n\n\n\n\n`
-        this.editorService.readOnly = false;
-        this.editorService.updateEditorState.next(true);
-        this.editorService.styleEditorVisible = true;
-        this.editedStyleSourceSubscription = this.editorService.editedStateData.subscribe(editedStyleSource => {
-            this.sourceWasModified = !(editedStyleSource.replace(/\n+$/, '') == this.editorService.editableData.replace(/\n+$/, ''));
-        });
-        this.savedStyleSourceSubscription = this.styleService.styleEditedSaveTriggered.subscribe(_ => {
-            this.applyEditedStyle();
-        });
-    }
-
-    applyEditedStyle() {
-        const styleId = this.styleService.selectedStyleIdForEditing;
-        this.editorService.editableData = this.editorService.editedStateData.getValue();
-        const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
-        if (!styleId) {
-            this.messageService.showError(`No cached style ID found!`);
-            return;
-        }
-        if (!styleData) {
-            this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
-            return;
-        }
-        if (!this.styleService.styles.has(styleId)) {
-            this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
-            return;
-        }
-        this.styleService.setStyleSource(styleId, styleData);
-        this.sourceWasModified = false;
-    }
-
-    closeEditorDialog(event: any) {
-        if (this.editorDialog !== undefined) {
-            if (this.sourceWasModified) {
-                event.stopPropagation();
-                this.warningDialogVisible = true;
-            } else {
-                this.warningDialogVisible = false;
-                this.editorDialog.close(event);
-            }
-        }
-        this.editedStyleSourceSubscription.unsubscribe();
-        this.savedStyleSourceSubscription.unsubscribe();
-    }
-
-    discardStyleEdits() {
-        this.editorService.updateEditorState.next(false);
-        this.warningDialogVisible = false;
-    }
-
-    openStyleHelp() {
-        window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {

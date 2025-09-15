@@ -96,6 +96,8 @@ import {ViewService} from "./view.service";
 import {CameraService} from "./camera.service";
 import {MarkerService} from "./marker.service";
 import {ViewStateService} from "./view.state.service";
+import {ChipModule} from "primeng/chip";
+import {StyleComponent} from "./style.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -198,7 +200,8 @@ export const initializeServices = () => {
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
-        ErdblickViewUIComponent
+        ErdblickViewUIComponent,
+        StyleComponent
     ],
     bootstrap: [
         AppComponent
@@ -273,7 +276,8 @@ export const initializeServices = () => {
         ContextMenuModule,
         IconFieldModule,
         InputIconModule,
-        PopoverModule
+        PopoverModule,
+        ChipModule
     ],
     providers: [
         provideAppInitializer(initializeServices),

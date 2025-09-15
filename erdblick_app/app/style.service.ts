@@ -12,7 +12,7 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
-import {MapInfoItem} from "./map.service";
+import {GroupInfoItem, MapInfoItem} from "./map.service";
 
 interface StyleConfigEntry {
     id: string,
@@ -39,7 +39,8 @@ export interface ErdblickStyle {
     options: Array<FeatureStyleOptionWithStringType>,
     key?: string,
     type?: string,
-    children?: Array<FeatureStyleOptionWithStringType>
+    children?: Array<FeatureStyleOptionWithStringType>,
+    expanded?: boolean
 }
 
 export interface ErdblickStyleGroup extends Record<string, any> {
@@ -47,6 +48,8 @@ export interface ErdblickStyleGroup extends Record<string, any> {
     groupId: string;
     type: string;
     children: Array<ErdblickStyle>;
+    visible: boolean,
+    expanded: boolean
 }
 
 /**
@@ -56,6 +59,8 @@ export interface ErdblickStyleGroup extends Record<string, any> {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
+    styleIdsForNewStyles: Array<string> = [];
+    styleIdsForUpdatedStyles: Array<string> = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
@@ -69,6 +74,8 @@ export class StyleService {
     private textEncoder: TextEncoder = new TextEncoder();
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
+
+    styleGroups: BehaviorSubject<Map<string, ErdblickStyleGroup>> = new BehaviorSubject<Map<string, ErdblickStyleGroup>>(new Map<string, ErdblickStyleGroup>());
 
     constructor(private httpClient: HttpClient, private parameterService: ParametersService)
     {
@@ -98,6 +105,7 @@ export class StyleService {
                 }
             });
 
+            const styleHashes = this.loadStyleHashes();
             const dataMap = await this.fetchStylesYamlSources(styleUrls);
             dataMap.forEach((styleString, styleId) => {
                 if (!styleString) {
@@ -121,6 +129,7 @@ export class StyleService {
                 styleUrls.forEach(styleUrl => {
                     if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
                 });
+                this.compareStyleHashes(styleId, styleHashes);
             });
             this.loadModifiedBuiltinStyles();
         } catch (error) {
@@ -374,10 +383,6 @@ export class StyleService {
                         if (!style.params.options.hasOwnProperty(option.id)) {
                             style.params.options[option.id] = option.defaultValue;
                         }
-                        option.type = "Bool";
-                        option.key = `${style.key}-${i}`;
-                        option.styleId = style.id;
-                        style.children?.push(option);
                     }
                     options.delete();
                     return true;
@@ -403,10 +408,73 @@ export class StyleService {
         }
         let style = this.styles.get(styleId)!;
         this.initializeWasmStyle(styleId);
+        this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
+    }
+
+    private setStylesIdChildren(style: ErdblickStyle, key: string) {
+        style.key = key;
+        style.children = [];
+        style.expanded = true;
+        let i = 0;
+        for (let option of style.options) {
+            option.type = "Bool";
+            option.key = `${key}-${i}`;
+            option.styleId = style.id;
+            style.children.push(option);
+        }
+        return style;
+    }
+
+    computeStyleGroups() {
+        const groups = new Map<string, ErdblickStyleGroup>();
+        const ungrouped: Array<ErdblickStyle> = [];
+        let firstGroup = "";
+        for (const [styleId, style] of this.styles) {
+            if (styleId.includes('/')) {
+                const prefix = styleId.split('/')[0];
+                if (groups.has(prefix)) {
+                    const key = groups.get(prefix)!.key;
+                    groups.get(prefix)!.visible = groups.get(prefix)!.visible || style.params.visible;
+                    groups.get(prefix)!.children.push(
+                        this.setStylesIdChildren(style, `${key}-${groups.get(prefix)!.children.length}`)
+                    );
+                    continue;
+                }
+                const key = groups.size.toString();
+                const group = {
+                    key: key,
+                    groupId: prefix,
+                    type: "Group",
+                    children: [this.setStylesIdChildren(style, `${key}-0`)],
+                    visible: style.params.visible,
+                    expanded: true
+                };
+                groups.set(prefix, group);
+                if (!firstGroup) {
+                    firstGroup = prefix;
+                }
+            } else {
+                ungrouped.push(this.setStylesIdChildren(style, ungrouped.length.toString()));
+            }
+        }
+
+        if (ungrouped.length > 0) {
+            const group = {
+                key: groups.size.toString(),
+                groupId: "ungrouped",
+                type: "Group",
+                children: ungrouped,
+                visible: true,
+                expanded: true
+            };
+            groups.set("ungrouped", group);
+        }
+
+        return groups;
     }
 
     reapplyStyles(styleIds: Array<string>) {
@@ -432,5 +500,47 @@ export class StyleService {
     toggleOption(styleId: string, optionId: string, enabled: boolean) {
         const style = this.styles.get(styleId)!;
         style.params.options[optionId] = enabled;
+    }
+
+    private loadStyleHashes(): Map<string, string> {
+        const styleHashes = new Map<string, string>();
+        const savedStyleHashes = localStorage.getItem('styleHashes');
+        if (savedStyleHashes) {
+            for (let [styleId, styleHash] of JSON.parse(savedStyleHashes)) {
+                styleHashes.set(styleId, styleHash);
+            }
+        }
+        return styleHashes;
+    }
+
+    private compareStyleHashes(styleId: string, styleHashes: Map<string, string>) {
+        if (!styleHashes.has(styleId)) {
+            this.styleIdsForNewStyles.push(styleId);
+            return;
+        }
+
+        this.styleSha256(styleId).then(styleHash => {
+            if (styleHash !== styleHashes.get(styleId)) {
+                this.styleIdsForUpdatedStyles.push(styleId);
+            }
+        });
+    }
+
+    updateStyleHashes() {
+        localStorage.removeItem("styleHashes");
+        const styleHashes = new Map<string, string>();
+        for (let [styleId, style] of this.styles) {
+            this.styleSha256(styleId).then(styleHash => {
+                styleHashes.set(styleId, styleHash);
+            });
+        }
+        localStorage.setItem('styleHashes', JSON.stringify([...styleHashes]));
+    }
+
+    private async styleSha256(yamlString: string): Promise<string> {
+        const data = new TextEncoder().encode(yamlString);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        const hexString = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+        return hexString;
     }
 }

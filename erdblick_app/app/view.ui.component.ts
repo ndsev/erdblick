@@ -95,6 +95,9 @@ export class ErdblickViewUIComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
+        // TODO - refactoring:
+        //   1. ErdblickViewUIComponent should affect every ViewerWrapper globally and have an equivalent effect
+        //      for every ViewerWrapper simultaneously.
         this.viewStateService.isViewerInit.subscribe(initialised => {
             if (initialised && this.needleRef) {
                 const needle = this.needleRef.nativeElement;

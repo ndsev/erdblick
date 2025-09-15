@@ -13,6 +13,7 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
 import * as uuid from 'uuid';
+import {SetDisabledStateOption} from "@angular/forms";
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -50,6 +51,7 @@ export interface MapInfoItem extends Record<string, any> {
     visible: boolean;
     type: string;
     children?: Array<LayerInfoItem>;
+    expanded?: boolean;
 }
 
 export interface GroupInfoItem extends Record<string, any> {
@@ -57,6 +59,8 @@ export interface GroupInfoItem extends Record<string, any> {
     groupId: string;
     type: string;
     children: Array<MapInfoItem>;
+    visible: boolean;
+    expanded: boolean;
 }
 
 const infoUrl = "sources";
@@ -99,6 +103,10 @@ export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
     public mapGroups: BehaviorSubject<Map<string, GroupInfoItem>> = new BehaviorSubject<Map<string, GroupInfoItem>>(new Map<string, GroupInfoItem>());
+    // TODO - refactoring:
+    //   1. mapIdsPerViewer: Map<string, Set<string>> should store sets of mapIds associated
+    //      with the particular ViewerWrapper.viewerId.
+    public mapIdsPerViewer: Map<string, Set<string>> = new Map<string, Set<string>>();
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
@@ -314,6 +322,7 @@ export class MapService {
     private setMapsLayersIdChildren(mapItem: MapInfoItem, key: string) {
         mapItem.key = key;
         mapItem.children = [];
+        mapItem.expanded = true;
         let i = 0;
         for (let layer of mapItem.layers.values()) {
             if (layer.type !== "SourceData") {
@@ -338,6 +347,7 @@ export class MapService {
                 const prefix = mapId.split('/')[0];
                 if (groups.has(prefix)) {
                     const key = groups.get(prefix)!.key;
+                    groups.get(prefix)!.visible = groups.get(prefix)!.visible || mapItem.visible;
                     groups.get(prefix)!.children.push(
                         this.setMapsLayersIdChildren(mapItem, `${key}-${groups.get(prefix)!.children.length}`)
                     );
@@ -348,7 +358,9 @@ export class MapService {
                     key: key,
                     groupId: prefix,
                     type: "Group",
-                    children: [this.setMapsLayersIdChildren(mapItem, `${key}-0`)]
+                    children: [this.setMapsLayersIdChildren(mapItem, `${key}-0`)],
+                    visible: mapItem.visible,
+                    expanded: true
                 };
                 groups.set(prefix, group);
                 if (!firstGroup) {
@@ -370,7 +382,9 @@ export class MapService {
                 key: groups.size.toString(),
                 groupId: "ungrouped",
                 type: "Group",
-                children: ungrouped
+                children: ungrouped,
+                visible: true,
+                expanded: true
             };
             groups.set("ungrouped", group);
         }

@@ -29,33 +29,33 @@ export interface InspectionContainerSize {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion *ngIf="inspectionService.isInspectionPanelVisible"
-                     class="w-full inspect-panel" [ngClass]="{'inspect-panel-small-header': activeIndex > 0}"
-                     [activeIndex]="0" >
-            <p-accordionTab>
-                <ng-template pTemplate="header">
+        <p-accordion *ngIf="inspectionService.isInspectionPanelVisible" class="w-full inspect-panel" 
+                     [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" [value]="0">
+            <p-accordion-panel value="0">
+                <p-accordion-header>
                     <span class="inspector-title" *ngIf="activeIndex < tabs.length">
-                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" 
-                                  *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length" />
+                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
+                                  *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length"/>
                         
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
-                        
-                        <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems" 
-                                    [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
-                                    (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled" 
+
+                        <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems"
+                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
+                                  (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled"
                                   appendTo="body"/>
                     </span>
-                </ng-template>
+                </p-accordion-header>
 
-                <ng-template pTemplate="content">
-                    <div *ngFor="let tab of tabs; let i = index">
-                        <div [style]="{'display': i == activeIndex ? 'block' : 'none'}">
-                            <ng-container *ngComponentOutlet="tab.component; inputs: tab.inputs" />
+                <p-accordion-content>
+                    <ng-container *ngFor="let tab of tabs; let i = index">
+                        <div [style.display]="i === activeIndex ? 'block' : 'none'">
+                            <ng-container *ngComponentOutlet="tab.component; inputs: tab.inputs"/>
                         </div>
-                    </div>
-                </ng-template>
-            </p-accordionTab>
+                    </ng-container>
+                </p-accordion-content>
+            </p-accordion-panel>
         </p-accordion>
+
     `,
     styles: [
         `@layer erdblick {
@@ -76,8 +76,7 @@ export interface InspectionContainerSize {
     ],
     standalone: false
 })
-export class InspectionPanelComponent
-{
+export class InspectionPanelComponent {
     title = "";
     tabs: InspectorTab[] = [];
     activeIndex = 0;
@@ -96,7 +95,7 @@ export class InspectionPanelComponent
             // TODO: Create a new FeaturePanelComponent instance for each unique feature selection.
             //       Then we can get rid of all the service's View Component logic/functions.
             //       reset() Would then completely clear the tabs.
-            const featureIds = this.inspectionService.selectedFeatures.map(f=>f.featureId).join(", ");
+            const featureIds = this.inspectionService.selectedFeatures.map(f => f.featureId).join(", ");
             if (this.inspectionService.selectedFeatures.length == 1) {
                 this.tabs[0].title = featureIds;
             } else {
@@ -136,7 +135,7 @@ export class InspectionPanelComponent
                                     this.inspectionService.selectedSourceData.next(sourceData);
                                 },
                             };
-                    }).sort((a, b) => a.label.localeCompare(b.label));
+                        }).sort((a, b) => a.label.localeCompare(b.label));
                     this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
                 } else {
                     this.layerMenuItems = [];
