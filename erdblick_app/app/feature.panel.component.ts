@@ -149,7 +149,7 @@ interface Column {
     `,
     styles: [`
         .section-style {
-            background-color: gainsboro;
+            background-color: var(--p-highlight-background);
             margin-top: 1em;
         }
         
