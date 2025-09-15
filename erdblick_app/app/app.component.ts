@@ -6,6 +6,18 @@ import {ParametersService} from "./parameters.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
+// Centralized helpers for compact URL stringification
+function booleanReplacerForUrl(_: string, value: any) {
+    return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+}
+
+function stringifyForUrl(value: any): string {
+    if (typeof value === 'boolean') {
+        return value ? '1' : '0';
+    }
+    return JSON.stringify(value, booleanReplacerForUrl);
+}
+
 interface Versions {
     name: string;
     tag: string;
@@ -148,7 +160,7 @@ export class AppComponent {
             const entries = [...Object.entries(parameters)].filter(value =>
                 this.parametersService.isUrlParameter(value[0])
             );
-            entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
+            entries.forEach(entry => entry[1] = stringifyForUrl(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
         });
     }

@@ -75,6 +75,61 @@ function validateObject(fields: Record<string, string>) {
     };
 }
 
+
+/**
+ * decodeCompactBooleans: Convert 1/0 → boolean for known compact-encoded params.
+ * Handles:
+ * - layers: Array<[string, number, boolean|0|1, boolean|0|1]>
+ * - styles: Record<string, { visible: boolean|0|1, showOptions: boolean|0|1, options: Record<string, boolean|0|1|number> }>
+ * Note: Update this function if these shapes evolve.
+ */
+function decodeCompactBooleans(obj: any, parameterName: string): any {
+    const toBool = (v: any) => (v === 1 ? true : v === 0 ? false : v);
+
+    if (parameterName === 'layers' && Array.isArray(obj)) {
+        return obj.map(layer => {
+            if (Array.isArray(layer) && layer.length === 4) {
+                const [name, id, v2, v3] = layer as [string, number, any, any];
+                const v2ok = v2 === 0 || v2 === 1 || typeof v2 === 'boolean';
+                const v3ok = v3 === 0 || v3 === 1 || typeof v3 === 'boolean';
+                if (!v2ok || !v3ok) {
+                    console.warn('[params] layers element has unexpected schema; leaving values unchanged.');
+                }
+                return [name, id, toBool(v2), toBool(v3)];
+            }
+            return layer;
+        });
+    }
+
+    if (parameterName === 'styles' && obj && typeof obj === 'object') {
+        return Object.fromEntries(
+            Object.entries(obj).map(([styleId, data]) => {
+                if (!data || typeof data !== 'object') return [styleId, data];
+
+                const style: any = { ...data };
+                style.visible = toBool(style.visible);
+                style.showOptions = toBool(style.showOptions);
+
+                if (style.options && typeof style.options === 'object') {
+                    style.options = Object.fromEntries(
+                        Object.entries(style.options).map(([k, v]) => {
+                            if (v !== 0 && v !== 1 && typeof v === 'number') {
+                                console.warn('[params] styles.options value not compact-boolean; leaving as-is.');
+                            }
+                            return [k, toBool(v)];
+                        })
+                    );
+                }
+
+                return [styleId, style];
+            })
+        );
+    }
+
+    return obj;
+}
+
+
 const erdblickParameters: Record<string, ParameterDescriptor> = {
     search: {
         converter: val => JSON.parse(val),
@@ -83,7 +138,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: true
     },
     marker: {
-        converter: val => val === 'true',
+        converter: val => val === 'true' || val === '1',
         validator: val => typeof val === 'boolean',
         default: false,
         urlParam: true
@@ -137,7 +192,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: true
     },
     mode2d: {
-        converter: val => val === 'true',
+        converter: val => val === 'true' || val === '1',
         validator: val => typeof val === 'boolean',
         default: false,
         urlParam: true
@@ -155,19 +210,19 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: true
     },
     osm: {
-        converter: val => val === 'true',
+        converter: val => val === 'true' || val === '1',
         validator: val => typeof val === 'boolean',
         default: true,
         urlParam: true
     },
     layers: {
-        converter: val => JSON.parse(val),
+        converter: val => decodeCompactBooleans(JSON.parse(val), 'layers'),
         validator: val => Array.isArray(val) && val.every(item => Array.isArray(item) && item.length === 4 && typeof item[0] === 'string' && typeof item[1] === 'number' && typeof item[2] === 'boolean' && typeof item[3] === 'boolean'),
         default: [],
         urlParam: true
     },
     styles: {
-        converter: val => JSON.parse(val),
+        converter: val => decodeCompactBooleans(JSON.parse(val), 'styles'),
         validator: val => {
             return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
                 ([_, v]) => validateObject({visible: "boolean", showOptions: "boolean", options: "object"})(v));
@@ -194,7 +249,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         urlParam: false
     },
     selectedSourceData: {
-        converter: JSON.parse,
+        converter: val => JSON.parse(val),
         validator: Array.isArray,
         default: [],
         urlParam: true
@@ -310,6 +365,11 @@ export class ParametersService {
         return this.parameters.getValue();
     }
 
+    private isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
+        const lower = mapLayerNameOrLayerId.toLowerCase();
+        return lower.includes('sourcedata') || lower.includes('metadata');
+    }
+
     public setSelectedSourceData(selection: SelectedSourceData) {
         this.p().selectedSourceData = [
             selection.tileId,
@@ -345,7 +405,7 @@ export class ParametersService {
         if (this.p().layers.length) {
             return;
         }
-        this.p().layers = layers;
+        this.p().layers = layers.filter(l => !this.isSourceOrMetaData(l[0]));
         this.parameters.next(this.p());
     }
 
@@ -410,12 +470,6 @@ export class ParametersService {
         }
     }
 
-    setCompleteMapLayerConfig(mapLayerConfig: Array<[string, number, boolean, boolean]>) {
-        // TODO: Add checks
-        this.p().layers = mapLayerConfig;
-        this.parameters.next(this.p());
-    }
-
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
         const conf = this.p().layers.find(ml => ml[0] == mapId + "/" + layerId);
         if (conf !== undefined && conf[2]) {
@@ -425,7 +479,7 @@ export class ParametersService {
     }
 
     setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
-        if (layerId.includes("SourceData") || layerId.includes("Metadata")) {
+        if (this.isSourceOrMetaData(layerId)) {
             return;
         }
         const mapLayerName = mapId + "/" + layerId;
@@ -448,7 +502,7 @@ export class ParametersService {
         tileBorders: boolean
     }[]) {
         layerParams.forEach(params => {
-            if (!params.layerId.includes("SourceData") && !params.layerId.includes("Metadata")) {
+            if (!this.isSourceOrMetaData(params.layerId)) {
                 const mapLayerName = params.mapId + "/" + params.layerId;
                 let conf = this.p().layers.find(
                     val => val[0] == mapLayerName
@@ -587,6 +641,10 @@ export class ParametersService {
             }
         });
 
+        if (Array.isArray(updatedParameters.layers)) {
+            updatedParameters.layers = updatedParameters.layers.filter(l => Array.isArray(l) && typeof l[0] === 'string' && !this.isSourceOrMetaData(l[0]));
+        }
+
         if (!this.initialQueryParamsSet) {
             this.setView(Cartesian3.fromDegrees(updatedParameters.lon, updatedParameters.lat, updatedParameters.alt), {
                 heading: updatedParameters.heading,
@@ -711,7 +769,9 @@ export class ParametersService {
             });
         });
 
-        this.p().layers = this.p().layers.filter(layer => mapLayerIds.has(layer[0]));
+        this.p().layers = this.p().layers.filter(layer => {
+            return mapLayerIds.has(layer[0]) && !this.isSourceOrMetaData(layer[0]);
+        });
         const hasLayersAfterPruning = this.p().layers.length > 0;
         this.parameters.next(this.p());
         return !hasLayersAfterPruning; // Need to reinitialise the layers if none configured anymore
