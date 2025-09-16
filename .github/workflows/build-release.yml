@@ -18,8 +18,17 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
-      - name: Install build dependencies
-        run: sudo apt-get install ninja-build
+      - name: Configure Git authentication for GitHub
+        run: |
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install build dependencies (ninja, git-lfs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build git-lfs
+
+      - name: Initialize Git LFS
+        run: git lfs install
 
       - name: Install npm dependencies
         run: npm -g install --force --include=dev
