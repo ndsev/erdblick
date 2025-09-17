@@ -535,6 +535,8 @@ export class StyleService {
             });
         }
         localStorage.setItem('styleHashes', JSON.stringify([...styleHashes]));
+        this.styleIdsForNewStyles = [];
+        this.styleIdsForUpdatedStyles = [];
     }
 
     private async styleSha256(yamlString: string): Promise<string> {

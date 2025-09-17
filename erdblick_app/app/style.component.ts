@@ -38,7 +38,8 @@ import {EditorService} from "./editor.service";
                             </ng-template>
                             <ng-template let-node pTemplate="Style">
                                 <div class="flex-container">
-                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
+                                    <div class="font-bold white-space-nowrap"
+                                         style="display: flex; align-items: center;">
                                             <span onEnterClick class="material-icons"
                                                   style="font-size: 1.5em; cursor: pointer"
                                                   (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
@@ -78,16 +79,18 @@ import {EditorService} from "./editor.service";
                                     <span onEnterClick class="material-icons"
                                           style="font-size: 1.5em; cursor: pointer"
                                           (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
-                                          [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}" tabindex="0">
+                                          [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
+                                          tabindex="0">
                                         more_vert
                                     </span>
                                 <span [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
                                       style="font-style: oblique">
-                                        <p-checkbox [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
-                                                    (ngModelChange)="toggleOption(node.styleId)"
-                                                    [binary]="true"
-                                                    [inputId]="node.styleId + '_' + node.id"
-                                                    [name]="node.styleId + '_' + node.id"/>
+                                        <p-checkbox
+                                                [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
+                                                (ngModelChange)="toggleOption(node.styleId)"
+                                                [binary]="true"
+                                                [inputId]="node.styleId + '_' + node.id"
+                                                [name]="node.styleId + '_' + node.id"/>
                                         <label [for]="node.styleId + '_' + node.id"
                                                style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
                                     </span>
@@ -139,16 +142,18 @@ import {EditorService} from "./editor.service";
                                 <span onEnterClick class="material-icons"
                                       style="font-size: 1.5em; cursor: pointer"
                                       (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
-                                      [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}" tabindex="0">
+                                      [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
+                                      tabindex="0">
                                     more_vert
                                 </span>
                             <span [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
                                   style="font-style: oblique">
-                                    <p-checkbox [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
-                                                (ngModelChange)="toggleOption(node.styleId)"
-                                                [binary]="true"
-                                                [inputId]="node.styleId + '_' + node.id"
-                                                [name]="node.styleId + '_' + node.id"/>
+                                    <p-checkbox
+                                            [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
+                                            (ngModelChange)="toggleOption(node.styleId)"
+                                            [binary]="true"
+                                            [inputId]="node.styleId + '_' + node.id"
+                                            [name]="node.styleId + '_' + node.id"/>
                                     <label [for]="node.styleId + '_' + node.id"
                                            style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
                                 </span>
@@ -177,7 +182,7 @@ import {EditorService} from "./editor.service";
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog">
+                  class="editor-dialog" appendTo="body">
             <editor></editor>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -200,21 +205,22 @@ import {EditorService} from "./editor.service";
                 </div>
             </div>
         </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog>
+        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog appendTo="body">
             <p>You have already edited the style data. Do you really want to discard the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="discardStyleEdits()" label="Yes"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="No"></p-button>
             </div>
         </p-dialog>
-        <p-dialog header="Updated Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true" (onHide)="resetStyleIds" #updatedStyleDialog>
+        <p-dialog header="Updated Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
+                  (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
             <ng-container *ngIf="styleService.styleIdsForUpdatedStyles.length">
                 <p>The following styles were updated:</p>
-                <p-chip *ngFor="let styleId of styleService.styleIdsForUpdatedStyles" [label]="styleId" />
+                <p-chip *ngFor="let styleId of styleService.styleIdsForUpdatedStyles" [label]="styleId"/>
             </ng-container>
             <ng-container *ngIf="styleService.styleIdsForNewStyles.length">
                 <p>The following styles were newly initialised:</p>
-                <p-chip *ngFor="let styleId of styleService.styleIdsForNewStyles" [label]="styleId" />
+                <p-chip *ngFor="let styleId of styleService.styleIdsForNewStyles" [label]="styleId"/>
             </ng-container>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
@@ -262,7 +268,8 @@ export class StyleComponent {
         });
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
         this.parameterService.ready$.subscribe(_ => {
-            this.styleUpdateDialogVisible = true;
+            this.styleUpdateDialogVisible = this.styleService.styleIdsForUpdatedStyles.length > 0 ||
+                this.styleService.styleIdsForNewStyles.length > 0;
         });
     }
 
@@ -505,7 +512,8 @@ export class StyleComponent {
         this.applyStyleConfig(styleId);
     }
 
-    resetStyleIds() {
+    resetUpdatedStyleIds() {
         this.styleService.updateStyleHashes();
+        this.styleUpdateDialogVisible = false;
     }
 }

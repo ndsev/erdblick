@@ -139,48 +139,10 @@ body {
   transform-origin: 50% 50%;
 }
 
-.help-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
-  }
-}
-
-.pref-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
-    width: 3em;
-    height: 3em;
-  }
-}
-
 .controls-button {
   .p-button {
     background: none;
     border: none;
-  }
-}
-
-.pref-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
   }
 }
 
@@ -199,23 +161,66 @@ body {
   }
 }
 
-.layers-button {
+.main-button-controls {
   position: absolute;
   top: 0.5em;
   left: 0.5em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
 
-  button {
-    width: 3em;
-    height: 3em;
-    box-shadow: none;
+  .layers-button {
+    button {
+      width: 3em;
+      height: 3em;
+      box-shadow: none;
+    }
   }
 
-  &.shifted {
-    left: 25.5em !important;
-    top: 5em !important;
-    z-index: 1000;
+  &.hovered {
+    .pref-buttons {
+      visibility: visible;
+      opacity: 1;
+      transition: opacity 0.1s, visibility 0.1s;
+    }
+  }
+
+  .pref-buttons {
+    visibility: hidden;
+    opacity: 0;
   }
 }
+
+.bttn-container {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5em;
+  position: relative;
+  z-index: 1100;
+
+  .help-button {
+    width: 3em;
+    height: 3em;
+
+    .p-button {
+      border-radius: 50%;
+      padding: 0.8em 0;
+    }
+  }
+
+  .pref-button {
+    width: 3em;
+    height: 3em;
+
+    .p-button {
+      border-radius: 50%;
+      padding: 0.8em 0;
+      width: 3em;
+      height: 3em;
+    }
+  }
+}
+
 
 .card {
   background-color: rgba(#fff, 1.0);
@@ -240,8 +245,9 @@ body {
 
 .inspect-panel-small-header {
   .p-accordionheader {
-    padding-top: 0.5em !important;
-    padding-bottom: 0.5em !important;
+    /* Match default header height from .inspect-panel .p-accordionheader (0.95em total) */
+    padding-top: 0.6em !important;
+    padding-bottom: 0.6em !important;
   }
 
   .resizable-container {
@@ -262,7 +268,7 @@ body {
   }
 
   .p-accordionheader {
-    padding: 0.95em;
+    padding: 0.93em;
   }
 
   .p-accordioncontent-content {
@@ -997,14 +1003,7 @@ body {
   }
 }
 
-.bttn-container {
-  position: absolute;
-  left: 0;
-  top: 4em;
-  display: flex;
-  flex-direction: column-reverse;
-  z-index: 110;
-}
+
 
 .editor-dialog {
   .spinner {

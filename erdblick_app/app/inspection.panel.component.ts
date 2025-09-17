@@ -30,19 +30,19 @@ export interface InspectionContainerSize {
     selector: 'inspection-panel',
     template: `
         <p-accordion *ngIf="inspectionService.isInspectionPanelVisible" class="w-full inspect-panel" 
-                     [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" [value]="0">
+                     [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" value="0">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <span class="inspector-title" *ngIf="activeIndex < tabs.length">
-                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
+                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"
                                   *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length"/>
                         
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
 
                         <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems"
-                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" scrollHeight="20em"
-                                  (ngModelChange)="onSelectedLayerItem()" optionLabel="label" optionDisabled="disabled"
-                                  appendTo="body"/>
+                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)" 
+                                  scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label" 
+                                  optionDisabled="disabled" appendTo="body"/>
                     </span>
                 </p-accordion-header>
 

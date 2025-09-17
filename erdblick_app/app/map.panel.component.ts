@@ -15,6 +15,7 @@ import {KeyboardService} from "./keyboard.service";
 import {EditorService} from "./editor.service";
 import {DataSourcesService} from "./datasources.service";
 import {InspectionService} from "./inspection.service";
+import {AppModeService} from "./app-mode.service";
 
 
 @Component({
@@ -245,11 +246,18 @@ import {InspectionService} from "./inspection.service";
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <p-button onEnterClick (click)="showLayerDialog()" label="" class="layers-button"
-                  tooltipPosition="right" pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
-                  icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}" tabindex="0">
-        </p-button>
-        <pref-components></pref-components>
+        <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false" 
+             [ngClass]="{'hovered': isMainButtonHovered}">
+            <p-button onEnterClick class="layers-button" icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}"
+                      (mouseenter)="isMainButtonHovered = true"
+                      (click)="isMainButtonHovered = false; showLayerDialog()" 
+                      tooltipPosition="right" pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
+                      label=""  tabindex="0">
+            </p-button>
+            <div class="pref-buttons" *ngIf="!appModeService.isVisualizationOnly">
+                <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
+            </div>
+        </div>
         <datasources></datasources>
     `,
     styles: [`
@@ -261,6 +269,7 @@ import {InspectionService} from "./inspection.service";
     standalone: false
 })
 export class MapPanelComponent {
+    isMainButtonHovered: boolean = false;
     layerDialogVisible: boolean = false;
     mapsCollapsed: boolean = false;
 
@@ -276,7 +285,7 @@ export class MapPanelComponent {
     metadataMenusEntries: Map<string, {label: string, command: () => void }[]> = new Map();
 
     constructor(public mapService: MapService,
-                private messageService: InfoMessageService,
+                public appModeService: AppModeService,
                 public styleService: StyleService,
                 public parameterService: ParametersService,
                 public keyboardService: KeyboardService,
