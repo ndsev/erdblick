@@ -543,8 +543,7 @@ export class StyleComponent {
     }
 
     resetUpdatedStyleIds() {
-        this.styleService.updateStyleHashes();
-        this.styleUpdateDialogVisible = false;
+        this.styleService.updateStyleHashes().then(_ => this.warningDialogVisible = false);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

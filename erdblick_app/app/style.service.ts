@@ -128,7 +128,7 @@ export class StyleService {
                 styleUrls.forEach(styleUrl => {
                     if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
                 });
-                this.compareStyleHashes(styleId, styleHashes);
+                this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
             });
             this.loadModifiedBuiltinStyles();
         } catch (error) {
@@ -559,36 +559,33 @@ export class StyleService {
         return styleHashes;
     }
 
-    private compareStyleHashes(styleId: string, styleHashes: Map<string, string>) {
-        if (!styleHashes.has(styleId)) {
-            this.styleIdsForNewStyles.push(styleId);
+    private compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
+        if (!styleHashes.has(style.id)) {
+            this.styleIdsForNewStyles.push(style.id);
             return;
         }
 
-        this.styleSha256(styleId).then(styleHash => {
-            if (styleHash !== styleHashes.get(styleId)) {
-                this.styleIdsForUpdatedStyles.push(styleId);
+        this.styleSha256(style.source).then(styleHash => {
+            if (styleHash !== styleHashes.get(style.id)) {
+                this.styleIdsForUpdatedStyles.push(style.id);
             }
         });
     }
 
-    updateStyleHashes() {
-        localStorage.removeItem("styleHashes");
-        const styleHashes = new Map<string, string>();
-        for (let [styleId, style] of this.styles) {
-            this.styleSha256(styleId).then(styleHash => {
-                styleHashes.set(styleId, styleHash);
-            });
-        }
-        localStorage.setItem('styleHashes', JSON.stringify([...styleHashes]));
+    async updateStyleHashes() {
+        const pairs = await Promise.all(
+            Array.from(this.styles, async ([styleId, { source }]) =>
+                [styleId, await this.styleSha256(source)] as const));
+
+        localStorage.setItem('styleHashes', JSON.stringify(pairs));
         this.styleIdsForNewStyles = [];
         this.styleIdsForUpdatedStyles = [];
     }
 
-    private async styleSha256(yamlString: string): Promise<string> {
-        const data = new TextEncoder().encode(yamlString);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        const hexString = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-        return hexString;
+    private async styleSha256(input: string): Promise<string> {
+        const data = new TextEncoder().encode(input);
+        const buffer = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(buffer), b => b.toString(16)
+            .padStart(2, '0')).join('');
     }
 }
