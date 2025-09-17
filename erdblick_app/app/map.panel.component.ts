@@ -1,19 +1,14 @@
 import {Component, ViewChild} from "@angular/core";
-import {InfoMessageService} from "./info.service";
-import {CoverageRectItem, GroupInfoItem, MapInfoItem, MapService} from "./map.service";
-import {ErdblickStyle, StyleService} from "./style.service";
+import {CoverageRectItem, MapService, removeGroupPrefix, MapInfoItem} from "./map.service";
 import {ParametersService} from "./parameters.service";
-import {FileUpload} from "primeng/fileupload";
-import {Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
 import {coreLib} from "./wasm";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
-import {MenuItem, TreeNode} from "primeng/api";
+import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "./keyboard.service";
 import {EditorService} from "./editor.service";
-import {DataSourcesService} from "./datasources.service";
 import {InspectionService} from "./inspection.service";
 import {AppModeService} from "./app-mode.service";
 
@@ -59,14 +54,14 @@ import {AppModeService} from "./app-mode.service";
                                 <p-tree [value]="[group.value]">
                                     <ng-template let-node pTemplate="Group">
                                         <span>
-                                            <p-checkbox [ngModel]="mapGroupsVisibility.get(node.groupId)![0]"
+                                            <p-checkbox [ngModel]="isGroupAnyVisible(node)"
                                                         (click)="$event.stopPropagation()"
                                                         (ngModelChange)="toggleGroup(node.groupId)"
                                                         [binary]="true"
                                                         [inputId]="node.groupId"
                                                         [name]="node.groupId" tabindex="0"/>
                                             <label [for]="node.groupId" style="margin-left: 0.5em; cursor: pointer">
-                                                {{ node.groupId }}
+                                                {{ removeGroupPrefix(node.groupId) }}
                                             </label>
                                         </span>
                                     </ng-template>
@@ -82,7 +77,7 @@ import {AppModeService} from "./app-mode.service";
                                                         [inputId]="node.mapId"
                                                         [name]="node.mapId" tabindex="0"/>
                                             <label [for]="node.mapId"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.mapId) }}</label>
                                         </span>
                                             <div class="map-controls">
                                                 <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
@@ -100,7 +95,7 @@ import {AppModeService} from "./app-mode.service";
                                     <ng-template let-node pTemplate="Features">
                                         <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                             <div class="font-bold white-space-nowrap"
-                                                 style="margin-left: 0.5em; display: flex; align-items: center;">
+                                                 style="display: flex; align-items: center;">
                                             <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
                                                   tabindex="0" (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
                                                 more_vert
@@ -281,16 +276,14 @@ export class MapPanelComponent {
 
     @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
 
-    mapGroupsVisibility: Map<string, [boolean, boolean]> = new Map<string, [boolean, boolean]>();
     metadataMenusEntries: Map<string, {label: string, command: () => void }[]> = new Map();
+    private _reinitializingAfterPrune: boolean = false;
 
     constructor(public mapService: MapService,
                 public appModeService: AppModeService,
-                public styleService: StyleService,
                 public parameterService: ParametersService,
                 public keyboardService: KeyboardService,
                 public editorService: EditorService,
-                public dsService: DataSourcesService,
                 private inspectionService: InspectionService,
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
@@ -299,29 +292,40 @@ export class MapPanelComponent {
             this.osmEnabled = parameters.osm;
             this.osmOpacityValue = parameters.osmOpacity;
         });
-        // TODO: Use parameter service to store the state of the groups?
+        // Rebuild metadata menus recursively and prune when needed.
         this.mapService.mapGroups.subscribe(mapGroups => {
-            for (const [groupId, group] of mapGroups) {
-                if (groupId !== "ungrouped") {
-                    const groupVisibility = group.children.some(mapItem => mapItem.visible);
-                    const mapsVisibility = group.children.every(mapItem => mapItem.visible);
-                    this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
-                }
-                group.children.forEach(mapItem => this.metadataMenusEntries.set(
-                    mapItem.mapId,
-                    this.inspectionService.findLayersForMapId(mapItem.mapId, true)
-                        .map(layer => {
-                            return {
+            this.metadataMenusEntries.clear();
+            const collectMaps = (node: any) => {
+                if (!node) return;
+                if (node.type === 'Group') {
+                    for (const child of node.children) collectMaps(child);
+                } else {
+                    const mapItem = node;
+                    this.metadataMenusEntries.set(
+                        mapItem.mapId,
+                        this.inspectionService.findLayersForMapId(mapItem.mapId, true)
+                            .map(layer => ({
                                 label: layer.name,
-                                command: () =>
-                                    this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
-                            }
-                    })
-                ));
+                                command: () => this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
+                            }))
+                    );
+                }
+            };
 
-                // If all layers were pruned (complete maps config change), reinitialize default maps
-                if (this.parameterService.pruneMapLayerConfig(group.children)) {
-                    this.mapService.processMapsUpdate();
+            const allLeafMaps: MapInfoItem[] = [];
+            for (const [_, group] of mapGroups) {
+                collectMaps(group);
+                allLeafMaps.push(...this.collectLeafMaps(group));
+            }
+            // If all layers were pruned (complete maps config change), reinitialize default maps once
+            if (allLeafMaps.length > 0 && this.parameterService.pruneMapLayerConfig(allLeafMaps)) {
+                if (!this._reinitializingAfterPrune) {
+                    this._reinitializingAfterPrune = true;
+                    try {
+                        this.mapService.processMapsUpdate();
+                    } finally {
+                        this._reinitializingAfterPrune = false;
+                    }
                 }
             }
         });
@@ -472,7 +476,6 @@ export class MapPanelComponent {
 
     toggleLayer(mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(mapName, layerName);
-        this.updateGroupVisibilityForMap(mapName);
     }
 
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
@@ -484,54 +487,82 @@ export class MapPanelComponent {
         this.editorService.datasourcesEditorVisible = true;
     }
 
-    removePrefix(mapId: string) {
-        if (mapId.includes('/')) {
-            const mapIdParts = mapId.split('/');
-            return mapIdParts.slice(1).join('/');
-        }
-        return mapId;
-    }
-
-    toggleMap(mapId: string, groupId: string = "") {
+    toggleMap(mapId: string) {
         if (!mapId) {
             return;
         }
-        if (groupId && groupId !== "ungrouped") {
-            const state = this.mapGroupsVisibility.has(groupId) && this.mapGroupsVisibility.get(groupId)![0];
-            this.mapService.toggleMapLayerVisibility(mapId, "", state)
-            return;
-        }
         this.mapService.toggleMapLayerVisibility(mapId);
-        this.updateGroupVisibilityForMap(mapId);
     }
 
     toggleGroup(groupId: string) {
         if (!groupId || groupId === 'ungrouped') {
             return;
         }
-        if (!this.mapGroupsVisibility.has(groupId)) {
-            return;
+        const root = this.mapService.mapGroups.getValue();
+        const group = this.findMapGroupById(root, groupId);
+        if (!group) return;
+        // Recompute current visibility at the time of click (derived): any descendant map visible
+        const currentVisible = this.collectLeafMaps(group).some(m => m.visible);
+        const target = !currentVisible;
+        const mapIds = this.collectMapIds(group);
+        for (const mapId of mapIds) {
+            this.mapService.toggleMapLayerVisibility(mapId, "", target, true);
         }
-        if (!this.mapService.mapGroups.getValue().has(groupId)) {
-            return;
-        }
-        const currentState = this.mapGroupsVisibility.get(groupId)!;
-        currentState[0] = !currentState[0];
-        this.mapGroupsVisibility.set(groupId, [currentState[0], currentState[0]]);
-        this.mapService.mapGroups.getValue().get(groupId)!.children.forEach(mapItem => {
-            this.toggleMap(mapItem.mapId, groupId);
-        });
+        this.mapService.processMapsUpdate();
+        this.mapService.update().then();
     }
 
-    private updateGroupVisibilityForMap(mapId: string) {
-        if (mapId.includes('/')) {
-            const groupId = mapId.split('/')[0];
-            if (this.mapService.mapGroups.getValue().has(groupId)) {
-                const mapItems = this.mapService.mapGroups.getValue().get(groupId)!.children;
-                const groupVisibility = mapItems.some(mapItem => mapItem.visible);
-                const mapsVisibility = mapItems.every(mapItem => mapItem.visible);
-                this.mapGroupsVisibility.set(groupId, [groupVisibility, mapsVisibility]);
+    private findMapGroupById(groups: Map<string, any>, groupId: string): any {
+        for (const [id, group] of groups) {
+            if (id === groupId || group.groupId === groupId) return group;
+            const found = this.findInGroupChildren(group, groupId);
+            if (found) return found;
+        }
+        return undefined;
+    }
+
+    private findInGroupChildren(group: any, groupId: string): any {
+        if (!group || !group.children) return undefined;
+        for (const child of group.children) {
+            if (child.type === 'Group') {
+                if (child.groupId === groupId) return child;
+                const found = this.findInGroupChildren(child, groupId);
+                if (found) return found;
             }
         }
+        return undefined;
     }
+
+    private collectMapIds(group: any): string[] {
+        const ids: string[] = [];
+        if (!group || !group.children) return ids;
+        for (const child of group.children) {
+            if (child.type === 'Group') {
+                ids.push(...this.collectMapIds(child));
+            } else {
+                ids.push(child.mapId);
+            }
+        }
+        return ids;
+    }
+
+    private collectLeafMaps(group: any): MapInfoItem[] {
+        const maps: MapInfoItem[] = [];
+        if (!group || !group.children) return maps;
+        for (const child of group.children) {
+            if (child.type === 'Group') {
+                maps.push(...this.collectLeafMaps(child));
+            } else {
+                maps.push(child as MapInfoItem);
+            }
+        }
+        return maps;
+    }
+
+    isGroupAnyVisible(group: any): boolean {
+        return this.collectLeafMaps(group).some(m => m.visible);
+    }
+
+    protected readonly removeGroupPrefix = removeGroupPrefix;
 }
+

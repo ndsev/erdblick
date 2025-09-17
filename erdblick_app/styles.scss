@@ -730,6 +730,7 @@ body {
 
     .p-tree-node-content {
       padding: 0;
+      font-size: 0.95em;
     }
 
     .p-tree-node-toggle-button {
@@ -864,19 +865,11 @@ body {
     }
   }
 
-  .styles-container {
-    font-size: 0.9em;
-  }
-
   .flex-container {
     padding: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
-
-    span {
-      font-size: 0.9em;
-    }
 
     &:hover {
       .layer-controls {

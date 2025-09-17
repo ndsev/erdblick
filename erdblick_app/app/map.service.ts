@@ -13,7 +13,14 @@ import {MAX_ZOOM_LEVEL} from "./feature.search.service";
 import {PointMergeService} from "./pointmerge.service";
 import {KeyboardService} from "./keyboard.service";
 import * as uuid from 'uuid';
-import {SetDisabledStateOption} from "@angular/forms";
+
+export function removeGroupPrefix(id: string) {
+    if (id.includes('/')) {
+        const pureId = id.split('/').at(-1);
+        return pureId ? pureId : id;
+    }
+    return id;
+}
 
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
@@ -58,7 +65,7 @@ export interface GroupInfoItem extends Record<string, any> {
     key: string;
     groupId: string;
     type: string;
-    children: Array<MapInfoItem>;
+    children: Array<GroupInfoItem | MapInfoItem>;
     visible: boolean;
     expanded: boolean;
 }
@@ -329,6 +336,7 @@ export class MapService {
                 layer.key = `${key}-${i}`;
                 layer.mapId = mapItem.mapId;
                 mapItem.children.push(layer);
+                ++i;
             }
         }
         return mapItem;
@@ -341,49 +349,100 @@ export class MapService {
 
         const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
-        let firstGroup = "";
-        for (const [mapId, mapItem] of this.maps.getValue()) {
-            if (mapId.includes('/')) {
-                const prefix = mapId.split('/')[0];
-                if (groups.has(prefix)) {
-                    const key = groups.get(prefix)!.key;
-                    groups.get(prefix)!.visible = groups.get(prefix)!.visible || mapItem.visible;
-                    groups.get(prefix)!.children.push(
-                        this.setMapsLayersIdChildren(mapItem, `${key}-${groups.get(prefix)!.children.length}`)
-                    );
-                    continue;
-                }
-                const key = groups.size.toString();
-                const group = {
-                    key: key,
-                    groupId: prefix,
+
+        let keyCounter = 0;
+        const nextKey = () => (keyCounter++).toString();
+
+        const getOrCreateGroupByPath = (path: string): GroupInfoItem => {
+            const segments = path.split('/');
+            const top = segments[0];
+            let current: GroupInfoItem;
+            if (groups.has(top)) {
+                current = groups.get(top)!;
+            } else {
+                current = {
+                    key: nextKey(),
+                    groupId: top,
                     type: "Group",
-                    children: [this.setMapsLayersIdChildren(mapItem, `${key}-0`)],
-                    visible: mapItem.visible,
+                    children: [],
+                    visible: false,
                     expanded: true
                 };
-                groups.set(prefix, group);
-                if (!firstGroup) {
-                    firstGroup = prefix;
+                groups.set(top, current);
+            }
+            let acc = top;
+            for (let i = 1; i < segments.length; ++i) {
+                acc = `${acc}/${segments[i]}`;
+                let found: GroupInfoItem | null = null;
+                for (const child of current.children) {
+                    if ((child as any).type === "Group" && (child as GroupInfoItem).groupId === acc) {
+                        found = child as GroupInfoItem;
+                        break;
+                    }
                 }
+                if (!found) {
+                    found = {
+                        key: nextKey(),
+                        groupId: acc,
+                        type: "Group",
+                        children: [],
+                        visible: false,
+                        expanded: true
+                    };
+                    current.children.push(found);
+                }
+                current = found;
+            }
+            return current;
+        };
+
+        // Build nested groups
+        for (const [mapId, mapItem] of this.maps.getValue()) {
+            if (mapId.includes('/')) {
+                const parentPath = mapId.split('/').slice(0, -1).join('/');
+                const currentGroup = getOrCreateGroupByPath(parentPath);
+                const mapNode = this.setMapsLayersIdChildren(mapItem, nextKey());
+                currentGroup.children.push(mapNode);
             } else {
-                ungrouped.push(this.setMapsLayersIdChildren(mapItem, ungrouped.length.toString()));
+                ungrouped.push(this.setMapsLayersIdChildren(mapItem, nextKey()));
             }
         }
 
-        if (!isInitLoad) {
-            this.activateMapsIfNew(groups, ungrouped); // Added new maps to the datasource so will activate them
+        // If no parameter layers exist yet, activate defaults
+        if (!isInitLoad && (groups.size > 0 || ungrouped.length > 0)) {
+            this.activateMapsIfNew(groups, ungrouped);
         } else if (!hasExistingLayers) {
-            this.activateMapsByDefault(groups, ungrouped, firstGroup); // Starting from a clean state
+            // choose the first available top-level group if any, else first ungrouped
+            const firstTop = groups.keys().next().value as string | undefined;
+            this.activateMapsByDefault(groups, ungrouped, firstTop || "");
+        }
+
+        // compute derived visibility for all groups (any descendant map visible)
+        const computeGroupVisibility = (group: GroupInfoItem): boolean => {
+            let anyVisible = false;
+            for (const child of group.children) {
+                if ((child as any).type === "Group") {
+                    anyVisible = computeGroupVisibility(child as GroupInfoItem) || anyVisible;
+                } else {
+                    const mapChild = child as MapInfoItem;
+                    anyVisible = (mapChild.visible || anyVisible);
+                }
+            }
+            group.visible = anyVisible;
+            return anyVisible;
+        };
+
+        for (const [_, topGroup] of groups) {
+            computeGroupVisibility(topGroup);
         }
 
         if (ungrouped.length > 0) {
-            const group = {
-                key: groups.size.toString(),
+            const group: GroupInfoItem = {
+                key: nextKey(),
                 groupId: "ungrouped",
                 type: "Group",
                 children: ungrouped,
-                visible: true,
+                visible: ungrouped.some(m => m.visible),
                 expanded: true
             };
             groups.set("ungrouped", group);
@@ -394,8 +453,6 @@ export class MapService {
 
     public processMapsUpdate() {
         const newGroups = this.computeMapGroups();
-
-        // Only emit if groups actually changed to prevent unnecessary updates
         const currentGroups = this.mapGroups.getValue();
         if (!this.mapGroupsEqual(currentGroups, newGroups)) {
             this.mapGroups.next(newGroups);
@@ -404,24 +461,33 @@ export class MapService {
 
     // Helper to compare map groups for equality
     private mapGroupsEqual(a: Map<string, GroupInfoItem>, b: Map<string, GroupInfoItem>): boolean {
-        if (a.size !== b.size) {
-            return false;
-        }
-
-        for (const [key, valueA] of a) {
-            const valueB = b.get(key);
-            if (!valueB || valueA.children.length !== valueB.children.length) {
-                return false;
-            }
-
-            for (let i = 0; i < valueA.children.length; i++) {
-                if (valueA.children[i].mapId !== valueB.children[i].mapId || valueA.children[i].visible !== valueB.children[i].visible) {
-                    return false;
-                }
-            }
+        if (a.size !== b.size) return false;
+        for (const [key, aGroup] of a) {
+            const bGroup = b.get(key);
+            if (!bGroup) return false;
+            if (!this.groupsDeepEqual(aGroup, bGroup)) return false;
         }
         return true;
     };
+
+    private groupsDeepEqual(a: GroupInfoItem, b: GroupInfoItem): boolean {
+        if (a.groupId !== b.groupId) return false;
+        if (a.children.length !== b.children.length) return false;
+        for (let i = 0; i < a.children.length; i++) {
+            const ac = a.children[i] as any;
+            const bc = b.children[i] as any;
+            if (ac.type !== bc.type) return false;
+            if (ac.type === 'Group') {
+                if (!this.groupsDeepEqual(ac as GroupInfoItem, bc as GroupInfoItem)) return false;
+            } else {
+                // Map nodes: compare id and visibility
+                if ((ac as MapInfoItem).mapId !== (bc as MapInfoItem).mapId) return false;
+                if ((ac as MapInfoItem).visible !== (bc as MapInfoItem).visible) return false;
+            }
+        }
+        // Optional: group visible flag derives from children; ignore minor differences
+        return true;
+    }
 
     private processTileStream() {
         const startTime = Date.now();
@@ -540,7 +606,7 @@ export class MapService {
         return false;
     }
 
-    toggleMapLayerVisibility(mapId: string, layerId: string = "", state: boolean | undefined = undefined) {
+    toggleMapLayerVisibility(mapId: string, layerId: string = "", state: boolean | undefined = undefined, deferUpdate: boolean = false) {
         const mapItem = this.maps.getValue().get(mapId);
         if (mapItem === undefined) {
             return;
@@ -589,7 +655,10 @@ export class MapService {
             }
             this.parameterService.setMapConfig(params);
         }
-        this.update().then();
+        if (!deferUpdate) {
+            this.processMapsUpdate();
+            this.update().then();
+        }
     }
 
     toggleLayerTileBorderVisibility(mapId: string, layerId: string) {

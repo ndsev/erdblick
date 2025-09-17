@@ -12,7 +12,6 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "./wasm";
 import {ParametersService, StyleParameters} from "./parameters.service";
-import {GroupInfoItem, MapInfoItem} from "./map.service";
 
 interface StyleConfigEntry {
     id: string,
@@ -47,7 +46,7 @@ export interface ErdblickStyleGroup extends Record<string, any> {
     key: string;
     groupId: string;
     type: string;
-    children: Array<ErdblickStyle>;
+    children: Array<ErdblickStyleGroup | ErdblickStyle>;
     visible: boolean,
     expanded: boolean
 }
@@ -432,39 +431,86 @@ export class StyleService {
     computeStyleGroups() {
         const groups = new Map<string, ErdblickStyleGroup>();
         const ungrouped: Array<ErdblickStyle> = [];
-        let firstGroup = "";
-        for (const [styleId, style] of this.styles) {
-            if (styleId.includes('/')) {
-                const prefix = styleId.split('/')[0];
-                if (groups.has(prefix)) {
-                    const key = groups.get(prefix)!.key;
-                    groups.get(prefix)!.visible = groups.get(prefix)!.visible || style.params.visible;
-                    groups.get(prefix)!.children.push(
-                        this.setStylesIdChildren(style, `${key}-${groups.get(prefix)!.children.length}`)
-                    );
-                    continue;
-                }
-                const key = groups.size.toString();
-                const group = {
-                    key: key,
-                    groupId: prefix,
+
+        let keyCounter = 0;
+        const nextKey = () => (keyCounter++).toString();
+
+        const getOrCreateGroupByPath = (path: string): ErdblickStyleGroup => {
+            const segments = path.split('/');
+            const top = segments[0];
+            let current: ErdblickStyleGroup;
+            if (groups.has(top)) {
+                current = groups.get(top)!;
+            } else {
+                current = {
+                    key: nextKey(),
+                    groupId: top,
                     type: "Group",
-                    children: [this.setStylesIdChildren(style, `${key}-0`)],
-                    visible: style.params.visible,
+                    children: [],
+                    visible: false,
                     expanded: true
                 };
-                groups.set(prefix, group);
-                if (!firstGroup) {
-                    firstGroup = prefix;
+                groups.set(top, current);
+            }
+            let acc = top;
+            for (let i = 1; i < segments.length; ++i) {
+                acc = `${acc}/${segments[i]}`;
+                let found: ErdblickStyleGroup | null = null;
+                for (const child of current.children) {
+                    if ((child as any).type === "Group" && (child as ErdblickStyleGroup).groupId === acc) {
+                        found = child as ErdblickStyleGroup;
+                        break;
+                    }
                 }
+                if (!found) {
+                    found = {
+                        key: nextKey(),
+                        groupId: acc,
+                        type: "Group",
+                        children: [],
+                        visible: false,
+                        expanded: true
+                    };
+                    current.children.push(found);
+                }
+                current = found;
+            }
+            return current;
+        };
+
+        for (const [styleId, style] of this.styles) {
+            if (styleId.includes('/')) {
+                const parentPath = styleId.split('/').slice(0, -1).join('/');
+                const currentGroup = getOrCreateGroupByPath(parentPath);
+                const styleNode = this.setStylesIdChildren(style, nextKey());
+                currentGroup.children.push(styleNode);
             } else {
-                ungrouped.push(this.setStylesIdChildren(style, ungrouped.length.toString()));
+                ungrouped.push(this.setStylesIdChildren(style, nextKey()));
             }
         }
 
+        // compute derived visibility for groups
+        const computeGroupVisibility = (group: ErdblickStyleGroup): boolean => {
+            let anyVisible = false;
+            for (const child of group.children) {
+                if ((child as any).type === "Group") {
+                    anyVisible = computeGroupVisibility(child as ErdblickStyleGroup) || anyVisible;
+                } else {
+                    const styleChild = child as ErdblickStyle;
+                    anyVisible = (styleChild.params.visible || anyVisible);
+                }
+            }
+            group.visible = anyVisible;
+            return anyVisible;
+        };
+
+        for (const [_, top] of groups) {
+            computeGroupVisibility(top);
+        }
+
         if (ungrouped.length > 0) {
-            const group = {
-                key: groups.size.toString(),
+            const group: ErdblickStyleGroup = {
+                key: nextKey(),
                 groupId: "ungrouped",
                 type: "Group",
                 children: ungrouped,
