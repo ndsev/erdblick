@@ -278,7 +278,7 @@ export const initializeServices = () => {
         IconFieldModule,
         InputIconModule,
         PopoverModule,
-        SelectButtonModule
+        SelectButtonModule,
         ChipModule
     ],
     providers: [

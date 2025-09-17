@@ -66,7 +66,8 @@ import {AppModeService} from "./app-mode.service";
                                         </span>
                                     </ng-template>
                                     <ng-template let-node pTemplate="Map">
-                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)" [popup]="true"
+                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)"
+                                                [popup]="true"
                                                 appendTo="body"/>
                                         <div class="flex-container">
                                         <span>
@@ -83,11 +84,12 @@ import {AppModeService} from "./app-mode.service";
                                                 <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
                                                           [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
                                                           tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0"
+                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                          tabindex="0"
                                                           [disabled]="!metadataMenusEntries.get(node.mapId)?.length">
-                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
-                                                data_object
-                                            </span>
+                                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                                        data_object
+                                                    </span>
                                                 </p-button>
                                             </div>
                                         </div>
@@ -96,38 +98,42 @@ import {AppModeService} from "./app-mode.service";
                                         <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                             <div class="font-bold white-space-nowrap"
                                                  style="display: flex; align-items: center;">
-                                            <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer"
-                                                  tabindex="0" (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
-                                                more_vert
-                                            </span>
+                                                <span onEnterClick class="material-icons"
+                                                      style="font-size: 1.5em; cursor: pointer"
+                                                      tabindex="0"
+                                                      (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
+                                                    more_vert
+                                                </span>
                                                 <span>
-                                            <p-checkbox [(ngModel)]="node.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
-                                                        [binary]="true"
-                                                        [inputId]="node.layerId"
-                                                        [name]="node.layerId" tabindex="0"/>
-                                            <label [for]="node.layerId"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
-                                            </span>
+                                                <p-checkbox [(ngModel)]="node.visible"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
+                                                            [binary]="true"
+                                                            [inputId]="node.layerId"
+                                                            [name]="node.layerId" tabindex="0"/>
+                                                <label [for]="node.layerId"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
+                                                </span>
                                             </div>
                                             <div class="layer-controls">
                                                 <p-button onEnterClick
                                                           (click)="toggleTileBorders(node.mapId, node.layerId)"
-                                                          label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                                          label="" pTooltip="Toggle tile borders"
+                                                          tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0">
-                                            <span class="material-icons"
-                                                  style="font-size: 1.2em; margin: 0 auto;">
-                                                {{ node.tileBorders ? 'select_all' : 'deselect' }}
-                                            </span>
+                                                    <span class="material-icons"
+                                                          style="font-size: 1.2em; margin: 0 auto;">
+                                                        {{ node.tileBorders ? 'select_all' : 'deselect' }}
+                                                    </span>
                                                 </p-button>
                                                 <p-button onEnterClick *ngIf="node.coverage.length"
                                                           (click)="focus(node.coverage[0], $event)"
                                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0">
-                                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                                    <span class="material-icons"
+                                                          style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                                                 </p-button>
                                                 <p-inputNumber [(ngModel)]="node.level"
                                                                (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.layerId)"
@@ -182,19 +188,21 @@ import {AppModeService} from "./app-mode.service";
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
                                              style="margin-left: 0.5em; display: flex; align-items: center;">
-                                            <span onEnterClick class="material-icons" style="font-size: 1.5em; cursor: pointer" 
-                                                  tabindex="0" (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
+                                            <span onEnterClick class="material-icons"
+                                                  style="font-size: 1.5em; cursor: pointer"
+                                                  tabindex="0"
+                                                  (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
                                                 more_vert
                                             </span>
                                             <span>
-                                            <p-checkbox [(ngModel)]="node.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
-                                                        [binary]="true"
-                                                        [inputId]="node.layerId"
-                                                        [name]="node.layerId" tabindex="0"/>
-                                            <label [for]="node.layerId"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
+                                                <p-checkbox [(ngModel)]="node.visible"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
+                                                            [binary]="true"
+                                                            [inputId]="node.layerId"
+                                                            [name]="node.layerId" tabindex="0"/>
+                                                <label [for]="node.layerId"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
                                             </span>
                                         </div>
                                         <div class="layer-controls">
@@ -203,10 +211,10 @@ import {AppModeService} from "./app-mode.service";
                                                       label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
-                                            <span class="material-icons"
-                                                  style="font-size: 1.2em; margin: 0 auto;">
-                                                {{ node.tileBorders ? 'select_all' : 'deselect' }}
-                                            </span>
+                                                <span class="material-icons"
+                                                      style="font-size: 1.2em; margin: 0 auto;">
+                                                    {{ node.tileBorders ? 'select_all' : 'deselect' }}
+                                                </span>
                                             </p-button>
                                             <p-button onEnterClick *ngIf="node.coverage.length"
                                                       (click)="focus(node.coverage[0], $event)"
@@ -241,13 +249,18 @@ import {AppModeService} from "./app-mode.service";
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
-        <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false" 
+        <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false"
              [ngClass]="{'hovered': isMainButtonHovered}">
-            <p-button onEnterClick class="layers-button" icon="{{layerDialogVisible ? 'pi pi-times' : 'pi pi-images'}}"
-                      (mouseenter)="isMainButtonHovered = true"
-                      (click)="isMainButtonHovered = false; showLayerDialog()" 
+            <p-button onEnterClick class="layers-button" (mouseenter)="isMainButtonHovered = true"
+                      (click)="isMainButtonHovered = false; showLayerDialog()"
                       tooltipPosition="right" pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
-                      label=""  tabindex="0">
+                      label="" tabindex="0">
+                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                    stacks
+                </span>
+                <span *ngIf="layerDialogVisible" class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                    close
+                </span>
             </p-button>
             <div class="pref-buttons" *ngIf="!appModeService.isVisualizationOnly">
                 <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
@@ -276,7 +289,7 @@ export class MapPanelComponent {
 
     @ViewChild('mapLayerDialog') mapLayerDialog: Dialog | undefined;
 
-    metadataMenusEntries: Map<string, {label: string, command: () => void }[]> = new Map();
+    metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
     private _reinitializingAfterPrune: boolean = false;
 
     constructor(public mapService: MapService,
@@ -443,8 +456,7 @@ export class MapPanelComponent {
             this.mapService.moveToWgs84PositionTopic.next(
                 {x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
             );
-        }
-        else {
+        } else {
             const position = coreLib.getTilePosition(BigInt(coverage as number));
             this.mapService.moveToWgs84PositionTopic.next(
                 {x: position.x, y: position.y}

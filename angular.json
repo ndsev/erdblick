@@ -59,12 +59,23 @@
                                 "glob": "LICENSE*",
                                 "input": "node_modules/@fontsource/inter",
                                 "output": "/bundle/licenses/fonts/inter"
+                            },
+                            {
+                                "glob": "LICENSE*",
+                                "input": "node_modules/material-icons",
+                                "output": "/bundle/licenses/icons/material-icons"
+                            },
+                            {
+                                "glob": "LICENSE*",
+                                "input": "node_modules/material-symbols",
+                                "output": "/bundle/licenses/icons/material-symbols"
                             }
                         ],
                         "styles": [
                             "node_modules/primeicons/primeicons.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
                             "node_modules/material-icons/iconfont/material-icons.css",
+                            "node_modules/material-symbols/index.css",
                             "erdblick_app/styles.scss"
                         ],
                         "scripts": [],
@@ -123,6 +134,16 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/@fontsource/inter",
                                     "output": "/bundle/licenses/fonts/inter"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/material-icons",
+                                    "output": "/bundle/licenses/icons/material-icons"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/material-symbols",
+                                    "output": "/bundle/licenses/icons/material-symbols"
                                 }
                             ],
                             "buildOptimizer": true,
@@ -210,6 +231,16 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/@fontsource/inter",
                                     "output": "/bundle/licenses/fonts/inter"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/material-icons",
+                                    "output": "/bundle/licenses/icons/material-icons"
+                                },
+                                {
+                                    "glob": "LICENSE*",
+                                    "input": "node_modules/material-symbols",
+                                    "output": "/bundle/licenses/icons/material-symbols"
                                 }
                             ],
                             "buildOptimizer": true,
