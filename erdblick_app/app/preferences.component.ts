@@ -4,6 +4,7 @@ import {MapService} from "./map.service";
 import {StyleService} from "./style.service";
 import {InspectionService} from "./inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} from "./parameters.service";
+import {OnDestroy, OnInit} from '@angular/core';
 
 @Component({
     selector: 'pref-components',
@@ -42,6 +43,11 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             </div>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
+            <p-divider></p-divider>
+            <div class="button-container">
+                <label>Dark Mode:</label>
+                <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
+            </div>
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Storage for Viewer properties and search history:</label>
@@ -140,7 +146,7 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
             .keyboard-dialog {
                 width: 25em;
                 text-align: center;
-                background-color: white;
+                background-color: var(--p-content-background);
             }
 
             h2 {
@@ -164,17 +170,17 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
 
             .keyboard-list li span {
                 display: inline-block;
-                background-color: #eef1f7;
+                background-color: var(--p-highlight-background);
                 padding: 0.5em 0.75em;
                 border-radius: 0.5em;
-                color: #333;
+                color: var(--p-content-color);
                 font-weight: bold;
                 min-width: 4em;
                 text-align: center;
             }
 
             .control-desc {
-                color: #666;
+                color: var(--p-surface-500);
                 font-size: 0.9em;
             }
 
@@ -212,12 +218,27 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, ParametersService} fr
     ],
     standalone: false
 })
-export class PreferencesComponent {
+export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
 
     controlsDialogVisible = false;
+    darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
+    darkModeOptions = [
+        { label: 'Off', value: 'off' },
+        { label: 'On', value: 'on' },
+        { label: 'Auto', value: 'auto' }
+    ];
+    private mediaQueryList?: MediaQueryList;
+    private readonly DARK_MODE_CLASS = 'erdblick-dark';
+    private readonly DARK_MODE_KEY = 'ui.darkMode';
+    private readonly PREFERS_DARK_QUERY = '(prefers-color-scheme: dark)';
+    private handleSystemSchemeChange = (e: MediaQueryListEvent) => {
+        if (this.darkModeSetting === 'auto') {
+            this.updateDarkClass(e.matches);
+        }
+    };
 
     constructor(private messageService: InfoMessageService,
                 public mapService: MapService,
@@ -228,6 +249,16 @@ export class PreferencesComponent {
             this.tilesToLoadInput = parameters.tilesLoadLimit;
             this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
         });
+    }
+
+    ngOnInit() {
+        const saved = (localStorage.getItem(this.DARK_MODE_KEY) as 'off' | 'on' | 'auto' | null);
+        this.darkModeSetting = saved ?? 'auto';
+        this.applyDarkModeSetting(this.darkModeSetting);
+    }
+
+    ngOnDestroy() {
+        this.cleanupMediaQueryListener();
     }
 
     applyTileLimits() {
@@ -282,6 +313,48 @@ export class PreferencesComponent {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
+    }
+
+    setDarkMode(setting: 'off' | 'on' | 'auto') {
+        this.darkModeSetting = setting;
+        localStorage.setItem(this.DARK_MODE_KEY, setting);
+        this.applyDarkModeSetting(setting);
+    }
+
+    private applyDarkModeSetting(setting: 'off' | 'on' | 'auto') {
+        if (setting === 'on') {
+            this.cleanupMediaQueryListener();
+            this.updateDarkClass(true);
+            return;
+        }
+
+        if (setting === 'off') {
+            this.cleanupMediaQueryListener();
+            this.updateDarkClass(false);
+            return;
+        }
+
+        // AUTO: follow system preference
+        this.cleanupMediaQueryListener();
+        this.mediaQueryList = window.matchMedia(this.PREFERS_DARK_QUERY);
+        this.mediaQueryList.addEventListener('change', this.handleSystemSchemeChange);
+        this.updateDarkClass(this.mediaQueryList.matches);
+    }
+
+    private updateDarkClass(isDark: boolean) {
+        const root = document.documentElement;
+        if (isDark) {
+            root.classList.add(this.DARK_MODE_CLASS);
+        } else {
+            root.classList.remove(this.DARK_MODE_CLASS);
+        }
+    }
+
+    private cleanupMediaQueryListener() {
+        if (this.mediaQueryList) {
+            this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
+            this.mediaQueryList = undefined;
+        }
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

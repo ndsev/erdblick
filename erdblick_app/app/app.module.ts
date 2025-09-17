@@ -96,6 +96,7 @@ import {ViewService} from "./view.service";
 import {CameraService} from "./camera.service";
 import {MarkerService} from "./marker.service";
 import {ViewStateService} from "./view.state.service";
+import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./style.component";
 
@@ -277,6 +278,7 @@ export const initializeServices = () => {
         IconFieldModule,
         InputIconModule,
         PopoverModule,
+        SelectButtonModule
         ChipModule
     ],
     providers: [
@@ -302,7 +304,10 @@ export const initializeServices = () => {
         providePrimeNG({
             ripple: true,
             theme: {
-                preset: ErdblickTheme
+                preset: ErdblickTheme,
+                options: {
+                    darkModeSelector: '.erdblick-dark'
+                }
             }
         })
     ]

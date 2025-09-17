@@ -4,6 +4,17 @@
 
 @layer primeng, erdblick;
 
+/* Translucent surfaces used in UI (light/dark specific) */
+:root {
+  --erdblick-card-bg: rgba(255, 255, 255, 0.87);
+  --erdblick-card-bg-hover: rgba(255, 255, 255, 1);
+}
+
+.erdblick-dark {
+  --erdblick-card-bg: rgba(0, 0, 0, 0.5);
+  --erdblick-card-bg-hover: rgba(0, 0, 0, 0.65);
+}
+
 :root {
   font-family: Inter, sans-serif;
   font-feature-settings: 'liga' 1, 'calt' 1; /* fix for Chrome */
@@ -223,7 +234,7 @@ body {
 
 
 .card {
-  background-color: rgba(#fff, 1.0);
+  background-color: var(--p-content-background);
   border-radius: 10px;
   margin-bottom: 1em;
 
@@ -292,7 +303,7 @@ body {
     height: 2em;
     width: 100%;
     border-radius: 6px;
-    border: solid 1px lightgray;
+    border: solid 1px var(--p-content-border-color);
     direction: ltr;
   }
 
@@ -322,9 +333,9 @@ body {
         height: 1em;
         padding: 0.1em;
         margin-top: 0.1em;
-        color: #fff;
-        background: #64748b;
-        border: 1px solid #64748b;
+        color: var(--p-primary-contrast-color);
+        background: var(--p-primary-500);
+        border: 1px solid var(--p-primary-500);
       }
 
       .p-button-label {
@@ -357,13 +368,13 @@ body {
       td {
         padding: 0 0 0 0.5em;
         height: 26px;
-        border-right: 1px solid #e5e7eb;
+        border-right: 1px solid var(--p-content-border-color);
       }
 
       th {
         padding: 0 0 0 0.5em;
         height: 26px;
-        border-right: 1px solid lightgrey;
+        border-right: 1px solid var(--p-content-border-color);
       }
 
       .p-treetable-toggler {
@@ -377,7 +388,7 @@ body {
         color: black;
 
         td {
-          border-color: darkgrey;
+          border-color: var(--p-content-border-color);
           background: var(--p-green-100);
         }
       }
@@ -567,11 +578,11 @@ body {
       flex-direction: row;
 
       &:hover {
-        background-color: var(--blue-100);
+        background-color: var(--p-highlight-background);
       }
 
       &:focus-visible {
-        background-color: var(--blue-100);
+        background-color: var(--p-highlight-background);
         outline: none;
       }
     }
@@ -590,7 +601,7 @@ body {
         height: 2em;
 
         &:hover {
-          background-color: var(--red-500);
+          background-color: var(--p-red-500);
           color: white;
         }
       }
@@ -721,7 +732,7 @@ body {
     border-top-left-radius: 6px;
 
     *:focus-visible {
-      outline: 2px solid var(--blue-500);
+      outline: 2px solid var(--p-primary-500);
     }
   }
 
@@ -829,9 +840,9 @@ body {
     .p-fieldset-legend {
       padding: 0.5em;
       margin-left: 0.5em;
-      border: 1px solid #dee2e6;
-      color: #343a40;
-      background: #f8f9fa;
+      border: 1px solid var(--p-content-border-color);
+      color: var(--p-content-color);
+      background: var(--p-content-background);
       font-weight: 700;
       border-radius: 6px;
       font-size: 0.9em;
@@ -1221,12 +1232,12 @@ body {
     }
 
     .p-card {
-      background: #ffffffdd;
+      background: var(--erdblick-card-bg);
       border-radius: var(--p-button-border-radius)
     }
 
     .p-card:hover {
-      background: #ffffffff;
+      background: var(--erdblick-card-bg-hover);
     }
 
     .p-card-body {
@@ -1289,9 +1300,9 @@ body {
 
     .p-fieldset-legend {
       padding: 0.5em;
-      border: 1px solid #dee2e6;
-      color: #343a40;
-      background: #f8f9fa;
+      border: 1px solid var(--p-content-border-color);
+      color: var(--p-content-color);
+      background: var(--p-content-background);
       font-weight: 700;
       border-radius: 6px;
       font-size: 1em;
