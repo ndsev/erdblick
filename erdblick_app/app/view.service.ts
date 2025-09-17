@@ -7,6 +7,9 @@ import {ViewStateService} from "./view.state.service";
 
 @Injectable({providedIn: 'root'})
 export class ViewService {
+    // TODO - refactoring:
+    //   1. ViewService should be able to handle more than one viewer: Viewer within their ViewerWrapper
+    //      based on their unique viewerIds.
     constructor(private mapService: MapService,
                 private parameterService: ParametersService,
                 private viewStateService: ViewStateService,

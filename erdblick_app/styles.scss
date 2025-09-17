@@ -150,48 +150,10 @@ body {
   transform-origin: 50% 50%;
 }
 
-.help-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
-  }
-}
-
-.pref-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
-    width: 3em;
-    height: 3em;
-  }
-}
-
 .controls-button {
   .p-button {
     background: none;
     border: none;
-  }
-}
-
-.pref-button {
-  width: 3em;
-  height: 3em;
-  margin-left: 0.5em;
-  margin-bottom: 0.5em;
-
-  .p-button {
-    border-radius: 50%;
-    padding: 0.8em 0;
   }
 }
 
@@ -210,17 +172,66 @@ body {
   }
 }
 
-.layers-button {
+.main-button-controls {
   position: absolute;
   top: 0.5em;
   left: 0.5em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
 
-  button {
-    width: 3em;
-    height: 3em;
-    box-shadow: none;
+  .layers-button {
+    button {
+      width: 3em;
+      height: 3em;
+      box-shadow: none;
+    }
+  }
+
+  &.hovered {
+    .pref-buttons {
+      visibility: visible;
+      opacity: 1;
+      transition: opacity 0.1s, visibility 0.1s;
+    }
+  }
+
+  .pref-buttons {
+    visibility: hidden;
+    opacity: 0;
   }
 }
+
+.bttn-container {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5em;
+  position: relative;
+  z-index: 1100;
+
+  .help-button {
+    width: 3em;
+    height: 3em;
+
+    .p-button {
+      border-radius: 50%;
+      padding: 0.8em 0;
+    }
+  }
+
+  .pref-button {
+    width: 3em;
+    height: 3em;
+
+    .p-button {
+      border-radius: 50%;
+      padding: 0.8em 0;
+      width: 3em;
+      height: 3em;
+    }
+  }
+}
+
 
 .card {
   background-color: var(--p-content-background);
@@ -245,8 +256,9 @@ body {
 
 .inspect-panel-small-header {
   .p-accordionheader {
-    padding-top: 0.5em !important;
-    padding-bottom: 0.5em !important;
+    /* Match default header height from .inspect-panel .p-accordionheader (0.95em total) */
+    padding-top: 0.6em !important;
+    padding-bottom: 0.6em !important;
   }
 
   .resizable-container {
@@ -267,7 +279,7 @@ body {
   }
 
   .p-accordionheader {
-    padding: 0.95em;
+    padding: 0.93em;
   }
 
   .p-accordioncontent-content {
@@ -420,10 +432,14 @@ body {
   top: 0.5em;
   left: 4em;
   min-width: 22em;
-  min-height: 3.5em;
+  // min-height: 3.5em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
-  z-index: 150;
+  z-index: 1500;
+
+  &.shifted {
+    left: 0.5em !important;
+  }
 
   .resizable-container {
     min-width: 22em;
@@ -444,7 +460,6 @@ body {
     line-height: 0;
 
     textarea {
-      padding-top: 0.75em;
       width: 100% !important;
       transition: all 0.3s;
       resize: none;
@@ -455,9 +470,8 @@ body {
     }
 
     textarea.single-line {
-      padding-top: 0.75em;
-      min-height: 3em;
-      width: 22em !important;
+      min-height: 2.9em;
+      width: 24em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
@@ -651,19 +665,32 @@ body {
 }
 
 .map-layer-dialog, .side-menu-dialog {
+  z-index: 1000 !important;
+
+  .p-dialog-mask {
+    z-index: 1000 !important;
+  }
+
   .p-dialog {
-    width: 25.5em;
+    width: 28em;
     min-width: 25.5em;
     margin: 0 !important;
     position: absolute;
-    top: 4em;
-    left: 0.5em;
+    bottom: 0;
+    left: 0;
     overflow: auto;
-    max-height: calc(100vh - 8em);
+    height: calc(100% - 4em);
+    z-index: 1000 !important;
   }
 
   .p-dialog-content {
     padding: 0.5em;
+
+    .search-wrapper {
+      position: relative;
+      top: 0;
+      left: 0;
+    }
   }
 
   .p-dialog-header {
@@ -677,6 +704,10 @@ body {
   .p-fieldset {
     padding: 0;
 
+    .p-fieldset-toggle-button {
+      padding: 0 !important;
+    }
+
     .p-accordionheader {
       padding: 0.5em 1em 0.5em 1em;
     }
@@ -684,6 +715,10 @@ body {
     .p-accordioncontent-content {
       padding: 0;
     }
+  }
+
+  .p-tree-node-label {
+    width: 100%;
   }
 }
 
@@ -701,47 +736,53 @@ body {
     }
   }
 
-  //.p-checkbox-box {
-  //  width: 1.5em;
-  //  height: 1.5em;
-  //
-  //  .p-checkbox-icon {
-  //    transition-duration: 0.1s;
-  //    font-size: 1em;
-  //  }
-  //
-  //  .p-icon {
-  //    width: 1em;
-  //    height: 1em;
-  //  }
-  //}
+  .p-tree {
+    padding: 0.5em;
+
+    .p-tree-node-content {
+      padding: 0;
+      font-size: 0.95em;
+    }
+
+    .p-tree-node-toggle-button {
+      width: 1.25em;
+      height: 1.25em;
+    }
+
+    .p-tree-node-leaf {
+      .p-tree-node-toggle-button {
+        display: none !important;
+      }
+      padding-left: 0.45em;
+    }
+  }
+}
+
+.osm-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin-bottom: 0.25em;
+
+  button {
+    width: 2em;
+    height: 2em;
+    box-shadow: none;
+  }
+
+  .slider-input {
+    width: 11em;
+    font-size: 0.9em;
+    padding: 0.5em 0.75em;
+  }
+
+  .p-divider-vertical {
+    margin: 0;
+    padding: 0.5em 0;
+  }
 }
 
 .map-tab {
-  .osm-controls {
-    display: flex;
-    align-items: center;
-    gap: 1em;
-    margin: 0.5em 0.75em;
-
-    button {
-      width: 2em;
-      height: 2em;
-      box-shadow: none;
-    }
-
-    .slider-input {
-      width: 11em;
-      font-size: 0.9em;
-      padding: 0.5em 0.75em;
-    }
-
-    .p-divider-vertical {
-      margin: 0;
-      padding: 0.5em 0;
-    }
-  }
-
   .grid-controls {
     display: flex;
     align-items: flex-start;
@@ -823,7 +864,7 @@ body {
     }
 
     .map-container {
-      padding: 0.5em 1em 0.5em 1em;
+      padding: 0;
 
       .map-header {
         font-size: 0.9em;
@@ -835,28 +876,11 @@ body {
     }
   }
 
-  .styles-container {
-    padding: 0.5em 1em 0.5em 1em;
-    //margin-top: 0.25em;
-    //padding-right: 0.75em;
-    //margin-right: -0.75em;
-
-    .rotated-icon {
-      transform: rotate(-90deg);
-      transition: transform 0.3s ease-in-out;
-    }
-  }
-
   .flex-container {
-    margin-top: 0.25em;
     padding: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
-
-    span {
-      font-size: 0.9em;
-    }
 
     &:hover {
       .layer-controls {
@@ -925,7 +949,6 @@ body {
       gap: 0.5em;
       width: 4em;
       justify-content: flex-end;
-      transition: opacity 0s, visibility 0s;
 
       button {
         width: 2em;
@@ -943,7 +966,7 @@ body {
     justify-content: center;
     align-items: center;
     display: flex;
-    padding-top: 0.5em;
+    padding: 0.5em;
 
     .p-fileupload {
       .p-fileupload-choose {
@@ -984,14 +1007,7 @@ body {
   }
 }
 
-.bttn-container {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: row;
-  z-index: 110;
-}
+
 
 .editor-dialog {
   .spinner {
@@ -1404,7 +1420,7 @@ body {
     min-height: 3.5em;
     max-width: 100%;
     max-height: calc(100vh - 5em);
-    z-index: 150;
+    z-index: 1500;
 
     .resizable-container {
       position: relative;
