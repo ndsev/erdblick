@@ -35,6 +35,14 @@ public:
      */
     NativeJsValue complete(std::string const& q, int point, NativeJsValue const& options);
 
+    /** Returns a list of diagnostic messages of the following form:
+     *
+     *  [
+     *    {message: string, location: {offset: number, size: numebr}, fix?: string}
+     *  ]
+     */
+    NativeJsValue diagnostics(std::string const& q, NativeJsValue const& diagnostics);
+
 private:
     TileFeatureLayer& tfl_;
 };

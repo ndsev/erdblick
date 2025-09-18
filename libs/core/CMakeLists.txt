@@ -35,6 +35,7 @@ set(ERDBLICK_SOURCE_FILES
   src/search.cpp
   src/layer.cpp
 
+  src/cesium-interface/base64.h
   src/cesium-interface/object.cpp
   src/cesium-interface/primitive.cpp
   src/cesium-interface/cesium.cpp
