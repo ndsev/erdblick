@@ -98,9 +98,7 @@ import {AppModeService} from "./app-mode.service";
                                         <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                             <div class="font-bold white-space-nowrap"
                                                  style="display: flex; align-items: center;">
-                                                <span onEnterClick class="material-icons"
-                                                      style="font-size: 1.5em; cursor: pointer"
-                                                      tabindex="0"
+                                                <span onEnterClick class="material-icons menu-toggler" tabindex="0"
                                                       (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
                                                     more_vert
                                                 </span>
@@ -188,8 +186,7 @@ import {AppModeService} from "./app-mode.service";
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
                                              style="margin-left: 0.5em; display: flex; align-items: center;">
-                                            <span onEnterClick class="material-icons"
-                                                  style="font-size: 1.5em; cursor: pointer"
+                                            <span onEnterClick class="material-icons menu-toggler"
                                                   tabindex="0"
                                                   (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
                                                 more_vert

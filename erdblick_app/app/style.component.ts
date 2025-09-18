@@ -40,8 +40,7 @@ import {EditorService} from "./editor.service";
                             <ng-template let-node pTemplate="Style">
                                 <div class="flex-container">
                                     <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons"
-                                              style="font-size: 1.5em; cursor: pointer"
+                                        <span onEnterClick class="material-icons menu-toggler"
                                               (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                             more_vert
                                         </span>
@@ -77,8 +76,7 @@ import {EditorService} from "./editor.service";
                             </ng-template>
                             <ng-template let-node pTemplate="Bool">
                                 <div style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-icons"
-                                          style="font-size: 1.5em; cursor: pointer"
+                                    <span onEnterClick class="material-icons menu-toggler"
                                           (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
                                           [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
                                           tabindex="0">
@@ -105,8 +103,7 @@ import {EditorService} from "./editor.service";
                         <ng-template let-node pTemplate="Style">
                             <div class="flex-container">
                                 <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons"
-                                              style="font-size: 1.5em; cursor: pointer"
+                                        <span onEnterClick class="material-icons menu-toggler"
                                               (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                             more_vert
                                         </span>
@@ -142,8 +139,7 @@ import {EditorService} from "./editor.service";
                         </ng-template>
                         <ng-template let-node pTemplate="Bool">
                             <div style="display: flex; align-items: center;">
-                                <span onEnterClick class="material-icons"
-                                      style="font-size: 1.5em; cursor: pointer"
+                                <span onEnterClick class="material-icons menu-toggler"
                                       (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
                                       [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
                                       tabindex="0">
@@ -183,8 +179,8 @@ import {EditorService} from "./editor.service";
                 </div>
             </div>
         </p-fieldset>
-        <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
-                [style]="{'font-size': '0.9em'}"></p-menu>
+        <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
+                [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
                   class="editor-dialog" appendTo="body">
             <editor></editor>
@@ -247,7 +243,7 @@ export class StyleComponent {
     sourceWasModified: boolean = false;
     stylesCollapsed: boolean = false;
 
-    @ViewChild('menu') toggleMenu!: Menu;
+    @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;

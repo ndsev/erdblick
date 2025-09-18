@@ -739,6 +739,16 @@ body {
   .p-tree {
     padding: 0.5em;
 
+    .menu-toggler {
+      font-size: 1.4em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      line-height: 1;
+      margin: 0;
+      padding: 0;
+    }
+
     .p-tree-node-content {
       padding: 0;
       font-size: 0.95em;
