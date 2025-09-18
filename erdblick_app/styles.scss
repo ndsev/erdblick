@@ -740,13 +740,14 @@ body {
     padding: 0.5em;
 
     .menu-toggler {
-      font-size: 1.4em;
+      font-size: 1.5em;
       cursor: pointer;
-      display: inline-flex;
-      align-items: center;
+      display: inline-block;
       line-height: 1;
+      vertical-align: middle;
       margin: 0;
       padding: 0;
+      overflow: hidden;
     }
 
     .p-tree-node-content {
