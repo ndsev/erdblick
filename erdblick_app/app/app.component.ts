@@ -6,16 +6,11 @@ import {ParametersService} from "./parameters.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
-// Centralized helpers for compact URL stringification
-function booleanReplacerForUrl(_: string, value: any) {
-    return typeof value === 'boolean' ? (value ? 1 : 0) : value;
-}
-
+// Helper to stringify with booleans in compact representation
 function stringifyForUrl(value: any): string {
-    if (typeof value === 'boolean') {
-        return value ? '1' : '0';
-    }
-    return JSON.stringify(value, booleanReplacerForUrl);
+    return JSON.stringify(value, (_: string, value: any) => {
+        return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+    });
 }
 
 interface Versions {

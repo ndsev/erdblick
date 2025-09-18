@@ -111,7 +111,7 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.parameterService.setInitialStyles(Object.fromEntries([...this.styles.entries()].map(([k, v]) => [k, v.params])));
+        this.parameterService.setInitialStyles(this.styles);
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
