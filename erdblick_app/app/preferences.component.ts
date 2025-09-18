@@ -24,7 +24,7 @@ import {OnDestroy, OnInit} from '@angular/core';
             </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #pref class="pref-dialog" appendTo="body">
+                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
@@ -65,7 +65,7 @@ import {OnDestroy, OnInit} from '@angular/core';
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
         <p-dialog header="Keyboard Controls" [(visible)]="controlsDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #controls class="pref-dialog" appendTo="body">
+                  [resizable]="false" [modal]="true" #controls class="pref-dialog">
             <div class="keyboard-dialog">
                 <ul class="keyboard-list">
                     <li>
