@@ -696,6 +696,13 @@ export class SearchPanelComponent implements AfterViewInit {
             event.stopPropagation();
             if (this.searchInputValue) {
                 this.setSearchValue("");
+                // Reset completion and hide its popup.
+                this.completeQuery("", undefined);
+                this.completion.selectionIndex = 0;
+                this.completionItems = [];
+                this.completion.visible = false;
+                this.searchService.completionPending.next(false);
+                this.searchService.completionCandidates.next([]);
                 return;
             }
 
