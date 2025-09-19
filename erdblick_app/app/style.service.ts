@@ -21,9 +21,11 @@ interface StyleConfigEntry {
 export type FeatureStyleOptionWithStringType = {
     label: string,
     id: string,
-    type: FeatureStyleOptionType,
+    type: FeatureStyleOptionType | string,
     defaultValue: any,
-    description: string
+    description: string,
+    styleId?: string,
+    key?: string
 };
 
 export interface ErdblickStyle {
@@ -33,7 +35,20 @@ export interface ErdblickStyle {
     params: StyleParameters,
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
-    options: Array<FeatureStyleOptionWithStringType>
+    options: Array<FeatureStyleOptionWithStringType>,
+    key?: string,
+    type?: string,
+    children?: Array<FeatureStyleOptionWithStringType>,
+    expanded?: boolean
+}
+
+export interface ErdblickStyleGroup extends Record<string, any> {
+    key: string;
+    groupId: string;
+    type: string;
+    children: Array<ErdblickStyleGroup | ErdblickStyle>;
+    visible: boolean,
+    expanded: boolean
 }
 
 /**
@@ -43,6 +58,8 @@ export interface ErdblickStyle {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
+    styleIdsForNewStyles: Array<string> = [];
+    styleIdsForUpdatedStyles: Array<string> = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
@@ -56,6 +73,8 @@ export class StyleService {
     private textEncoder: TextEncoder = new TextEncoder();
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
+
+    styleGroups: BehaviorSubject<Map<string, ErdblickStyleGroup>> = new BehaviorSubject<Map<string, ErdblickStyleGroup>>(new Map<string, ErdblickStyleGroup>());
 
     constructor(private httpClient: HttpClient, private parameterService: ParametersService)
     {
@@ -85,6 +104,7 @@ export class StyleService {
                 }
             });
 
+            const styleHashes = this.loadStyleHashes();
             const dataMap = await this.fetchStylesYamlSources(styleUrls);
             dataMap.forEach((styleString, styleId) => {
                 if (!styleString) {
@@ -99,12 +119,16 @@ export class StyleService {
                     params: this.parameterService.styleConfig(styleId),
                     source: styleString,
                     featureLayerStyle: null,
-                    options: []
+                    options: [],
+                    key: `${this.styles.size}`,
+                    type: "Style",
+                    children: []
                 });
                 this.builtinStylesCount++;
                 styleUrls.forEach(styleUrl => {
                     if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
                 });
+                this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
             });
             this.loadModifiedBuiltinStyles();
         } catch (error) {
@@ -157,7 +181,10 @@ export class StyleService {
                             params: this.parameterService.styleConfig(styleId),
                             source: styleString,
                             featureLayerStyle: null,
-                            options: []
+                            options: [],
+                            key: `${this.styles.size}`,
+                            type: "Style",
+                            children: []
                         });
                         this.saveModifiedBuiltinStyles();
                         this.reapplyStyle(styleId);
@@ -247,7 +274,10 @@ export class StyleService {
             },
             source: styleData,
             featureLayerStyle: null,
-            options: []
+            options: [],
+            key: `${this.styles.size}`,
+            type: "Style",
+            children: []
         });
 
         ++this.importedStylesCount;
@@ -377,10 +407,120 @@ export class StyleService {
         }
         let style = this.styles.get(styleId)!;
         this.initializeWasmStyle(styleId);
+        this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.params.visible) {
             this.styleAddedForId.next(styleId);
         }
+    }
+
+    private setStylesIdChildren(style: ErdblickStyle, key: string) {
+        style.key = key;
+        style.children = [];
+        style.expanded = true;
+        let i = 0;
+        for (let option of style.options) {
+            option.type = "Bool";
+            option.key = `${key}-${i}`;
+            option.styleId = style.id;
+            style.children.push(option);
+        }
+        return style;
+    }
+
+    computeStyleGroups() {
+        const groups = new Map<string, ErdblickStyleGroup>();
+        const ungrouped: Array<ErdblickStyle> = [];
+
+        let keyCounter = 0;
+        const nextKey = () => (keyCounter++).toString();
+
+        const getOrCreateGroupByPath = (path: string): ErdblickStyleGroup => {
+            const segments = path.split('/');
+            const top = segments[0];
+            let current: ErdblickStyleGroup;
+            if (groups.has(top)) {
+                current = groups.get(top)!;
+            } else {
+                current = {
+                    key: nextKey(),
+                    groupId: top,
+                    type: "Group",
+                    children: [],
+                    visible: false,
+                    expanded: true
+                };
+                groups.set(top, current);
+            }
+            let acc = top;
+            for (let i = 1; i < segments.length; ++i) {
+                acc = `${acc}/${segments[i]}`;
+                let found: ErdblickStyleGroup | null = null;
+                for (const child of current.children) {
+                    if ((child as any).type === "Group" && (child as ErdblickStyleGroup).groupId === acc) {
+                        found = child as ErdblickStyleGroup;
+                        break;
+                    }
+                }
+                if (!found) {
+                    found = {
+                        key: nextKey(),
+                        groupId: acc,
+                        type: "Group",
+                        children: [],
+                        visible: false,
+                        expanded: true
+                    };
+                    current.children.push(found);
+                }
+                current = found;
+            }
+            return current;
+        };
+
+        for (const [styleId, style] of this.styles) {
+            if (styleId.includes('/')) {
+                const parentPath = styleId.split('/').slice(0, -1).join('/');
+                const currentGroup = getOrCreateGroupByPath(parentPath);
+                const styleNode = this.setStylesIdChildren(style, nextKey());
+                currentGroup.children.push(styleNode);
+            } else {
+                ungrouped.push(this.setStylesIdChildren(style, nextKey()));
+            }
+        }
+
+        // compute derived visibility for groups
+        const computeGroupVisibility = (group: ErdblickStyleGroup): boolean => {
+            let anyVisible = false;
+            for (const child of group.children) {
+                if ((child as any).type === "Group") {
+                    anyVisible = computeGroupVisibility(child as ErdblickStyleGroup) || anyVisible;
+                } else {
+                    const styleChild = child as ErdblickStyle;
+                    anyVisible = (styleChild.params.visible || anyVisible);
+                }
+            }
+            group.visible = anyVisible;
+            return anyVisible;
+        };
+
+        for (const [_, top] of groups) {
+            computeGroupVisibility(top);
+        }
+
+        if (ungrouped.length > 0) {
+            const group: ErdblickStyleGroup = {
+                key: nextKey(),
+                groupId: "ungrouped",
+                type: "Group",
+                children: ungrouped,
+                visible: true,
+                expanded: true
+            };
+            groups.set("ungrouped", group);
+        }
+
+        return groups;
     }
 
     reapplyStyles(styleIds: Array<string>) {
@@ -406,5 +546,50 @@ export class StyleService {
     toggleOption(styleId: string, optionId: string, enabled: boolean) {
         const style = this.styles.get(styleId)!;
         style.params.options[optionId] = enabled;
+    }
+
+    private loadStyleHashes(): Map<string, string> {
+        const styleHashes = new Map<string, string>();
+        const savedStyleHashes = localStorage.getItem('styleHashes');
+        if (savedStyleHashes) {
+            for (let [styleId, styleHash] of JSON.parse(savedStyleHashes)) {
+                styleHashes.set(styleId, styleHash);
+            }
+        }
+        return styleHashes;
+    }
+
+    private compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
+        if (!styleHashes.has(style.id)) {
+            this.styleIdsForNewStyles.push(style.id);
+            return;
+        }
+
+        this.styleSha256(style.source).then(styleHash => {
+            if (styleHash !== styleHashes.get(style.id)) {
+                this.styleIdsForUpdatedStyles.push(style.id);
+            }
+        });
+    }
+
+    async updateStyleHashes() {
+        const pairs = await Promise.all(
+            Array.from(this.styles, async ([styleId, { source }]) =>
+                [styleId, await this.styleSha256(source)] as const));
+
+        localStorage.setItem('styleHashes', JSON.stringify(pairs));
+        this.styleIdsForNewStyles = [];
+        this.styleIdsForUpdatedStyles = [];
+    }
+
+    private async styleSha256(input: string): Promise<string> {
+        if (globalThis.isSecureContext && globalThis.crypto?.subtle) {
+            const data = new TextEncoder().encode(input);
+            const buffer = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(buffer), b => b.toString(16)
+                .padStart(2, '0')).join('');
+        } else {
+            return "";
+        }
     }
 }

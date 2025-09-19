@@ -26,7 +26,6 @@ interface Versions {
         <p-toast position="top-center" key="tc"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
         <inspection-panel *ngIf="!appModeService.isVisualizationOnly"></inspection-panel>
-        <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
