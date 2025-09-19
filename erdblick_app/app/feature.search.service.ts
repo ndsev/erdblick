@@ -362,6 +362,7 @@ export class FeatureSearchService {
         // Set up completion callback to trigger diagnostics after
         // all tasks of the group are done.
         searchGroup.onComplete((group: JobGroup) => {
+            console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
             this.startDiagnosticsForCompletedSearch(group.query);
         });
 
@@ -525,6 +526,11 @@ export class FeatureSearchService {
         // Create completion job group
         const completionGroup = this.jobGroupManager.createGroup('completion', query, this.generateTaskGroupId());
         this.currentCompletionGroup = completionGroup
+        completionGroup.onComplete((group: JobGroup) => {
+            console.debug(`Completion group completed (id: ${group.id}, current: ${this.currentCompletionGroup?.id})`)
+            if (this.currentCompletionGroup?.id === group.id)
+                this.completionPending.next(false);
+        })
 
         // Build one task per tile
         const tileParser = this.mapService.tileParser;

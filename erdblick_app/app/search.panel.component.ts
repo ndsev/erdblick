@@ -698,6 +698,13 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.setSearchValue("");
                 return;
             }
+            // Reset completion and hide its popup.
+            this.completeQuery("", undefined);
+            this.completion.selectionIndex = 0;
+            this.completionItems = [];
+            this.completion.visible = false;
+            this.searchService.completionPending.next(false);
+            this.searchService.completionCandidates.next([]);
 
             this.dialog.close(event);
         } else if (event.key === 'Tab') {
