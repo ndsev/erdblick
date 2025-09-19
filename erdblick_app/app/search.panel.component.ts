@@ -696,15 +696,10 @@ export class SearchPanelComponent implements AfterViewInit {
             event.stopPropagation();
             if (this.searchInputValue) {
                 this.setSearchValue("");
+                this.resetCompletion();
                 return;
             }
-            // Reset completion and hide its popup.
-            this.completeQuery("", undefined);
-            this.completion.selectionIndex = 0;
-            this.completionItems = [];
-            this.completion.visible = false;
-            this.searchService.completionPending.next(false);
-            this.searchService.completionCandidates.next([]);
+            this.resetCompletion();
 
             this.dialog.close(event);
         } else if (event.key === 'Tab') {
@@ -817,5 +812,14 @@ export class SearchPanelComponent implements AfterViewInit {
 
         this.searchService.completeQuery(query, point || query.length);
         this.completion.selectionIndex = 0;
+    }
+
+    resetCompletion() {
+        this.completeQuery("", undefined);
+        this.completion.selectionIndex = 0;
+        this.completionItems = [];
+        this.completion.visible = false;
+        this.searchService.completionPending.next(false);
+        this.searchService.completionCandidates.next([]);
     }
 }
