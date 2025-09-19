@@ -470,7 +470,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     this.viewStateService.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
                     this.viewStateService.viewer.scene.render();
                 } else if (this.viewStateService.tileOutlineEntity) {
-                    console.log('Clearing outline entity');
                     this.viewStateService.viewer.entities.remove(this.viewStateService.tileOutlineEntity);
                     this.viewStateService.tileOutlineEntity = null;
                     this.viewStateService.viewer.scene.render();

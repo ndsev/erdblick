@@ -925,7 +925,6 @@ export class MapService {
 
         // Update legal information if any.
         if (tileLayer.legalInfo) {
-            console.log("Legal info", tileLayer.legalInfo);
             this.setLegalInfo(tileLayer.mapName, tileLayer.legalInfo);
         }
 

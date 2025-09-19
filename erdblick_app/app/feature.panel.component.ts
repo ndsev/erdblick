@@ -373,19 +373,6 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
             const mapId = this.inspectionService.selectedFeatures[0].featureTile.mapName;
             const featureIds = this.inspectionService.selectedFeatures.map(f => f.featureId).join(", ");
 
-            console.log(
-                "layerId",
-                layerId,
-                "| tileId",
-                tileId,
-                "| address",
-                address,
-                "| mapId",
-                mapId,
-                "| featureIds",
-                featureIds
-            );
-
             this.inspectionService.selectedSourceData.next({
                 tileId: Number(tileId),
                 layerId: String(layerId),
