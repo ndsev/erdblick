@@ -1,6 +1,6 @@
 {
   "name": "erdblick",
-  "version": "2025.1.0",
+  "version": "2025.3.1",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -23,6 +23,8 @@
     "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/lint": "^6.8.5",
     "@codemirror/view": "^6.36.7",
+    "@fontsource-variable/inter": "^5.2.6",
+    "@fontsource/inter": "^5.2.6",
     "@ngx-formly/core": "^7.0.0",
     "@primeng/themes": "^19.1.4",
     "assert": "^2.1.0",
@@ -32,6 +34,7 @@
     "https-browserify": "^1.0.0",
     "js-yaml": "^4.1.0",
     "material-icons": "^1.13.14",
+    "material-symbols": "0.35.2",
     "primeicons": "^7.0.0",
     "primeng": "19.1.4",
     "rxjs": "~7.8.2",

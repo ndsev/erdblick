@@ -149,7 +149,7 @@ interface Column {
     `,
     styles: [`
         .section-style {
-            background-color: gainsboro;
+            background-color: var(--p-highlight-background);
             margin-top: 1em;
         }
         
@@ -379,7 +379,7 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
                 mapId: String(mapId),
                 address: BigInt(address),
                 featureIds: featureIds,
-            })
+            });
         } catch (e) {
             this.messageService.showError(`Encountered error: ${e}`);
         }

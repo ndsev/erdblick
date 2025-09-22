@@ -9,6 +9,8 @@ export interface SearchWorkerTask {
     query: string;
     dataSourceInfo: Uint8Array;
     nodeId: string;
+    taskId?: string;
+    groupId?: string;
 }
 
 export interface CompletionWorkerTask {
@@ -20,6 +22,20 @@ export interface CompletionWorkerTask {
     point: number; // Cursor position to complete at
     nodeId: string;
     limit: number | undefined;
+    taskId?: string;
+    groupId?: string;
+}
+
+export interface DiagnosticsWorkerTask {
+    type: 'DiagnosticsWorkerTask';
+    blob: Uint8Array;
+    fieldDictBlob: Uint8Array;
+    dataSourceInfo: Uint8Array;
+    nodeId: string;
+    query: string;
+    diagnostics: Array<Uint8Array>; // List of diagnostic data
+    taskId?: string;
+    groupId?: string;
 }
 
 export interface SearchResultPosition {
@@ -36,6 +52,7 @@ export interface TraceResult {
 }
 
 export interface DiagnosticsMessage {
+    query: string;
     message: string;
     location: {offset: number, size: number},
     fix: null | string;
@@ -47,28 +64,42 @@ export interface SearchResultForTile {
     query: string;
     numFeatures: number;
     matches: Array<[string, string, SearchResultPosition]>;  // Array of (MapTileKey, FeatureId, SearchResultPosition)
-    traces: null|Map<string, TraceResult>;
-    diagnostics: Array<DiagnosticsMessage>;
+    traces: Map<string, TraceResult> | null;
+    diagnostics: Uint8Array | null;
     billboardPrimitiveIndices?: Array<number>;  // Used by search service for visualization.
-    error: null|string
+    error: string | null;
+    taskId?: string;
+    groupId?: string;
 }
 
 export interface CompletionCandidate {
     text: string;   /// The completion
+    kind: string;   /// Type of the completion ("constant", "field", ...)
     begin: number;  /// Offset where to insert the completion
     end: number;    /// Length of the to be replaced input
     query: string;  /// Query with the completion applied
     source: string; /// Source query this candidate is for
+    hint: string;   /// Extra information
 }
 
 export interface CompletionCandidatesForTile {
     type: 'CompletionCandidatesForTile';
     query: string;
     candidates: CompletionCandidate[];
+    taskId?: string;
+    groupId?: string;
 }
 
-export type WorkerTask = SearchWorkerTask | CompletionWorkerTask;
-export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile;
+export interface DiagnosticsResultsForTile {
+    type: 'DiagnosticsResultsForTile';
+    query: string;
+    messages: DiagnosticsMessage[];
+    taskId?: string;
+    groupId?: string;
+}
+
+export type WorkerTask = SearchWorkerTask | CompletionWorkerTask | DiagnosticsWorkerTask;
+export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile | DiagnosticsResultsForTile;
 
 function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
@@ -79,8 +110,10 @@ function processSearch(task: SearchWorkerTask) {
             numFeatures: 0,
             matches: [],
             traces: null,
-            diagnostics: [],
-            error: `${name}: ${message}`
+            diagnostics: null,
+            error: `${name}: ${message}`,
+            taskId: task.taskId,
+            groupId: task.groupId
         };
         postMessage(result);
     }
@@ -112,7 +145,9 @@ function processSearch(task: SearchWorkerTask) {
                 matches: queryResult.result,
                 traces: queryResult.traces,
                 diagnostics: queryResult.diagnostics,
-                error: null
+                error: null,
+                taskId: task.taskId,
+                groupId: task.groupId
             };
             postMessage(result);
         }
@@ -157,8 +192,12 @@ function processCompletion(task: CompletionWorkerTask) {
                     end: item.range[1],
                     query: item.query,
                     source: task.query,
+                    kind: item.type,
+                    hint: item.hint,
                 }
             }),
+            taskId: task.taskId,
+            groupId: task.groupId
         };
         postMessage(result);
     }
@@ -167,14 +206,45 @@ function processCompletion(task: CompletionWorkerTask) {
     }
 }
 
+function processDiagnostics(task: DiagnosticsWorkerTask) {
+    try {
+        // Parse the tile.
+        let parser = new coreLib.TileLayerParser();
+        uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
+        uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
+        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+
+        // Get the query results from the tile.
+        let search = new coreLib.FeatureLayerSearch(tile);
+
+        const messages = search.diagnostics(task.query, task.diagnostics);
+
+        search.delete();
+        tile.delete();
+
+        postMessage({
+            type: 'DiagnosticsResultsForTile',
+            query: task.query,
+            messages: messages,
+            taskId: task.taskId,
+            groupId: task.groupId
+        } as DiagnosticsResultsForTile);
+    }
+    catch (exc: any) {
+        console.error("Diagnostics error", exc);
+    }
+}
+
 addEventListener('message', async ({data}) => {
     await initializeLibrary();
 
     let task = (data as WorkerTask);
     switch (task['type']) {
-         case 'SearchWorkerTask':
+        case 'SearchWorkerTask':
             return processSearch(task as SearchWorkerTask);
-         case 'CompletionWorkerTask':
+        case 'CompletionWorkerTask':
             return processCompletion(task as CompletionWorkerTask);
+        case 'DiagnosticsWorkerTask':
+            return processDiagnostics(task as DiagnosticsWorkerTask);
     }
 })

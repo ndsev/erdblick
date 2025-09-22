@@ -60,12 +60,13 @@ import { ClipboardService } from "./clipboard.service";
                 border-collapse: collapse;
             }
             .stats-table th, .stats-table td {
-                border: 1px solid #ccc;
+                border: 1px solid var(--p-content-border-color);
                 padding: 0.5em;
                 text-align: left;
             }
             .stats-table th {
-                background-color: #f9f9f9;
+                background-color: var(--p-highlight-background);
+                color: var(--p-content-color);
                 font-weight: bold;
             }
         `

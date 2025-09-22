@@ -123,6 +123,30 @@ export class CameraService {
     }
 
     /**
+     * Map a 3D camera height to an equivalent 2D WebMercator height
+     * by preserving the visual angular field (exact, drift-free).
+     */
+    private map3DHeightTo2DHeight(height3D: number, latitudeRadians: number, earthRadius: number): number {
+        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
+        const halfAngle = Math.atan(height3D / (2 * earthRadius));
+        const height2D = (2 * earthRadius) * Math.tan(distortion * halfAngle);
+        // Enforce a reasonable minimum altitude for stability
+        return Math.max(this.CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height2D);
+    }
+
+    /**
+     * Map a 2D WebMercator height to an equivalent 3D height
+     * by preserving the visual angular field (exact, drift-free).
+     */
+    private map2DHeightTo3DHeight(height2D: number, latitudeRadians: number, earthRadius: number): number {
+        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
+        const halfAngle = Math.atan(height2D / (2 * earthRadius));
+        const height3D = (2 * earthRadius) * Math.tan(halfAngle / distortion);
+        // Enforce a reasonable minimum altitude for stability
+        return Math.max(this.CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height3D);
+    }
+
+    /**
      * Get the WebMercator maximum latitude in radians for use by other services
      * @returns Maximum latitude in radians
      */
@@ -521,21 +545,20 @@ export class CameraService {
                     // Fallback: Create a rectangle from position with altitude compensation if needed
                     let restoredHeight = cameraState.height;
 
-                    // Apply forward distortion compensation when switching from 3D to 2D
+                    // Apply exact forward compensation when switching from 3D to 2D
                     if (cameraState.savedFromMode === '3D') {
-                        const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                        restoredHeight = cameraState.height * distortionFactor;
-                        console.debug('Applied 3D→2D altitude compensation:', {
+                        const earthRadius = this.viewStateService.viewer.scene.globe.ellipsoid.maximumRadius;
+                        restoredHeight = this.map3DHeightTo2DHeight(cameraState.height, cameraState.latitude, earthRadius);
+                        console.debug('Applied exact 3D→2D altitude mapping:', {
                             originalHeight: cameraState.height,
                             compensatedHeight: restoredHeight,
-                            distortionFactor: distortionFactor,
                             latitude: CesiumMath.toDegrees(cameraState.latitude)
                         });
                     } else if (!cameraState.savedFromMode) {
-                        // Backward compatibility: if no savedFromMode flag, use moderate compensation
+                        // Backward compatibility: keep legacy behavior to avoid surprises in old persisted states
                         const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                        if (distortionFactor > 1.5) { // Only compensate at higher latitudes
-                            restoredHeight = cameraState.height * Math.sqrt(distortionFactor); // Apply partial compensation
+                        if (distortionFactor > 1.5) {
+                            restoredHeight = cameraState.height * Math.sqrt(distortionFactor);
                             console.debug('Applied backward-compatible 3D→2D altitude compensation:', {
                                 originalHeight: cameraState.height,
                                 compensatedHeight: restoredHeight,
@@ -564,22 +587,20 @@ export class CameraService {
                 // For 3D mode, restore full camera state with altitude compensation if needed
                 let restoredHeight = cameraState.height;
 
-                // Apply inverse distortion compensation when switching from 2D to 3D
+                // Apply exact inverse compensation when switching from 2D to 3D
                 if (cameraState.savedFromMode === '2D') {
-                    const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                    restoredHeight = cameraState.height / distortionFactor;
-                    console.debug('Applied 2D→3D altitude compensation:', {
+                    const earthRadius = this.viewStateService.viewer.scene.globe.ellipsoid.maximumRadius;
+                    restoredHeight = this.map2DHeightTo3DHeight(cameraState.height, cameraState.latitude, earthRadius);
+                    console.debug('Applied exact 2D→3D altitude mapping:', {
                         originalHeight: cameraState.height,
                         compensatedHeight: restoredHeight,
-                        distortionFactor: distortionFactor,
                         latitude: CesiumMath.toDegrees(cameraState.latitude)
                     });
                 } else if (!cameraState.savedFromMode) {
-                    // Backward compatibility: if no savedFromMode flag, assume potential 2D→3D transition
-                    // Apply moderate compensation to avoid extreme altitude jumps
+                    // Backward compatibility: keep legacy behavior to avoid surprises in old persisted states
                     const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                    if (distortionFactor > 1.5) { // Only compensate at higher latitudes where distortion is significant
-                        restoredHeight = cameraState.height / Math.sqrt(distortionFactor); // Apply partial compensation
+                    if (distortionFactor > 1.5) {
+                        restoredHeight = cameraState.height / Math.sqrt(distortionFactor);
                         console.debug('Applied backward-compatible altitude compensation:', {
                             originalHeight: cameraState.height,
                             compensatedHeight: restoredHeight,

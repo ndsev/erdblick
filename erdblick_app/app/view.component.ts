@@ -63,7 +63,6 @@ declare let window: DebugWindow;
 export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
-    private tileOutlineEntity: Entity | null = null;
     private subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
 
@@ -159,14 +158,14 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                     // Center the rectangle on the target position with same dimensions
                     const centerLon = CesiumMath.toRadians(pos.x);
                     const centerLat = CesiumMath.toRadians(pos.y);
-                    const halfWidth = currentWidth / 2;
-                    const halfHeight = currentHeight / 2;
+                    const reducedWidth = currentWidth / 20
+                    const reducedHeight = currentHeight / 20;
 
                     const rectangle = new Rectangle(
-                        centerLon - halfWidth,
-                        centerLat - halfHeight,
-                        centerLon + halfWidth,
-                        centerLat + halfHeight
+                        centerLon - reducedWidth,
+                        centerLat - reducedHeight,
+                        centerLon + reducedWidth,
+                        centerLat + reducedHeight
                     );
 
                     // Ignore the camera change event to preserve mode switch cache
@@ -328,7 +327,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
             const position = movement.position;
             let feature = this.viewStateService.viewer.scene.pick(position);
-            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive.id.type === "SearchResult") {
+            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
@@ -459,17 +458,21 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.push(
             this.menuService.tileOutline.subscribe(entity => {
-                // Add safety check before accessing viewer
                 if (this.viewStateService.isUnavailable() || this.viewStateService.isDestroyed()) {
+                    console.log('Viewer unavailable or destroyed, skipping outline update');
                     return;
                 }
-
                 if (entity) {
-                    this.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
-                    this.viewStateService.viewer.scene.requestRender();
-                } else if (this.tileOutlineEntity) {
-                    this.viewStateService.viewer.entities.remove(this.tileOutlineEntity);
-                    this.viewStateService.viewer.scene.requestRender();
+                    if (this.viewStateService.tileOutlineEntity) {
+                        this.viewStateService.viewer.entities.remove(this.viewStateService.tileOutlineEntity);
+                        this.viewStateService.tileOutlineEntity = null;
+                    }
+                    this.viewStateService.tileOutlineEntity = this.viewStateService.viewer.entities.add(entity);
+                    this.viewStateService.viewer.scene.render();
+                } else if (this.viewStateService.tileOutlineEntity) {
+                    this.viewStateService.viewer.entities.remove(this.viewStateService.tileOutlineEntity);
+                    this.viewStateService.tileOutlineEntity = null;
+                    this.viewStateService.viewer.scene.render();
                 }
             })
         );
@@ -480,13 +483,13 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      */
     private setupKeyboardShortcuts() {
         if (!this.appModeService.isVisualizationOnly) {
-            this.keyboardService.registerShortcut('q', this.cameraService.zoomIn.bind(this), true);
-            this.keyboardService.registerShortcut('e', this.cameraService.zoomOut.bind(this), true);
-            this.keyboardService.registerShortcut('w', this.cameraService.moveUp.bind(this), true);
-            this.keyboardService.registerShortcut('a', this.cameraService.moveLeft.bind(this), true);
-            this.keyboardService.registerShortcut('s', this.cameraService.moveDown.bind(this), true);
-            this.keyboardService.registerShortcut('d', this.cameraService.moveRight.bind(this), true);
-            this.keyboardService.registerShortcut('r', this.cameraService.resetOrientation.bind(this), true);
+            this.keyboardService.registerShortcut('q', this.cameraService.zoomIn.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('e', this.cameraService.zoomOut.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('w', this.cameraService.moveUp.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('a', this.cameraService.moveLeft.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('s', this.cameraService.moveDown.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('d', this.cameraService.moveRight.bind(this.cameraService), true);
+            this.keyboardService.registerShortcut('r', this.cameraService.resetOrientation.bind(this.cameraService), true);
         }
     }
 
@@ -506,7 +509,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
     onContextMenuHide() {
         if (!this.menuService.tileSourceDataDialogVisible) {
-            this.menuService.tileOutline.next(null)
+            this.menuService.tileOutline.next(null);
         }
     }
 
@@ -605,7 +608,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 openStreetMapLayerAlpha: this.openStreetMapLayer?.alpha || 0.3,
                 openStreetMapLayerShow: this.openStreetMapLayer?.show || false,
                 markerPositions: markerPositions,
-                tileOutlineEntity: this.tileOutlineEntity,
+                tileOutlineEntity: this.viewStateService.tileOutlineEntity,
                 cameraState: this.cameraService.getCurrentCameraState(),
                 menuItems: [...this.menuItems]
             };
@@ -646,7 +649,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
 
                 // Clean up collections and entities references
                 this.markerService.markerCollection = null;
-                this.tileOutlineEntity = null;
+                this.viewStateService.tileOutlineEntity = null;
                 this.openStreetMapLayer = null;
 
                 // Clean the feature search visualization collection up
@@ -701,7 +704,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.viewStateService.viewer = null as any;
                 this.mouseHandler = null;
                 this.markerService.markerCollection = null;
-                this.tileOutlineEntity = null;
+                this.viewStateService.tileOutlineEntity = null;
                 this.openStreetMapLayer = null;
                 resolve(); // Continue anyway
             }
@@ -945,7 +948,7 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
         this.mouseHandler = null;
         this.openStreetMapLayer = null;
         this.markerService.markerCollection = null;
-        this.tileOutlineEntity = null;
+        this.viewStateService.tileOutlineEntity = null;
         this.viewStateService.viewerState = null;
 
         // Reset flags

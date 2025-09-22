@@ -6,6 +6,13 @@ import {ParametersService} from "./parameters.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./app-mode.service";
 
+// Helper to stringify with booleans in compact representation
+function stringifyForUrl(value: any): string {
+    return JSON.stringify(value, (_: string, value: any) => {
+        return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+    });
+}
+
 interface Versions {
     name: string;
     tag: string;
@@ -19,15 +26,19 @@ interface Versions {
         <p-toast position="top-center" key="tc"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
         <inspection-panel *ngIf="!appModeService.isVisualizationOnly"></inspection-panel>
-        <pref-components *ngIf="!appModeService.isVisualizationOnly"></pref-components>
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
         <div id="info">
-            <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
-            <span *ngIf="distributionVersions.length" style="cursor: pointer; z-index: 110" (click)="showExposedVersions()">
-                {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
-            </span>
+            <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
+                {{ copyright }}
+            </div>
+            <div>
+                <span *ngIf="!distributionVersions.length">{{ erdblickVersion }}</span>
+                <span *ngIf="distributionVersions.length" style="cursor: pointer" (click)="showExposedVersions()">
+                    {{ distributionVersions[0].name }}&nbsp;{{ distributionVersions[0].tag }}
+                </span>
+            </div>
         </div>
         <p-dialog header="Distribution Version Information" [(visible)]="distributionVersionsDialogVisible" 
                   [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
@@ -143,7 +154,7 @@ export class AppComponent {
             const entries = [...Object.entries(parameters)].filter(value =>
                 this.parametersService.isUrlParameter(value[0])
             );
-            entries.forEach(entry => entry[1] = JSON.stringify(entry[1]));
+            entries.forEach(entry => entry[1] = stringifyForUrl(entry[1]));
             this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
         });
     }

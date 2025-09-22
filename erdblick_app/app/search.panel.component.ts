@@ -7,11 +7,11 @@ import {ParametersService} from "./parameters.service";
 import {SidePanelService, SidePanelState} from "./sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "./keyboard.service";
-import {debounceTime, distinctUntilChanged, Subject} from "rxjs";
+import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
-import { CompletionCandidate } from "./featurefilter.worker";
+import {CompletionCandidate} from "./featurefilter.worker";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -30,19 +30,28 @@ interface ExtendedSearchTarget extends SearchTarget {
                           (keydown)="onKeydown($event)"
                           (keyup)="onKeyup($event)"
                           (blur)="onBlur()"
+                          (focus)="onFocus()"
                           (scroll)="updateCursor()"
                           placeholder="Search">
                 </textarea>
 
                 <div class="completion-popup"
-                    *ngIf="completion.visible"
+                    *ngIf="completion.visible || completion.pending"
                     (mousedown)="onCompletionPopupDown($event)"
                     [style.top.px]="completion.top"
                     [style.left.px]="completion.left">
+                    <p-progress-spinner *ngIf="completion.pending"
+                        aria-label="Loading completion candidates"
+                        [style]="{ height: '1em', width: '1em' }" />
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
-                        <span>{{ item.text }}</span>
+                        <div class="row">
+                            <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
+                        </div>
+                        <div class="row hint" *ngIf="item.hint">
+                           {{ item.hint }}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -136,6 +145,12 @@ export class SearchPanelComponent implements AfterViewInit {
         selectionIndex: 0,
         // True if the popup is visible
         visible: false,
+        // True if we are waiting for candidates
+        pending: false,
+        // Delay in ms to show the spinner
+        pendingDelay: 600,
+        // Delay for requesting completion candidates
+        completionDelay: 150,
     };
 
     mapSelectionVisible: boolean = false;
@@ -145,6 +160,11 @@ export class SearchPanelComponent implements AfterViewInit {
     @ViewChild('actionsdialog') dialog!: Dialog;
 
     cursorPosition: number = 0;
+
+    // Selection state preservation for text selection across focus changes
+    private savedSelectionStart: number = 0;
+    private savedSelectionEnd: number = 0;
+    private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
 
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
@@ -315,6 +335,14 @@ export class SearchPanelComponent implements AfterViewInit {
 
         this.reloadSearchHistory();
 
+        this.searchService.completionPending.pipe(
+            switchMap(pending => pending ? timer(this.completion.pendingDelay).pipe(map(() => true)) : of(false)),
+            startWith(false),
+            distinctUntilChanged()
+        ).subscribe((pending: boolean) => {
+            this.completion.pending = pending;
+        })
+
         this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             this.completionItems = value.filter((item, index, array) => {
                 // Discard any candidate that is equal to the current input
@@ -328,7 +356,7 @@ export class SearchPanelComponent implements AfterViewInit {
             this.completion.visible = length > 0;
         });
 
-        this.searchInputChanged.pipe(debounceTime(150)).subscribe(() => {
+        this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
             this.completeQuery(this.searchInputValue, this.cursorPosition);
         })
     }
@@ -402,12 +430,14 @@ export class SearchPanelComponent implements AfterViewInit {
         }
 
         // WGS (degree)
-        if (isLonLat) {
-            exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
-        } else {
-            exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+        if (!isMatched) {
+            if (isLonLat) {
+                exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
+            } else {
+                exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
+            }
+            matches = [...coordinateString.matchAll(exp)];
         }
-        matches = [...coordinateString.matchAll(exp)];
         if (!isMatched && matches.length > 0) {
             let matchResults = matches[0];
             if (matchResults.length >= 9) {
@@ -455,14 +485,12 @@ export class SearchPanelComponent implements AfterViewInit {
         let lat = coordinates[0];
         let lon = coordinates[1];
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
-        let position = Cartesian3.fromDegrees(lon, lat, alt);
-        let orientation = this.parametersService.getCameraOrientation();
-        if (orientation) {
-            this.parametersService.cameraViewData.next({
-                destination: position,
-                orientation: orientation
-            });
-        }
+
+        this.mapService.moveToWgs84PositionTopic.next({
+            x: lon,
+            y: lat,
+            z: alt
+        });
     }
 
     openInGM(value: string): number[] | undefined {
@@ -581,7 +609,6 @@ export class SearchPanelComponent implements AfterViewInit {
         const style = window.getComputedStyle(textarea);
         const fontSizePx = parseFloat(style.fontSize);
         const offset = (1 + 0.75) * fontSizePx; // Text height + padding height
-
         this.cursorPosition = cursor;
 
         const caret = getCaretCoordinates(textarea, cursor);
@@ -599,9 +626,23 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     onBlur() {
+        this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
+        this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
+        this.savedSelectionDirection = (this.textarea.nativeElement.selectionDirection as 'forward' | 'backward' | 'none') || 'none';
+        
         setTimeout(() => {
             this.completion.visible = false;
-        })
+        }, 0);
+    }
+
+    onFocus() {
+        setTimeout(() => {
+            this.textarea.nativeElement.setSelectionRange(
+                this.savedSelectionStart, 
+                this.savedSelectionEnd, 
+                this.savedSelectionDirection
+            );
+        }, 0);
     }
 
     onKeyup(event: KeyboardEvent) {
@@ -655,8 +696,10 @@ export class SearchPanelComponent implements AfterViewInit {
             event.stopPropagation();
             if (this.searchInputValue) {
                 this.setSearchValue("");
+                this.resetCompletion();
                 return;
             }
+            this.resetCompletion();
 
             this.dialog.close(event);
         } else if (event.key === 'Tab') {
@@ -720,20 +763,19 @@ export class SearchPanelComponent implements AfterViewInit {
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         setTimeout(() => {
             this.textarea.nativeElement.focus();
-            this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         }, 100)
     }
 
     shrinkTextarea() {
-        this.cursorPosition = this.textarea.nativeElement.selectionStart;
+        this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
         this.sidePanelService.searchOpen = false;
     }
 
     clickOnSearchToStart() {
-        this.textarea.nativeElement.setSelectionRange(this.cursorPosition, this.cursorPosition);
         this.textarea.nativeElement.click();
+        this.textarea.nativeElement.focus();
     }
 
     @HostListener('document:mousedown', ['$event'])
@@ -764,10 +806,20 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!query) {
             this.completion.visible = false;
             this.completionItems = [];
+            this.searchService.currentCompletionGroup = null;
             return;
         }
 
         this.searchService.completeQuery(query, point || query.length);
         this.completion.selectionIndex = 0;
+    }
+
+    resetCompletion() {
+        this.completeQuery("", undefined);
+        this.completion.selectionIndex = 0;
+        this.completionItems = [];
+        this.completion.visible = false;
+        this.searchService.completionPending.next(false);
+        this.searchService.completionCandidates.next([]);
     }
 }
