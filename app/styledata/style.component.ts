@@ -1,7 +1,7 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapService, removeGroupPrefix} from "../mapdata/map.service";
-import {StyleService} from "./style.service";
+import {FeatureStyleOptionWithStringType, StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle} from "./style.service";
 import {AppStateService} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
@@ -21,102 +21,38 @@ import {EditorService} from "../shared/editor.service";
                 <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
                     No styles loaded.
                 </div>
-                <ng-container *ngFor="let group of styleGroups | keyvalue: unordered">
-                    <div class="styles-container card" *ngIf="group.value.groupId != 'ungrouped'">
-                        <p-tree [value]="[group.value]">
-                            <ng-template let-node pTemplate="Group">
-                                <span>
-                                    <p-checkbox [ngModel]="node.visible"
-                                                (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleStyleGroup(node.groupId)"
-                                                [binary]="true"
-                                                [inputId]="node.groupId"
-                                                [name]="node.groupId" tabindex="0"/>
-                                    <label [for]="node.groupId" style="margin-left: 0.5em; cursor: pointer">
-                                        {{ removeGroupPrefix(node.groupId) }}
-                                    </label>
-                                </span>
-                            </ng-template>
-                            <ng-template let-node pTemplate="Style">
-                                <div class="flex-container">
-                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons menu-toggler"
-                                              (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                            more_vert
-                                        </span>
-                                        <span>
-                                            <p-checkbox [(ngModel)]="node.params.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="applyStyleConfig(node.id)"
-                                                        [binary]="true"
-                                                        [inputId]="node.id"
-                                                        [name]="node.id"/>
-                                            <label [for]="node.id"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                        </span>
-                                    </div>
-                                    <div class="layer-controls style-controls">
-                                        <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
-                                                  icon="pi pi-trash"
-                                                  label="" pTooltip="Remove style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                        <p-button onEnterClick *ngIf="!node.imported" (click)="resetStyle(node.id)"
-                                                  icon="pi pi-refresh"
-                                                  label="" pTooltip="Reload style from storage"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                                  icon="pi pi-file-edit"
-                                                  label="" pTooltip="Edit style"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                    </div>
-                                </div>
-                            </ng-template>
-                            <ng-template let-node pTemplate="Bool">
-                                <div style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-icons menu-toggler"
-                                          (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
-                                          [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
-                                          tabindex="0">
-                                        more_vert
-                                    </span>
-                                    <span [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
-                                          style="font-style: oblique">
-                                        <p-checkbox
-                                                [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
-                                                (ngModelChange)="toggleOption(node.styleId)"
-                                                [binary]="true"
-                                                [inputId]="node.styleId + '_' + node.id"
-                                                [name]="node.styleId + '_' + node.id"/>
-                                        <label [for]="node.styleId + '_' + node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
-                                    </span>
-                                </div>
-                            </ng-template>
-                        </p-tree>
-                    </div>
-                </ng-container>
-                <div class="card" *ngIf="styleGroups.has('ungrouped')">
-                    <p-tree [value]="styleGroups.get('ungrouped')?.children">
+                <div class="styles-container card">
+                    <p-tree [value]="styleGroups">
+                        <ng-template let-node pTemplate="Group">
+                            <span>
+                                <p-checkbox [ngModel]="node.visible"
+                                            (click)="$event.stopPropagation()"
+                                            (ngModelChange)="toggleStyleGroup(node.id)"
+                                            [binary]="true"
+                                            [inputId]="node.id"
+                                            [name]="node.id" tabindex="0"/>
+                                <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
+                                    {{ removeGroupPrefix(node.id) }}
+                                </label>
+                            </span>
+                        </ng-template>
                         <ng-template let-node pTemplate="Style">
                             <div class="flex-container">
                                 <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons menu-toggler"
-                                              (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                            more_vert
-                                        </span>
+                                    <span onEnterClick class="material-icons menu-toggler"
+                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
+                                        more_vert
+                                    </span>
                                     <span>
-                                            <p-checkbox [(ngModel)]="node.params.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="applyStyleConfig(node.id)"
-                                                        [binary]="true"
-                                                        [inputId]="node.id"
-                                                        [name]="node.id"/>
-                                            <label [for]="node.id"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
-                                        </span>
+                                        <p-checkbox [(ngModel)]="node.params.visible"
+                                                    (click)="$event.stopPropagation()"
+                                                    (ngModelChange)="applyStyleConfig(node.id)"
+                                                    [binary]="true"
+                                                    [inputId]="node.id"
+                                                    [name]="node.id"/>
+                                        <label [for]="node.id"
+                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                    </span>
                                 </div>
                                 <div class="layer-controls style-controls">
                                     <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
@@ -482,12 +418,12 @@ export class StyleComponent {
     }
 
     toggleStyleGroup(groupId: string) {
-        if (!groupId || groupId === 'ungrouped') {
+        if (!groupId) {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
         const group = this.findStyleGroupById(rootGroups, groupId);
-        if (!group) {
+        if (!group || !this.checkIsStyleGroup(group)) {
             return;
         }
         const target = !group.visible;
@@ -498,24 +434,17 @@ export class StyleComponent {
         this.styleService.reapplyAllStyles();
         this.mapService.update().then();
     }
-
-    private findStyleGroupById(groups: Map<string, ErdblickStyleGroup>, groupId: string): ErdblickStyleGroup | undefined {
-        for (const [id, group] of groups) {
-            if (id === groupId || group.groupId === groupId) {
-                return group;
-            }
-            const found = this.findInChildren(group, groupId);
-            if (found) return found;
-        }
-        return undefined;
+    private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
+        return e.type === "Group";
     }
 
-    private findInChildren(group: ErdblickStyleGroup, groupId: string): ErdblickStyleGroup | undefined {
-        for (const child of group.children) {
-            if ((child as any).type === 'Group') {
-                const g = child as ErdblickStyleGroup;
-                if (g.groupId === groupId) return g;
-                const found = this.findInChildren(g, groupId);
+    private findStyleGroupById(elements: (ErdblickStyleGroup|ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
+        for (const elem of elements) {
+            if (elem.id === id) {
+                return elem;
+            }
+            if (this.checkIsStyleGroup(elem)) {
+                const found = this.findStyleGroupById(elem.children, id);
                 if (found) return found;
             }
         }

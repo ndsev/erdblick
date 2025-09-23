@@ -44,7 +44,7 @@ export interface ErdblickStyle {
 
 export interface ErdblickStyleGroup extends Record<string, any> {
     key: string;
-    groupId: string;
+    id: string;
     type: string;
     children: Array<ErdblickStyleGroup | ErdblickStyle>;
     visible: boolean,
@@ -74,7 +74,7 @@ export class StyleService {
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
 
-    styleGroups: BehaviorSubject<Map<string, ErdblickStyleGroup>> = new BehaviorSubject<Map<string, ErdblickStyleGroup>>(new Map<string, ErdblickStyleGroup>());
+    styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
     constructor(private httpClient: HttpClient, private parameterService: AppStateService)
     {
@@ -112,6 +112,7 @@ export class StyleService {
                     console.error(`Wrong URL or no data available for style: ${styleId}`);
                     return;
                 }
+
                 this.styles.set(styleId, {
                     id: styleId,
                     modified: false,
@@ -428,7 +429,7 @@ export class StyleService {
         return style;
     }
 
-    computeStyleGroups() {
+    computeStyleGroups(): (ErdblickStyle|ErdblickStyleGroup)[] {
         const groups = new Map<string, ErdblickStyleGroup>();
         const ungrouped: Array<ErdblickStyle> = [];
 
@@ -444,7 +445,7 @@ export class StyleService {
             } else {
                 current = {
                     key: nextKey(),
-                    groupId: top,
+                    id: top,
                     type: "Group",
                     children: [],
                     visible: false,
@@ -457,7 +458,7 @@ export class StyleService {
                 acc = `${acc}/${segments[i]}`;
                 let found: ErdblickStyleGroup | null = null;
                 for (const child of current.children) {
-                    if ((child as any).type === "Group" && (child as ErdblickStyleGroup).groupId === acc) {
+                    if ((child as any).type === "Group" && (child as ErdblickStyleGroup).id === acc) {
                         found = child as ErdblickStyleGroup;
                         break;
                     }
@@ -465,7 +466,7 @@ export class StyleService {
                 if (!found) {
                     found = {
                         key: nextKey(),
-                        groupId: acc,
+                        id: acc,
                         type: "Group",
                         children: [],
                         visible: false,
@@ -508,19 +509,7 @@ export class StyleService {
             computeGroupVisibility(top);
         }
 
-        if (ungrouped.length > 0) {
-            const group: ErdblickStyleGroup = {
-                key: nextKey(),
-                groupId: "ungrouped",
-                type: "Group",
-                children: ungrouped,
-                visible: true,
-                expanded: true
-            };
-            groups.set("ungrouped", group);
-        }
-
-        return groups;
+        return [...groups.values(), ...ungrouped];
     }
 
     reapplyStyles(styleIds: Array<string>) {
