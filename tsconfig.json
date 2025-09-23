@@ -34,6 +34,6 @@
         "strictTemplates": true
     },
     "exclude": [
-        "erdblick_app/**/*.worker.ts"
+      "app/**/*.worker.ts"
     ]
 }

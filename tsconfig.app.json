@@ -6,9 +6,9 @@
     "types": []
   },
   "files": [
-    "erdblick_app/main.ts"
+    "app/main.ts"
   ],
   "include": [
-    "erdblick_app/**/*.d.ts"
+    "app/**/*.d.ts"
   ]
 }

@@ -8,7 +8,7 @@
     ]
   },
   "include": [
-    "erdblick_app/**/*.spec.ts",
-    "erdblick_app/**/*.d.ts"
+    "app/**/*.spec.ts",
+    "app/**/*.d.ts"
   ]
 }
