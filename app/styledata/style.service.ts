@@ -73,7 +73,7 @@ export class StyleService {
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
 
-    styleGroups: BehaviorSubject<Map<string, ErdblickStyleGroup>> = new BehaviorSubject<Map<string, ErdblickStyleGroup>>(new Map<string, ErdblickStyleGroup>());
+    styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
     constructor(private httpClient: HttpClient, private parameterService: AppStateService)
     {
@@ -111,6 +111,7 @@ export class StyleService {
                     console.error(`Wrong URL or no data available for style: ${styleId}`);
                     return;
                 }
+
                 this.styles.set(styleId, {
                     id: styleId,
                     modified: false,
@@ -441,7 +442,7 @@ export class StyleService {
         return style;
     }
 
-    computeStyleGroups() {
+    computeStyleGroups(): (ErdblickStyle|ErdblickStyleGroup)[] {
         const groups = new Map<string, ErdblickStyleGroup>();
         const ungrouped: Array<ErdblickStyle> = [];
 
@@ -521,19 +522,7 @@ export class StyleService {
             computeGroupVisibility(top);
         }
 
-        if (ungrouped.length > 0) {
-            const group: ErdblickStyleGroup = {
-                key: nextKey(),
-                id: "ungrouped",
-                type: "Group",
-                children: ungrouped,
-                visible: true,
-                expanded: true
-            };
-            groups.set("ungrouped", group);
-        }
-
-        return groups;
+        return [...groups.values(), ...ungrouped];
     }
 
     reapplyStyles(styleIds: Array<string>) {
