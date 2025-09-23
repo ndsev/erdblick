@@ -38,12 +38,12 @@ export default [
             "no-restricted-imports": ["error", {
                 paths: [{
                     name: "cesium",
-                    message: "Please import Cesium modules only in erdblick_app/app/cesium.ts.",
+                    message: "Please import Cesium modules only in app/integrations/cesium.ts.",
                 }],
 
                 patterns: [{
                     group: ["cesium/*"],
-                    message: "Please import Cesium modules only in erdblick_app/app/cesium.ts.",
+                    message: "Please import Cesium modules only in app/integrations/cesium.ts.",
                 }],
             }],
 
@@ -60,7 +60,7 @@ export default [
         },
     },
     {
-        files: ["erdblick_app/app/cesium.ts"],
+        files: ["app/integrations/cesium.ts"],
 
         rules: {
             "no-restricted-imports": "off",
