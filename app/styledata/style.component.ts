@@ -416,12 +416,12 @@ export class StyleComponent {
         return 0;
     }
 
-    toggleStyleGroup(groupId: string) {
-        if (!groupId || groupId === 'ungrouped') {
+    toggleStyleGroup(id: string) {
+        if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
-        const group = this.findStyleGroupById(rootGroups, id);
+        const group = this.findStyleGroupById(rootGroups, groupId);
         if (!group || !this.checkIsStyleGroup(group)) {
             return;
         }
