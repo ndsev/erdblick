@@ -58,8 +58,7 @@ export interface ErdblickStyleGroup extends Record<string, any> {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    styleIdsForNewStyles: Array<string> = [];
-    styleIdsForUpdatedStyles: Array<string> = [];
+    styleHashes: Map<string, {sha256: string, isNew: boolean, isChanged: boolean}> = new Map<string, {sha256: string; isNew: boolean, isChanged: boolean}>();
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
@@ -560,26 +559,20 @@ export class StyleService {
     }
 
     private compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
-        if (!styleHashes.has(style.id)) {
-            this.styleIdsForNewStyles.push(style.id);
-            return;
-        }
-
         this.styleSha256(style.source).then(styleHash => {
-            if (styleHash !== styleHashes.get(style.id)) {
-                this.styleIdsForUpdatedStyles.push(style.id);
-            }
+            this.styleHashes.set(style.id, {
+                sha256: styleHash,
+                isNew: !styleHashes.has(style.id),
+                isChanged: styleHash !== styleHashes.get(style.id)
+            });
         });
     }
 
-    async updateStyleHashes() {
-        const pairs = await Promise.all(
-            Array.from(this.styles, async ([styleId, { source }]) =>
-                [styleId, await this.styleSha256(source)] as const));
-
+    updateStyleHashes() {
+        localStorage.removeItem('styleHashes');
+        const pairs = Array.from(this.styleHashes, ([styleId, status]) => [styleId, status.sha256]);
         localStorage.setItem('styleHashes', JSON.stringify(pairs));
-        this.styleIdsForNewStyles = [];
-        this.styleIdsForUpdatedStyles = [];
+        this.styleHashes.clear();
     }
 
     private async styleSha256(input: string): Promise<string> {

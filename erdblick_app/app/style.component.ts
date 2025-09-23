@@ -214,13 +214,13 @@ import {EditorService} from "./editor.service";
         </p-dialog>
         <p-dialog header="Updated Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
                   (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
-            <ng-container *ngIf="styleService.styleIdsForUpdatedStyles.length">
+            <ng-container *ngIf="getUpdatedStyleIds(false).length">
                 <p>The following styles were updated:</p>
-                <p-chip *ngFor="let styleId of styleService.styleIdsForUpdatedStyles" [label]="styleId"/>
+                <p-chip *ngFor="let styleId of getUpdatedStyleIds(false)" [label]="styleId"/>
             </ng-container>
-            <ng-container *ngIf="styleService.styleIdsForNewStyles.length">
+            <ng-container *ngIf="getUpdatedStyleIds(true).length">
                 <p>The following styles were newly initialised:</p>
-                <p-chip *ngFor="let styleId of styleService.styleIdsForNewStyles" [label]="styleId"/>
+                <p-chip *ngFor="let styleId of getUpdatedStyleIds(true)" [label]="styleId"/>
             </ng-container>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
@@ -260,8 +260,7 @@ export class StyleComponent {
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
         this.parameterService.ready$.subscribe(_ => {
-            this.styleUpdateDialogVisible = this.styleService.styleIdsForUpdatedStyles.length > 0 ||
-                this.styleService.styleIdsForNewStyles.length > 0;
+            this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(state => state.isChanged);
         });
     }
 
@@ -539,7 +538,12 @@ export class StyleComponent {
     }
 
     resetUpdatedStyleIds() {
-        this.styleService.updateStyleHashes().then(_ => this.warningDialogVisible = false);
+        this.styleService.updateStyleHashes();
+        this.warningDialogVisible = false;
+    }
+
+    getUpdatedStyleIds(filterNew: boolean) {
+        return [... this.styleService.styleHashes].filter(([_, state] ) => state.isChanged && (filterNew === state.isNew)).map(([name, _]) => name)
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
