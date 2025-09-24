@@ -22,18 +22,18 @@ import {EditorService} from "./editor.service";
                     No styles loaded.
                 </div>
                 <ng-container *ngFor="let group of styleGroups | keyvalue: unordered">
-                    <div class="styles-container card" *ngIf="group.value.groupId != 'ungrouped'">
+                    <div class="styles-container card" *ngIf="group.value.id != 'ungrouped'">
                         <p-tree [value]="[group.value]">
                             <ng-template let-node pTemplate="Group">
                                 <span>
                                     <p-checkbox [ngModel]="node.visible"
                                                 (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleStyleGroup(node.groupId)"
+                                                (ngModelChange)="toggleStyleGroup(node.id)"
                                                 [binary]="true"
-                                                [inputId]="node.groupId"
-                                                [name]="node.groupId" tabindex="0"/>
-                                    <label [for]="node.groupId" style="margin-left: 0.5em; cursor: pointer">
-                                        {{ removeGroupPrefix(node.groupId) }}
+                                                [inputId]="node.id"
+                                                [name]="node.id" tabindex="0"/>
+                                    <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
+                                        {{ removeGroupPrefix(node.id) }}
                                     </label>
                                 </span>
                             </ng-template>
@@ -480,12 +480,12 @@ export class StyleComponent {
         return 0;
     }
 
-    toggleStyleGroup(groupId: string) {
-        if (!groupId || groupId === 'ungrouped') {
+    toggleStyleGroup(id: string) {
+        if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
-        const group = this.findStyleGroupById(rootGroups, groupId);
+        const group = this.findStyleGroupById(rootGroups, id);
         if (!group) {
             return;
         }
@@ -498,23 +498,23 @@ export class StyleComponent {
         this.mapService.update().then();
     }
 
-    private findStyleGroupById(groups: Map<string, ErdblickStyleGroup>, groupId: string): ErdblickStyleGroup | undefined {
+    private findStyleGroupById(groups: Map<string, ErdblickStyleGroup>, id: string): ErdblickStyleGroup | undefined {
         for (const [id, group] of groups) {
-            if (id === groupId || group.groupId === groupId) {
+            if (id === id || group.id === id) {
                 return group;
             }
-            const found = this.findInChildren(group, groupId);
+            const found = this.findInChildren(group, id);
             if (found) return found;
         }
         return undefined;
     }
 
-    private findInChildren(group: ErdblickStyleGroup, groupId: string): ErdblickStyleGroup | undefined {
+    private findInChildren(group: ErdblickStyleGroup, id: string): ErdblickStyleGroup | undefined {
         for (const child of group.children) {
             if ((child as any).type === 'Group') {
                 const g = child as ErdblickStyleGroup;
-                if (g.groupId === groupId) return g;
-                const found = this.findInChildren(g, groupId);
+                if (g.id === id) return g;
+                const found = this.findInChildren(g, id);
                 if (found) return found;
             }
         }

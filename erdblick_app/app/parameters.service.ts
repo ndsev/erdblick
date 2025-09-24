@@ -21,14 +21,14 @@ export interface TileFeatureId {
 
 export interface StyleParameters {
     visible: boolean,
-    options: Record<string, boolean>,
+    options: Record<string, boolean|number>,
     showOptions: boolean,
 }
 
 export interface StyleURLParameters {
     v: boolean,
     optOn: boolean,
-    o: Record<string, boolean>
+    o: Record<string, boolean|number>
 }
 
 interface ErdblickParameters extends Record<string, any> {
