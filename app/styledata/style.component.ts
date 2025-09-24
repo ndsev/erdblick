@@ -417,11 +417,11 @@ export class StyleComponent {
     }
 
     toggleStyleGroup(groupId: string) {
-        if (!groupId) {
+        if (!groupId || groupId === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
-        const group = this.findStyleGroupById(rootGroups, groupId);
+        const group = this.findStyleGroupById(rootGroups, id);
         if (!group || !this.checkIsStyleGroup(group)) {
             return;
         }

@@ -319,14 +319,20 @@ export class StyleService {
     }
 
     saveModifiedBuiltinStyles() {
+        // Omit the 'parent' field which is injected by prime-ng,
+        // so we do not get cyclic object errors.
         localStorage.setItem('builtinStyleData', JSON.stringify(
-            [...this.styles].filter(([_, value]) => !value.imported && value.modified)
+            [...this.styles].filter(([_, value]) => !value.imported && value.modified),
+            (key, value) => key === 'parent' ? undefined : value
         ));
     }
 
     saveImportedStyles() {
+        // Omit the 'parent' field which is injected by prime-ng,
+        // so we do not get cyclic object errors.
         localStorage.setItem('importedStyleData', JSON.stringify(
-            [...this.styles].filter(([_, value]) => value.imported)
+            [...this.styles].filter(([_, value]) => value.imported),
+            (key, value) => key === 'parent' ? undefined : value
         ));
     }
 
@@ -347,6 +353,7 @@ export class StyleService {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 if (this.styles.has(styleId)) {
                     style.featureLayerStyle = null;
+                    style.params = this.parameterService.styleConfig(styleId);
                     this.styles.set(styleId, style);
                 }
             }
@@ -382,6 +389,15 @@ export class StyleService {
                         if (!style.params.options.hasOwnProperty(option.id)) {
                             style.params.options[option.id] = option.defaultValue;
                         }
+
+                        // From the pre-initialized option value, ensure that it complies
+                        // with the expected data type. Also, we need to convert the value
+                        // type to a string, so it is understood by prime-ng p-tree.
+                        const currentValue = style.params.options[option.id];
+                        if (option.type === coreLib.FeatureStyleOptionType.Bool) {
+                            option.type = "Bool";
+                            style.params.options[option.id] = !!currentValue;
+                        }
                     }
                     options.delete();
                     return true;
@@ -414,14 +430,13 @@ export class StyleService {
         }
     }
 
-    private setStylesIdChildren(style: ErdblickStyle, key: string) {
-        style.key = key;
+    private setStylesIdChildren(style: ErdblickStyle) {
+        style.key = style.id;
         style.children = [];
         style.expanded = true;
-        let i = 0;
+        style.type = "Style";
         for (let option of style.options) {
-            option.type = "Bool";
-            option.key = `${key}-${i}`;
+            option.key = `${style.id}/${option.id}`;
             option.styleId = style.id;
             style.children.push(option);
         }
@@ -443,7 +458,7 @@ export class StyleService {
                 current = groups.get(top)!;
             } else {
                 current = {
-                    key: nextKey(),
+                    key: top,
                     id: top,
                     type: "Group",
                     children: [],
@@ -464,7 +479,7 @@ export class StyleService {
                 }
                 if (!found) {
                     found = {
-                        key: nextKey(),
+                        key: acc,
                         id: acc,
                         type: "Group",
                         children: [],
@@ -482,10 +497,10 @@ export class StyleService {
             if (styleId.includes('/')) {
                 const parentPath = styleId.split('/').slice(0, -1).join('/');
                 const currentGroup = getOrCreateGroupByPath(parentPath);
-                const styleNode = this.setStylesIdChildren(style, nextKey());
+                const styleNode = this.setStylesIdChildren(style);
                 currentGroup.children.push(styleNode);
             } else {
-                ungrouped.push(this.setStylesIdChildren(style, nextKey()));
+                ungrouped.push(this.setStylesIdChildren(style));
             }
         }
 

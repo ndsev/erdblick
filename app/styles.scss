@@ -1050,6 +1050,10 @@ body {
     width: 0;
     flex-grow: 1;
   }
+
+  .cm-gutters {
+    background-color: var(--erdblick-card-bg) !important;
+  }
 }
 
 .filter-panel {
