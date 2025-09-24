@@ -9,6 +9,8 @@ import {syntaxHighlighting, defaultHighlightStyle} from "@codemirror/language"
 import {StyleService} from "../styledata/style.service";
 import * as jsyaml from 'js-yaml';
 import {EditorService} from "./editor.service";
+import { Compartment } from '@codemirror/state';
+import { oneDark } from '@codemirror/theme-one-dark';
 
 const completionsList = [
     {label: "version", type: "property"},
@@ -104,26 +106,52 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
 
     private editorView?: EditorView;
     private editedSource: string = "";
+    private themeComp = new Compartment();
+    private modeObserver?: MutationObserver;
+
+    private readonly DARK_MODE_CLASS = 'erdblick-dark';
 
     constructor(public editorService: EditorService,
                 public renderer: Renderer2) {}
 
     ngAfterViewInit(): void {
         this.editorService.updateEditorState.subscribe(state => {
-            if (state) {
-                const childElements = this.editorRef.nativeElement.childNodes;
-                for (let child of childElements) {
-                    this.renderer.removeChild(this.editorRef.nativeElement, child);
-                }
-                this.editorView = new EditorView({
-                    state: this.createEditorState(),
-                    parent: this.editorRef.nativeElement
-                });
+            if (!state) {
+                return;
             }
+            const childElements = this.editorRef.nativeElement.childNodes;
+            for (let child of childElements) {
+                this.renderer.removeChild(this.editorRef.nativeElement, child);
+            }
+            this.editorView = new EditorView({
+                state: this.createEditorState(),
+                parent: this.editorRef.nativeElement
+            });
+
+            const root = document.documentElement; // or your specific root element
+            this.modeObserver?.disconnect();
+            this.modeObserver = new MutationObserver((records) => {
+                for (const r of records) {
+                    if (r.type === 'attributes' && r.attributeName === 'class') {
+                        const isDark = root.classList.contains(this.DARK_MODE_CLASS);
+                        const lightTheme = EditorView.theme({}, { dark: false });
+                        this.editorView?.dispatch({
+                            effects: this.themeComp.reconfigure(
+                                isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)]
+                            )
+                        });
+                    }
+                }
+            });
+            this.modeObserver.observe(root, { attributes: true, attributeFilter: ['class'] }); // watch only class attr
         });
     }
 
     createEditorState() {
+        const root = document.documentElement; // or your app's root element
+        const isDark = root.classList.contains('erdblick-dark');
+        const lightTheme = EditorView.theme({}, { dark: false });
+
         this.editedSource = this.editorService.editableData;
         return EditorState.create({
             doc: this.editedSource,
@@ -131,7 +159,6 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 basicSetup,
                 yaml(),
                 keymap.of([this.saveCmd()]),
-                syntaxHighlighting(defaultHighlightStyle),
                 autocompletion({override: [this.styleCompletions]}),
                 lintGutter(),
                 this.yamlLinter,
@@ -140,12 +167,14 @@ export class EditorComponent implements AfterViewInit, OnDestroy {
                 EditorState.readOnly.of(this.editorService.readOnly),
                 EditorView.updateListener.of((e: ViewUpdate) => {
                     this.editorService.editedStateData.next(e.state.doc.toString());
-                })
+                }),
+                this.themeComp.of(isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)])
             ]
         });
     }
 
     ngOnDestroy(): void {
+        this.modeObserver?.disconnect();
         this.editorView?.destroy();
     }
 

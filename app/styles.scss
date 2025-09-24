@@ -1034,26 +1034,19 @@ body {
     }
   }
 
-  .editor-container {
-    min-width: 46em;
-    width: 100%;
-    height: calc(100% - 4em);
-    max-height: calc(75vh - 2em);
-    margin: 0;
-    overflow: auto;
-    border: 1px solid silver;
-    display: flex;
-    flex-direction: row;
-  }
-
   .cm-editor {
     width: 0;
     flex-grow: 1;
   }
+}
 
-  .cm-gutters {
-    background-color: var(--erdblick-card-bg) !important;
-  }
+.editor-container {
+  min-width: 46em;
+  width: 100%;
+  height: calc(100% - 4em);
+  max-height: calc(75vh - 2em);
+  overflow: auto;
+  border: 1px solid silver;
 }
 
 .filter-panel {
