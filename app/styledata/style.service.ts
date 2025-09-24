@@ -269,8 +269,7 @@ export class StyleService {
             imported: true,
             params: {
                 visible: true,
-                options: {},
-                showOptions: true
+                options: {}
             },
             source: styleData,
             featureLayerStyle: null,
