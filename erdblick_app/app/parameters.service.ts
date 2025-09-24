@@ -21,13 +21,11 @@ export interface TileFeatureId {
 
 export interface StyleParameters {
     visible: boolean,
-    options: Record<string, boolean|number>,
-    showOptions: boolean,
+    options: Record<string, boolean|number>
 }
 
 export interface StyleURLParameters {
     v: boolean,
-    optOn: boolean,
     o: Record<string, boolean|number>
 }
 
@@ -87,7 +85,7 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
                     (o as Record<string, any>)[key] = !!value;  // Turn the compact boolean into a primitive boolean.
                     continue;
                 }
-                if (valueType !== fields[key]) {
+                if (fields.hasOwnProperty(key) && valueType !== fields[key]) {
                     return false;
                 }
             }
@@ -205,7 +203,7 @@ const erdblickParameters: Record<string, ParameterDescriptor> = {
         converter: val => JSON.parse(val),
         validator: val => {
             return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
-                ([_, v]) => validateObjectsAndTypes({v: "boolean", optOn: "boolean", o: "object"})(v));
+                ([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v));
         },
         default: {},
         urlParam: true
@@ -305,7 +303,7 @@ export class ParametersService {
 
     legalInfoDialogVisible: boolean = false;
 
-    constructor(appModeService: AppModeService) {
+    constructor(public appModeService: AppModeService) {
         // Filter parameter descriptors based on mode
         this.parameterDescriptors = appModeService.isVisualizationOnly
             ? Object.fromEntries(
@@ -391,14 +389,10 @@ export class ParametersService {
 
     setInitialStyles(styles: Map<string, ErdblickStyle>) {
         // In visualization-only mode, ignore style updates
-        if (Object.keys(this.parameterDescriptors).length !== Object.keys(erdblickParameters).length) {
+        if (this.appModeService.isVisualizationOnly) {
             return;
         }
 
-        // Only set styles, if there are no configured values yet.
-        if (!Object.entries(this.p().styles).length) {
-            return;
-        }
         this.p().styles = Object.fromEntries([...styles.entries()].map(([k, v]) =>
             [k, this.styleParamsToURLParams(v.params)]));
         this.parameters.next(this.p());
@@ -505,9 +499,8 @@ export class ParametersService {
             return this.styleURLParamsToParams(this.p().styles[styleId]);
         }
         return {
-            visible: !Object.entries(this.p().styles).length,
-            options: {},
-            showOptions: true,
+            visible: true,
+            options: {}
         };
     }
 
@@ -610,7 +603,16 @@ export class ParametersService {
                 try {
                     const value = descriptor.converter(params[key]);
                     if (descriptor.validator(value)) {
-                        updatedParameters[key] = value;
+                        // If the parameter to update is an object (dict), only
+                        // overlay the keys present in the url, and leave other
+                        // dict entries untouched.
+                        if (value && typeof value === 'object' && !Array.isArray(value)) {
+                            for (const [entryKey, entryValue] of Object.entries(value)) {
+                                updatedParameters[key][entryKey] = entryValue;
+                            }
+                        } else {
+                            updatedParameters[key] = value;
+                        }
                     } else {
                         console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
                         updatedParameters[key] = descriptor.default;
@@ -759,10 +761,10 @@ export class ParametersService {
     }
 
     private styleParamsToURLParams(params: StyleParameters): StyleURLParameters {
-        return { v: params.visible, optOn: params.showOptions, o: params.options };
+        return { v: params.visible, o: params.options };
     }
 
     private styleURLParamsToParams(params: StyleURLParameters): StyleParameters{
-        return { visible: params.v, showOptions: params.optOn, options: params.o };
+        return { visible: params.v, options: params.o };
     }
 }
