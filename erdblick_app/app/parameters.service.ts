@@ -66,7 +66,15 @@ interface ParameterDescriptor {
     urlParam: boolean
 }
 
-/** Function to create an object or array types validator given a key-typeof-value dictionary or a types array. */
+/**
+ * !!! THE RETURNED FUNCTION MAY MUTATE THE VALIDATED VALUES !!!
+ *
+ * Function to create an object or array types validator given a key-typeof-value
+ * dictionary or a types array.
+ *
+ * Note: For boolean values, this function contains an extra mechanism to
+ * turn compact (0/1) boolean representations into true/false inside the validated objects.
+ */
 function validateObjectsAndTypes(fields: Record<string, string> | Array<string>) {
     return (o: object | Array<any>) => {
         if (!Array.isArray(fields)) {
@@ -76,6 +84,7 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
             for (let [key, value] of Object.entries(o)) {
                 const valueType = typeof value;
                 if (valueType === "number" && fields[key] === "boolean" && (value === 0 || value === 1)) {
+                    (o as Record<string, any>)[key] = !!value;  // Turn the compact boolean into a primitive boolean.
                     continue;
                 }
                 if (valueType !== fields[key]) {
@@ -88,6 +97,7 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
             for (let i = 0; i < fields.length; i++) {
                 const valueType = typeof o[i] ;
                 if (valueType  === "number" && fields[i] === "boolean" && (o[i] === 0 || o[i] === 1)) {
+                    o[i] = !!o[i];  // Turn the compact boolean into a primitive boolean.
                     continue;
                 }
                 if (valueType !== fields[i]) {
