@@ -148,16 +148,13 @@ import {EditorService} from "../shared/editor.service";
                 <p-button (click)="warningDialog.close($event)" label="No"></p-button>
             </div>
         </p-dialog>
-        <p-dialog header="Updated Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
+        <p-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
                   (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
-            <ng-container *ngIf="getUpdatedStyleIds(false).length">
-                <p>The following styles were updated:</p>
-                <p-chip *ngFor="let styleId of getUpdatedStyleIds(false)" [label]="styleId"/>
-            </ng-container>
-            <ng-container *ngIf="getUpdatedStyleIds(true).length">
-                <p>The following styles were newly initialised:</p>
-                <p-chip *ngFor="let styleId of getUpdatedStyleIds(true)" [label]="styleId"/>
-            </ng-container>
+            <div class="updated-styles-container" *ngIf="getUpdatedModifiedStyleIds().length">
+                <p>The following styles were updated in the datasource while their modifications persist in local
+                    memory:</p>
+                <p-chip *ngFor="let styleId of getUpdatedModifiedStyleIds()" [label]="styleId"/>
+            </div>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
             </div>
@@ -196,7 +193,8 @@ export class StyleComponent {
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
         this.parameterService.ready$.subscribe(_ => {
-            this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(state => state.isChanged);
+            this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(
+                state => state.isUpdated && state.isModified);
         });
     }
 
@@ -471,8 +469,10 @@ export class StyleComponent {
         this.warningDialogVisible = false;
     }
 
-    getUpdatedStyleIds(filterNew: boolean) {
-        return [... this.styleService.styleHashes].filter(([_, state] ) => state.isChanged && (filterNew === state.isNew)).map(([name, _]) => name)
+    getUpdatedModifiedStyleIds() {
+        return [...this.styleService.styleHashes]
+            .filter(([_, state] ) => state.isUpdated && state.isModified)
+            .map(([name, _]) => name);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

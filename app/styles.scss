@@ -993,6 +993,17 @@ body {
   }
 }
 
+.updated-styles-container {
+  max-width: 30em;
+  margin-bottom: 1em;
+
+  .p-chip {
+    margin: 0.25em;
+    background: var(--p-badge-danger-background) !important;
+    color: var(--p-badge-danger-color) !important;
+  }
+}
+
 .pref-dialog {
   margin: 0;
 
