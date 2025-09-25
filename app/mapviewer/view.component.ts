@@ -240,10 +240,10 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             this.cameraService.ignoreNextCameraUpdate = true;
             if (this.viewStateService.is2DMode) {
                 // In 2D mode, check if we have a view rectangle in parameters
-                const params = this.parameterService.p();
-                if (params.viewRectangle && params.viewRectangle.length === 4) {
+                const viewRectangle = this.parameterService.viewRectangle.getValue();
+                if (viewRectangle && viewRectangle.length === 4) {
                     this.viewStateService.viewer.camera.setView({
-                        destination: Rectangle.fromDegrees(...params.viewRectangle)
+                        destination: Rectangle.fromDegrees(...viewRectangle)
                     });
                 } else {
                     // Fallback to center position
@@ -312,13 +312,6 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
                 this.markerService.clearMarkers();
             }
         });
-        
-        /* LEGACY APPROACH (kept for reference - can be removed after full migration):
-        this.parameterService.parameters.subscribe(parameters => {
-            // This would receive ALL state changes, even irrelevant ones
-            // Components had to internally check what actually changed
-        });
-        */
     }
 
     /**

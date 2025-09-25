@@ -218,9 +218,8 @@ export class MapService {
         this.tileParser = new coreLib.TileLayerParser();
 
         // Use combineLatest to coordinate maps loading with parameter initialization
-        combineLatest([this.maps, this.parameterService.ready$.pipe(startWith(null))]).pipe(
-            filter(_ => this.parameterService.initialQueryParamsSet)
-        ).subscribe(_ => {
+        combineLatest([this.maps, this.parameterService.ready$.pipe(startWith(null))])
+        .subscribe(_ => {
             this.processMapsUpdate();
         });
 
@@ -244,7 +243,7 @@ export class MapService {
 
         // Apply initial parameter configuration once maps are loaded and parameters are ready
         combineLatest([this.maps, this.parameterService.ready$]).pipe(
-            filter(([maps, _]) => maps.size > 0 && this.parameterService.initialQueryParamsSet),
+            filter(([maps, _]) => maps.size > 0),
         ).subscribe(([maps, _]) => {
             for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
@@ -261,8 +260,9 @@ export class MapService {
 
         await this.reloadDataSources();
 
-        this.parameterService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-            this.highlightFeatures(parameters.selected).then();
+        // Subscribe to selected state for highlighting
+        this.parameterService.selected.pipe(distinctUntilChanged()).subscribe(selected => {
+            this.highlightFeatures(selected).then();
         });
 
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
@@ -345,7 +345,7 @@ export class MapService {
     // Pure function that computes new map groups
     private computeMapGroups(): Map<string, GroupInfoItem> {
         const isInitLoad = this.mapGroups.getValue().size === 0;
-        const hasExistingLayers = this.parameterService.p().layers.length > 0;
+        const hasExistingLayers = this.parameterService.layers.getValue().length > 0;
 
         const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
@@ -718,7 +718,7 @@ export class MapService {
                 const allViewportTileIds = coreLib.getTileIds(
                     this.currentViewport,
                     level,
-                    this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
+                    this.parameterService.tilesLoadLimit.getValue()) as bigint[];
 
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
@@ -728,7 +728,7 @@ export class MapService {
                 this.currentHighDetailTileIds = new Set([
                     ...this.currentHighDetailTileIds,
                     ...new Set<bigint>(
-                        allViewportTileIds.slice(0, this.parameterService.parameters.getValue().tilesVisualizeLimit))
+                        allViewportTileIds.slice(0, this.parameterService.tilesVisualizeLimit.getValue()))
                 ]);
             }
         }

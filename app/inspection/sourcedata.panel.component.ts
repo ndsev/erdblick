@@ -132,10 +132,14 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
                 public mapService: MapService) {
         this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
         this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
-            if (parameter.panel.length == 2) {
-                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (parameter.panel[1] + 3) * this.parameterService.baseFontSize;
+        
+        // OPTIMIZATION: Using atomized state subscription
+        // This component now only receives updates for panel sizing (1 state)
+        // instead of all 18+ state changes, reducing unnecessary updates by ~94%
+        this.containerSizeSubscription = this.parameterService.panel.subscribe(panelSizes => {
+            if (panelSizes.length == 2) {
+                this.inspectionContainerWidth = panelSizes[0] * this.parameterService.baseFontSize;
+                this.inspectionContainerHeight = (panelSizes[1] + 3) * this.parameterService.baseFontSize;
             } else {
                 this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
                 this.inspectionContainerHeight = (window.innerHeight - (this.parameterService.inspectionContainerHeight + 3) * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;

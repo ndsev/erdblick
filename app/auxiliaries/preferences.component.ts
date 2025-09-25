@@ -5,6 +5,7 @@ import {StyleService} from "../styledata/style.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
 import {OnDestroy, OnInit} from '@angular/core';
+import {combineLatest} from "rxjs";
 
 @Component({
     selector: 'pref-components',
@@ -245,9 +246,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: AppStateService) {
-        this.parametersService.parameters.subscribe(parameters => {
-            this.tilesToLoadInput = parameters.tilesLoadLimit;
-            this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
+        // OPTIMIZATION: Using atomized state subscriptions
+        // This component now only receives updates for tile limit states (2 states)
+        // instead of all 18+ state changes, reducing unnecessary updates by ~89%
+        combineLatest([
+            this.parametersService.tilesLoadLimit,
+            this.parametersService.tilesVisualizeLimit
+        ]).subscribe(([loadLimit, visualizeLimit]) => {
+            this.tilesToLoadInput = loadLimit;
+            this.tilesToVisualizeInput = visualizeLimit;
         });
     }
 
@@ -267,10 +274,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
-        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.parametersService.parameters.next(parameters);
+        // Update tile limits using atomized states
+        this.parametersService.tilesLoadLimit.next(Number(this.tilesToLoadInput));
+        this.parametersService.tilesVisualizeLimit.next(Number(this.tilesToVisualizeInput));
         this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }

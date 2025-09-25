@@ -148,9 +148,7 @@ export class DatasourcesComponent {
                 public editorService: EditorService,
                 private http: HttpClient,
                 private mapService: MapService) {
-        this.parameterService.parameters.subscribe(parameters => {
-            return;
-        });
+        // Empty subscription removed - no longer needed with atomized states
 
         this.dataSourcesConfigJson.subscribe((config: any) => {
             if (config && config["schema"] && config["model"]) {

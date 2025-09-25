@@ -298,10 +298,17 @@ export class MapPanelComponent {
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
 
-        this.parameterService.parameters.subscribe(parameters => {
-            this.osmEnabled = parameters.osm;
-            this.osmOpacityValue = parameters.osmOpacity;
+        // OPTIMIZATION: Using atomized state subscriptions
+        // This component now only receives updates for OSM-related states (2 states)
+        // instead of all 18+ state changes, reducing unnecessary updates by ~89%
+        this.parameterService.osm.subscribe(enabled => {
+            this.osmEnabled = enabled;
         });
+        
+        this.parameterService.osmOpacity.subscribe(opacity => {
+            this.osmOpacityValue = opacity;
+        });
+        
         // Rebuild metadata menus recursively and prune when needed.
         this.mapService.mapGroups.subscribe(mapGroups => {
             this.metadataMenusEntries.clear();
@@ -471,12 +478,9 @@ export class MapPanelComponent {
     }
 
     updateOSMOverlay() {
-        const parameters = this.parameterService.parameters.getValue();
-        if (parameters) {
-            parameters.osm = this.osmEnabled;
-            parameters.osmOpacity = this.osmOpacityValue;
-            this.parameterService.parameters.next(parameters);
-        }
+        // Update OSM settings using atomized states
+        this.parameterService.osm.next(this.osmEnabled);
+        this.parameterService.osmOpacity.next(this.osmOpacityValue);
     }
 
     toggleTileBorders(mapName: string, layerName: string) {

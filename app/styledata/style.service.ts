@@ -77,11 +77,8 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient, private parameterService: AppStateService)
     {
-        this.parameterService.parameters.subscribe(_ => {
-            // This subscription exists specifically to catch the values of the query parameters.
-            if (this.parameterService.initialQueryParamsSet) {
-                return;
-            }
+        // Use ready$ observable instead of checking initialQueryParamsSet
+        this.parameterService.ready$.subscribe(() => {
             for (let [styleId, style] of this.styles) {
                 style.params = this.parameterService.styleConfig(styleId);
             }

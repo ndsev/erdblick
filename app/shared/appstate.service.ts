@@ -32,41 +32,6 @@ export interface StyleURLParameters {
     o: Record<string, boolean|number>
 }
 
-interface ErdblickParameters extends Record<string, any> {
-    search: [number, string] | [],
-    marker: boolean,
-    markedPosition: Array<number>,
-    selected: TileFeatureId[],
-    heading: number,
-    pitch: number,
-    roll: number,
-    lon: number,
-    lat: number,
-    alt: number,
-    mode2d: boolean,
-    viewRectangle: [number, number, number, number] | null,  // [west, south, east, north] in degrees
-    osm: boolean,
-    osmOpacity: number,
-    layers: Array<[string, number, boolean, boolean]>,
-    styles: Record<string, StyleURLParameters>,
-    tilesLoadLimit: number,
-    tilesVisualizeLimit: number,
-    enabledCoordsTileIds: Array<string>,
-    selectedSourceData: Array<any>,
-    panel: Array<number>
-}
-
-interface ParameterDescriptor {
-    // Convert the setting to the correct type, e.g. Number.
-    converter: (val: any) => any,
-    // Check if the converted value is good, or the default must be used.
-    validator: (val: any) => boolean,
-    // Default value.
-    default: any,
-    // Include in the url
-    urlParam: boolean
-}
-
 /**
  * !!! THE RETURNED FUNCTION MAY MUTATE THE VALIDATED VALUES !!!
  *
@@ -111,144 +76,7 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
     };
 }
 
-const erdblickParameters: Record<string, ParameterDescriptor> = {
-    search: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
-        default: [],
-        urlParam: true
-    },
-    marker: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: false,
-        urlParam: true
-    },
-    markedPosition: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
-        default: [],
-        urlParam: true
-    },
-    selected: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
-        default: [],
-        urlParam: true
-    },
-    heading: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 6.0,
-        urlParam: true
-    },
-    pitch: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: -1.55,
-        urlParam: true
-    },
-    roll: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 0.25,
-        urlParam: true
-    },
-    lon: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 22.837473,
-        urlParam: true
-    },
-    lat: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 38.490817,
-        urlParam: true
-    },
-    alt: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 16000000,
-        urlParam: true
-    },
-    mode2d: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: false,
-        urlParam: true
-    },
-    viewRectangle: {
-        converter: val => val === 'null' ? null : JSON.parse(val),
-        validator: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(v => typeof v === 'number')),
-        default: null,
-        urlParam: true
-    },
-    osmOpacity: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
-        default: 30,
-        urlParam: true
-    },
-    osm: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: true,
-        urlParam: true
-    },
-    layers: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
-        default: [],
-        urlParam: true
-    },
-    styles: {
-        converter: val => JSON.parse(val),
-        validator: val => {
-            return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
-                ([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v));
-        },
-        default: {},
-        urlParam: true
-    },
-    tilesLoadLimit: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_LOAD,
-        urlParam: true
-    },
-    tilesVisualizeLimit: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_VISUALIZE,
-        urlParam: true
-    },
-    enabledCoordsTileIds: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: ["WGS84"],
-        urlParam: false
-    },
-    selectedSourceData: {
-        converter: val => JSON.parse(val),
-        validator: Array.isArray,
-        default: [],
-        urlParam: true
-    },
-    panel: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && (!val.length || val.length == 2 && val.every(item => typeof item === 'number')),
-        default: [],
-        urlParam: true
-    }
-};
-
 /** Set of parameter keys allowed in visualization-only mode */
-// TODO: Reflect this in the parameter descriptors, instead
-// of having a separate set.
-// NOTE: Currently parameter access restrictions for visualization-only mode are maintained
-// in this hardcoded set. Should be integrated into the parameter descriptor system for
-// better maintainability and to avoid duplication.
 const VISUALIZATION_ONLY_ALLOWED = new Set([
     'heading',
     'pitch',
@@ -291,15 +119,10 @@ export class AppStateService implements OnDestroy {
     public readonly selectedSourceData: AppState<any[]>;
     public readonly panel: AppState<number[]>;
     
-    // Legacy support - will emit combined state changes
-    parameters: BehaviorSubject<ErdblickParameters>;
-    
     // Observable that emits when initialization is complete
     private ready = new Subject<void>();
     public ready$ = this.ready.asObservable();
 
-    // Store filtered parameter descriptors based on mode
-    private parameterDescriptors: Record<string, ParameterDescriptor>;
 
     // Keep for compatibility
     cameraViewData: BehaviorSubject<{
@@ -320,10 +143,6 @@ export class AppStateService implements OnDestroy {
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
     
-    // Expose for backwards compatibility
-    get initialQueryParamsSet(): boolean {
-        return this._initialQueryParamsSet;
-    }
 
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
@@ -340,13 +159,6 @@ export class AppStateService implements OnDestroy {
         private router?: Router,
         private location?: Location
     ) {
-        // Filter parameter descriptors based on mode
-        this.parameterDescriptors = appModeService.isVisualizationOnly
-            ? Object.fromEntries(
-                Object.entries(erdblickParameters)
-                    .filter(([key]) => VISUALIZATION_ONLY_ALLOWED.has(key))
-            )
-            : erdblickParameters;
 
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 
@@ -490,12 +302,6 @@ export class AppStateService implements OnDestroy {
             this.shouldIncludeInUrl('panel') ? 'panel' : ''
         );
 
-        // Initialize legacy parameters BehaviorSubject for backwards compatibility
-        let parameters = this.loadSavedParameters();
-        this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
-        
-        // Setup state synchronization
-        this.setupStateSync();
         
         // Setup URL synchronization if router is available
         if (this.router) {
@@ -504,7 +310,6 @@ export class AppStateService implements OnDestroy {
         
         // Load from local storage
         this.loadFromLocalStorage();
-        this.saveParameters();
 
         // Subscribe to camera changes for scaling factor
         this.cameraView.subscribe(camera => {
@@ -537,10 +342,12 @@ export class AppStateService implements OnDestroy {
 
     // Check if parameter should be included in URL based on mode
     private shouldIncludeInUrl(key: string): boolean {
-        if (!this.parameterDescriptors.hasOwnProperty(key)) {
-            return false;
+        // In visualization-only mode, only allow specific parameters
+        if (this.appModeService.isVisualizationOnly) {
+            return VISUALIZATION_ONLY_ALLOWED.has(key);
         }
-        return this.parameterDescriptors[key].urlParam;
+        // In normal mode, allow all parameters except enabledCoordsTileIds
+        return key !== 'enabledCoordsTileIds';
     }
 
     // Parse camera data from URL parameters  
@@ -567,19 +374,6 @@ export class AppStateService implements OnDestroy {
             typeof val.roll === 'number' && !isNaN(val.roll);
     }
 
-    // Setup state synchronization to legacy parameters
-    private setupStateSync() {
-        // Subscribe to all state changes and update legacy parameters
-        const stateChanges = Array.from(this.appStatePool.values());
-        
-        combineLatest(stateChanges).pipe(
-            debounceTime(10),
-            distinctUntilChanged()
-        ).subscribe(() => {
-            const legacyParams = this.getCurrentParametersObject();
-            this.parameters.next(legacyParams);
-        });
-    }
 
     // Setup URL synchronization
     private setupUrlSync() {
@@ -636,33 +430,6 @@ export class AppStateService implements OnDestroy {
         this._replaceUrl = true;
     }
 
-    // Build legacy parameters object from atomized states
-    private getCurrentParametersObject(): ErdblickParameters {
-        const camera = this.cameraView.getValue();
-        return {
-            search: this.search.getValue(),
-            marker: this.marker.getValue(),
-            markedPosition: this.markedPosition.getValue(),
-            selected: this.selected.getValue(),
-            heading: camera.heading,
-            pitch: camera.pitch,
-            roll: camera.roll,
-            lon: camera.lon,
-            lat: camera.lat,
-            alt: camera.alt,
-            mode2d: this.mode2d.getValue(),
-            viewRectangle: this.viewRectangle.getValue(),
-            osm: this.osm.getValue(),
-            osmOpacity: this.osmOpacity.getValue(),
-            layers: this.layers.getValue(),
-            styles: this.styles.getValue(),
-            tilesLoadLimit: this.tilesLoadLimit.getValue(),
-            tilesVisualizeLimit: this.tilesVisualizeLimit.getValue(),
-            enabledCoordsTileIds: this.enabledCoordsTileIds.getValue(),
-            selectedSourceData: this.selectedSourceData.getValue(),
-            panel: this.panel.getValue()
-        };
-    }
 
     // Load state from local storage
     private loadFromLocalStorage() {
@@ -691,9 +458,11 @@ export class AppStateService implements OnDestroy {
                     if (key === 'cameraView') continue;
                     
                     if (parsed.hasOwnProperty(key)) {
-                        const descriptor = this.parameterDescriptors[key];
-                        if (descriptor && descriptor.validator(parsed[key])) {
+                        // Use the state's own validator
+                        try {
                             state.next(parsed[key]);
+                        } catch (e) {
+                            console.warn(`Failed to load state ${key} from localStorage:`, e);
                         }
                     }
                 }
@@ -725,9 +494,6 @@ export class AppStateService implements OnDestroy {
         return currentValue;
     }
 
-    p() {
-        return this.parameters.getValue();
-    }
 
     private isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
         return mapLayerNameOrLayerId.includes('/SourceData-') ||
@@ -961,35 +727,6 @@ export class AppStateService implements OnDestroy {
         this.mode2d.next(isEnabled);
     }
 
-    loadSavedParameters(): ErdblickParameters | null {
-        let parsedParameters: Record<string, any> = {};
-        const parameters = localStorage.getItem('erdblickParameters');
-        if (parameters) {
-            parsedParameters = JSON.parse(parameters);
-        }
-
-        // First create an object with all default values from the full parameter set
-        let defaultParameters = Object.keys(erdblickParameters).reduce((acc, key: string) => {
-            acc[key] = erdblickParameters[key].default;
-            return acc;
-        }, {} as any);
-
-        // Then override with valid values from the filtered parameter descriptors
-        Object.keys(this.parameterDescriptors).forEach(key => {
-            const descriptor = this.parameterDescriptors[key];
-            if (parsedParameters.hasOwnProperty(key)) {
-                const value = parsedParameters[key];
-                if (descriptor.validator(value)) {
-                    defaultParameters[key] = value;
-                }
-            }
-        });
-
-        // Also load into atomized states
-        this.loadFromLocalStorage();
-
-        return defaultParameters;
-    }
 
     parseAndApplyQueryParams(params: Params) {
         // Handle camera parameters specially - they are form-encoded
@@ -1019,42 +756,36 @@ export class AppStateService implements OnDestroy {
         }
 
         // Handle all other parameters using the atomized states
-        Object.keys(this.parameterDescriptors).forEach(key => {
+        for (const [key, value] of Object.entries(params)) {
             // Skip camera-related individual params as we handle them as a group
             if (['lon', 'lat', 'alt', 'heading', 'pitch', 'roll'].includes(key)) {
-                return;
+                continue;
             }
             
-            const descriptor = this.parameterDescriptors[key];
-            if (params.hasOwnProperty(key)) {
-                try {
-                    const value = descriptor.converter(params[key]);
-                    if (descriptor.validator(value)) {
-                        // Find the corresponding AppState and update it
-                        const stateName = this.getStateNameForParam(key);
-                        const state = this.appStatePool.get(stateName);
-                        
-                        if (state) {
-                            // Handle special case for styles (object merge)
-                            if (key === 'styles' && value && typeof value === 'object' && !Array.isArray(value)) {
-                                const currentStyles = this.styles.getValue();
-                                const mergedStyles = {...currentStyles};
-                                for (const [entryKey, entryValue] of Object.entries(value)) {
-                                    mergedStyles[entryKey] = entryValue as StyleURLParameters;
-                                }
-                                this.styles.next(mergedStyles);
-                            } else {
-                                state.parseFromUrl(params[key]);
+            const stateName = this.getStateNameForParam(key);
+            const state = this.appStatePool.get(stateName);
+            
+            if (state) {
+                // Handle special case for styles (object merge)
+                if (key === 'styles' && typeof value === 'string') {
+                    try {
+                        const parsedStyles = JSON.parse(value);
+                        if (typeof parsedStyles === 'object' && !Array.isArray(parsedStyles)) {
+                            const currentStyles = this.styles.getValue();
+                            const mergedStyles = {...currentStyles};
+                            for (const [entryKey, entryValue] of Object.entries(parsedStyles)) {
+                                mergedStyles[entryKey] = entryValue as StyleURLParameters;
                             }
+                            this.styles.next(mergedStyles);
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to parse styles parameter:`, e);
                         }
                     } else {
-                        console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
-                    }
-                } catch (e) {
-                    console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
+                    state.parseFromUrl(value);
                 }
             }
-        });
+        }
 
         // Filter layers to remove source/metadata layers
         const currentLayers = this.layers.getValue();
@@ -1109,8 +840,32 @@ export class AppStateService implements OnDestroy {
     }
 
     private saveParameters() {
-        const currentParams = this.getCurrentParametersObject();
-        localStorage.setItem('erdblickParameters', JSON.stringify(currentParams));
+        // Save all state values to localStorage
+        const camera = this.cameraView.getValue();
+        const params = {
+            search: this.search.getValue(),
+            marker: this.marker.getValue(),
+            markedPosition: this.markedPosition.getValue(),
+            selected: this.selected.getValue(),
+            heading: camera.heading,
+            pitch: camera.pitch,
+            roll: camera.roll,
+            lon: camera.lon,
+            lat: camera.lat,
+            alt: camera.alt,
+            mode2d: this.mode2d.getValue(),
+            viewRectangle: this.viewRectangle.getValue(),
+            osm: this.osm.getValue(),
+            osmOpacity: this.osmOpacity.getValue(),
+            layers: this.layers.getValue(),
+            styles: this.styles.getValue(),
+            tilesLoadLimit: this.tilesLoadLimit.getValue(),
+            tilesVisualizeLimit: this.tilesVisualizeLimit.getValue(),
+            enabledCoordsTileIds: this.enabledCoordsTileIds.getValue(),
+            selectedSourceData: this.selectedSourceData.getValue(),
+            panel: this.panel.getValue()
+        };
+        localStorage.setItem('erdblickParameters', JSON.stringify(params));
     }
 
     setView(destination: Cartesian3, orientation: { heading: number, pitch: number, roll: number }) {
@@ -1154,12 +909,6 @@ export class AppStateService implements OnDestroy {
         return this.enabledCoordsTileIds.getValue();
     }
 
-    isUrlParameter(name: string) {
-        if (this.parameterDescriptors.hasOwnProperty(name)) {
-            return this.parameterDescriptors[name].urlParam;
-        }
-        return false;
-    }
 
     resetSearchHistoryState() {
         this.search.next([]);

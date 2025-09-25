@@ -6,6 +6,10 @@ import {MapService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {filter} from "rxjs";
 import {AppModeService} from "./shared/app-mode.service";
+import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
+
+// Extend window for debug access
+declare let window: DebugWindow;
 
 interface Versions {
     name: string;
@@ -86,7 +90,8 @@ export class AppComponent {
                 private location: Location,
                 private activatedRoute: ActivatedRoute,
                 public mapService: MapService,
-                public appModeService: AppModeService) {
+                public appModeService: AppModeService,
+) {
         // Create parametersService with router and location for URL sync
         this.parametersService = new AppStateService(appModeService, router, location);
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
@@ -163,4 +168,5 @@ export class AppComponent {
                 this.erdblickVersion = `${this.title} ${data.toString()}`;
             });
     }
+    
 }

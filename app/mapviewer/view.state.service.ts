@@ -35,7 +35,7 @@ export class ViewStateService {
     viewerState: ViewState | null = null;
 
     constructor(private parameterService: AppStateService) {
-        this.is2DMode = this.parameterService.parameters.getValue().mode2d;
+        this.is2DMode = this.parameterService.mode2d.getValue();
     }
 
     isAvailable() {

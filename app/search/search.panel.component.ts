@@ -287,15 +287,16 @@ export class SearchPanelComponent implements AfterViewInit {
             this.mapSelectionVisible = true;
         });
 
-        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-           if (parameters.search.length) {
+        // Subscribe to search state for history tracking
+        this.parametersService.search.pipe(distinctUntilChanged()).subscribe(searchEntry => {
+           if (searchEntry.length) {
                const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
                if (lastEntry) {
-                   if (parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
-                       this.parametersService.lastSearchHistoryEntry.next(parameters.search);
+                   if (searchEntry[0] != lastEntry[0] && searchEntry[1] != lastEntry[1]) {
+                       this.parametersService.lastSearchHistoryEntry.next(searchEntry);
                    }
                } else {
-                   this.parametersService.lastSearchHistoryEntry.next(parameters.search);
+                   this.parametersService.lastSearchHistoryEntry.next(searchEntry);
                }
            }
         });
@@ -484,7 +485,7 @@ export class SearchPanelComponent implements AfterViewInit {
         }
         let lat = coordinates[0];
         let lon = coordinates[1];
-        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
+        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.cameraView.getValue().alt;
 
         this.mapService.moveToWgs84PositionTopic.next({
             x: lon,
