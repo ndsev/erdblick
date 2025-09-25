@@ -173,11 +173,12 @@ export class MarkerService {
      */
     restoreParameterMarker() {
         try {
-            const currentParams = this.parameterService.parameters.getValue();
-            if (currentParams.marker && currentParams.markedPosition.length === 2) {
+            const markerEnabled = this.parameterService.markerState.getValue();
+            const markedPosition = this.parameterService.markedPositionState.getValue();
+            if (markerEnabled && markedPosition.length === 2) {
                 const markerPosition = Cartesian3.fromDegrees(
-                    Number(currentParams.markedPosition[0]),
-                    Number(currentParams.markedPosition[1])
+                    Number(markedPosition[0]),
+                    Number(markedPosition[1])
                 );
                 const success = this.addMarker(markerPosition);
                 if (success) {

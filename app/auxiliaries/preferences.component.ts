@@ -1,10 +1,10 @@
-import {Component} from '@angular/core';
+import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {OnDestroy, OnInit} from '@angular/core';
 
 @Component({
     selector: 'pref-components',
@@ -239,16 +239,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.updateDarkClass(e.matches);
         }
     };
+    private subscriptions: Subscription[] = [];
 
     constructor(private messageService: InfoMessageService,
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public parametersService: AppStateService) {
-        this.parametersService.parameters.subscribe(parameters => {
-            this.tilesToLoadInput = parameters.tilesLoadLimit;
-            this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
-        });
+        this.subscriptions.push(this.parametersService.tilesLoadLimitState.subscribe(limit => {
+            this.tilesToLoadInput = limit;
+        }));
+        this.subscriptions.push(this.parametersService.tilesVisualizeLimitState.subscribe(limit => {
+            this.tilesToVisualizeInput = limit;
+        }));
     }
 
     ngOnInit() {
@@ -258,6 +261,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     ngOnDestroy() {
+        this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
@@ -267,10 +271,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
-        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.parametersService.parameters.next(parameters);
+        this.parametersService.tilesLoadLimitState.next(Number(this.tilesToLoadInput));
+        this.parametersService.tilesVisualizeLimitState.next(Number(this.tilesToVisualizeInput));
         this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
