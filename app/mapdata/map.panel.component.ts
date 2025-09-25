@@ -298,9 +298,11 @@ export class MapPanelComponent {
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
 
-        this.parameterService.parameters.subscribe(parameters => {
-            this.osmEnabled = parameters.osm;
-            this.osmOpacityValue = parameters.osmOpacity;
+        this.parameterService.osmEnabledState.subscribe(enabled => {
+            this.osmEnabled = enabled;
+        });
+        this.parameterService.osmOpacityState.subscribe(opacity => {
+            this.osmOpacityValue = opacity;
         });
         // Rebuild metadata menus recursively and prune when needed.
         this.mapService.mapGroups.subscribe(mapGroups => {
@@ -471,12 +473,8 @@ export class MapPanelComponent {
     }
 
     updateOSMOverlay() {
-        const parameters = this.parameterService.parameters.getValue();
-        if (parameters) {
-            parameters.osm = this.osmEnabled;
-            parameters.osmOpacity = this.osmOpacityValue;
-            this.parameterService.parameters.next(parameters);
-        }
+        this.parameterService.osmEnabledState.next(this.osmEnabled);
+        this.parameterService.osmOpacityState.next(this.osmOpacityValue);
     }
 
     toggleTileBorders(mapName: string, layerName: string) {
@@ -574,4 +572,3 @@ export class MapPanelComponent {
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
 }
-

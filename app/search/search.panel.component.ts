@@ -287,17 +287,14 @@ export class SearchPanelComponent implements AfterViewInit {
             this.mapSelectionVisible = true;
         });
 
-        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-           if (parameters.search.length) {
-               const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
-               if (lastEntry) {
-                   if (parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
-                       this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-                   }
-               } else {
-                   this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-               }
-           }
+        this.parametersService.searchState.subscribe(search => {
+            if (search.length === 2) {
+                const currentEntry: [number, string] = [search[0], search[1]];
+                const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
+                if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
+                    this.parametersService.lastSearchHistoryEntry.next(currentEntry);
+                }
+            }
         });
 
         this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
@@ -484,7 +481,8 @@ export class SearchPanelComponent implements AfterViewInit {
         }
         let lat = coordinates[0];
         let lon = coordinates[1];
-        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
+        const cameraView = this.parametersService.cameraViewData.getValue();
+        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : cameraView.destination.alt;
 
         this.mapService.moveToWgs84PositionTopic.next({
             x: lon,

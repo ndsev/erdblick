@@ -26,7 +26,7 @@ import {DebugWindow, ErdblickDebugApi} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";
-import {distinctUntilChanged, Subscription} from "rxjs";
+import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {InspectionService} from "../inspection/inspection.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {coreLib} from "../integrations/wasm";
@@ -236,62 +236,74 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Setup parameter subscriptions
      */
     private setupParameterSubscriptions() {
-        this.parameterService.cameraViewData.pipe(distinctUntilChanged()).subscribe(cameraData => {
-            this.cameraService.ignoreNextCameraUpdate = true;
-            if (this.viewStateService.is2DMode) {
-                // In 2D mode, check if we have a view rectangle in parameters
-                const params = this.parameterService.p();
-                if (params.viewRectangle && params.viewRectangle.length === 4) {
-                    this.viewStateService.viewer.camera.setView({
-                        destination: Rectangle.fromDegrees(...params.viewRectangle)
-                    });
-                } else {
-                    // Fallback to center position
-                    const cartographic = Cartographic.fromCartesian(cameraData.destination);
-                    this.viewStateService.viewer.camera.setView({
-                        destination: Rectangle.fromDegrees(
-                            CesiumMath.toDegrees(cartographic.longitude) - 1,
-                            CesiumMath.toDegrees(cartographic.latitude) - 1,
-                            CesiumMath.toDegrees(cartographic.longitude) + 1,
-                            CesiumMath.toDegrees(cartographic.latitude) + 1
-                        )
+        this.subscriptions.push(
+            this.parameterService.cameraViewData
+                .pipe(distinctUntilChanged())
+                .subscribe(cameraData => {
+                    if (!this.viewStateService.viewer) {
+                        return;
+                    }
+                    this.cameraService.ignoreNextCameraUpdate = true;
+                    if (this.viewStateService.is2DMode) {
+                        const viewRectangle = this.parameterService.viewRectangleState.getValue();
+                        if (viewRectangle && viewRectangle.length === 4) {
+                            this.viewStateService.viewer.camera.setView({
+                                destination: Rectangle.fromDegrees(...viewRectangle)
+                            });
+                        } else {
+                            const rect = Rectangle.fromDegrees(
+                                cameraData.destination.lon - 1,
+                                cameraData.destination.lat - 1,
+                                cameraData.destination.lon + 1,
+                                cameraData.destination.lat + 1
+                            );
+                            this.viewStateService.viewer.camera.setView({
+                                destination: rect
+                            });
+                        }
+                    } else {
+                        this.viewStateService.viewer.camera.setView({
+                            destination: Cartesian3.fromDegrees(
+                                cameraData.destination.lon,
+                                cameraData.destination.lat,
+                                cameraData.destination.alt
+                            ),
+                            orientation: cameraData.orientation
+                        });
+                    }
+                    this.viewService.updateViewport();
+                })
+        );
+
+        this.subscriptions.push(
+            combineLatest([
+                this.parameterService.osmEnabledState,
+                this.parameterService.osmOpacityState,
+                this.parameterService.mode2dState,
+                this.parameterService.markerState,
+                this.parameterService.markedPositionState
+            ]).subscribe(([osmEnabled, osmOpacity, mode2d, markerEnabled, markedPosition]) => {
+                if (this.openStreetMapLayer) {
+                    this.openStreetMapLayer.show = osmEnabled;
+                    this.updateOpenStreetMapLayer(osmOpacity / 100);
+                }
+                if (this.viewStateService.viewer && this.viewStateService.is2DMode !== mode2d) {
+                    this.applySceneModeChange(mode2d).catch(error => {
+                        console.error('Failed to change scene mode:', error);
                     });
                 }
-            } else {
-                // 3D mode
-                this.viewStateService.viewer.camera.setView({
-                    destination: cameraData.destination,
-                    orientation: cameraData.orientation
-                });
-            }
-            this.viewService.updateViewport();
-        });
 
-        this.parameterService.parameters.subscribe(parameters => {
-            if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.show = parameters.osm;
-                this.updateOpenStreetMapLayer(parameters.osmOpacity / 100);
-            }
-            if (this.viewStateService.viewer && this.viewStateService.is2DMode !== parameters.mode2d) {
-                // Handle async mode change properly
-                this.applySceneModeChange(parameters.mode2d).catch(error => {
-                    console.error('Failed to change scene mode:', error);
-                });
-            }
-
-            // Handle marker parameters - try immediately, but don't retry here
-            // The viewerReinitializationComplete subscription will handle restoration after mode changes
-            if (parameters.marker && parameters.markedPosition.length == 2) {
-                const markerPosition = Cartesian3.fromDegrees(
-                    Number(parameters.markedPosition[0]),
-                    Number(parameters.markedPosition[1])
-                );
-                this.markerService.addMarker(markerPosition);
-            } else {
-                // Clear markers when marker is disabled or no position
-                this.markerService.clearMarkers();
-            }
-        });
+                if (markerEnabled && markedPosition.length === 2) {
+                    const markerPosition = Cartesian3.fromDegrees(
+                        Number(markedPosition[0]),
+                        Number(markedPosition[1])
+                    );
+                    this.markerService.addMarker(markerPosition);
+                } else {
+                    this.markerService.clearMarkers();
+                }
+            })
+        );
     }
 
     /**
