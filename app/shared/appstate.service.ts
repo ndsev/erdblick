@@ -1,11 +1,14 @@
-import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
+import {Injectable, OnDestroy} from "@angular/core";
+import {BehaviorSubject, Subject, Subscription, combineLatest, merge} from "rxjs";
+import {debounceTime, distinctUntilChanged, map} from "rxjs/operators";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "../integrations/cesium";
-import {Params} from "@angular/router";
+import {Params, Router} from "@angular/router";
+import {Location} from "@angular/common";
 import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "./app-mode.service";
 import {MapInfoItem} from "../mapdata/map.service";
 import {ErdblickStyle} from "../styledata/style.service";
+import {AppState, CameraViewData} from "./appstate.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -262,11 +265,34 @@ const VISUALIZATION_ONLY_ALLOWED = new Set([
 ]);
 
 @Injectable({providedIn: 'root'})
-export class AppStateService {
+export class AppStateService implements OnDestroy {
 
     private _replaceUrl: boolean = true;
+    private appStatePool = new Map<string, AppState<any>>();
+    private urlUpdateSubscription?: Subscription;
+    private stateSubscriptions: Subscription[] = [];
+    private _initialQueryParamsSet: boolean = false;
+    
+    // Atomized state members
+    public readonly search: AppState<[number, string] | []>;
+    public readonly marker: AppState<boolean>;
+    public readonly markedPosition: AppState<number[]>;
+    public readonly selected: AppState<TileFeatureId[]>;
+    public readonly cameraView: AppState<CameraViewData>;
+    public readonly mode2d: AppState<boolean>;
+    public readonly viewRectangle: AppState<[number, number, number, number] | null>;
+    public readonly osm: AppState<boolean>;
+    public readonly osmOpacity: AppState<number>;
+    public readonly layers: AppState<Array<[string, number, boolean, boolean]>>;
+    public readonly styles: AppState<Record<string, StyleURLParameters>>;
+    public readonly tilesLoadLimit: AppState<number>;
+    public readonly tilesVisualizeLimit: AppState<number>;
+    public readonly enabledCoordsTileIds: AppState<string[]>;
+    public readonly selectedSourceData: AppState<any[]>;
+    public readonly panel: AppState<number[]>;
+    
+    // Legacy support - will emit combined state changes
     parameters: BehaviorSubject<ErdblickParameters>;
-    initialQueryParamsSet: boolean = false;
     
     // Observable that emits when initialization is complete
     private ready = new Subject<void>();
@@ -275,6 +301,7 @@ export class AppStateService {
     // Store filtered parameter descriptors based on mode
     private parameterDescriptors: Record<string, ParameterDescriptor>;
 
+    // Keep for compatibility
     cameraViewData: BehaviorSubject<{
         destination: Cartesian3,
         orientation: { heading: number, pitch: number, roll: number }
@@ -292,6 +319,11 @@ export class AppStateService {
         });
 
     lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
+    
+    // Expose for backwards compatibility
+    get initialQueryParamsSet(): boolean {
+        return this._initialQueryParamsSet;
+    }
 
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
@@ -303,7 +335,11 @@ export class AppStateService {
 
     legalInfoDialogVisible: boolean = false;
 
-    constructor(public appModeService: AppModeService) {
+    constructor(
+        public appModeService: AppModeService,
+        private router?: Router,
+        private location?: Location
+    ) {
         // Filter parameter descriptors based on mode
         this.parameterDescriptors = appModeService.isVisualizationOnly
             ? Object.fromEntries(
@@ -314,15 +350,365 @@ export class AppStateService {
 
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 
+        // Initialize atomized states
+        this.search = this.createState<[number, string] | []>(
+            'search',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
+            [],
+            this.shouldIncludeInUrl('search') ? 'search' : ''
+        );
+        
+        this.marker = this.createState<boolean>(
+            'marker',
+            val => val === 'true' || val === '1',
+            val => typeof val === 'boolean',
+            false,
+            this.shouldIncludeInUrl('marker') ? 'marker' : ''
+        );
+        
+        this.markedPosition = this.createState<number[]>(
+            'markedPosition',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+            [],
+            this.shouldIncludeInUrl('markedPosition') ? 'markedPosition' : ''
+        );
+        
+        this.selected = this.createState<TileFeatureId[]>(
+            'selected',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
+            [],
+            this.shouldIncludeInUrl('selected') ? 'selected' : ''
+        );
+        
+        this.cameraView = this.createState<CameraViewData>(
+            'cameraView',
+            val => this.parseCameraFromUrl(val),
+            val => this.validateCameraData(val),
+            {
+                lon: 22.837473,
+                lat: 38.490817,
+                alt: 16000000,
+                heading: 6.0,
+                pitch: -1.55,
+                roll: 0.25
+            },
+            '',  // Special handling for camera URL params
+            true  // Form encoded
+        );
+        
+        this.mode2d = this.createState<boolean>(
+            'mode2d',
+            val => val === 'true' || val === '1',
+            val => typeof val === 'boolean',
+            false,
+            this.shouldIncludeInUrl('mode2d') ? 'mode2d' : ''
+        );
+        
+        this.viewRectangle = this.createState<[number, number, number, number] | null>(
+            'viewRectangle',
+            val => val === 'null' ? null : JSON.parse(val),
+            val => val === null || (Array.isArray(val) && val.length === 4 && val.every(v => typeof v === 'number')),
+            null,
+            this.shouldIncludeInUrl('viewRectangle') ? 'viewRectangle' : ''
+        );
+        
+        this.osm = this.createState<boolean>(
+            'osm',
+            val => val === 'true' || val === '1',
+            val => typeof val === 'boolean',
+            true,
+            this.shouldIncludeInUrl('osm') ? 'osm' : ''
+        );
+        
+        this.osmOpacity = this.createState<number>(
+            'osmOpacity',
+            Number,
+            val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
+            30,
+            this.shouldIncludeInUrl('osmOpacity') ? 'osmOpacity' : ''
+        );
+        
+        this.layers = this.createState<Array<[string, number, boolean, boolean]>>(
+            'layers',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
+            [],
+            this.shouldIncludeInUrl('layers') ? 'layers' : ''
+        );
+        
+        this.styles = this.createState<Record<string, StyleURLParameters>>(
+            'styles',
+            val => JSON.parse(val),
+            val => {
+                return typeof val === "object" && Object.entries(val as Record<string, StyleURLParameters>).every(
+                    ([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v));
+            },
+            {},
+            this.shouldIncludeInUrl('styles') ? 'styles' : ''
+        );
+        
+        this.tilesLoadLimit = this.createState<number>(
+            'tilesLoadLimit',
+            Number,
+            val => typeof val === 'number' && !isNaN(val) && val >= 0,
+            MAX_NUM_TILES_TO_LOAD,
+            this.shouldIncludeInUrl('tilesLoadLimit') ? 'tilesLoadLimit' : ''
+        );
+        
+        this.tilesVisualizeLimit = this.createState<number>(
+            'tilesVisualizeLimit',
+            Number,
+            val => typeof val === 'number' && !isNaN(val) && val >= 0,
+            MAX_NUM_TILES_TO_VISUALIZE,
+            this.shouldIncludeInUrl('tilesVisualizeLimit') ? 'tilesVisualizeLimit' : ''
+        );
+        
+        this.enabledCoordsTileIds = this.createState<string[]>(
+            'enabledCoordsTileIds',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && val.every(item => typeof item === 'string'),
+            ["WGS84"],
+            ''  // Not a URL parameter
+        );
+        
+        this.selectedSourceData = this.createState<any[]>(
+            'selectedSourceData',
+            val => JSON.parse(val),
+            Array.isArray,
+            [],
+            this.shouldIncludeInUrl('selectedSourceData') ? 'selectedSourceData' : ''
+        );
+        
+        this.panel = this.createState<number[]>(
+            'panel',
+            val => JSON.parse(val),
+            val => Array.isArray(val) && (!val.length || val.length == 2 && val.every(item => typeof item === 'number')),
+            [],
+            this.shouldIncludeInUrl('panel') ? 'panel' : ''
+        );
+
+        // Initialize legacy parameters BehaviorSubject for backwards compatibility
         let parameters = this.loadSavedParameters();
         this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
+        
+        // Setup state synchronization
+        this.setupStateSync();
+        
+        // Setup URL synchronization if router is available
+        if (this.router) {
+            this.setupUrlSync();
+        }
+        
+        // Load from local storage
+        this.loadFromLocalStorage();
         this.saveParameters();
-        this.parameters.subscribe(parameters => {
-            if (parameters) {
-                this.scalingFactor = Math.pow(parameters.alt / 1000, 1.1) / 2;
+
+        // Subscribe to camera changes for scaling factor
+        this.cameraView.subscribe(camera => {
+            if (camera) {
+                this.scalingFactor = Math.pow(camera.alt / 1000, 1.1) / 2;
                 this.saveParameters();
             }
         });
+    }
+
+    // Helper method to create AppState instances
+    private createState<T>(
+        name: string,
+        converter: (val: string) => T,
+        validator: (val: T) => boolean,
+        defaultValue: T,
+        urlParamName: string = '',
+        urlFormEncoded: boolean = false
+    ): AppState<T> {
+        return new AppState<T>(
+            this.appStatePool,
+            converter,
+            validator,
+            defaultValue,
+            name,
+            urlParamName,
+            urlFormEncoded
+        );
+    }
+
+    // Check if parameter should be included in URL based on mode
+    private shouldIncludeInUrl(key: string): boolean {
+        if (!this.parameterDescriptors.hasOwnProperty(key)) {
+            return false;
+        }
+        return this.parameterDescriptors[key].urlParam;
+    }
+
+    // Parse camera data from URL parameters  
+    private parseCameraFromUrl(val: string): CameraViewData {
+        const parsed = JSON.parse(val);
+        return {
+            lon: parsed.lon || 22.837473,
+            lat: parsed.lat || 38.490817,
+            alt: parsed.alt || 16000000,
+            heading: parsed.heading || 6.0,
+            pitch: parsed.pitch || -1.55,
+            roll: parsed.roll || 0.25
+        };
+    }
+
+    // Validate camera data
+    private validateCameraData(val: any): boolean {
+        return val && 
+            typeof val.lon === 'number' && !isNaN(val.lon) &&
+            typeof val.lat === 'number' && !isNaN(val.lat) &&
+            typeof val.alt === 'number' && !isNaN(val.alt) &&
+            typeof val.heading === 'number' && !isNaN(val.heading) &&
+            typeof val.pitch === 'number' && !isNaN(val.pitch) &&
+            typeof val.roll === 'number' && !isNaN(val.roll);
+    }
+
+    // Setup state synchronization to legacy parameters
+    private setupStateSync() {
+        // Subscribe to all state changes and update legacy parameters
+        const stateChanges = Array.from(this.appStatePool.values());
+        
+        combineLatest(stateChanges).pipe(
+            debounceTime(10),
+            distinctUntilChanged()
+        ).subscribe(() => {
+            const legacyParams = this.getCurrentParametersObject();
+            this.parameters.next(legacyParams);
+        });
+    }
+
+    // Setup URL synchronization
+    private setupUrlSync() {
+        if (!this.router) return;
+        
+        // Subscribe to state changes that should update URL
+        const urlStates = Array.from(this.appStatePool.values())
+            .filter(state => state.urlParamName || state.urlFormEncoded);
+        
+        this.urlUpdateSubscription = merge(...urlStates.map(state => 
+            state.pipe(
+                debounceTime(100),
+                distinctUntilChanged()
+            )
+        )).subscribe(() => {
+            if (this._initialQueryParamsSet) {
+                this.updateUrl();
+            }
+        });
+    }
+
+    // Update URL with current state
+    private updateUrl() {
+        if (!this.router) return;
+        
+        const params: Record<string, string> = {};
+        
+        // Handle camera parameters specially - form encode them
+        const camera = this.cameraView.getValue();
+        if (this.shouldIncludeInUrl('heading')) params['heading'] = String(camera.heading);
+        if (this.shouldIncludeInUrl('pitch')) params['pitch'] = String(camera.pitch);
+        if (this.shouldIncludeInUrl('roll')) params['roll'] = String(camera.roll);
+        if (this.shouldIncludeInUrl('lon')) params['lon'] = String(camera.lon);
+        if (this.shouldIncludeInUrl('lat')) params['lat'] = String(camera.lat);
+        if (this.shouldIncludeInUrl('alt')) params['alt'] = String(camera.alt);
+        
+        // Handle all other states
+        for (const [name, state] of this.appStatePool.entries()) {
+            if (name === 'cameraView') continue; // Already handled above
+            
+            if (state.urlParamName) {
+                const urlValue = state.toUrlValue();
+                if (urlValue !== null) {
+                    params[state.urlParamName] = urlValue;
+                }
+            }
+        }
+        
+        this.router.navigate([], {
+            queryParams: params,
+            queryParamsHandling: 'merge',
+            replaceUrl: this._replaceUrl
+        });
+        this._replaceUrl = true;
+    }
+
+    // Build legacy parameters object from atomized states
+    private getCurrentParametersObject(): ErdblickParameters {
+        const camera = this.cameraView.getValue();
+        return {
+            search: this.search.getValue(),
+            marker: this.marker.getValue(),
+            markedPosition: this.markedPosition.getValue(),
+            selected: this.selected.getValue(),
+            heading: camera.heading,
+            pitch: camera.pitch,
+            roll: camera.roll,
+            lon: camera.lon,
+            lat: camera.lat,
+            alt: camera.alt,
+            mode2d: this.mode2d.getValue(),
+            viewRectangle: this.viewRectangle.getValue(),
+            osm: this.osm.getValue(),
+            osmOpacity: this.osmOpacity.getValue(),
+            layers: this.layers.getValue(),
+            styles: this.styles.getValue(),
+            tilesLoadLimit: this.tilesLoadLimit.getValue(),
+            tilesVisualizeLimit: this.tilesVisualizeLimit.getValue(),
+            enabledCoordsTileIds: this.enabledCoordsTileIds.getValue(),
+            selectedSourceData: this.selectedSourceData.getValue(),
+            panel: this.panel.getValue()
+        };
+    }
+
+    // Load state from local storage
+    private loadFromLocalStorage() {
+        const stored = localStorage.getItem('erdblickParameters');
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored);
+                
+                // Load camera state
+                if (parsed.lon !== undefined && parsed.lat !== undefined) {
+                    const cameraData = {
+                        lon: parsed.lon,
+                        lat: parsed.lat,
+                        alt: parsed.alt || 16000000,
+                        heading: parsed.heading || 6.0,
+                        pitch: parsed.pitch || -1.55,
+                        roll: parsed.roll || 0.25
+                    };
+                    if (this.validateCameraData(cameraData)) {
+                        this.cameraView.next(cameraData);
+                    }
+                }
+                
+                // Load other states
+                for (const [key, state] of this.appStatePool.entries()) {
+                    if (key === 'cameraView') continue;
+                    
+                    if (parsed.hasOwnProperty(key)) {
+                        const descriptor = this.parameterDescriptors[key];
+                        if (descriptor && descriptor.validator(parsed[key])) {
+                            state.next(parsed[key]);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load parameters from local storage:', e);
+            }
+        }
+    }
+
+    ngOnDestroy() {
+        // Clean up subscriptions
+        if (this.urlUpdateSubscription) {
+            this.urlUpdateSubscription.unsubscribe();
+        }
+        this.stateSubscriptions.forEach(sub => sub.unsubscribe());
     }
 
     get cameraMoveUnits() {
@@ -349,23 +735,21 @@ export class AppStateService {
     }
 
     public setSelectedSourceData(selection: SelectedSourceData) {
-        this.p().selectedSourceData = [
+        this.selectedSourceData.next([
             selection.tileId,
             selection.layerId,
             selection.mapId,
             selection.address ? selection.address.toString() : "",
             selection.featureIds ? selection.featureIds : "",
-        ];
-        this.parameters.next(this.p());
+        ]);
     }
 
     public unsetSelectedSourceData() {
-        this.p().selectedSourceData = [];
-        this.parameters.next(this.p());
+        this.selectedSourceData.next([]);
     }
 
     public getSelectedSourceData(): SelectedSourceData | null {
-        const sd = this.p().selectedSourceData;
+        const sd = this.selectedSourceData.getValue();
         if (!sd || !sd.length)
             return null;
 
@@ -380,11 +764,10 @@ export class AppStateService {
 
     setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
         // Only set map layers, if there are no configured values yet.
-        if (this.p().layers.length) {
+        if (this.layers.getValue().length) {
             return;
         }
-        this.p().layers = layers.filter(l => !this.isSourceOrMetaData(l[0]));
-        this.parameters.next(this.p());
+        this.layers.next(layers.filter(l => !this.isSourceOrMetaData(l[0])));
     }
 
     setInitialStyles(styles: Map<string, ErdblickStyle>) {
@@ -393,13 +776,12 @@ export class AppStateService {
             return;
         }
 
-        this.p().styles = Object.fromEntries([...styles.entries()].map(([k, v]) =>
-            [k, this.styleParamsToURLParams(v.params)]));
-        this.parameters.next(this.p());
+        this.styles.next(Object.fromEntries([...styles.entries()].map(([k, v]) =>
+            [k, this.styleParamsToURLParams(v.params)])));
     }
 
     setSelectedFeatures(newSelection: TileFeatureId[]) {
-        const currentSelection = this.p().selected;
+        const currentSelection = this.selected.getValue();
         if (currentSelection.length == newSelection.length) {
             let selectedFeaturesAreSame = true;
             for (let i = 0; i < currentSelection.length; ++i) {
@@ -416,17 +798,14 @@ export class AppStateService {
             }
         }
 
-        this.p().selected = newSelection;
         this._replaceUrl = false;
-        this.parameters.next(this.p());
+        this.selected.next(newSelection);
         return true;
     }
 
     setMarkerState(enabled: boolean) {
-        this.p().marker = enabled;
-        if (enabled) {
-            this.parameters.next(this.p());
-        } else {
+        this.marker.next(enabled);
+        if (!enabled) {
             this.setMarkerPosition(null);
         }
     }
@@ -435,22 +814,22 @@ export class AppStateService {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
-            this.p().markedPosition = [longitude, latitude];
+            this.markedPosition.next([longitude, latitude]);
         } else {
-            this.p().markedPosition = [];
+            this.markedPosition.next([]);
         }
         if (!delayUpdate) {
             this._replaceUrl = false;
-            this.parameters.next(this.p());
         }
     }
 
     mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
-        const conf = this.p().layers.find(ml => ml[0] == mapId + "/" + layerId);
+        const layers = this.layers.getValue();
+        const conf = layers.find(ml => ml[0] == mapId + "/" + layerId);
         if (conf !== undefined && conf[2]) {
             return [true, conf[1], conf[3]];
         }
-        return [!this.p().layers.length, fallbackLevel, false];
+        return [!layers.length, fallbackLevel, false];
     }
 
     setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
@@ -458,15 +837,16 @@ export class AppStateService {
             return;
         }
         const mapLayerName = mapId + "/" + layerId;
-        let conf = this.p().layers.find(val => val[0] == mapLayerName);
+        const currentLayers = [...this.layers.getValue()];  // Create a copy
+        let conf = currentLayers.find(val => val[0] == mapLayerName);
         if (conf !== undefined) {
             conf[1] = level;
             conf[2] = visible;
             conf[3] = tileBorders;
         } else if (visible) {
-            this.p().layers.push([mapLayerName, level, visible, tileBorders]);
+            currentLayers.push([mapLayerName, level, visible, tileBorders]);
         }
-        this.parameters.next(this.p());
+        this.layers.next(currentLayers);
     }
 
     setMapConfig(layerParams: {
@@ -476,10 +856,11 @@ export class AppStateService {
         visible: boolean,
         tileBorders: boolean
     }[]) {
+        const currentLayers = [...this.layers.getValue()];
         layerParams.forEach(params => {
             if (!this.isSourceOrMetaData(params.layerId)) {
                 const mapLayerName = params.mapId + "/" + params.layerId;
-                let conf = this.p().layers.find(
+                let conf = currentLayers.find(
                     val => val[0] == mapLayerName
                 );
                 if (conf !== undefined) {
@@ -487,16 +868,17 @@ export class AppStateService {
                     conf[2] = params.visible;
                     conf[3] = params.tileBorders;
                 } else if (params.visible) {
-                    this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+                    currentLayers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
                 }
             }
         });
-        this.parameters.next(this.p());
+        this.layers.next(currentLayers);
     }
 
     styleConfig(styleId: string): StyleParameters {
-        if (this.p().styles.hasOwnProperty(styleId)) {
-            return this.styleURLParamsToParams(this.p().styles[styleId]);
+        const styles = this.styles.getValue();
+        if (styles.hasOwnProperty(styleId)) {
+            return this.styleURLParamsToParams(styles[styleId]);
         }
         return {
             visible: true,
@@ -505,65 +887,78 @@ export class AppStateService {
     }
 
     setStyleConfig(styleId: string, params: StyleParameters) {
-        this.p().styles[styleId] = this.styleParamsToURLParams(params);
-        this.parameters.next(this.p());
+        const currentStyles = {...this.styles.getValue()};
+        currentStyles[styleId] = this.styleParamsToURLParams(params);
+        this.styles.next(currentStyles);
     }
 
     setCameraState(camera: Camera) {
         const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-        this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
-        this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
-        this.p().alt = currentPositionCartographic.height;
-        this.p().heading = camera.heading;
-        this.p().pitch = camera.pitch;
-        this.p().roll = camera.roll;
-        this.parameters.next(this.p());
-        this.setView(Cartesian3.fromDegrees(this.p().lon, this.p().lat, this.p().alt), {
-            heading: this.p().heading,
-            pitch: this.p().pitch,
-            roll: this.p().roll
-        });
+        const cameraData: CameraViewData = {
+            lon: CesiumMath.toDegrees(currentPositionCartographic.longitude),
+            lat: CesiumMath.toDegrees(currentPositionCartographic.latitude),
+            alt: currentPositionCartographic.height,
+            heading: camera.heading,
+            pitch: camera.pitch,
+            roll: camera.roll
+        };
+        this.cameraView.next(cameraData);
+        this.setView(
+            Cartesian3.fromDegrees(cameraData.lon, cameraData.lat, cameraData.alt),
+            {
+                heading: cameraData.heading,
+                pitch: cameraData.pitch,
+                roll: cameraData.roll
+            }
+        );
     }
 
     set2DCameraState(camera: Camera) {
         // In 2D mode, store the view rectangle AND altitude for proper mode switching
         const viewRect = camera.computeViewRectangle();
         const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
+        
+        let cameraData = this.cameraView.getValue();
 
         if (viewRect) {
-            this.p().viewRectangle = [
+            this.viewRectangle.next([
                 CesiumMath.toDegrees(viewRect.west),
                 CesiumMath.toDegrees(viewRect.south),
                 CesiumMath.toDegrees(viewRect.east),
                 CesiumMath.toDegrees(viewRect.north)
-            ];
+            ]);
             // Update center position for compatibility
             const center = Cartographic.fromRadians(
                 (viewRect.west + viewRect.east) / 2,
                 (viewRect.north + viewRect.south) / 2
             );
-            this.p().lon = CesiumMath.toDegrees(center.longitude);
-            this.p().lat = CesiumMath.toDegrees(center.latitude);
+            cameraData = {
+                ...cameraData,
+                lon: CesiumMath.toDegrees(center.longitude),
+                lat: CesiumMath.toDegrees(center.latitude),
+                alt: currentPositionCartographic.height,
+                heading: camera.heading,
+                pitch: camera.pitch,
+                roll: camera.roll
+            };
         } else {
             // Fallback if view rectangle can't be computed
-            this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
-            this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
+            cameraData = {
+                ...cameraData,
+                lon: CesiumMath.toDegrees(currentPositionCartographic.longitude),
+                lat: CesiumMath.toDegrees(currentPositionCartographic.latitude),
+                alt: currentPositionCartographic.height,
+                heading: camera.heading,
+                pitch: camera.pitch,
+                roll: camera.roll
+            };
         }
 
-        // CRITICAL: Store altitude in 2D mode for consistent mode switching
-        this.p().alt = currentPositionCartographic.height;
-
-        // Store 2D-specific camera orientation (always top-down view)
-        this.p().heading = camera.heading;
-        this.p().pitch = camera.pitch;
-        this.p().roll = camera.roll;
-
-        this.parameters.next(this.p());
+        this.cameraView.next(cameraData);
     }
 
     setCameraMode(isEnabled: boolean) {
-        this.p().mode2d = isEnabled;
-        this.parameters.next(this.p());
+        this.mode2d.next(isEnabled);
     }
 
     loadSavedParameters(): ErdblickParameters | null {
@@ -590,57 +985,120 @@ export class AppStateService {
             }
         });
 
+        // Also load into atomized states
+        this.loadFromLocalStorage();
+
         return defaultParameters;
     }
 
     parseAndApplyQueryParams(params: Params) {
-        let currentParameters = this.p();
-        let updatedParameters: ErdblickParameters = {...currentParameters};
+        // Handle camera parameters specially - they are form-encoded
+        if (this.hasCameraParams(params)) {
+            const cameraData: CameraViewData = {
+                lon: params['lon'] ? Number(params['lon']) : 22.837473,
+                lat: params['lat'] ? Number(params['lat']) : 38.490817,
+                alt: params['alt'] ? Number(params['alt']) : 16000000,
+                heading: params['heading'] ? Number(params['heading']) : 6.0,
+                pitch: params['pitch'] ? Number(params['pitch']) : -1.55,
+                roll: params['roll'] ? Number(params['roll']) : 0.25
+            };
+            if (this.validateCameraData(cameraData)) {
+                this.cameraView.next(cameraData);
+                
+                if (!this._initialQueryParamsSet) {
+                    this.setView(
+                        Cartesian3.fromDegrees(cameraData.lon, cameraData.lat, cameraData.alt),
+                        {
+                            heading: cameraData.heading,
+                            pitch: cameraData.pitch,
+                            roll: cameraData.roll
+                        }
+                    );
+                }
+            }
+        }
 
+        // Handle all other parameters using the atomized states
         Object.keys(this.parameterDescriptors).forEach(key => {
+            // Skip camera-related individual params as we handle them as a group
+            if (['lon', 'lat', 'alt', 'heading', 'pitch', 'roll'].includes(key)) {
+                return;
+            }
+            
             const descriptor = this.parameterDescriptors[key];
             if (params.hasOwnProperty(key)) {
                 try {
                     const value = descriptor.converter(params[key]);
                     if (descriptor.validator(value)) {
-                        // If the parameter to update is an object (dict), only
-                        // overlay the keys present in the url, and leave other
-                        // dict entries untouched.
-                        if (value && typeof value === 'object' && !Array.isArray(value)) {
-                            for (const [entryKey, entryValue] of Object.entries(value)) {
-                                updatedParameters[key][entryKey] = entryValue;
+                        // Find the corresponding AppState and update it
+                        const stateName = this.getStateNameForParam(key);
+                        const state = this.appStatePool.get(stateName);
+                        
+                        if (state) {
+                            // Handle special case for styles (object merge)
+                            if (key === 'styles' && value && typeof value === 'object' && !Array.isArray(value)) {
+                                const currentStyles = this.styles.getValue();
+                                const mergedStyles = {...currentStyles};
+                                for (const [entryKey, entryValue] of Object.entries(value)) {
+                                    mergedStyles[entryKey] = entryValue as StyleURLParameters;
+                                }
+                                this.styles.next(mergedStyles);
+                            } else {
+                                state.parseFromUrl(params[key]);
                             }
-                        } else {
-                            updatedParameters[key] = value;
                         }
                     } else {
                         console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
-                        updatedParameters[key] = descriptor.default;
                     }
                 } catch (e) {
-                    console.warn(`Invalid query param  ${params[key]} for ${key}, using default.`);
-                    updatedParameters[key] = descriptor.default;
+                    console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
                 }
             }
         });
 
-        if (Array.isArray(updatedParameters.layers)) {
-            updatedParameters.layers = updatedParameters.layers.filter(l => Array.isArray(l) && typeof l[0] === 'string' && !this.isSourceOrMetaData(l[0]));
+        // Filter layers to remove source/metadata layers
+        const currentLayers = this.layers.getValue();
+        if (Array.isArray(currentLayers)) {
+            const filtered = currentLayers.filter(l => 
+                Array.isArray(l) && typeof l[0] === 'string' && !this.isSourceOrMetaData(l[0])
+            );
+            if (filtered.length !== currentLayers.length) {
+                this.layers.next(filtered);
+            }
         }
 
-        if (!this.initialQueryParamsSet) {
-            this.setView(Cartesian3.fromDegrees(updatedParameters.lon, updatedParameters.lat, updatedParameters.alt), {
-                heading: updatedParameters.heading,
-                pitch: updatedParameters.pitch,
-                roll: updatedParameters.roll
-            });
-        }
-
-        this.parameters.next(updatedParameters);
-        this.initialQueryParamsSet = true;
+        this._initialQueryParamsSet = true;
         
         // Emit ready signal for subscribers waiting for initialization
         this.ready.next();
+    }
+
+    // Helper to check if camera parameters exist in query params
+    private hasCameraParams(params: Params): boolean {
+        return params['lon'] || params['lat'] || params['alt'] || 
+               params['heading'] || params['pitch'] || params['roll'];
+    }
+
+    // Map parameter names to state names
+    private getStateNameForParam(paramName: string): string {
+        const mapping: Record<string, string> = {
+            'search': 'search',
+            'marker': 'marker',
+            'markedPosition': 'markedPosition',
+            'selected': 'selected',
+            'mode2d': 'mode2d',
+            'viewRectangle': 'viewRectangle',
+            'osm': 'osm',
+            'osmOpacity': 'osmOpacity',
+            'layers': 'layers',
+            'styles': 'styles',
+            'tilesLoadLimit': 'tilesLoadLimit',
+            'tilesVisualizeLimit': 'tilesVisualizeLimit',
+            'enabledCoordsTileIds': 'enabledCoordsTileIds',
+            'selectedSourceData': 'selectedSourceData',
+            'panel': 'panel'
+        };
+        return mapping[paramName] || paramName;
     }
 
     resetStorage() {
@@ -651,14 +1109,33 @@ export class AppStateService {
     }
 
     private saveParameters() {
-        localStorage.setItem('erdblickParameters', JSON.stringify(this.p()));
+        const currentParams = this.getCurrentParametersObject();
+        localStorage.setItem('erdblickParameters', JSON.stringify(currentParams));
     }
 
     setView(destination: Cartesian3, orientation: { heading: number, pitch: number, roll: number }) {
+        // Update both the legacy cameraViewData and the new atomized state
         this.cameraViewData.next({
             destination: destination,
             orientation: orientation
         });
+        
+        // Also update the atomized camera state if destination changed
+        const cartographic = Cartographic.fromCartesian(destination);
+        const currentCamera = this.cameraView.getValue();
+        const newCameraData: CameraViewData = {
+            lon: CesiumMath.toDegrees(cartographic.longitude),
+            lat: CesiumMath.toDegrees(cartographic.latitude),
+            alt: cartographic.height,
+            heading: orientation.heading,
+            pitch: orientation.pitch,
+            roll: orientation.roll
+        };
+        
+        // Only update if values actually changed to avoid unnecessary emissions
+        if (JSON.stringify(currentCamera) !== JSON.stringify(newCameraData)) {
+            this.cameraView.next(newCameraData);
+        }
     }
 
     getCameraOrientation() {
@@ -670,12 +1147,11 @@ export class AppStateService {
     }
 
     setCoordinatesAndTileIds(selectedOptions: Array<string>) {
-        this.p().enabledCoordsTileIds = selectedOptions;
-        this.parameters.next(this.p());
+        this.enabledCoordsTileIds.next(selectedOptions);
     }
 
     getCoordinatesAndTileIds() {
-        return this.p().enabledCoordsTileIds;
+        return this.enabledCoordsTileIds.getValue();
     }
 
     isUrlParameter(name: string) {
@@ -686,8 +1162,7 @@ export class AppStateService {
     }
 
     resetSearchHistoryState() {
-        this.p().search = [];
-        this.parameters.next(this.p());
+        this.search.next([]);
     }
 
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
@@ -697,10 +1172,9 @@ export class AppStateService {
                 this.saveHistoryStateValue(value);
             }
         }
-        this.p().search = value ? value : [];
         this._replaceUrl = false;
+        this.search.next(value ? value : []);
         this.lastSearchHistoryEntry.next(value);
-        this.parameters.next(this.p())
     }
 
     private saveHistoryStateValue(value: [number, string]) {
@@ -737,11 +1211,10 @@ export class AppStateService {
         }
         this.inspectionContainerHeight = element.offsetHeight;
 
-        this.p().panel = [
+        this.panel.next([
             this.inspectionContainerWidth / this.baseFontSize,
             this.inspectionContainerHeight / this.baseFontSize
-        ];
-        this.parameters.next(this.p());
+        ]);
     }
 
     pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
@@ -752,11 +1225,16 @@ export class AppStateService {
             });
         });
 
-        this.p().layers = this.p().layers.filter(layer => {
+        const currentLayers = this.layers.getValue();
+        const filteredLayers = currentLayers.filter(layer => {
             return mapLayerIds.has(layer[0]) && !this.isSourceOrMetaData(layer[0]);
         });
-        const hasLayersAfterPruning = this.p().layers.length > 0;
-        this.parameters.next(this.p());
+        
+        if (filteredLayers.length !== currentLayers.length) {
+            this.layers.next(filteredLayers);
+        }
+        
+        const hasLayersAfterPruning = filteredLayers.length > 0;
         return !hasLayersAfterPruning; // Need to reinitialise the layers if none configured anymore
     }
 
