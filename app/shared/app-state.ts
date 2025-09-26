@@ -1,67 +1,47 @@
 import {BehaviorSubject} from "rxjs";
-import {Params} from "@angular/router";
 
-export type AppStateValidator<T> = (value: T) => boolean;
-export type AppStateStringConverter<T> = (value: string) => T;
+export type AppStateValidator = (value: any) => boolean;
 export type AppStateSerializer<T> = (value: T) => string;
-export type AppStateDeserializer<T> = (raw: string) => T | undefined;
-
-export interface AppStateUrlCodec<T> {
-    paramName?: string;
-    encoder?: (value: T) => Record<string, string>;
-    decoder?: (params: Params) => T | undefined;
-    formEncoding?: boolean;
-    includeInVisualizationOnly?: boolean;
-}
-
-export interface AppStateStorageCodec<T> {
-    key?: string;
-    serialize?: AppStateSerializer<T>;
-    deserialize?: AppStateDeserializer<T>;
-}
+export type AppStateDeserializer<T> = (raw: string, currentValue: T) => T | undefined;
 
 export interface AppStateOptions<T> {
     name: string;
     defaultValue: T;
-    converter?: AppStateStringConverter<T>;
-    validator?: AppStateValidator<T>;
-    url?: AppStateUrlCodec<T>;
-    storage?: AppStateStorageCodec<T>;
-    persist?: boolean;
+    validate?: AppStateValidator;
+    serialize?: AppStateSerializer<T>;
+    deserialize?: AppStateDeserializer<T>;
+    urlParamName?: string;
+    urlFormEncode?: boolean;
+    urlFormParamNames?: ReadonlyArray<string>;
+    urlIncludeInVisualizationOnly?: boolean;
 }
 
 export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
-    readonly url?: AppStateUrlCodec<T>;
-    readonly storage?: Required<AppStateStorageCodec<T>>;
 
-    private readonly converter?: AppStateStringConverter<T>;
-    private readonly validator?: AppStateValidator<T>;
+    readonly urlParamName?: string;
+    readonly urlFormEncode: boolean;
+    readonly urlFormParamNames: ReadonlyArray<string>;
+    readonly urlIncludeInVisualizationOnly?: boolean;
+
+    private readonly serializer: AppStateSerializer<T>;
+    private readonly deserializer: AppStateDeserializer<T>;
+    private readonly validator?: AppStateValidator;
 
     constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
         super(options.defaultValue);
         this.name = options.name;
         this.defaultValue = options.defaultValue;
-        this.converter = options.converter;
-        this.validator = options.validator;
-        this.url = options.url;
-        if (options.persist === false) {
-            this.storage = undefined;
-        } else {
-            this.storage = {
-                key: options.storage?.key ?? `appState/${options.name}`,
-                serialize: options.storage?.serialize ?? JSON.stringify,
-                deserialize: options.storage?.deserialize ?? ((raw: string) => {
-                    try {
-                        return JSON.parse(raw) as T;
-                    } catch (error) {
-                        console.warn(`[AppState:${options.name}] Failed to parse storage value`, error);
-                        return undefined;
-                    }
-                })
-            };
-        }
+
+        this.urlParamName = options.urlParamName;
+        this.urlFormEncode = options.urlFormEncode ?? false;
+        this.urlFormParamNames = options.urlFormParamNames ?? [];
+        this.urlIncludeInVisualizationOnly = options.urlIncludeInVisualizationOnly;
+
+        this.validator = options.validate;
+        this.serializer = options.serialize ?? (value => simpleStringify(value));
+        this.deserializer = options.deserialize ?? ((raw: string) => defaultJsonDeserialize<T>(raw, options.name));
 
         if (pool.has(options.name)) {
             console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
@@ -85,44 +65,25 @@ export class AppState<T> extends BehaviorSubject<T> {
         }
     }
 
-    convert(raw: string): T | undefined {
-        if (!this.converter) {
-            return raw as unknown as T;
-        }
-        try {
-            return this.converter(raw);
-        } catch (error) {
-            console.warn(`[AppState:${this.name}] Converter failed for value`, raw, error);
-            return undefined;
-        }
-    }
-
-    trySet(value: T): boolean {
-        if (!this.validate(value)) {
-            return false;
-        }
-        this.next(value);
-        return true;
-    }
-
     serialize(value: T = this.getValue()): string | undefined {
-        if (!this.storage) {
-            return undefined;
-        }
         try {
-            return this.storage.serialize(value);
+            return this.serializer(value);
         } catch (error) {
             console.warn(`[AppState:${this.name}] Failed to serialize value`, error);
-            return this.storage.serialize(this.defaultValue);
+            if (value !== this.defaultValue) {
+                try {
+                    return this.serializer(this.defaultValue);
+                } catch (_fallbackError) {
+                    return undefined;
+                }
+            }
+            return undefined;
         }
     }
 
     deserialize(raw: string): T | undefined {
-        if (!this.storage) {
-            return undefined;
-        }
         try {
-            return this.storage.deserialize(raw);
+            return this.deserializer(raw, this.getValue());
         } catch (error) {
             console.warn(`[AppState:${this.name}] Failed to deserialize value`, error);
             return undefined;
@@ -130,33 +91,17 @@ export class AppState<T> extends BehaviorSubject<T> {
     }
 }
 
-export function createSimpleUrlCodec<T>(paramName: string, serializer?: AppStateSerializer<T>, converter?: AppStateStringConverter<T>): AppStateUrlCodec<T> {
-    return {
-        paramName,
-        encoder: (value: T) => ({[paramName]: serializer ? serializer(value) : simpleStringify(value)}),
-        decoder: (params: Params) => {
-            if (!params.hasOwnProperty(paramName)) {
-                return undefined;
-            }
-            const raw = params[paramName];
-            if (typeof raw !== 'string') {
-                return undefined;
-            }
-            if (converter) {
-                try {
-                    return converter(raw);
-                } catch (error) {
-                    console.warn(`[AppState:${paramName}] Failed to decode URL param`, error);
-                    return undefined;
-                }
-            }
-            return raw as unknown as T;
-        }
-    };
-}
-
 export function simpleStringify(value: unknown): string {
     return JSON.stringify(value, (_key, val) => {
         return typeof val === 'boolean' ? (val ? 1 : 0) : val;
     });
+}
+
+function defaultJsonDeserialize<T>(raw: string, stateName: string): T | undefined {
+    try {
+        return JSON.parse(raw) as T;
+    } catch (error) {
+        console.warn(`[AppState:${stateName}] Failed to parse value`, error);
+        return undefined;
+    }
 }
