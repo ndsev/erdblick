@@ -1,12 +1,12 @@
-import {Injectable} from "@angular/core";
+import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {Subject, Subscription, skip, ReplaySubject} from "rxjs";
+import {ReplaySubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
-import {Cartesian3, Cartographic, CesiumMath, Camera} from "../integrations/cesium";
+import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "./app-mode.service";
 import {MapInfoItem} from "../mapdata/map.service";
-import {AppState, AppStateOptions, AppStateUrlCodec, createSimpleUrlCodec, simpleStringify} from "./app-state";
+import {AppState, AppStateOptions, AppStateUrlCodec, createSimpleUrlCodec} from "./app-state";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -86,7 +86,7 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
     };
 }
 
-const CAMERA_PARAM_NAMES = ["lon", "lat", "alt", "heading", "pitch", "roll"] as const;
+const CAMERA_PARAM_NAMES = ["lon", "lat", "alt", "h", "p", "r"] as const;
 
 function parseBoolean(value: string): boolean {
     return value === "true" || value === "1";
@@ -128,9 +128,9 @@ function encodeCameraToQuery(view: CameraViewState): Record<string, string> {
         lon: view.destination.lon.toString(),
         lat: view.destination.lat.toString(),
         alt: view.destination.alt.toString(),
-        heading: view.orientation.heading.toString(),
-        pitch: view.orientation.pitch.toString(),
-        roll: view.orientation.roll.toString(),
+        h: view.orientation.heading.toString(),
+        p: view.orientation.pitch.toString(),
+        r: view.orientation.roll.toString(),
     };
 }
 
@@ -140,11 +140,7 @@ function decodeCameraFromParams(params: Params): CameraViewState | undefined {
         if (!params.hasOwnProperty(key)) {
             return undefined;
         }
-        const rawValue = params[key];
-        if (Array.isArray(rawValue)) {
-            return undefined;
-        }
-        const parsed = toNumber(rawValue);
+        const parsed = toNumber(params[key]);
         if (parsed === undefined) {
             return undefined;
         }
@@ -157,15 +153,14 @@ function decodeCameraFromParams(params: Params): CameraViewState | undefined {
             alt: values.alt!,
         },
         orientation: {
-            heading: values.heading!,
-            pitch: values.pitch!,
-            roll: values.roll!,
+            heading: values.h!,
+            pitch: values.p!,
+            roll: values.r!,
         }
     };
 }
 
 const cameraUrlCodec: AppStateUrlCodec<CameraViewState> = {
-    paramNames: [...CAMERA_PARAM_NAMES],
     formEncoding: true,
     encoder: encodeCameraToQuery,
     decoder: decodeCameraFromParams,
@@ -176,41 +171,19 @@ function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
-function parseBigInt(value: unknown): bigint | undefined {
+function parseBigInt(value: any): bigint | undefined {
     if (value === undefined || value === null || value === "") {
         return BigInt(0);
     }
-    if (typeof value === 'bigint') {
-        return value;
+    try {
+        return typeof value === 'bigint' ? value : BigInt(value);
+    } catch (_error) {
+        return undefined;
     }
-    if (typeof value === 'boolean') {
-        return value ? BigInt(1) : BigInt(0);
-    }
-    if (typeof value === 'number') {
-        if (!Number.isFinite(value)) {
-            return undefined;
-        }
-        try {
-            return BigInt(value);
-        } catch (_error) {
-            return undefined;
-        }
-    }
-    if (typeof value === 'string') {
-        if (value.trim() === "") {
-            return BigInt(0);
-        }
-        try {
-            return BigInt(value);
-        } catch (_error) {
-            return undefined;
-        }
-    }
-    return undefined;
 }
 
 function normaliseSelectedSourceData(value: any): SelectedSourceData | null | undefined {
-    if (value === null) {
+    if (!value) {
         return null;
     }
     if (Array.isArray(value) && value.length >= 3) {
@@ -226,19 +199,6 @@ function normaliseSelectedSourceData(value: any): SelectedSourceData | null | un
             address,
             featureIds: value[4] !== undefined ? String(value[4]) : undefined,
         };
-    }
-    if (typeof value === "object" && value !== null) {
-        const candidate = value as Partial<Record<'tileId' | 'layerId' | 'mapId' | 'address' | 'featureIds', unknown>>;
-        const {tileId, layerId, mapId, address, featureIds} = candidate;
-        if (typeof tileId === "number" && Number.isFinite(tileId) && typeof layerId === "string" && typeof mapId === "string") {
-            return {
-                tileId,
-                layerId,
-                mapId,
-                address: parseBigInt(address),
-                featureIds: featureIds !== undefined ? String(featureIds) : undefined,
-            };
-        }
     }
     return undefined;
 }
@@ -460,7 +420,6 @@ export class AppStateService {
         this.inspectionContainerHeight = window.innerHeight - 10.5 * this.baseFontSize;
 
         this.setupStateSubscriptions();
-        this.hydrateFromLegacyStorage();
         this.hydrateFromStorage();
         this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
         this.isHydrating = false;
@@ -497,11 +456,11 @@ export class AppStateService {
     }
 
     private createState<T>(options: AppStateOptions<T>): AppState<T> {
-        const state = new AppState<T>(this.statePool, options);
-        return state;
+        return new AppState<T>(this.statePool, options);
     }
 
     private setupStateSubscriptions() {
+        // NOTE: Is this the best way to implement the internal subscription mechanism?
         for (const state of this.statePool.values()) {
             const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe(value => {
                 this.onStateChanged(state as AppState<unknown>, value);
@@ -616,52 +575,6 @@ export class AppStateService {
         });
     }
 
-    private hydrateFromLegacyStorage(): void {
-        const legacyRaw = localStorage.getItem('erdblickParameters');
-        if (!legacyRaw) {
-            return;
-        }
-        let legacy: LegacyParametersPayload | null = null;
-        try {
-            legacy = JSON.parse(legacyRaw) as LegacyParametersPayload;
-        } catch (error) {
-            console.warn('[AppStateService] Failed to parse legacy parameter payload', error);
-        }
-        if (!legacy || typeof legacy !== 'object') {
-            localStorage.removeItem('erdblickParameters');
-            return;
-        }
-        this.withHydration(() => {
-            for (const state of this.statePool.values()) {
-                if (state === this.cameraViewData) {
-                    continue;
-                }
-                if (!legacy!.hasOwnProperty(state.name)) {
-                    continue;
-                }
-                const rawValue = legacy![state.name];
-                let value: any = rawValue;
-                if (state === this.selectedSourceDataState) {
-                    value = normaliseSelectedSourceData(rawValue);
-                }
-                if (value === undefined) {
-                    this.logRejectedValue(state.name, 'legacy', rawValue);
-                    continue;
-                }
-                if (!state.validate(value)) {
-                    this.logRejectedValue(state.name, 'legacy', value);
-                    continue;
-                }
-                this.applyStateValue(state, value);
-            }
-            const camera = this.buildCameraFromLegacy(legacy);
-            if (camera) {
-                this.applyStateValue(this.cameraViewData, camera);
-            }
-        });
-        localStorage.removeItem('erdblickParameters');
-    }
-
     private hydrateFromUrl(params: Params): void {
         for (const state of this.statePool.values()) {
             if (state === this.cameraViewData) {
@@ -751,9 +664,9 @@ export class AppStateService {
         update('lon', value => destination.lon = value);
         update('lat', value => destination.lat = value);
         update('alt', value => destination.alt = value);
-        update('heading', value => orientation.heading = value);
-        update('pitch', value => orientation.pitch = value);
-        update('roll', value => orientation.roll = value);
+        update('h', value => orientation.heading = value);
+        update('p', value => orientation.pitch = value);
+        update('r', value => orientation.roll = value);
 
         if (!hasValue || invalid) {
             return undefined;
