@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {Subject, Subscription, skip} from "rxjs";
+import {Subject, Subscription, skip, ReplaySubject} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartesian3, Cartographic, CesiumMath, Camera} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
@@ -31,7 +31,7 @@ export interface CameraViewState {
     orientation: { heading: number, pitch: number, roll: number };
 }
 
-export type PanelSizeState = [number, number];
+export type PanelSizeState = [] | [number, number];
 
 interface LegacyParametersPayload extends Record<string, any> {
     lon?: number;
@@ -145,7 +145,7 @@ function decodeCameraFromParams(params: Params): CameraViewState | undefined {
             return undefined;
         }
         const parsed = toNumber(rawValue);
-        if (!isFinite(parsed)) {
+        if (parsed === undefined) {
             return undefined;
         }
         values[key] = parsed;
@@ -180,11 +180,33 @@ function parseBigInt(value: unknown): bigint | undefined {
     if (value === undefined || value === null || value === "") {
         return BigInt(0);
     }
-    try {
-        return typeof value === 'bigint' ? value : BigInt(value);
-    } catch (_error) {
-        return undefined;
+    if (typeof value === 'bigint') {
+        return value;
     }
+    if (typeof value === 'boolean') {
+        return value ? BigInt(1) : BigInt(0);
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return undefined;
+        }
+        try {
+            return BigInt(value);
+        } catch (_error) {
+            return undefined;
+        }
+    }
+    if (typeof value === 'string') {
+        if (value.trim() === "") {
+            return BigInt(0);
+        }
+        try {
+            return BigInt(value);
+        } catch (_error) {
+            return undefined;
+        }
+    }
+    return undefined;
 }
 
 function normaliseSelectedSourceData(value: any): SelectedSourceData | null | undefined {
@@ -206,14 +228,15 @@ function normaliseSelectedSourceData(value: any): SelectedSourceData | null | un
         };
     }
     if (typeof value === "object" && value !== null) {
-        const candidate = value as Record<string, any>;
-        if (typeof candidate.tileId === "number" && Number.isFinite(candidate.tileId) && typeof candidate.layerId === "string" && typeof candidate.mapId === "string") {
+        const candidate = value as Partial<Record<'tileId' | 'layerId' | 'mapId' | 'address' | 'featureIds', unknown>>;
+        const {tileId, layerId, mapId, address, featureIds} = candidate;
+        if (typeof tileId === "number" && Number.isFinite(tileId) && typeof layerId === "string" && typeof mapId === "string") {
             return {
-                tileId: candidate.tileId,
-                layerId: candidate.layerId,
-                mapId: candidate.mapId,
-                address: parseBigInt(candidate.address),
-                featureIds: candidate.featureIds !== undefined ? String(candidate.featureIds) : undefined,
+                tileId,
+                layerId,
+                mapId,
+                address: parseBigInt(address),
+                featureIds: featureIds !== undefined ? String(featureIds) : undefined,
             };
         }
     }
@@ -246,7 +269,7 @@ function decodeSelectedSourceData(raw: string): SelectedSourceData | null | unde
 export class AppStateService {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
-    private readonly readySubject = new Subject<void>();
+    private readonly readySubject = new ReplaySubject<void>(1);
     public readonly ready$ = this.readySubject.asObservable();
 
     private readonly stateSubscriptions: Subscription[] = [];
@@ -408,8 +431,8 @@ export class AppStateService {
 
     readonly panelState = this.createState<PanelSizeState>({
         name: 'panel',
-        defaultValue: [],
-        converter: raw => JSON.parse(raw),
+        defaultValue: [] as PanelSizeState,
+        converter: raw => JSON.parse(raw) as PanelSizeState,
         validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && val.every(item => typeof item === 'number'))),
         url: {...createSimpleUrlCodec('panel', undefined, raw => JSON.parse(raw)), includeInVisualizationOnly: false},
     });
@@ -956,6 +979,22 @@ export class AppStateService {
             return;
         }
         this.layersState.next(filtered);
+    }
+
+    setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
+        if (Object.keys(this.stylesState.getValue()).length) {
+            return;
+        }
+        const initial: Record<string, StyleURLParameters> = {};
+        styles.forEach((style, styleId) => {
+            const params = style?.params;
+            if (params) {
+                initial[styleId] = this.styleParamsToURLParams(params);
+            }
+        });
+        if (Object.keys(initial).length) {
+            this.stylesState.next(initial);
+        }
     }
 
     styleConfig(styleId: string): StyleParameters {

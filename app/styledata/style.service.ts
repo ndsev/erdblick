@@ -132,6 +132,10 @@ export class StyleService {
         }
         this.loadImportedStyles();
         this.parameterService.setInitialStyles(this.styles);
+
+        if (this.styles.size) {
+            this.reapplyStyles([...this.styles.keys()]);
+        }
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
