@@ -11,7 +11,6 @@ export interface AppStateUrlCodec<T> {
     encoder?: (value: T) => Record<string, string>;
     decoder?: (params: Params) => T | undefined;
     formEncoding?: boolean;
-    paramNames?: Array<string>;
     includeInVisualizationOnly?: boolean;
 }
 
@@ -134,7 +133,6 @@ export class AppState<T> extends BehaviorSubject<T> {
 export function createSimpleUrlCodec<T>(paramName: string, serializer?: AppStateSerializer<T>, converter?: AppStateStringConverter<T>): AppStateUrlCodec<T> {
     return {
         paramName,
-        paramNames: [paramName],
         encoder: (value: T) => ({[paramName]: serializer ? serializer(value) : simpleStringify(value)}),
         decoder: (params: Params) => {
             if (!params.hasOwnProperty(paramName)) {
