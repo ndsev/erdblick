@@ -969,13 +969,15 @@ export class MapService {
         this.statsDialogNeedsUpdate.next();
     }
 
-    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle | FeatureLayerStyle, styleId: string = "") {
-        let wasmStyle = (style as ErdblickStyle).featureLayerStyle ? (style as ErdblickStyle).featureLayerStyle : style as FeatureLayerStyle;
-        if (!wasmStyle)
-            return;
-        if ((style as ErdblickStyle).params !== undefined && !(style as ErdblickStyle).params.visible) {
+    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle, styleId: string = "") {
+        const wasmStyle = style.featureLayerStyle;
+        if (!wasmStyle) {
             return;
         }
+        if (style.params !== undefined && !style.params.visible) {
+            return;
+        }
+
         const mapName = tileLayer.mapName;
         const layerName = tileLayer.layerName;
         let visu = new TileVisualization(
@@ -987,7 +989,7 @@ export class MapService {
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.getMapLayerBorderState(mapName, layerName),
-            (style as ErdblickStyle).params !== undefined ? (style as ErdblickStyle).params.options : {});
+            style.params !== undefined ? style.params.options : {});
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);
