@@ -6,7 +6,7 @@ import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesi
 import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "./app-mode.service";
 import {MapInfoItem} from "../mapdata/map.service";
-import {AppState, AppStateOptions, AppStateUrlCodec, createSimpleUrlCodec} from "./app-state";
+import {AppState, AppStateOptions} from "./app-state";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -32,15 +32,6 @@ export interface CameraViewState {
 }
 
 export type PanelSizeState = [] | [number, number];
-
-interface LegacyParametersPayload extends Record<string, any> {
-    lon?: number;
-    lat?: number;
-    alt?: number;
-    heading?: number;
-    pitch?: number;
-    roll?: number;
-}
 
 /**
  * !!! THE RETURNED FUNCTION MAY MUTATE THE VALIDATED VALUES !!!
@@ -88,10 +79,6 @@ function validateObjectsAndTypes(fields: Record<string, string> | Array<string>)
 
 const CAMERA_PARAM_NAMES = ["lon", "lat", "alt", "h", "p", "r"] as const;
 
-function parseBoolean(value: string): boolean {
-    return value === "true" || value === "1";
-}
-
 function isFiniteNumber(value: unknown): value is number {
     return typeof value === "number" && !isNaN(value) && isFinite(value);
 }
@@ -99,6 +86,16 @@ function isFiniteNumber(value: unknown): value is number {
 function toNumber(value: string): number | undefined {
     const parsed = Number(value);
     return isFinite(parsed) ? parsed : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+        return isFiniteNumber(value) ? value : undefined;
+    }
+    if (typeof value === 'string') {
+        return toNumber(value);
+    }
+    return undefined;
 }
 
 function canonicaliseForComparison(value: unknown): unknown {
@@ -123,48 +120,64 @@ function valuesEqual(left: unknown, right: unknown): boolean {
     }
 }
 
-function encodeCameraToQuery(view: CameraViewState): Record<string, string> {
-    return {
-        lon: view.destination.lon.toString(),
-        lat: view.destination.lat.toString(),
-        alt: view.destination.alt.toString(),
-        h: view.orientation.heading.toString(),
-        p: view.orientation.pitch.toString(),
-        r: view.orientation.roll.toString(),
-    };
+function serializeCameraView(view: CameraViewState): string {
+    return JSON.stringify({
+        lon: view.destination.lon,
+        lat: view.destination.lat,
+        alt: view.destination.alt,
+        h: view.orientation.heading,
+        p: view.orientation.pitch,
+        r: view.orientation.roll,
+    });
 }
 
-function decodeCameraFromParams(params: Params): CameraViewState | undefined {
-    const values: Partial<Record<typeof CAMERA_PARAM_NAMES[number], number>> = {};
-    for (const key of CAMERA_PARAM_NAMES) {
-        if (!params.hasOwnProperty(key)) {
-            return undefined;
-        }
-        const parsed = toNumber(params[key]);
-        if (parsed === undefined) {
-            return undefined;
-        }
-        values[key] = parsed;
+function deserializeCameraView(raw: string, current: CameraViewState): CameraViewState | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+        return undefined;
     }
-    return {
-        destination: {
-            lon: values.lon!,
-            lat: values.lat!,
-            alt: values.alt!,
-        },
-        orientation: {
-            heading: values.h!,
-            pitch: values.p!,
-            roll: values.r!,
-        }
-    };
-}
 
-const cameraUrlCodec: AppStateUrlCodec<CameraViewState> = {
-    formEncoding: true,
-    encoder: encodeCameraToQuery,
-    decoder: decodeCameraFromParams,
-};
+    const next: CameraViewState = {
+        destination: {...current.destination},
+        orientation: {...current.orientation},
+    };
+    let updated = false;
+
+    const apply = (value: unknown, setter: (val: number) => void): boolean => {
+        if (value === undefined) {
+            return true;
+        }
+        const numeric = asFiniteNumber(value);
+        if (numeric === undefined) {
+            return false;
+        }
+        setter(numeric);
+        updated = true;
+        return true;
+    };
+
+    const flat = parsed as Record<string, unknown>;
+    if (!apply(flat['lon'], value => next.destination.lon = value)) {
+        return undefined;
+    }
+    if (!apply(flat['lat'], value => next.destination.lat = value)) {
+        return undefined;
+    }
+    if (!apply(flat['alt'], value => next.destination.alt = value)) {
+        return undefined;
+    }
+    if (!apply(flat['h'], value => next.orientation.heading = value)) {
+        return undefined;
+    }
+    if (!apply(flat['p'], value => next.orientation.pitch = value)) {
+        return undefined;
+    }
+    if (!apply(flat['r'], value => next.orientation.roll = value)) {
+        return undefined;
+    }
+
+    return updated ? next : undefined;
+}
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
@@ -225,6 +238,176 @@ function decodeSelectedSourceData(raw: string): SelectedSourceData | null | unde
     }
 }
 
+function safeJsonParse(raw: string): unknown | undefined {
+    try {
+        return JSON.parse(raw);
+    } catch (_error) {
+        return undefined;
+    }
+}
+
+function coerceBoolean(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (value === 1 || value === '1' || value === 'true') {
+        return true;
+    }
+    if (value === 0 || value === '0' || value === 'false') {
+        return false;
+    }
+    return undefined;
+}
+
+function deserializeSearch(raw: string): [number, string] | [] | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed)) {
+        return undefined;
+    }
+    if (parsed.length === 0) {
+        return [];
+    }
+    if (parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
+        return [parsed[0], parsed[1]];
+    }
+    return undefined;
+}
+
+function deserializeNumberArray(raw: string): number[] | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'number')) {
+        return undefined;
+    }
+    return parsed as number[];
+}
+
+function deserializeTileFeatureIds(raw: string): TileFeatureId[] | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed)) {
+        return undefined;
+    }
+    const validator = validateObjectsAndTypes({mapTileKey: "string", featureId: "string"});
+    if (!parsed.every(item => validator(item))) {
+        return undefined;
+    }
+    return parsed as TileFeatureId[];
+}
+
+function deserializeViewRectangle(raw: string): [number, number, number, number] | null | undefined {
+    if (raw === 'null') {
+        return null;
+    }
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== 4 || !parsed.every(item => typeof item === 'number')) {
+        return undefined;
+    }
+    return parsed as [number, number, number, number];
+}
+
+function deserializeLayers(raw: string): Array<[string, number, boolean, boolean]> | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed)) {
+        return undefined;
+    }
+    const result: Array<[string, number, boolean, boolean]> = [];
+    for (const entry of parsed) {
+        if (!Array.isArray(entry) || entry.length !== 4) {
+            return undefined;
+        }
+        const [layerId, level, visibleRaw, tileBordersRaw] = entry;
+        if (typeof layerId !== 'string' || typeof level !== 'number') {
+            return undefined;
+        }
+        const visible = coerceBoolean(visibleRaw);
+        const tileBorders = coerceBoolean(tileBordersRaw);
+        if (visible === undefined || tileBorders === undefined) {
+            return undefined;
+        }
+        result.push([layerId, level, visible, tileBorders]);
+    }
+    return result;
+}
+
+function deserializeStyles(raw: string): Record<string, StyleURLParameters> | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+        return undefined;
+    }
+    const result: Record<string, StyleURLParameters> = {};
+    for (const [styleId, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!value || typeof value !== 'object') {
+            return undefined;
+        }
+        const v = coerceBoolean((value as Record<string, unknown>)['v']);
+        const optionsRaw = (value as Record<string, unknown>)['o'];
+        if (v === undefined || !optionsRaw || typeof optionsRaw !== 'object') {
+            return undefined;
+        }
+        const options: Record<string, boolean | number> = {};
+        for (const [optionKey, optionValue] of Object.entries(optionsRaw as Record<string, unknown>)) {
+            if (typeof optionValue === 'number') {
+                options[optionKey] = optionValue;
+                continue;
+            }
+            const optionBoolean = coerceBoolean(optionValue);
+            if (optionBoolean === undefined) {
+                return undefined;
+            }
+            options[optionKey] = optionBoolean;
+        }
+        result[styleId] = {v, o: options};
+    }
+    return result;
+}
+
+function deserializeTilesLimit(raw: string): number | undefined {
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function deserializePanel(raw: string): PanelSizeState | undefined {
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed)) {
+        return undefined;
+    }
+    if (parsed.length === 0) {
+        return [];
+    }
+    if (parsed.length === 2 && parsed.every(item => typeof item === 'number')) {
+        return [parsed[0], parsed[1]] as PanelSizeState;
+    }
+    return undefined;
+}
+
+function deserializeSearchHistory(raw: string): [number, string] | null | undefined {
+    if (raw === 'null') {
+        return null;
+    }
+    const parsed = safeJsonParse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== 2) {
+        return undefined;
+    }
+    if (typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
+        return [parsed[0], parsed[1]];
+    }
+    return undefined;
+}
+
+function validateCameraView(value: CameraViewState): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+    const destination = value.destination;
+    const orientation = value.orientation;
+    return destination !== undefined && orientation !== undefined &&
+        isFiniteNumber(destination?.lon) &&
+        isFiniteNumber(destination?.lat) &&
+        isFiniteNumber(destination?.alt) &&
+        isFiniteNumber(orientation?.heading) &&
+        isFiniteNumber(orientation?.pitch) &&
+        isFiniteNumber(orientation?.roll);
+}
+
 @Injectable({providedIn: 'root'})
 export class AppStateService {
 
@@ -254,33 +437,38 @@ export class AppStateService {
     readonly searchState = this.createState<[number, string] | []>({
         name: 'search',
         defaultValue: [],
-        converter: raw => JSON.parse(raw),
-        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
-        url: {...createSimpleUrlCodec('search', undefined, raw => JSON.parse(raw)), includeInVisualizationOnly: false},
+        deserialize: (raw) => deserializeSearch(raw),
+        validate: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
+        urlParamName: 'search',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly markerState = this.createState<boolean>({
         name: 'marker',
         defaultValue: false,
-        converter: parseBoolean,
-        validator: val => typeof val === 'boolean',
-        url: {...createSimpleUrlCodec('marker', value => value ? '1' : '0', parseBoolean), includeInVisualizationOnly: false},
+        serialize: value => value ? '1' : '0',
+        deserialize: raw => coerceBoolean(raw),
+        validate: val => typeof val === 'boolean',
+        urlParamName: 'marker',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        converter: raw => JSON.parse(raw),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
-        url: {...createSimpleUrlCodec('markedPosition', undefined, raw => JSON.parse(raw)), includeInVisualizationOnly: false},
+        deserialize: (raw) => deserializeNumberArray(raw),
+        validate: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+        urlParamName: 'markedPosition',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly selectedFeaturesState = this.createState<TileFeatureId[]>({
         name: 'selected',
         defaultValue: [],
-        converter: raw => JSON.parse(raw),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
-        url: {...createSimpleUrlCodec('selected', undefined, raw => JSON.parse(raw)), includeInVisualizationOnly: false},
+        deserialize: (raw) => deserializeTileFeatureIds(raw),
+        validate: val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
+        urlParamName: 'selected',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly cameraViewData = this.createState<CameraViewState>({
@@ -289,128 +477,134 @@ export class AppStateService {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
             orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
         },
-        validator: val => val !== null && typeof val === 'object',
-        url: cameraUrlCodec,
+        serialize: serializeCameraView,
+        deserialize: (raw, current) => deserializeCameraView(raw, current),
+        validate: value => validateCameraView(value),
+        urlParamName: 'cameraView',
+        urlFormEncode: true,
+        urlFormParamNames: [...CAMERA_PARAM_NAMES],
     });
 
     readonly viewRectangleState = this.createState<[number, number, number, number] | null>({
         name: 'viewRectangle',
         defaultValue: null,
-        converter: raw => raw === 'null' ? null : JSON.parse(raw),
-        validator: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(item => typeof item === 'number')),
-        url: {...createSimpleUrlCodec('viewRectangle', undefined, raw => raw === 'null' ? null : JSON.parse(raw)), includeInVisualizationOnly: false},
+        deserialize: (raw) => deserializeViewRectangle(raw),
+        validate: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(item => typeof item === 'number')),
+        urlParamName: 'viewRectangle',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly mode2dState = this.createState<boolean>({
         name: 'mode2d',
         defaultValue: false,
-        converter: parseBoolean,
-        validator: val => typeof val === 'boolean',
-        url: {...createSimpleUrlCodec('mode2d', value => value ? '1' : '0', parseBoolean), includeInVisualizationOnly: false},
+        serialize: value => value ? '1' : '0',
+        deserialize: raw => coerceBoolean(raw),
+        validate: val => typeof val === 'boolean',
+        urlParamName: 'mode2d',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly osmEnabledState = this.createState<boolean>({
         name: 'osm',
         defaultValue: true,
-        converter: parseBoolean,
-        validator: val => typeof val === 'boolean',
-        url: createSimpleUrlCodec('osm', value => value ? '1' : '0', parseBoolean),
+        serialize: value => value ? '1' : '0',
+        deserialize: raw => coerceBoolean(raw),
+        validate: val => typeof val === 'boolean',
+        urlParamName: 'osm',
     });
 
     readonly osmOpacityState = this.createState<number>({
         name: 'osmOpacity',
         defaultValue: 30,
-        converter: value => Number(value),
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
-        url: createSimpleUrlCodec('osmOpacity', value => value.toString(), value => Number(value)),
+        serialize: value => value.toString(),
+        deserialize: raw => {
+            const parsed = Number(raw);
+            return Number.isFinite(parsed) ? parsed : undefined;
+        },
+        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
+        urlParamName: 'osmOpacity',
     });
 
     readonly layersState = this.createState<Array<[string, number, boolean, boolean]>>({
         name: 'layers',
         defaultValue: [],
-        converter: raw => JSON.parse(raw),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
-        url: createSimpleUrlCodec('layers', undefined, raw => JSON.parse(raw)),
+        deserialize: (raw) => deserializeLayers(raw),
+        validate: val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
+        urlParamName: 'layers',
     });
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
-        converter: raw => JSON.parse(raw),
-        validator: val => typeof val === "object" && Object.entries(val as Record<string, StyleURLParameters>)
+        deserialize: raw => deserializeStyles(raw),
+        validate: val => typeof val === 'object' && Object.entries(val as Record<string, StyleURLParameters>)
             .every(([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v)),
-        url: createSimpleUrlCodec('styles', undefined, raw => JSON.parse(raw)),
+        urlParamName: 'styles',
     });
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
-        converter: value => Number(value),
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        url: createSimpleUrlCodec('tilesLoadLimit', value => value.toString(), value => Number(value)),
+        serialize: value => value.toString(),
+        deserialize: raw => deserializeTilesLimit(raw),
+        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        urlParamName: 'tilesLoadLimit',
     });
 
     readonly tilesVisualizeLimitState = this.createState<number>({
         name: 'tilesVisualizeLimit',
         defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
-        converter: value => Number(value),
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        url: createSimpleUrlCodec('tilesVisualizeLimit', value => value.toString(), value => Number(value)),
+        serialize: value => value.toString(),
+        deserialize: raw => deserializeTilesLimit(raw),
+        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        urlParamName: 'tilesVisualizeLimit',
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
-        converter: raw => JSON.parse(raw),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        persist: true,
-        url: undefined,
+        deserialize: raw => {
+            const parsed = safeJsonParse(raw);
+            if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'string')) {
+                return undefined;
+            }
+            return parsed as string[];
+        },
+        validate: val => Array.isArray(val) && val.every(item => typeof item === 'string')
     });
 
     readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
         name: 'selectedSourceData',
         defaultValue: null,
-        validator: val => val === null || (typeof val.tileId === 'number' && typeof val.layerId === 'string' && typeof val.mapId === 'string'),
-        storage: {
-            serialize: value => encodeSelectedSourceData(value),
-            deserialize: raw => decodeSelectedSourceData(raw),
-        },
-        url: {
-            paramName: 'selectedSourceData',
-            encoder: value => ({selectedSourceData: encodeSelectedSourceData(value)}),
-            decoder: (params: Params) => {
-                const raw = params['selectedSourceData'];
-                if (typeof raw !== 'string') {
-                    return undefined;
-                }
-                return decodeSelectedSourceData(raw);
-            },
-            includeInVisualizationOnly: false,
-        },
+        serialize: value => encodeSelectedSourceData(value),
+        deserialize: raw => decodeSelectedSourceData(raw),
+        validate: val => val === null || (typeof val.tileId === 'number' && typeof val.layerId === 'string' && typeof val.mapId === 'string'),
+        urlParamName: 'selectedSourceData',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly panelState = this.createState<PanelSizeState>({
         name: 'panel',
         defaultValue: [] as PanelSizeState,
-        converter: raw => JSON.parse(raw) as PanelSizeState,
-        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && val.every(item => typeof item === 'number'))),
-        url: {...createSimpleUrlCodec('panel', undefined, raw => JSON.parse(raw)), includeInVisualizationOnly: false},
+        deserialize: raw => deserializePanel(raw),
+        validate: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && val.every(item => typeof item === 'number'))),
+        urlParamName: 'panel',
+        urlIncludeInVisualizationOnly: false,
     });
 
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
         name: 'legalInfoDialogVisible',
         defaultValue: false,
-        converter: parseBoolean,
-        validator: val => typeof val === 'boolean',
-        persist: false,
+        serialize: value => value ? '1' : '0',
+        deserialize: raw => coerceBoolean(raw),
+        validate: val => typeof val === 'boolean'
     });
 
     readonly lastSearchHistoryEntry = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
-        converter: raw => raw === 'null' ? null : JSON.parse(raw),
-        validator: val => val === null || (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string'),
-        persist: false,
+        deserialize: raw => deserializeSearchHistory(raw),
+        validate: val => val === null || (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')
     });
 
     constructor(private readonly router: Router,
@@ -479,15 +673,29 @@ export class AppStateService {
             return;
         }
 
-        if (state.storage) {
-            this.pendingStorageSync = true;
-        }
-
-        if (state.url && state.url.encoder && (!this.appModeService.isVisualizationOnly || state.url.includeInVisualizationOnly !== false)) {
+        this.pendingStorageSync = true;
+        if (this.shouldSyncUrlForState(state)) {
             this.pendingUrlSync = true;
         }
 
         this.scheduleFlush();
+    }
+
+    private hasUrlBinding(state: AppState<unknown>): boolean {
+        if (state.urlFormEncode) {
+            return state.urlFormParamNames.length > 0 || !!state.urlParamName;
+        }
+        return !!state.urlParamName;
+    }
+
+    private shouldSyncUrlForState(state: AppState<unknown>): boolean {
+        if (!this.hasUrlBinding(state)) {
+            return false;
+        }
+        if (this.appModeService.isVisualizationOnly && state.urlIncludeInVisualizationOnly === false) {
+            return false;
+        }
+        return true;
     }
 
     private scheduleFlush(): void {
@@ -514,15 +722,12 @@ export class AppStateService {
 
     private persistStates(): void {
         for (const state of this.statePool.values()) {
-            if (!state.storage) {
-                continue;
-            }
             const serialized = state.serialize();
             if (serialized === undefined) {
                 continue;
             }
             try {
-                localStorage.setItem(state.storage.key!, serialized);
+                localStorage.setItem(state.name, serialized);
             } catch (error) {
                 console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
             }
@@ -532,15 +737,22 @@ export class AppStateService {
     private syncUrl(): void {
         const params: Record<string, string> = {};
         for (const state of this.statePool.values()) {
-            const url = state.url;
-            if (!url || !url.encoder) {
+            if (!this.shouldSyncUrlForState(state)) {
                 continue;
             }
-            if (this.appModeService.isVisualizationOnly && url.includeInVisualizationOnly === false) {
+            const serialized = state.serialize();
+            if (serialized === undefined) {
                 continue;
             }
-            const encoded = url.encoder(state.getValue() as any);
-            Object.assign(params, encoded);
+            if (state.urlFormEncode) {
+                const encoded = this.encodeFormParams(state, serialized);
+                if (!encoded) {
+                    continue;
+                }
+                Object.assign(params, encoded);
+            } else if (state.urlParamName) {
+                params[state.urlParamName] = serialized;
+            }
         }
         const replaceUrl = this.replaceUrl;
         this.router.navigate([], {
@@ -552,13 +764,106 @@ export class AppStateService {
         });
     }
 
+    private encodeFormParams(state: AppState<unknown>, serialized: string): Record<string, string> | null {
+        if (!state.urlFormEncode) {
+            return null;
+        }
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(serialized);
+        } catch (error) {
+            console.warn(`[AppStateService] Failed to encode URL params for state '${state.name}'`, error);
+            return null;
+        }
+
+        const result: Record<string, string> = {};
+        const names = state.urlFormParamNames;
+
+        if (Array.isArray(parsed)) {
+            for (let index = 0; index < names.length; index++) {
+                if (index >= parsed.length) {
+                    break;
+                }
+                const value = parsed[index];
+                if (value === undefined) {
+                    continue;
+                }
+                result[names[index]] = String(value);
+            }
+            return result;
+        }
+
+        if (parsed && typeof parsed === 'object') {
+            for (const name of names) {
+                if (!Object.prototype.hasOwnProperty.call(parsed, name)) {
+                    continue;
+                }
+                const value = (parsed as Record<string, unknown>)[name];
+                if (value === undefined) {
+                    continue;
+                }
+                result[name] = String(value);
+            }
+            if (names.length === 0 && state.urlParamName) {
+                result[state.urlParamName] = serialized;
+            }
+            return result;
+        }
+
+        console.warn(`[AppStateService] Unsupported URL form payload for state '${state.name}'`);
+        return null;
+    }
+
+    private extractUrlSerializedValue(state: AppState<unknown>, params: Params): string | undefined {
+        if (state.urlFormEncode) {
+            const collected: Record<string, string> = {};
+            let hasValue = false;
+
+            for (const name of state.urlFormParamNames) {
+                const raw = params[name];
+                if (raw === undefined) {
+                    continue;
+                }
+                if (Array.isArray(raw)) {
+                    this.logRejectedValue(state.name, 'url', raw);
+                    return undefined;
+                }
+                collected[name] = raw;
+                hasValue = true;
+            }
+
+            if (!hasValue) {
+                const fallback = this.extractFallbackSerializedValue(state, params);
+                if (fallback !== undefined) {
+                    return fallback;
+                }
+                return undefined;
+            }
+            return JSON.stringify(collected);
+        }
+
+        return this.extractFallbackSerializedValue(state, params);
+    }
+
+    private extractFallbackSerializedValue(state: AppState<unknown>, params: Params): string | undefined {
+        if (!state.urlParamName) {
+            return undefined;
+        }
+        const raw = params[state.urlParamName];
+        if (raw === undefined) {
+            return undefined;
+        }
+        if (Array.isArray(raw)) {
+            this.logRejectedValue(state.name, 'url', raw);
+            return undefined;
+        }
+        return typeof raw === 'string' ? raw : undefined;
+    }
+
     private hydrateFromStorage(): void {
         this.withHydration(() => {
             for (const state of this.statePool.values()) {
-                if (!state.storage) {
-                    continue;
-                }
-                const raw = localStorage.getItem(state.storage.key!);
+                const raw = localStorage.getItem(state.name);
                 if (raw === null) {
                     continue;
                 }
@@ -577,29 +882,14 @@ export class AppStateService {
 
     private hydrateFromUrl(params: Params): void {
         for (const state of this.statePool.values()) {
-            if (state === this.cameraViewData) {
-                const cameraValue = this.readCameraViewFromParams(params);
-                if (cameraValue) {
-                    this.applyStateValue(this.cameraViewData, cameraValue);
-                }
+            if (!this.shouldSyncUrlForState(state)) {
                 continue;
             }
-            const url = state.url;
-            if (!url || (!url.paramName && !url.decoder)) {
+            const raw = this.extractUrlSerializedValue(state, params);
+            if (raw === undefined) {
                 continue;
             }
-            if (this.appModeService.isVisualizationOnly && url.includeInVisualizationOnly === false) {
-                continue;
-            }
-            let value: any;
-            if (url.decoder) {
-                value = url.decoder(params);
-            } else if (url.paramName && params.hasOwnProperty(url.paramName)) {
-                const raw = params[url.paramName];
-                if (typeof raw === 'string') {
-                    value = state.convert(raw);
-                }
-            }
+            const value = state.deserialize(raw);
             if (value === undefined) {
                 continue;
             }
@@ -607,7 +897,7 @@ export class AppStateService {
                 this.logRejectedValue(state.name, 'url', value);
                 continue;
             }
-            this.applyStateValue(state, value);
+            this.applyStateValue(state as AppState<unknown>, value as unknown);
         }
     }
 
@@ -616,63 +906,6 @@ export class AppStateService {
             return;
         }
         state.next(value);
-    }
-
-    private buildCameraFromLegacy(legacy: LegacyParametersPayload): CameraViewState | null {
-        const lon = legacy.lon;
-        const lat = legacy.lat;
-        const alt = legacy.alt;
-        const heading = legacy.heading;
-        const pitch = legacy.pitch;
-        const roll = legacy.roll;
-        if ([lon, lat, alt, heading, pitch, roll].every(isFiniteNumber)) {
-            return {
-                destination: {lon: lon!, lat: lat!, alt: alt!},
-                orientation: {heading: heading!, pitch: pitch!, roll: roll!},
-            };
-        }
-        return null;
-    }
-
-    private readCameraViewFromParams(params: Params): CameraViewState | undefined {
-        let hasValue = false;
-        let invalid = false;
-        const current = this.cameraViewData.getValue();
-        const destination = {...current.destination};
-        const orientation = {...current.orientation};
-
-        const update = (key: typeof CAMERA_PARAM_NAMES[number], setter: (value: number) => void) => {
-            const raw = params[key];
-            if (raw === undefined) {
-                return;
-            }
-            if (Array.isArray(raw)) {
-                this.logRejectedValue('cameraView', 'url', raw);
-                invalid = true;
-                return;
-            }
-            const parsed = toNumber(raw);
-            if (parsed === undefined) {
-                this.logRejectedValue('cameraView', 'url', raw);
-                invalid = true;
-                return;
-            }
-            setter(parsed);
-            hasValue = true;
-        };
-
-        update('lon', value => destination.lon = value);
-        update('lat', value => destination.lat = value);
-        update('alt', value => destination.alt = value);
-        update('h', value => orientation.heading = value);
-        update('p', value => orientation.pitch = value);
-        update('r', value => orientation.roll = value);
-
-        if (!hasValue || invalid) {
-            return undefined;
-        }
-
-        return {destination, orientation};
     }
 
     private updateScalingFactor(altitude: number): void {
@@ -693,7 +926,7 @@ export class AppStateService {
         }
     }
 
-    private logRejectedValue(stateName: string, source: 'url' | 'storage' | 'legacy' | 'runtime', raw: unknown): void {
+    private logRejectedValue(stateName: string, source: 'url' | 'storage' | 'runtime', raw: unknown): void {
         console.warn(`[AppStateService] Rejected ${source} value for state '${stateName}'`, raw);
     }
 
@@ -975,9 +1208,7 @@ export class AppStateService {
     resetStorage() {
         for (const state of this.statePool.values()) {
             state.resetToDefault();
-            if (state.storage) {
-                localStorage.removeItem(state.storage.key!);
-            }
+            localStorage.removeItem(state.name);
         }
         localStorage.removeItem('searchHistory');
         const {origin, pathname} = window.location;
