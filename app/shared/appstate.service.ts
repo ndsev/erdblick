@@ -580,6 +580,7 @@ export class AppStateService {
                 }
             }
 
+            // TODO: Re-introduce logic to merge style config rather than replacing it.
             const raw = this.extractRawParamValue(state, params);
             if (raw === undefined) {
                 continue;
