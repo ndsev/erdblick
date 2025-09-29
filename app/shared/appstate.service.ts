@@ -1,4 +1,4 @@
-import {Injectable, OnDestroy} from "@angular/core";
+import {Injectable} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
 import {ReplaySubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
@@ -7,6 +7,7 @@ import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "./app-mode.service";
 import {MapInfoItem} from "../mapdata/map.service";
 import {AppState, AppStateOptions} from "./app-state";
+import {z} from "zod";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -33,379 +34,99 @@ export interface CameraViewState {
 
 export type PanelSizeState = [] | [number, number];
 
-/**
- * !!! THE RETURNED FUNCTION MAY MUTATE THE VALIDATED VALUES !!!
- *
- * Function to create an object or array types validator given a key-typeof-value
- * dictionary or a types array.
- *
- * Note: For boolean values, this function contains an extra mechanism to
- * turn compact (0/1) boolean representations into true/false inside the validated objects.
- */
-function validateObjectsAndTypes(fields: Record<string, string> | Array<string>) {
-    return (o: object | Array<any>) => {
-        if (!Array.isArray(fields)) {
-            if (typeof o !== "object" || o === null) {
-                return false;
-            }
-            for (const [key, value] of Object.entries(o)) {
-                const valueType = typeof value;
-                if (valueType === "number" && fields[key] === "boolean" && (value === 0 || value === 1)) {
-                    (o as Record<string, any>)[key] = !!value;  // Turn the compact boolean into a primitive boolean.
-                    continue;
-                }
-                if (fields.hasOwnProperty(key) && valueType !== fields[key]) {
-                    return false;
-                }
-            }
-            return true;
+const Boolish = z.union([
+    z.boolean(),
+    z.string()
+        .transform(value => value.trim().toLowerCase())
+        .refine(value => ['true', 'false', '1', '0'].includes(value))
+        .transform(value => value === 'true' || value === '1'),
+    z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
+]);
+
+const FiniteNumber = z.coerce.number().refine(Number.isFinite, 'Expected finite number');
+const NonNegativeNumber = z.coerce.number().refine(value => Number.isFinite(value) && value >= 0, 'Expected non-negative number');
+const PercentageNumber = z.coerce.number().refine(value => Number.isFinite(value) && value >= 0 && value <= 100, 'Expected value between 0 and 100');
+
+const Numberish = z.preprocess(input => {
+    if (typeof input === 'string') {
+        const trimmed = input.trim();
+        if (trimmed === '') {
+            return input;
         }
-        if (Array.isArray(o) && o.length === fields.length) {
-            for (let i = 0; i < fields.length; i++) {
-                const valueType = typeof o[i];
-                if (valueType === "number" && fields[i] === "boolean" && (o[i] === 0 || o[i] === 1)) {
-                    o[i] = !!o[i];  // Turn the compact boolean into a primitive boolean.
-                    continue;
-                }
-                if (valueType !== fields[i]) {
-                    return false;
-                }
-            }
-            return true;
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) {
+            return parsed;
         }
-        return false;
-    };
-}
+    }
+    return input;
+}, z.number());
 
-const CAMERA_PARAM_NAMES = ["lon", "lat", "alt", "h", "p", "r"] as const;
+const SearchSchema = z.union([
+    z.tuple([]),
+    z.tuple([FiniteNumber, z.string()]),
+]);
 
-function isFiniteNumber(value: unknown): value is number {
-    return typeof value === "number" && !isNaN(value) && isFinite(value);
-}
+const CoordinatesSchema = z.union([
+    z.tuple([]),
+    z.tuple([FiniteNumber, FiniteNumber]),
+]);
 
-function toNumber(value: string): number | undefined {
-    const parsed = Number(value);
-    return isFinite(parsed) ? parsed : undefined;
-}
+const TileFeatureIdSchema = z.object({
+    featureId: z.string(),
+    mapTileKey: z.string(),
+});
 
-function asFiniteNumber(value: unknown): number | undefined {
-    if (typeof value === 'number') {
-        return isFiniteNumber(value) ? value : undefined;
-    }
-    if (typeof value === 'string') {
-        return toNumber(value);
-    }
-    return undefined;
-}
+const SelectedFeaturesSchema = z.array(TileFeatureIdSchema);
 
-function canonicaliseForComparison(value: unknown): unknown {
-    if (typeof value === 'bigint') {
-        return value.toString();
-    }
-    return value;
-}
+const CameraPayloadSchema = z.object({
+    lon: FiniteNumber,
+    lat: FiniteNumber,
+    alt: FiniteNumber,
+    h: FiniteNumber,
+    p: FiniteNumber,
+    r: FiniteNumber,
+});
+type CameraPayload = z.infer<typeof CameraPayloadSchema>;
 
-function valuesEqual(left: unknown, right: unknown): boolean {
-    if (left === right) {
-        return true;
-    }
-    if (typeof left !== typeof right) {
-        return false;
-    }
-    try {
-        return JSON.stringify(left, (_key, val) => canonicaliseForComparison(val)) ===
-            JSON.stringify(right, (_key, val) => canonicaliseForComparison(val));
-    } catch (_error) {
-        return false;
-    }
-}
+const ViewRectangleSchema = z.union([
+    z.null(),
+    z.tuple([FiniteNumber, FiniteNumber, FiniteNumber, FiniteNumber]),
+]);
 
-function serializeCameraView(view: CameraViewState): string {
-    return JSON.stringify({
-        lon: view.destination.lon,
-        lat: view.destination.lat,
-        alt: view.destination.alt,
-        h: view.orientation.heading,
-        p: view.orientation.pitch,
-        r: view.orientation.roll,
-    });
-}
+const LayersSchema = z.array(z.tuple([z.string(), FiniteNumber, Boolish, Boolish]));
 
-function deserializeCameraView(raw: string, current: CameraViewState): CameraViewState | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-        return undefined;
-    }
+const StylesSchema = z.record(z.string(), z.object({
+    v: Boolish,
+    o: z.record(z.string(), z.union([Boolish, Numberish])),
+}));
 
-    const next: CameraViewState = {
-        destination: {...current.destination},
-        orientation: {...current.orientation},
-    };
-    let updated = false;
+const TilesLimitSchema = NonNegativeNumber;
 
-    const apply = (value: unknown, setter: (val: number) => void): boolean => {
-        if (value === undefined) {
-            return true;
-        }
-        const numeric = asFiniteNumber(value);
-        if (numeric === undefined) {
-            return false;
-        }
-        setter(numeric);
-        updated = true;
-        return true;
-    };
+const CoordinatesIdsSchema = z.array(z.string());
 
-    const flat = parsed as Record<string, unknown>;
-    if (!apply(flat['lon'], value => next.destination.lon = value)) {
-        return undefined;
-    }
-    if (!apply(flat['lat'], value => next.destination.lat = value)) {
-        return undefined;
-    }
-    if (!apply(flat['alt'], value => next.destination.alt = value)) {
-        return undefined;
-    }
-    if (!apply(flat['h'], value => next.orientation.heading = value)) {
-        return undefined;
-    }
-    if (!apply(flat['p'], value => next.orientation.pitch = value)) {
-        return undefined;
-    }
-    if (!apply(flat['r'], value => next.orientation.roll = value)) {
-        return undefined;
-    }
+const SelectedSourceDataPayloadSchema = z.object({
+    mapId: z.string(),
+    tileId: FiniteNumber,
+    layerId: z.string(),
+    address: z.string().optional(),
+    featureIds: z.string().optional(),
+});
+type SelectedSourceDataPayload = z.infer<typeof SelectedSourceDataPayloadSchema>;
+const SelectedSourceDataSchema = z.union([z.null(), SelectedSourceDataPayloadSchema]);
 
-    return updated ? next : undefined;
-}
+const PanelStateSchema = z.union([
+    z.tuple([]),
+    z.tuple([FiniteNumber, FiniteNumber]),
+]);
+
+const SearchHistorySchema = z.union([
+    z.null(),
+    z.tuple([FiniteNumber, z.string()]),
+]);
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
-}
-
-function parseBigInt(value: any): bigint | undefined {
-    if (value === undefined || value === null || value === "") {
-        return BigInt(0);
-    }
-    try {
-        return typeof value === 'bigint' ? value : BigInt(value);
-    } catch (_error) {
-        return undefined;
-    }
-}
-
-function normaliseSelectedSourceData(value: any): SelectedSourceData | null | undefined {
-    if (!value) {
-        return null;
-    }
-    if (Array.isArray(value) && value.length >= 3) {
-        const tileId = Number(value[0]);
-        if (!Number.isFinite(tileId)) {
-            return undefined;
-        }
-        const address = parseBigInt(value[3]);
-        return {
-            tileId,
-            layerId: String(value[1]),
-            mapId: String(value[2]),
-            address,
-            featureIds: value[4] !== undefined ? String(value[4]) : undefined,
-        };
-    }
-    return undefined;
-}
-
-function encodeSelectedSourceData(value: SelectedSourceData | null): string {
-    if (!value) {
-        return JSON.stringify([]);
-    }
-    return JSON.stringify([
-        value.tileId,
-        value.layerId,
-        value.mapId,
-        value.address !== undefined ? value.address.toString() : "",
-        value.featureIds ?? "",
-    ]);
-}
-
-function decodeSelectedSourceData(raw: string): SelectedSourceData | null | undefined {
-    try {
-        const parsed = JSON.parse(raw);
-        return normaliseSelectedSourceData(parsed);
-    } catch (_error) {
-        return undefined;
-    }
-}
-
-function safeJsonParse(raw: string): unknown | undefined {
-    try {
-        return JSON.parse(raw);
-    } catch (_error) {
-        return undefined;
-    }
-}
-
-function coerceBoolean(value: unknown): boolean | undefined {
-    if (typeof value === 'boolean') {
-        return value;
-    }
-    if (value === 1 || value === '1' || value === 'true') {
-        return true;
-    }
-    if (value === 0 || value === '0' || value === 'false') {
-        return false;
-    }
-    return undefined;
-}
-
-function deserializeSearch(raw: string): [number, string] | [] | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed)) {
-        return undefined;
-    }
-    if (parsed.length === 0) {
-        return [];
-    }
-    if (parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
-        return [parsed[0], parsed[1]];
-    }
-    return undefined;
-}
-
-function deserializeNumberArray(raw: string): number[] | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'number')) {
-        return undefined;
-    }
-    return parsed as number[];
-}
-
-function deserializeTileFeatureIds(raw: string): TileFeatureId[] | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed)) {
-        return undefined;
-    }
-    const validator = validateObjectsAndTypes({mapTileKey: "string", featureId: "string"});
-    if (!parsed.every(item => validator(item))) {
-        return undefined;
-    }
-    return parsed as TileFeatureId[];
-}
-
-function deserializeViewRectangle(raw: string): [number, number, number, number] | null | undefined {
-    if (raw === 'null') {
-        return null;
-    }
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed) || parsed.length !== 4 || !parsed.every(item => typeof item === 'number')) {
-        return undefined;
-    }
-    return parsed as [number, number, number, number];
-}
-
-function deserializeLayers(raw: string): Array<[string, number, boolean, boolean]> | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed)) {
-        return undefined;
-    }
-    const result: Array<[string, number, boolean, boolean]> = [];
-    for (const entry of parsed) {
-        if (!Array.isArray(entry) || entry.length !== 4) {
-            return undefined;
-        }
-        const [layerId, level, visibleRaw, tileBordersRaw] = entry;
-        if (typeof layerId !== 'string' || typeof level !== 'number') {
-            return undefined;
-        }
-        const visible = coerceBoolean(visibleRaw);
-        const tileBorders = coerceBoolean(tileBordersRaw);
-        if (visible === undefined || tileBorders === undefined) {
-            return undefined;
-        }
-        result.push([layerId, level, visible, tileBorders]);
-    }
-    return result;
-}
-
-function deserializeStyles(raw: string): Record<string, StyleURLParameters> | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-        return undefined;
-    }
-    const result: Record<string, StyleURLParameters> = {};
-    for (const [styleId, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!value || typeof value !== 'object') {
-            return undefined;
-        }
-        const v = coerceBoolean((value as Record<string, unknown>)['v']);
-        const optionsRaw = (value as Record<string, unknown>)['o'];
-        if (v === undefined || !optionsRaw || typeof optionsRaw !== 'object') {
-            return undefined;
-        }
-        const options: Record<string, boolean | number> = {};
-        for (const [optionKey, optionValue] of Object.entries(optionsRaw as Record<string, unknown>)) {
-            if (typeof optionValue === 'number') {
-                options[optionKey] = optionValue;
-                continue;
-            }
-            const optionBoolean = coerceBoolean(optionValue);
-            if (optionBoolean === undefined) {
-                return undefined;
-            }
-            options[optionKey] = optionBoolean;
-        }
-        result[styleId] = {v, o: options};
-    }
-    return result;
-}
-
-function deserializeTilesLimit(raw: string): number | undefined {
-    const value = Number(raw);
-    return Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-function deserializePanel(raw: string): PanelSizeState | undefined {
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed)) {
-        return undefined;
-    }
-    if (parsed.length === 0) {
-        return [];
-    }
-    if (parsed.length === 2 && parsed.every(item => typeof item === 'number')) {
-        return [parsed[0], parsed[1]] as PanelSizeState;
-    }
-    return undefined;
-}
-
-function deserializeSearchHistory(raw: string): [number, string] | null | undefined {
-    if (raw === 'null') {
-        return null;
-    }
-    const parsed = safeJsonParse(raw);
-    if (!Array.isArray(parsed) || parsed.length !== 2) {
-        return undefined;
-    }
-    if (typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
-        return [parsed[0], parsed[1]];
-    }
-    return undefined;
-}
-
-function validateCameraView(value: CameraViewState): boolean {
-    if (!value || typeof value !== 'object') {
-        return false;
-    }
-    const destination = value.destination;
-    const orientation = value.orientation;
-    return destination !== undefined && orientation !== undefined &&
-        isFiniteNumber(destination?.lon) &&
-        isFiniteNumber(destination?.lat) &&
-        isFiniteNumber(destination?.alt) &&
-        isFiniteNumber(orientation?.heading) &&
-        isFiniteNumber(orientation?.pitch) &&
-        isFiniteNumber(orientation?.roll);
 }
 
 @Injectable({providedIn: 'root'})
@@ -437,8 +158,7 @@ export class AppStateService {
     readonly searchState = this.createState<[number, string] | []>({
         name: 'search',
         defaultValue: [],
-        deserialize: (raw) => deserializeSearch(raw),
-        validate: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
+        schema: SearchSchema,
         urlParamName: 'search',
         urlIncludeInVisualizationOnly: false,
     });
@@ -446,9 +166,7 @@ export class AppStateService {
     readonly markerState = this.createState<boolean>({
         name: 'marker',
         defaultValue: false,
-        serialize: value => value ? '1' : '0',
-        deserialize: raw => coerceBoolean(raw),
-        validate: val => typeof val === 'boolean',
+        schema: Boolish,
         urlParamName: 'marker',
         urlIncludeInVisualizationOnly: false,
     });
@@ -456,8 +174,7 @@ export class AppStateService {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        deserialize: (raw) => deserializeNumberArray(raw),
-        validate: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
+        schema: CoordinatesSchema,
         urlParamName: 'markedPosition',
         urlIncludeInVisualizationOnly: false,
     });
@@ -465,31 +182,46 @@ export class AppStateService {
     readonly selectedFeaturesState = this.createState<TileFeatureId[]>({
         name: 'selected',
         defaultValue: [],
-        deserialize: (raw) => deserializeTileFeatureIds(raw),
-        validate: val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
+        schema: SelectedFeaturesSchema,
         urlParamName: 'selected',
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly cameraViewData = this.createState<CameraViewState>({
+    readonly cameraViewData = this.createState<CameraViewState, CameraPayload>({
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
             orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
         },
-        serialize: serializeCameraView,
-        deserialize: (raw, current) => deserializeCameraView(raw, current),
-        validate: value => validateCameraView(value),
+        schema: CameraPayloadSchema,
+        serialize: value => ({
+            lon: value.destination.lon,
+            lat: value.destination.lat,
+            alt: value.destination.alt,
+            h: value.orientation.heading,
+            p: value.orientation.pitch,
+            r: value.orientation.roll,
+        }),
+        deserialize: payload => ({
+            destination: {
+                lon: payload.lon,
+                lat: payload.lat,
+                alt: payload.alt,
+            },
+            orientation: {
+                heading: payload.h,
+                pitch: payload.p,
+                roll: payload.r,
+            },
+        }),
         urlParamName: 'cameraView',
         urlFormEncode: true,
-        urlFormParamNames: [...CAMERA_PARAM_NAMES],
     });
 
     readonly viewRectangleState = this.createState<[number, number, number, number] | null>({
         name: 'viewRectangle',
         defaultValue: null,
-        deserialize: (raw) => deserializeViewRectangle(raw),
-        validate: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(item => typeof item === 'number')),
+        schema: ViewRectangleSchema,
         urlParamName: 'viewRectangle',
         urlIncludeInVisualizationOnly: false,
     });
@@ -497,9 +229,7 @@ export class AppStateService {
     readonly mode2dState = this.createState<boolean>({
         name: 'mode2d',
         defaultValue: false,
-        serialize: value => value ? '1' : '0',
-        deserialize: raw => coerceBoolean(raw),
-        validate: val => typeof val === 'boolean',
+        schema: Boolish,
         urlParamName: 'mode2d',
         urlIncludeInVisualizationOnly: false,
     });
@@ -507,78 +237,55 @@ export class AppStateService {
     readonly osmEnabledState = this.createState<boolean>({
         name: 'osm',
         defaultValue: true,
-        serialize: value => value ? '1' : '0',
-        deserialize: raw => coerceBoolean(raw),
-        validate: val => typeof val === 'boolean',
+        schema: Boolish,
         urlParamName: 'osm',
     });
 
     readonly osmOpacityState = this.createState<number>({
         name: 'osmOpacity',
         defaultValue: 30,
-        serialize: value => value.toString(),
-        deserialize: raw => {
-            const parsed = Number(raw);
-            return Number.isFinite(parsed) ? parsed : undefined;
-        },
-        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
+        schema: PercentageNumber,
         urlParamName: 'osmOpacity',
     });
 
     readonly layersState = this.createState<Array<[string, number, boolean, boolean]>>({
         name: 'layers',
         defaultValue: [],
-        deserialize: (raw) => deserializeLayers(raw),
-        validate: val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
+        schema: LayersSchema,
         urlParamName: 'layers',
     });
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
-        deserialize: raw => deserializeStyles(raw),
-        validate: val => typeof val === 'object' && Object.entries(val as Record<string, StyleURLParameters>)
-            .every(([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v)),
+        schema: StylesSchema,
         urlParamName: 'styles',
     });
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
-        serialize: value => value.toString(),
-        deserialize: raw => deserializeTilesLimit(raw),
-        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        schema: TilesLimitSchema,
         urlParamName: 'tilesLoadLimit',
     });
 
     readonly tilesVisualizeLimitState = this.createState<number>({
         name: 'tilesVisualizeLimit',
         defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
-        serialize: value => value.toString(),
-        deserialize: raw => deserializeTilesLimit(raw),
-        validate: val => typeof val === 'number' && !isNaN(val) && val >= 0,
+        schema: TilesLimitSchema,
         urlParamName: 'tilesVisualizeLimit',
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
-        deserialize: raw => {
-            const parsed = safeJsonParse(raw);
-            if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'string')) {
-                return undefined;
-            }
-            return parsed as string[];
-        },
-        validate: val => Array.isArray(val) && val.every(item => typeof item === 'string')
+        schema: CoordinatesIdsSchema,
     });
 
-    readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
+    readonly selectedSourceDataState = this.createState<SelectedSourceData | null, SelectedSourceDataPayload | null>({
         name: 'selectedSourceData',
         defaultValue: null,
-        serialize: value => encodeSelectedSourceData(value),
-        deserialize: raw => decodeSelectedSourceData(raw),
-        validate: val => val === null || (typeof val.tileId === 'number' && typeof val.layerId === 'string' && typeof val.mapId === 'string'),
+        schema: SelectedSourceDataSchema,
         urlParamName: 'selectedSourceData',
         urlIncludeInVisualizationOnly: false,
     });
@@ -586,8 +293,7 @@ export class AppStateService {
     readonly panelState = this.createState<PanelSizeState>({
         name: 'panel',
         defaultValue: [] as PanelSizeState,
-        deserialize: raw => deserializePanel(raw),
-        validate: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && val.every(item => typeof item === 'number'))),
+        schema: PanelStateSchema,
         urlParamName: 'panel',
         urlIncludeInVisualizationOnly: false,
     });
@@ -595,16 +301,13 @@ export class AppStateService {
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
         name: 'legalInfoDialogVisible',
         defaultValue: false,
-        serialize: value => value ? '1' : '0',
-        deserialize: raw => coerceBoolean(raw),
-        validate: val => typeof val === 'boolean'
+        schema: Boolish,
     });
 
     readonly lastSearchHistoryEntry = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
-        deserialize: raw => deserializeSearchHistory(raw),
-        validate: val => val === null || (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')
+        schema: SearchHistorySchema,
     });
 
     constructor(private readonly router: Router,
@@ -649,8 +352,8 @@ export class AppStateService {
         return currentValue;
     }
 
-    private createState<T>(options: AppStateOptions<T>): AppState<T> {
-        return new AppState<T>(this.statePool, options);
+    private createState<T, SchemaValue = T>(options: AppStateOptions<T, SchemaValue>): AppState<T, SchemaValue> {
+        return new AppState<T, SchemaValue>(this.statePool, options);
     }
 
     private setupStateSubscriptions() {
@@ -683,7 +386,7 @@ export class AppStateService {
 
     private hasUrlBinding(state: AppState<unknown>): boolean {
         if (state.urlFormEncode) {
-            return state.urlFormParamNames.length > 0 || !!state.urlParamName;
+            return state.getFormFieldNames().length > 0 || !!state.urlParamName;
         }
         return !!state.urlParamName;
     }
@@ -746,7 +449,10 @@ export class AppStateService {
             }
             if (state.urlFormEncode) {
                 const encoded = this.encodeFormParams(state, serialized);
-                if (!encoded) {
+                if (!encoded || Object.keys(encoded).length === 0) {
+                    if (state.urlParamName) {
+                        params[state.urlParamName] = serialized;
+                    }
                     continue;
                 }
                 Object.assign(params, encoded);
@@ -768,84 +474,68 @@ export class AppStateService {
         if (!state.urlFormEncode) {
             return null;
         }
-        let parsed: unknown;
+        const fields = state.getFormFieldNames();
+        if (fields.length === 0) {
+            return null;
+        }
+
+        let payload: unknown;
         try {
-            parsed = JSON.parse(serialized);
+            payload = JSON.parse(serialized);
         } catch (error) {
             console.warn(`[AppStateService] Failed to encode URL params for state '${state.name}'`, error);
             return null;
         }
 
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            console.warn(`[AppStateService] Unsupported URL form payload for state '${state.name}'`);
+            return null;
+        }
+
         const result: Record<string, string> = {};
-        const names = state.urlFormParamNames;
-
-        if (Array.isArray(parsed)) {
-            for (let index = 0; index < names.length; index++) {
-                if (index >= parsed.length) {
-                    break;
-                }
-                const value = parsed[index];
-                if (value === undefined) {
-                    continue;
-                }
-                result[names[index]] = String(value);
+        for (const name of fields) {
+            if (!Object.prototype.hasOwnProperty.call(payload, name)) {
+                continue;
             }
-            return result;
+            const value = (payload as Record<string, unknown>)[name];
+            if (value === undefined) {
+                continue;
+            }
+            result[name] = String(value);
         }
 
-        if (parsed && typeof parsed === 'object') {
-            for (const name of names) {
-                if (!Object.prototype.hasOwnProperty.call(parsed, name)) {
-                    continue;
-                }
-                const value = (parsed as Record<string, unknown>)[name];
-                if (value === undefined) {
-                    continue;
-                }
-                result[name] = String(value);
-            }
-            if (names.length === 0 && state.urlParamName) {
-                result[state.urlParamName] = serialized;
-            }
-            return result;
-        }
-
-        console.warn(`[AppStateService] Unsupported URL form payload for state '${state.name}'`);
-        return null;
+        return Object.keys(result).length ? result : null;
     }
 
-    private extractUrlSerializedValue(state: AppState<unknown>, params: Params): string | undefined {
-        if (state.urlFormEncode) {
-            const collected: Record<string, string> = {};
-            let hasValue = false;
+    private extractUrlFormPayload(state: AppState<unknown>, params: Params): Record<string, string> | undefined {
+        if (!state.urlFormEncode) {
+            return undefined;
+        }
+        const fields = state.getFormFieldNames();
+        if (fields.length === 0) {
+            return undefined;
+        }
 
-            for (const name of state.urlFormParamNames) {
-                const raw = params[name];
-                if (raw === undefined) {
-                    continue;
-                }
-                if (Array.isArray(raw)) {
-                    this.logRejectedValue(state.name, 'url', raw);
-                    return undefined;
-                }
-                collected[name] = raw;
-                hasValue = true;
+        const collected: Record<string, string> = {};
+        let hasValue = false;
+
+        for (const field of fields) {
+            const raw = params[field];
+            if (raw === undefined) {
+                continue;
             }
-
-            if (!hasValue) {
-                const fallback = this.extractFallbackSerializedValue(state, params);
-                if (fallback !== undefined) {
-                    return fallback;
-                }
+            if (Array.isArray(raw)) {
+                this.logRejectedValue(state.name, 'url', raw);
                 return undefined;
             }
-            return JSON.stringify(collected);
+            collected[field] = raw;
+            hasValue = true;
         }
 
-        return this.extractFallbackSerializedValue(state, params);
+        return hasValue ? collected : undefined;
     }
 
-    private extractFallbackSerializedValue(state: AppState<unknown>, params: Params): string | undefined {
+    private extractRawParamValue(state: AppState<unknown>, params: Params): string | undefined {
         if (!state.urlParamName) {
             return undefined;
         }
@@ -871,11 +561,7 @@ export class AppStateService {
                 if (value === undefined) {
                     continue;
                 }
-                if (!state.validate(value)) {
-                    this.logRejectedValue(state.name, 'storage', value);
-                    continue;
-                }
-                this.applyStateValue(state, value);
+                state.next(value);
             }
         });
     }
@@ -885,7 +571,16 @@ export class AppStateService {
             if (!this.shouldSyncUrlForState(state)) {
                 continue;
             }
-            const raw = this.extractUrlSerializedValue(state, params);
+            const formPayload = this.extractUrlFormPayload(state, params);
+            if (formPayload !== undefined) {
+                const parsed = state.parsePayload(formPayload);
+                if (parsed !== undefined) {
+                    state.next(parsed);
+                    continue;
+                }
+            }
+
+            const raw = this.extractRawParamValue(state, params);
             if (raw === undefined) {
                 continue;
             }
@@ -893,23 +588,12 @@ export class AppStateService {
             if (value === undefined) {
                 continue;
             }
-            if (!state.validate(value)) {
-                this.logRejectedValue(state.name, 'url', value);
-                continue;
-            }
-            this.applyStateValue(state as AppState<unknown>, value as unknown);
+            state.next(value);
         }
-    }
-
-    private applyStateValue<T>(state: AppState<T>, value: T): void {
-        if (valuesEqual(state.getValue(), value)) {
-            return;
-        }
-        state.next(value);
     }
 
     private updateScalingFactor(altitude: number): void {
-        if (!isFiniteNumber(altitude) || altitude <= 0) {
+        if (!Number.isFinite(altitude) || altitude <= 0) {
             this.scalingFactor = 1;
             return;
         }
@@ -1025,7 +709,14 @@ export class AppStateService {
     }
 
     setSelectedSourceData(selection: SelectedSourceData) {
-        const normalized = normaliseSelectedSourceData(selection);
+        const payload = {
+            mapId: selection.mapId,
+            tileId: selection.tileId,
+            layerId: selection.layerId,
+            address: selection.address?.toString(),
+            featureIds: selection.featureIds ?? undefined,
+        };
+        const normalized = this.selectedSourceDataState.parsePayload(payload);
         if (normalized === undefined) {
             this.logRejectedValue('selectedSourceData', 'runtime', selection);
             return;
@@ -1043,7 +734,7 @@ export class AppStateService {
 
     setSelectedFeatures(newSelection: TileFeatureId[]) {
         const currentSelection = this.selectedFeaturesState.getValue();
-        if (valuesEqual(currentSelection, newSelection)) {
+        if (newSelection.length !== currentSelection.length || newSelection.some( (v, i) => v.featureId !== currentSelection[i].featureId || v.mapTileKey !== currentSelection[i].mapTileKey)) {
             return false;
         }
         this.selectedFeaturesState.next(newSelection.map(feature => ({...feature})));
