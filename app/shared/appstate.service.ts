@@ -907,10 +907,6 @@ export class AppStateService {
         window.location.href = origin + pathname;
     }
 
-    setViewRectangle(rectangle: [number, number, number, number] | null) {
-        this.viewRectangleState.next(rectangle);
-    }
-
     onInspectionContainerResize(event: MouseEvent): void {
         const element = event.target as HTMLElement;
         if (!element.classList.contains("resizable-container")) {
