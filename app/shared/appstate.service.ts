@@ -4,9 +4,8 @@ import {ReplaySubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
-import {AppModeService} from "./app-mode.service";
 import {MapInfoItem} from "../mapdata/map.service";
-import {AppState, AppStateOptions} from "./app-state";
+import {AppState, AppStateOptions, Boolish} from "./app-state";
 import {z} from "zod";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
@@ -34,29 +33,6 @@ export interface CameraViewState {
 
 export type PanelSizeState = [] | [number, number];
 
-const Boolish = z.union([
-    z.boolean(),
-    z.string()
-        .transform(value => value.trim().toLowerCase())
-        .refine(value => ['true', 'false', '1', '0'].includes(value))
-        .transform(value => value === 'true' || value === '1'),
-    z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
-]);
-
-const Numberish = z.preprocess(input => {
-    if (typeof input === 'string') {
-        const trimmed = input.trim();
-        if (trimmed === '') {
-            return input;
-        }
-        const parsed = Number(trimmed);
-        if (Number.isFinite(parsed)) {
-            return parsed;
-        }
-    }
-    return input;
-}, z.number());
-
 const SearchSchema = z.union([
     z.tuple([]),
     z.tuple([z.coerce.number(), z.string()]),
@@ -80,7 +56,6 @@ const CameraPayloadSchema = z.object({
     p: z.coerce.number().optional(),
     r: z.coerce.number().optional()
 });
-type CameraPayload = z.infer<typeof CameraPayloadSchema>;
 
 const ViewRectangleSchema = z.union([
     z.null(),
@@ -91,7 +66,7 @@ const LayersSchema = z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Bo
 
 const StylesSchema = z.record(z.string(), z.object({
     v: Boolish,
-    o: z.record(z.string(), z.union([Boolish, Numberish])),
+    o: z.record(z.string(), z.union([z.boolean(), z.number()])),
 }));
 
 const SelectedSourceDataPayloadSchema = z.object({

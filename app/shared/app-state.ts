@@ -17,6 +17,35 @@ export interface AppStateOptions<T> {
     urlIncludeInVisualizationOnly?: boolean;
 }
 
+export const Boolish = z.union([
+    z.boolean(),
+    z.string()
+        .transform(value => value.trim().toLowerCase())
+        .refine(value => ['true', 'false', '1', '0'].includes(value))
+        .transform(value => value === 'true' || value === '1'),
+    z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
+]);
+
+function isScalar(schema: z.ZodTypeAny): boolean {
+    if (schema === Boolish) {
+        return true;
+    }
+    if (schema instanceof z.ZodUnion) {
+        return schema.options.every(opt => isScalar(opt as ZodTypeAny));
+    }
+    const scalarKinds = [
+        z.ZodString,
+        z.ZodNumber,
+        z.ZodBoolean,
+        z.ZodBigInt,
+        z.ZodDate,
+        z.ZodSymbol,
+        z.ZodUndefined,
+        z.ZodNull,
+    ];
+    return scalarKinds.some(type => schema instanceof type);
+}
+
 export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
@@ -65,6 +94,10 @@ export class AppState<T> extends BehaviorSubject<T> {
                         result[formField] = String((payload as Record<string, any>)[formField]);
                     }
                 } else {
+                    if (isScalar(this.schema)) {
+                        result[this.urlParamName!] = String(payload);
+                        return result;
+                    }
                     result[this.urlParamName!] = JSON.stringify(payload);
                 }
             } else {
@@ -101,6 +134,9 @@ export class AppState<T> extends BehaviorSubject<T> {
                     parsed = collected;
                 }
                 else if (raw[this.urlParamName!]) {
+                    if (isScalar(this.schema)) {
+                        parsed = raw[this.urlParamName!];
+                    }
                     parsed = JSON.parse(raw[this.urlParamName!]);
                 }
             }
