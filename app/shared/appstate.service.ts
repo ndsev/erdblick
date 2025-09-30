@@ -1,4 +1,4 @@
-import {Injectable} from "@angular/core";
+import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
 import {ReplaySubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
@@ -43,10 +43,6 @@ const Boolish = z.union([
     z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
 ]);
 
-const FiniteNumber = z.coerce.number().refine(Number.isFinite, 'Expected finite number');
-const NonNegativeNumber = z.coerce.number().refine(value => Number.isFinite(value) && value >= 0, 'Expected non-negative number');
-const PercentageNumber = z.coerce.number().refine(value => Number.isFinite(value) && value >= 0 && value <= 100, 'Expected value between 0 and 100');
-
 const Numberish = z.preprocess(input => {
     if (typeof input === 'string') {
         const trimmed = input.trim();
@@ -63,12 +59,12 @@ const Numberish = z.preprocess(input => {
 
 const SearchSchema = z.union([
     z.tuple([]),
-    z.tuple([FiniteNumber, z.string()]),
+    z.tuple([z.coerce.number(), z.string()]),
 ]);
 
 const CoordinatesSchema = z.union([
     z.tuple([]),
-    z.tuple([FiniteNumber, FiniteNumber]),
+    z.tuple([z.coerce.number(), z.coerce.number()]),
 ]);
 
 const TileFeatureIdSchema = z.object({
@@ -76,37 +72,31 @@ const TileFeatureIdSchema = z.object({
     mapTileKey: z.string(),
 });
 
-const SelectedFeaturesSchema = z.array(TileFeatureIdSchema);
-
 const CameraPayloadSchema = z.object({
-    lon: FiniteNumber,
-    lat: FiniteNumber,
-    alt: FiniteNumber,
-    h: FiniteNumber,
-    p: FiniteNumber,
-    r: FiniteNumber,
+    lon: z.coerce.number(),
+    lat: z.coerce.number(),
+    alt: z.coerce.number(),
+    h: z.coerce.number(),
+    p: z.coerce.number(),
+    r: z.coerce.number(),
 });
 type CameraPayload = z.infer<typeof CameraPayloadSchema>;
 
 const ViewRectangleSchema = z.union([
     z.null(),
-    z.tuple([FiniteNumber, FiniteNumber, FiniteNumber, FiniteNumber]),
+    z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]),
 ]);
 
-const LayersSchema = z.array(z.tuple([z.string(), FiniteNumber, Boolish, Boolish]));
+const LayersSchema = z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish]));
 
 const StylesSchema = z.record(z.string(), z.object({
     v: Boolish,
     o: z.record(z.string(), z.union([Boolish, Numberish])),
 }));
 
-const TilesLimitSchema = NonNegativeNumber;
-
-const CoordinatesIdsSchema = z.array(z.string());
-
 const SelectedSourceDataPayloadSchema = z.object({
     mapId: z.string(),
-    tileId: FiniteNumber,
+    tileId: z.coerce.number(),
     layerId: z.string(),
     address: z.string().optional(),
     featureIds: z.string().optional(),
@@ -116,12 +106,12 @@ const SelectedSourceDataSchema = z.union([z.null(), SelectedSourceDataPayloadSch
 
 const PanelStateSchema = z.union([
     z.tuple([]),
-    z.tuple([FiniteNumber, FiniteNumber]),
+    z.tuple([z.coerce.number(), z.coerce.number()]),
 ]);
 
 const SearchHistorySchema = z.union([
     z.null(),
-    z.tuple([FiniteNumber, z.string()]),
+    z.tuple([z.coerce.number(), z.string()]),
 ]);
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
@@ -130,7 +120,7 @@ function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
 }
 
 @Injectable({providedIn: 'root'})
-export class AppStateService {
+export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly readySubject = new ReplaySubject<void>(1);
@@ -159,7 +149,7 @@ export class AppStateService {
         name: 'search',
         defaultValue: [],
         schema: SearchSchema,
-        urlParamName: 'search',
+        urlParamName: 's',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -167,7 +157,7 @@ export class AppStateService {
         name: 'marker',
         defaultValue: false,
         schema: Boolish,
-        urlParamName: 'marker',
+        urlParamName: 'm',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -175,15 +165,15 @@ export class AppStateService {
         name: 'markedPosition',
         defaultValue: [],
         schema: CoordinatesSchema,
-        urlParamName: 'markedPosition',
+        urlParamName: 'mp',
         urlIncludeInVisualizationOnly: false,
     });
 
     readonly selectedFeaturesState = this.createState<TileFeatureId[]>({
         name: 'selected',
         defaultValue: [],
-        schema: SelectedFeaturesSchema,
-        urlParamName: 'selected',
+        schema: z.array(TileFeatureIdSchema),
+        urlParamName: 'sel',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -214,7 +204,7 @@ export class AppStateService {
                 roll: payload.r,
             },
         }),
-        urlParamName: 'cameraView',
+        urlParamName: 'c',
         urlFormEncode: true,
     });
 
@@ -222,7 +212,7 @@ export class AppStateService {
         name: 'viewRectangle',
         defaultValue: null,
         schema: ViewRectangleSchema,
-        urlParamName: 'viewRectangle',
+        urlParamName: 'vr',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -230,7 +220,7 @@ export class AppStateService {
         name: 'mode2d',
         defaultValue: false,
         schema: Boolish,
-        urlParamName: 'mode2d',
+        urlParamName: 'm2d',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -244,58 +234,56 @@ export class AppStateService {
     readonly osmOpacityState = this.createState<number>({
         name: 'osmOpacity',
         defaultValue: 30,
-        schema: PercentageNumber,
-        urlParamName: 'osmOpacity',
+        schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
+        urlParamName: 'osmOp',
     });
 
     readonly layersState = this.createState<Array<[string, number, boolean, boolean]>>({
         name: 'layers',
         defaultValue: [],
         schema: LayersSchema,
-        urlParamName: 'layers',
+        urlParamName: 'l',
     });
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
         schema: StylesSchema,
-        urlParamName: 'styles',
+        urlParamName: 'sty',
     });
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
-        schema: TilesLimitSchema,
-        urlParamName: 'tilesLoadLimit',
+        schema: z.coerce.number().nonnegative(),
+        urlParamName: 'tll',
     });
 
     readonly tilesVisualizeLimitState = this.createState<number>({
         name: 'tilesVisualizeLimit',
         defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
-        schema: TilesLimitSchema,
-        urlParamName: 'tilesVisualizeLimit',
-    });
-
-    readonly enabledCoordsTileIdsState = this.createState<string[]>({
-        name: 'enabledCoordsTileIds',
-        defaultValue: ["WGS84"],
-        schema: CoordinatesIdsSchema,
+        schema: z.coerce.number().nonnegative(),
+        urlParamName: 'tvl',
     });
 
     readonly selectedSourceDataState = this.createState<SelectedSourceData | null, SelectedSourceDataPayload | null>({
         name: 'selectedSourceData',
         defaultValue: null,
         schema: SelectedSourceDataSchema,
-        urlParamName: 'selectedSourceData',
+        urlParamName: 'ssd',
         urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly enabledCoordsTileIdsState = this.createState<string[]>({
+        name: 'enabledCoordsTileIds',
+        defaultValue: ["WGS84"],
+        schema: z.array(z.string()),
     });
 
     readonly panelState = this.createState<PanelSizeState>({
         name: 'panel',
         defaultValue: [] as PanelSizeState,
         schema: PanelStateSchema,
-        urlParamName: 'panel',
-        urlIncludeInVisualizationOnly: false,
     });
 
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
@@ -328,6 +316,10 @@ export class AppStateService {
         this.router.events.pipe(filter(event => event instanceof NavigationEnd)).subscribe(() => {
             this.withHydration(() => this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {}));
         });
+    }
+
+    ngOnDestroy(): void {
+        this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
     }
 
     get cameraMoveUnits() {
@@ -395,10 +387,7 @@ export class AppStateService {
         if (!this.hasUrlBinding(state)) {
             return false;
         }
-        if (this.appModeService.isVisualizationOnly && state.urlIncludeInVisualizationOnly === false) {
-            return false;
-        }
-        return true;
+        return !(this.appModeService.isVisualizationOnly && state.urlIncludeInVisualizationOnly === false);
     }
 
     private scheduleFlush(): void {

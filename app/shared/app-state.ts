@@ -51,7 +51,7 @@ export class AppState<T, SchemaValue = T> extends BehaviorSubject<T> {
         this.next(this.defaultValue);
     }
 
-    getSerializablePayload(value: T = this.getValue()): unknown | undefined {
+    private getSerializablePayload(value: T = this.getValue()): unknown | undefined {
         try {
             return this.serializer(value);
         } catch (error) {
@@ -66,7 +66,7 @@ export class AppState<T, SchemaValue = T> extends BehaviorSubject<T> {
             return undefined;
         }
         try {
-            return JSON.stringify(payload);
+            return JSON.stringify(payload, compactBooleans);
         } catch (error) {
             console.warn(`[AppState:${this.name}] Failed to serialize value`, error);
             return undefined;
