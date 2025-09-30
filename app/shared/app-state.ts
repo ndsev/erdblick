@@ -1,21 +1,23 @@
 import {BehaviorSubject} from "rxjs";
-import {z, ZodType, ZodTypeAny} from "zod";
+import {z, ZodTypeAny} from "zod";
+import {Params} from "@angular/router";
+import {environment} from "../environments/environment";
 
-export type AppStateSerializer<T> = (value: T) => unknown;
-export type AppStateDeserializer<T, SchemaValue = T> = (value: SchemaValue, currentValue: T) => T;
+export type AppStatePreProcessor<T> = (value: T) => unknown;
+export type AppStatePostProcessor<T> = (value: ZodTypeAny, currentValue: T) => T;
 
-export interface AppStateOptions<T, SchemaValue = T> {
+export interface AppStateOptions<T> {
     name: string;
     defaultValue: T;
-    schema: ZodType<SchemaValue>;
-    serialize?: AppStateSerializer<T>;
-    deserialize?: AppStateDeserializer<T, SchemaValue>;
+    schema: ZodTypeAny;
+    preprocess?: AppStatePreProcessor<T>;
+    postprocess?: AppStatePostProcessor<T>;
     urlParamName?: string;
     urlFormEncode?: boolean;
     urlIncludeInVisualizationOnly?: boolean;
 }
 
-export class AppState<T, SchemaValue = T> extends BehaviorSubject<T> {
+export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
 
@@ -23,19 +25,18 @@ export class AppState<T, SchemaValue = T> extends BehaviorSubject<T> {
     readonly urlFormEncode: boolean;
     readonly urlIncludeInVisualizationOnly?: boolean;
 
-    private readonly serializer: AppStateSerializer<T>;
-    private readonly deserializer?: AppStateDeserializer<T, SchemaValue>;
-    private readonly schema: ZodType<SchemaValue>;
-    private cachedFormKeys: readonly string[] | null = null;
+    private readonly preprocess?: AppStatePreProcessor<T>;
+    private readonly postprocess?: AppStatePostProcessor<T>;
+    private readonly schema: ZodTypeAny;
 
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T, SchemaValue>) {
+    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
         super(options.defaultValue);
         this.name = options.name;
         this.defaultValue = options.defaultValue;
 
         this.schema = options.schema;
-        this.serializer = options.serialize ?? (value => compactBooleans(value));
-        this.deserializer = options.deserialize;
+        this.preprocess = options.preprocess ?? (value => compactBooleans(value));
+        this.postprocess = options.postprocess;
 
         this.urlParamName = options.urlParamName;
         this.urlFormEncode = options.urlFormEncode ?? false;
@@ -51,67 +52,74 @@ export class AppState<T, SchemaValue = T> extends BehaviorSubject<T> {
         this.next(this.defaultValue);
     }
 
-    private getSerializablePayload(value: T = this.getValue()): unknown | undefined {
-        try {
-            return this.serializer(value);
-        } catch (error) {
-            console.warn(`[AppState:${this.name}] Failed to prepare serialization payload`, error);
-            return undefined;
-        }
-    }
-
-    serialize(value: T = this.getValue()): string | undefined {
-        const payload = this.getSerializablePayload(value);
-        if (payload === undefined) {
+    serialize(forUrl: boolean): Record<string, string> | undefined {
+        if (forUrl && !this.isUrlState()) {
             return undefined;
         }
         try {
-            return JSON.stringify(payload, compactBooleans);
+            const result: Record<string, string> = {};
+            const payload = this.preprocess ? this.preprocess(this.getValue()) : this.getValue();
+            if (forUrl) {
+                if (this.urlFormEncode) {
+                    for (const formField of this.getFormFieldNames()) {
+                        result[formField] = String((payload as Record<string, any>)[formField]);
+                    }
+                } else {
+                    result[this.urlParamName!] = JSON.stringify(payload);
+                }
+            } else {
+                result[this.name] = JSON.stringify(payload);
+            }
+            return result;
         } catch (error) {
             console.warn(`[AppState:${this.name}] Failed to serialize value`, error);
             return undefined;
         }
     }
 
-    parsePayload(payload: unknown): T | undefined {
-        try {
-            const parsed = this.schema.parse(payload) as unknown as SchemaValue;
-            const value = this.deserializer ? this.deserializer(parsed, this.getValue()) : parsed;
-            return value as unknown as T;
-        } catch (error) {
-            console.warn(`[AppState:${this.name}] Failed to parse payload`, error);
-            return undefined;
-        }
+    isUrlState(): boolean {
+        return (this.urlParamName !== undefined || this.urlFormEncode) &&
+            !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
     }
 
-    deserialize(raw: string): T | undefined {
+    deserialize(raw: string | Params) {
         try {
-            const parsed = JSON.parse(raw);
-            return this.parsePayload(parsed);
+            let parsed = undefined;
+            if (typeof raw === 'string') {
+                if (raw) {
+                    parsed = JSON.parse(raw);
+                }
+            } else if (this.isUrlState()) {
+                if (this.urlFormEncode) {
+                    const collected: Record<string, string> = {};
+                    for (const field of this.getFormFieldNames()) {
+                        if (raw[field] === undefined) {
+                            continue;
+                        }
+                        collected[field] = raw[field];
+                    }
+                    parsed = collected;
+                }
+                else if (raw[this.urlParamName!]) {
+                    parsed = JSON.parse(raw[this.urlParamName!]);
+                }
+            }
+            if (parsed) {
+                const verified = this.schema.parse(parsed);
+                const value = this.postprocess ? this.postprocess(verified as any, this.getValue()) : verified;
+                this.next(value as T);
+            }
         } catch (error) {
-            console.warn(`[AppState:${this.name}] Failed to deserialize value`, error);
-            return undefined;
+            console.error(`[AppState:${this.name}:${this.urlParamName}] Failed to deserialize value from `, raw, error);
         }
     }
 
     getFormFieldNames(): readonly string[] {
-        if (!this.urlFormEncode) {
+        if (!this.urlFormEncode || !(this.schema instanceof z.ZodObject)) {
             return [];
         }
-        if (this.cachedFormKeys) {
-            return this.cachedFormKeys;
-        }
-        const keys = extractSchemaFieldNames(this.schema);
-        this.cachedFormKeys = keys;
-        return keys;
+        return Object.keys(this.schema.shape);
     }
-}
-
-function extractSchemaFieldNames(schema: ZodTypeAny): readonly string[] {
-    if (schema instanceof z.ZodObject) {
-        return Object.keys(schema.shape);
-    }
-    return [];
 }
 
 function compactBooleans(value: unknown): unknown {
