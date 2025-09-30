@@ -73,12 +73,12 @@ const TileFeatureIdSchema = z.object({
 });
 
 const CameraPayloadSchema = z.object({
-    lon: z.coerce.number(),
-    lat: z.coerce.number(),
-    alt: z.coerce.number(),
-    h: z.coerce.number(),
-    p: z.coerce.number(),
-    r: z.coerce.number(),
+    lon: z.coerce.number().optional(),
+    lat: z.coerce.number().optional(),
+    alt: z.coerce.number().optional(),
+    h: z.coerce.number().optional(),
+    p: z.coerce.number().optional(),
+    r: z.coerce.number().optional()
 });
 type CameraPayload = z.infer<typeof CameraPayloadSchema>;
 
@@ -177,14 +177,14 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly cameraViewData = this.createState<CameraViewState, CameraPayload>({
+    readonly cameraViewData = this.createState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
             orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
         },
         schema: CameraPayloadSchema,
-        serialize: value => ({
+        preprocess: (value: any) => ({
             lon: value.destination.lon,
             lat: value.destination.lat,
             alt: value.destination.alt,
@@ -192,19 +192,18 @@ export class AppStateService implements OnDestroy {
             p: value.orientation.pitch,
             r: value.orientation.roll,
         }),
-        deserialize: payload => ({
+        postprocess: (payload: any, currentValue: CameraViewState) => ({
             destination: {
-                lon: payload.lon,
-                lat: payload.lat,
-                alt: payload.alt,
+                lon: payload.lon ?? currentValue.destination.lon,
+                lat: payload.lat ?? currentValue.destination.lat,
+                alt: payload.alt ?? currentValue.destination.alt,
             },
             orientation: {
-                heading: payload.h,
-                pitch: payload.p,
-                roll: payload.r,
+                heading: payload.h ?? currentValue.orientation.heading,
+                pitch: payload.p ?? currentValue.orientation.pitch,
+                roll: payload.r ?? currentValue.orientation.roll,
             },
         }),
-        urlParamName: 'c',
         urlFormEncode: true,
     });
 
@@ -266,7 +265,7 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'tvl',
     });
 
-    readonly selectedSourceDataState = this.createState<SelectedSourceData | null, SelectedSourceDataPayload | null>({
+    readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
         name: 'selectedSourceData',
         defaultValue: null,
         schema: SelectedSourceDataSchema,
@@ -298,8 +297,7 @@ export class AppStateService implements OnDestroy {
         schema: SearchHistorySchema,
     });
 
-    constructor(private readonly router: Router,
-                private readonly appModeService: AppModeService) {
+    constructor(private readonly router: Router) {
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
         this.inspectionContainerWidth = 40 * this.baseFontSize;
         this.inspectionContainerHeight = window.innerHeight - 10.5 * this.baseFontSize;
@@ -344,8 +342,8 @@ export class AppStateService implements OnDestroy {
         return currentValue;
     }
 
-    private createState<T, SchemaValue = T>(options: AppStateOptions<T, SchemaValue>): AppState<T, SchemaValue> {
-        return new AppState<T, SchemaValue>(this.statePool, options);
+    private createState<T>(options: AppStateOptions<T>): AppState<T> {
+        return new AppState<T>(this.statePool, options);
     }
 
     private setupStateSubscriptions() {
@@ -369,25 +367,11 @@ export class AppStateService implements OnDestroy {
         }
 
         this.pendingStorageSync = true;
-        if (this.shouldSyncUrlForState(state)) {
+        if (state.isUrlState()) {
             this.pendingUrlSync = true;
         }
 
         this.scheduleFlush();
-    }
-
-    private hasUrlBinding(state: AppState<unknown>): boolean {
-        if (state.urlFormEncode) {
-            return state.getFormFieldNames().length > 0 || !!state.urlParamName;
-        }
-        return !!state.urlParamName;
-    }
-
-    private shouldSyncUrlForState(state: AppState<unknown>): boolean {
-        if (!this.hasUrlBinding(state)) {
-            return false;
-        }
-        return !(this.appModeService.isVisualizationOnly && state.urlIncludeInVisualizationOnly === false);
     }
 
     private scheduleFlush(): void {
@@ -414,12 +398,14 @@ export class AppStateService implements OnDestroy {
 
     private persistStates(): void {
         for (const state of this.statePool.values()) {
-            const serialized = state.serialize();
-            if (serialized === undefined) {
-                continue;
-            }
             try {
-                localStorage.setItem(state.name, serialized);
+                const serialized = state.serialize(false);
+                if (serialized === undefined) {
+                    continue;
+                }
+                for (const [k, v] of Object.entries(serialized)) {
+                    localStorage.setItem(k, v);
+                }
             } catch (error) {
                 console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
             }
@@ -429,24 +415,15 @@ export class AppStateService implements OnDestroy {
     private syncUrl(): void {
         const params: Record<string, string> = {};
         for (const state of this.statePool.values()) {
-            if (!this.shouldSyncUrlForState(state)) {
+            if (!state.isUrlState()) {
                 continue;
             }
-            const serialized = state.serialize();
+            const serialized = state.serialize(true);
             if (serialized === undefined) {
                 continue;
             }
-            if (state.urlFormEncode) {
-                const encoded = this.encodeFormParams(state, serialized);
-                if (!encoded || Object.keys(encoded).length === 0) {
-                    if (state.urlParamName) {
-                        params[state.urlParamName] = serialized;
-                    }
-                    continue;
-                }
-                Object.assign(params, encoded);
-            } else if (state.urlParamName) {
-                params[state.urlParamName] = serialized;
+            for (const [k, v] of Object.entries(serialized)) {
+                params[k] = v;
             }
         }
         const replaceUrl = this.replaceUrl;
@@ -459,127 +436,23 @@ export class AppStateService implements OnDestroy {
         });
     }
 
-    private encodeFormParams(state: AppState<unknown>, serialized: string): Record<string, string> | null {
-        if (!state.urlFormEncode) {
-            return null;
-        }
-        const fields = state.getFormFieldNames();
-        if (fields.length === 0) {
-            return null;
-        }
-
-        let payload: unknown;
-        try {
-            payload = JSON.parse(serialized);
-        } catch (error) {
-            console.warn(`[AppStateService] Failed to encode URL params for state '${state.name}'`, error);
-            return null;
-        }
-
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-            console.warn(`[AppStateService] Unsupported URL form payload for state '${state.name}'`);
-            return null;
-        }
-
-        const result: Record<string, string> = {};
-        for (const name of fields) {
-            if (!Object.prototype.hasOwnProperty.call(payload, name)) {
-                continue;
-            }
-            const value = (payload as Record<string, unknown>)[name];
-            if (value === undefined) {
-                continue;
-            }
-            result[name] = String(value);
-        }
-
-        return Object.keys(result).length ? result : null;
-    }
-
-    private extractUrlFormPayload(state: AppState<unknown>, params: Params): Record<string, string> | undefined {
-        if (!state.urlFormEncode) {
-            return undefined;
-        }
-        const fields = state.getFormFieldNames();
-        if (fields.length === 0) {
-            return undefined;
-        }
-
-        const collected: Record<string, string> = {};
-        let hasValue = false;
-
-        for (const field of fields) {
-            const raw = params[field];
-            if (raw === undefined) {
-                continue;
-            }
-            if (Array.isArray(raw)) {
-                this.logRejectedValue(state.name, 'url', raw);
-                return undefined;
-            }
-            collected[field] = raw;
-            hasValue = true;
-        }
-
-        return hasValue ? collected : undefined;
-    }
-
-    private extractRawParamValue(state: AppState<unknown>, params: Params): string | undefined {
-        if (!state.urlParamName) {
-            return undefined;
-        }
-        const raw = params[state.urlParamName];
-        if (raw === undefined) {
-            return undefined;
-        }
-        if (Array.isArray(raw)) {
-            this.logRejectedValue(state.name, 'url', raw);
-            return undefined;
-        }
-        return typeof raw === 'string' ? raw : undefined;
-    }
-
     private hydrateFromStorage(): void {
         this.withHydration(() => {
             for (const state of this.statePool.values()) {
                 const raw = localStorage.getItem(state.name);
-                if (raw === null) {
-                    continue;
+                if (raw) {
+                    state.deserialize(raw);
                 }
-                const value = state.deserialize(raw);
-                if (value === undefined) {
-                    continue;
-                }
-                state.next(value);
             }
         });
     }
 
     private hydrateFromUrl(params: Params): void {
-        for (const state of this.statePool.values()) {
-            if (!this.shouldSyncUrlForState(state)) {
-                continue;
+        this.withHydration(() => {
+            for (const state of this.statePool.values()) {
+                state.deserialize(params);
             }
-            const formPayload = this.extractUrlFormPayload(state, params);
-            if (formPayload !== undefined) {
-                const parsed = state.parsePayload(formPayload);
-                if (parsed !== undefined) {
-                    state.next(parsed);
-                    continue;
-                }
-            }
-
-            // TODO: Re-introduce logic to merge style config rather than replacing it.
-            const raw = this.extractRawParamValue(state, params);
-            if (raw === undefined) {
-                continue;
-            }
-            const value = state.deserialize(raw);
-            if (value === undefined) {
-                continue;
-            }
-            state.next(value);
-        }
+        });
     }
 
     private updateScalingFactor(altitude: number): void {
@@ -598,10 +471,6 @@ export class AppStateService implements OnDestroy {
         } finally {
             this.isHydrating = previous;
         }
-    }
-
-    private logRejectedValue(stateName: string, source: 'url' | 'storage' | 'runtime', raw: unknown): void {
-        console.warn(`[AppStateService] Rejected ${source} value for state '${stateName}'`, raw);
     }
 
     // -----------------
@@ -699,19 +568,7 @@ export class AppStateService implements OnDestroy {
     }
 
     setSelectedSourceData(selection: SelectedSourceData) {
-        const payload = {
-            mapId: selection.mapId,
-            tileId: selection.tileId,
-            layerId: selection.layerId,
-            address: selection.address?.toString(),
-            featureIds: selection.featureIds ?? undefined,
-        };
-        const normalized = this.selectedSourceDataState.parsePayload(payload);
-        if (normalized === undefined) {
-            this.logRejectedValue('selectedSourceData', 'runtime', selection);
-            return;
-        }
-        this.selectedSourceDataState.next(normalized);
+        this.selectedSourceDataState.next(selection);
     }
 
     unsetSelectedSourceData() {
