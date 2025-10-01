@@ -94,11 +94,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                         result[formField] = String((payload as Record<string, any>)[formField]);
                     }
                 } else {
-                    if (isScalar(this.schema)) {
-                        result[this.urlParamName!] = String(payload);
-                        return result;
-                    }
-                    result[this.urlParamName!] = JSON.stringify(payload);
+                    result[this.urlParamName!] = isScalar(this.schema) ? String(payload) : JSON.stringify(payload);
                 }
             } else {
                 result[this.name] = JSON.stringify(payload);
@@ -134,10 +130,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                     parsed = collected;
                 }
                 else if (raw[this.urlParamName!]) {
-                    if (isScalar(this.schema)) {
-                        parsed = raw[this.urlParamName!];
-                    }
-                    parsed = JSON.parse(raw[this.urlParamName!]);
+                    parsed = isScalar(this.schema) ? raw[this.urlParamName!] : JSON.parse(raw[this.urlParamName!]);
                 }
             }
             if (parsed) {
