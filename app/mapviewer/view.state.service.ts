@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {Cartesian3, Entity, Viewer} from "../integrations/cesium";
 import {AppStateService} from "../shared/appstate.service";
-import {Subject, Subscription} from "rxjs";
+import {Subject} from "rxjs";
 import {MenuItem} from "primeng/api";
 
 export interface ViewState {
@@ -35,7 +35,7 @@ export class ViewStateService {
     viewerState: ViewState | null = null;
 
     constructor(private parameterService: AppStateService) {
-        this.is2DMode = this.parameterService.parameters.getValue().mode2d;
+        this.is2DMode = this.parameterService.mode2dState.getValue();
     }
 
     isAvailable() {

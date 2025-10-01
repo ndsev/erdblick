@@ -1,4 +1,4 @@
-import {Component} from "@angular/core";
+import {Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -7,6 +7,7 @@ import {ClipboardService} from "../shared/clipboard.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionService} from "../inspection/inspection.service";
 import {KeyValue} from "@angular/common";
+import {combineLatest, Subscription} from "rxjs";
 
 interface PanelOption {
     name: string,
@@ -73,7 +74,7 @@ interface PanelOption {
     `],
     standalone: false
 })
-export class CoordinatesPanelComponent {
+export class CoordinatesPanelComponent implements OnDestroy {
 
     longitude: number | undefined = undefined;
     latitude: number | undefined = undefined;
@@ -86,6 +87,7 @@ export class CoordinatesPanelComponent {
     markerButtonTooltip: string = "Enable marker placement";
     displayOptions: Array<PanelOption> = [{name: "WGS84"}];
     selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
+    private subscriptions: Subscription[] = [];
 
     constructor(public mapService: MapService,
                 public coordinatesService: CoordinatesService,
@@ -95,11 +97,14 @@ export class CoordinatesPanelComponent {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});
         }
-        this.parametersService.parameters.subscribe(parameters => {
-            this.isMarkerEnabled = parameters.marker;
-            if (parameters.markedPosition.length == 2) {
-                this.longitude = parameters.markedPosition[0];
-                this.latitude = parameters.markedPosition[1];
+        this.subscriptions.push(combineLatest([
+            this.parametersService.markerState,
+            this.parametersService.markedPositionState
+        ]).subscribe(([markerEnabled, markedPosition]) => {
+            this.isMarkerEnabled = markerEnabled;
+            if (markedPosition.length === 2) {
+                this.longitude = markedPosition[0];
+                this.latitude = markedPosition[1];
                 if (this.isMarkerEnabled) {
                     this.markerPosition = {x: this.longitude, y: this.latitude};
                     this.markerButtonIcon = "wrong_location";
@@ -110,12 +115,19 @@ export class CoordinatesPanelComponent {
                 if (this.isMarkerEnabled) {
                     this.markerButtonIcon = "location_on";
                     this.markerButtonTooltip = "Disable marker placement";
+                } else {
+                    this.markerButtonIcon = "location_off";
+                    this.markerButtonTooltip = "Enable marker placement";
                 }
                 this.markerPosition = null;
                 this.updateValues();
             }
             this.restoreSelectedOptions();
-        });
+        }));
+
+        this.subscriptions.push(this.parametersService.enabledCoordsTileIdsState.subscribe(() => {
+            this.restoreSelectedOptions();
+        }));
 
         this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
             if (!this.markerPosition && coordinates) {
@@ -125,6 +137,10 @@ export class CoordinatesPanelComponent {
             }
             this.restoreSelectedOptions();
         });
+    }
+
+    ngOnDestroy() {
+        this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 
     private restoreSelectedOptions() {

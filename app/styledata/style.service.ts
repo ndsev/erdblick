@@ -12,6 +12,7 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, StyleParameters} from "../shared/appstate.service";
+import {filter} from "rxjs/operators";
 
 interface StyleConfigEntry {
     id: string,
@@ -77,16 +78,12 @@ export class StyleService {
 
     constructor(private httpClient: HttpClient, private parameterService: AppStateService)
     {
-        this.parameterService.parameters.subscribe(_ => {
-            // This subscription exists specifically to catch the values of the query parameters.
-            if (this.parameterService.initialQueryParamsSet) {
-                return;
-            }
+        this.parameterService.ready.pipe(filter(state => state)).subscribe((state) => {
             for (let [styleId, style] of this.styles) {
                 style.params = this.parameterService.styleConfig(styleId);
             }
             this.reapplyAllStyles();
-        })
+        });
     }
 
     async initializeStyles(): Promise<void> {
@@ -136,6 +133,10 @@ export class StyleService {
         }
         this.loadImportedStyles();
         this.parameterService.setInitialStyles(this.styles);
+
+        if (this.styles.size) {
+            this.reapplyStyles([...this.styles.keys()]);
+        }
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {

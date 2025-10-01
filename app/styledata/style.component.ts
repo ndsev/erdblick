@@ -11,6 +11,7 @@ import {KeyValue} from "@angular/common";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
+import {filter} from "rxjs/operators";
 
 
 @Component({
@@ -192,7 +193,7 @@ export class StyleComponent {
 
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
-        this.parameterService.ready$.subscribe(_ => {
+        this.parameterService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(
                 state => state.isUpdated && state.isModified);
         });

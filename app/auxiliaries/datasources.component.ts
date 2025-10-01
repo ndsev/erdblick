@@ -148,10 +148,6 @@ export class DatasourcesComponent {
                 public editorService: EditorService,
                 private http: HttpClient,
                 private mapService: MapService) {
-        this.parameterService.parameters.subscribe(parameters => {
-            return;
-        });
-
         this.dataSourcesConfigJson.subscribe((config: any) => {
             if (config && config["schema"] && config["model"]) {
                 this.schema = config["schema"];

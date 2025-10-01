@@ -3,7 +3,7 @@ import {Fetch} from "./fetch";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileVisualization} from "../mapviewer/visualization.model";
-import {BehaviorSubject, distinctUntilChanged, Subject, combineLatest, filter, startWith} from "rxjs";
+import {BehaviorSubject, Subject, combineLatest, filter, map, startWith} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
 import {AppStateService, TileFeatureId} from "../shared/appstate.service";
@@ -218,8 +218,8 @@ export class MapService {
         this.tileParser = new coreLib.TileLayerParser();
 
         // Use combineLatest to coordinate maps loading with parameter initialization
-        combineLatest([this.maps, this.parameterService.ready$.pipe(startWith(null))]).pipe(
-            filter(_ => this.parameterService.initialQueryParamsSet)
+        combineLatest([this.maps, this.parameterService.ready]).pipe(
+            filter(([_, ready]) => ready)
         ).subscribe(_ => {
             this.processMapsUpdate();
         });
@@ -243,8 +243,8 @@ export class MapService {
         });
 
         // Apply initial parameter configuration once maps are loaded and parameters are ready
-        combineLatest([this.maps, this.parameterService.ready$]).pipe(
-            filter(([maps, _]) => maps.size > 0 && this.parameterService.initialQueryParamsSet),
+        combineLatest([this.maps, this.parameterService.ready]).pipe(
+            filter(([maps, ready]) => ready && maps.size > 0),
         ).subscribe(([maps, _]) => {
             for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
@@ -261,10 +261,9 @@ export class MapService {
 
         await this.reloadDataSources();
 
-        this.parameterService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-            this.highlightFeatures(parameters.selected).then();
+        this.parameterService.selectedFeaturesState.subscribe(selected => {
+            this.highlightFeatures(selected).then();
         });
-
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
         });
@@ -345,7 +344,7 @@ export class MapService {
     // Pure function that computes new map groups
     private computeMapGroups(): Map<string, GroupInfoItem> {
         const isInitLoad = this.mapGroups.getValue().size === 0;
-        const hasExistingLayers = this.parameterService.p().layers.length > 0;
+        const hasExistingLayers = this.parameterService.layersState.getValue().length > 0;
 
         const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
@@ -713,12 +712,15 @@ export class MapService {
         // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
 
+        const loadLimit = this.parameterService.tilesLoadLimitState.getValue();
+        const visualizeLimit = this.parameterService.tilesVisualizeLimitState.getValue();
+
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {
                 const allViewportTileIds = coreLib.getTileIds(
                     this.currentViewport,
                     level,
-                    this.parameterService.parameters.getValue().tilesLoadLimit) as bigint[];
+                    loadLimit) as bigint[];
 
                 tileIdPerLevel.set(level, allViewportTileIds);
                 this.currentVisibleTileIds = new Set([
@@ -728,7 +730,7 @@ export class MapService {
                 this.currentHighDetailTileIds = new Set([
                     ...this.currentHighDetailTileIds,
                     ...new Set<bigint>(
-                        allViewportTileIds.slice(0, this.parameterService.parameters.getValue().tilesVisualizeLimit))
+                        allViewportTileIds.slice(0, visualizeLimit))
                 ]);
             }
         }
@@ -964,13 +966,15 @@ export class MapService {
         this.statsDialogNeedsUpdate.next();
     }
 
-    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle | FeatureLayerStyle, styleId: string = "") {
-        let wasmStyle = (style as ErdblickStyle).featureLayerStyle ? (style as ErdblickStyle).featureLayerStyle : style as FeatureLayerStyle;
-        if (!wasmStyle)
-            return;
-        if ((style as ErdblickStyle).params !== undefined && !(style as ErdblickStyle).params.visible) {
+    private renderTileLayer(tileLayer: FeatureTile, style: ErdblickStyle, styleId: string = "") {
+        const wasmStyle = style.featureLayerStyle;
+        if (!wasmStyle) {
             return;
         }
+        if (style.params !== undefined && !style.params.visible) {
+            return;
+        }
+
         const mapName = tileLayer.mapName;
         const layerName = tileLayer.layerName;
         let visu = new TileVisualization(
@@ -982,7 +986,7 @@ export class MapService {
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.getMapLayerBorderState(mapName, layerName),
-            (style as ErdblickStyle).params !== undefined ? (style as ErdblickStyle).params.options : {});
+            style.params !== undefined ? style.params.options : {});
         this.tileVisualizationQueue.push([styleId, visu]);
         if (this.visualizedTileLayers.has(styleId)) {
             this.visualizedTileLayers.get(styleId)?.push(visu);
