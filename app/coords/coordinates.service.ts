@@ -1,6 +1,6 @@
 import {Injectable} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, skip} from "rxjs";
 import {Cartographic} from "../integrations/cesium";
 import {HttpClient} from "@angular/common/http";
 
@@ -13,7 +13,9 @@ export class CoordinatesService {
 
     constructor(private httpClient: HttpClient,
                 public parametersService: AppStateService) {
-        this.mouseClickCoordinates.subscribe(position => {
+        this.mouseClickCoordinates.pipe(
+            skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
+        ).subscribe(position => {
             this.parametersService.setMarkerPosition(position);
         });
     }

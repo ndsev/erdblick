@@ -236,74 +236,75 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
      * Setup parameter subscriptions
      */
     private setupParameterSubscriptions() {
-        this.subscriptions.push(
-            this.parameterService.cameraViewData
-                .pipe(distinctUntilChanged())
-                .subscribe(cameraData => {
-                    if (!this.viewStateService.viewer) {
-                        return;
-                    }
-                    this.cameraService.ignoreNextCameraUpdate = true;
-                    if (this.viewStateService.is2DMode) {
-                        const viewRectangle = this.parameterService.viewRectangleState.getValue();
-                        if (viewRectangle && viewRectangle.length === 4) {
-                            this.viewStateService.viewer.camera.setView({
-                                destination: Rectangle.fromDegrees(...viewRectangle)
-                            });
-                        } else {
-                            const rect = Rectangle.fromDegrees(
-                                cameraData.destination.lon - 1,
-                                cameraData.destination.lat - 1,
-                                cameraData.destination.lon + 1,
-                                cameraData.destination.lat + 1
-                            );
-                            this.viewStateService.viewer.camera.setView({
-                                destination: rect
-                            });
-                        }
-                    } else {
+        this.parameterService.cameraViewData
+            .pipe(distinctUntilChanged())
+            .subscribe(cameraData => {
+                if (!this.viewStateService.viewer) {
+                    return;
+                }
+                this.cameraService.ignoreNextCameraUpdate = true;
+                if (this.viewStateService.is2DMode) {
+                    const viewRectangle = this.parameterService.viewRectangleState.getValue();
+                    if (viewRectangle && viewRectangle.length === 4) {
                         this.viewStateService.viewer.camera.setView({
-                            destination: Cartesian3.fromDegrees(
-                                cameraData.destination.lon,
-                                cameraData.destination.lat,
-                                cameraData.destination.alt
-                            ),
-                            orientation: cameraData.orientation
+                            destination: Rectangle.fromDegrees(...viewRectangle)
+                        });
+                    } else {
+                        const rect = Rectangle.fromDegrees(
+                            cameraData.destination.lon - 1,
+                            cameraData.destination.lat - 1,
+                            cameraData.destination.lon + 1,
+                            cameraData.destination.lat + 1
+                        );
+                        this.viewStateService.viewer.camera.setView({
+                            destination: rect
                         });
                     }
-                    this.viewService.updateViewport();
-                })
-        );
-
-        this.subscriptions.push(
-            combineLatest([
-                this.parameterService.osmEnabledState,
-                this.parameterService.osmOpacityState,
-                this.parameterService.mode2dState,
-                this.parameterService.markerState,
-                this.parameterService.markedPositionState
-            ]).subscribe(([osmEnabled, osmOpacity, mode2d, markerEnabled, markedPosition]) => {
-                if (this.openStreetMapLayer) {
-                    this.openStreetMapLayer.show = osmEnabled;
-                    this.updateOpenStreetMapLayer(osmOpacity / 100);
-                }
-                if (this.viewStateService.viewer && this.viewStateService.is2DMode !== mode2d) {
-                    this.applySceneModeChange(mode2d).catch(error => {
-                        console.error('Failed to change scene mode:', error);
+                } else {
+                    this.viewStateService.viewer.camera.setView({
+                        destination: Cartesian3.fromDegrees(
+                            cameraData.destination.lon,
+                            cameraData.destination.lat,
+                            cameraData.destination.alt
+                        ),
+                        orientation: cameraData.orientation
                     });
                 }
+                this.viewService.updateViewport();
+            });
 
-                if (markerEnabled && markedPosition.length === 2) {
-                    const markerPosition = Cartesian3.fromDegrees(
-                        Number(markedPosition[0]),
-                        Number(markedPosition[1])
-                    );
-                    this.markerService.addMarker(markerPosition);
-                } else {
-                    this.markerService.clearMarkers();
-                }
-            })
-        );
+        combineLatest([
+            this.parameterService.osmEnabledState,
+            this.parameterService.osmOpacityState
+        ]).subscribe(([osmEnabled, osmOpacity]) => {
+            if (this.openStreetMapLayer) {
+                this.openStreetMapLayer.show = osmEnabled;
+                this.updateOpenStreetMapLayer(osmOpacity / 100);
+            }
+        });
+
+        this.parameterService.mode2dState.subscribe(mode2d => {
+            if (this.viewStateService.viewer && this.viewStateService.is2DMode !== mode2d) {
+                this.applySceneModeChange(mode2d).catch(error => {
+                    console.error('Failed to change scene mode:', error);
+                });
+            }
+        });
+
+        combineLatest([
+            this.parameterService.markerState,
+            this.parameterService.markedPositionState
+        ]).subscribe(([markerEnabled, markedPosition]) => {
+            if (markerEnabled && markedPosition.length === 2) {
+                const markerPosition = Cartesian3.fromDegrees(
+                    Number(markedPosition[0]),
+                    Number(markedPosition[1])
+                );
+                this.markerService.addMarker(markerPosition);
+            } else {
+                this.markerService.clearMarkers();
+            }
+        })
     }
 
     /**
@@ -816,6 +817,8 @@ export class ErdblickViewComponent implements AfterViewInit, OnDestroy {
             // Recreate subscriptions for new viewer
             this.setupAdditionalSubscriptions();
 
+            // Ensure markers are restored from parameters
+            this.markerService.restoreParameterMarker();
         } catch (error) {
             console.error('Error during viewer component initialization:', error);
             throw error;

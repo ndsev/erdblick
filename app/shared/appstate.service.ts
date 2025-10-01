@@ -556,7 +556,9 @@ export class AppStateService implements OnDestroy {
 
     setSelectedFeatures(newSelection: TileFeatureId[]) {
         const currentSelection = this.selectedFeaturesState.getValue();
-        if (newSelection.length !== currentSelection.length || newSelection.some( (v, i) => v.featureId !== currentSelection[i].featureId || v.mapTileKey !== currentSelection[i].mapTileKey)) {
+        if (newSelection.length === currentSelection.length &&
+            newSelection.every((v, i) =>
+                v.featureId === currentSelection[i].featureId && v.mapTileKey === currentSelection[i].mapTileKey)) {
             return false;
         }
         this.selectedFeaturesState.next(newSelection.map(feature => ({...feature})));
