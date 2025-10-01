@@ -217,10 +217,8 @@ export class MapService {
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
-        const initialization$ = this.parameterService.ready$.pipe(map(() => true), startWith(false));
-
         // Use combineLatest to coordinate maps loading with parameter initialization
-        combineLatest([this.maps, initialization$]).pipe(
+        combineLatest([this.maps, this.parameterService.ready]).pipe(
             filter(([_, ready]) => ready)
         ).subscribe(_ => {
             this.processMapsUpdate();
@@ -245,7 +243,7 @@ export class MapService {
         });
 
         // Apply initial parameter configuration once maps are loaded and parameters are ready
-        combineLatest([this.maps, initialization$]).pipe(
+        combineLatest([this.maps, this.parameterService.ready]).pipe(
             filter(([maps, ready]) => ready && maps.size > 0),
         ).subscribe(([maps, _]) => {
             for (let [mapId, mapInfo] of maps) {
@@ -266,7 +264,6 @@ export class MapService {
         this.parameterService.selectedFeaturesState.subscribe(selected => {
             this.highlightFeatures(selected).then();
         });
-
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
         });
