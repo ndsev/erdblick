@@ -1,6 +1,6 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {ReplaySubject, skip, Subscription} from "rxjs";
+import {BehaviorSubject, ReplaySubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
@@ -33,62 +33,6 @@ export interface CameraViewState {
 
 export type PanelSizeState = [] | [number, number];
 
-const SearchSchema = z.union([
-    z.tuple([]),
-    z.tuple([z.coerce.number(), z.string()]),
-]);
-
-const CoordinatesSchema = z.union([
-    z.tuple([]),
-    z.tuple([z.coerce.number(), z.coerce.number()]),
-]);
-
-const TileFeatureIdSchema = z.object({
-    featureId: z.string(),
-    mapTileKey: z.string(),
-});
-
-const CameraPayloadSchema = z.object({
-    lon: z.coerce.number().optional(),
-    lat: z.coerce.number().optional(),
-    alt: z.coerce.number().optional(),
-    h: z.coerce.number().optional(),
-    p: z.coerce.number().optional(),
-    r: z.coerce.number().optional()
-});
-
-const ViewRectangleSchema = z.union([
-    z.null(),
-    z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]),
-]);
-
-const LayersSchema = z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish]));
-
-const StylesSchema = z.record(z.string(), z.object({
-    v: Boolish,
-    o: z.record(z.string(), z.union([z.boolean(), z.number()])),
-}));
-
-const SelectedSourceDataPayloadSchema = z.object({
-    mapId: z.string(),
-    tileId: z.coerce.number(),
-    layerId: z.string(),
-    address: z.string().optional(),
-    featureIds: z.string().optional(),
-});
-type SelectedSourceDataPayload = z.infer<typeof SelectedSourceDataPayloadSchema>;
-const SelectedSourceDataSchema = z.union([z.null(), SelectedSourceDataPayloadSchema]);
-
-const PanelStateSchema = z.union([
-    z.tuple([]),
-    z.tuple([z.coerce.number(), z.coerce.number()]),
-]);
-
-const SearchHistorySchema = z.union([
-    z.null(),
-    z.tuple([z.coerce.number(), z.string()]),
-]);
-
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
@@ -98,8 +42,7 @@ function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
-    private readonly readySubject = new ReplaySubject<void>(1);
-    public readonly ready$ = this.readySubject.asObservable();
+    readonly ready = new BehaviorSubject<boolean>(false);
 
     private readonly stateSubscriptions: Subscription[] = [];
 
@@ -123,7 +66,10 @@ export class AppStateService implements OnDestroy {
     readonly searchState = this.createState<[number, string] | []>({
         name: 'search',
         defaultValue: [],
-        schema: SearchSchema,
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.string()]),
+        ]),
         urlParamName: 's',
         urlIncludeInVisualizationOnly: false,
     });
@@ -139,7 +85,10 @@ export class AppStateService implements OnDestroy {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        schema: CoordinatesSchema,
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.coerce.number()]),
+        ]),
         urlParamName: 'mp',
         urlIncludeInVisualizationOnly: false,
     });
@@ -147,7 +96,10 @@ export class AppStateService implements OnDestroy {
     readonly selectedFeaturesState = this.createState<TileFeatureId[]>({
         name: 'selected',
         defaultValue: [],
-        schema: z.array(TileFeatureIdSchema),
+        schema: z.array(z.object({
+            featureId: z.string(),
+            mapTileKey: z.string(),
+        })),
         urlParamName: 'sel',
         urlIncludeInVisualizationOnly: false,
     });
@@ -158,7 +110,14 @@ export class AppStateService implements OnDestroy {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
             orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
         },
-        schema: CameraPayloadSchema,
+        schema: z.object({
+            lon: z.coerce.number().optional(),
+            lat: z.coerce.number().optional(),
+            alt: z.coerce.number().optional(),
+            h: z.coerce.number().optional(),
+            p: z.coerce.number().optional(),
+            r: z.coerce.number().optional()
+        }),
         preprocess: (value: any) => ({
             lon: value.destination.lon,
             lat: value.destination.lat,
@@ -185,7 +144,10 @@ export class AppStateService implements OnDestroy {
     readonly viewRectangleState = this.createState<[number, number, number, number] | null>({
         name: 'viewRectangle',
         defaultValue: null,
-        schema: ViewRectangleSchema,
+        schema: z.union([
+            z.null(),
+            z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]),
+        ]),
         urlParamName: 'vr',
         urlIncludeInVisualizationOnly: false,
     });
@@ -215,14 +177,17 @@ export class AppStateService implements OnDestroy {
     readonly layersState = this.createState<Array<[string, number, boolean, boolean]>>({
         name: 'layers',
         defaultValue: [],
-        schema: LayersSchema,
+        schema: z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish])),
         urlParamName: 'l',
     });
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
-        schema: StylesSchema,
+        schema: z.record(z.string(), z.object({
+            v: Boolish,
+            o: z.record(z.string(), z.union([z.boolean(), z.number()])),
+        })),
         urlParamName: 'sty',
     });
 
@@ -243,7 +208,13 @@ export class AppStateService implements OnDestroy {
     readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
         name: 'selectedSourceData',
         defaultValue: null,
-        schema: SelectedSourceDataSchema,
+        schema: z.union([z.null(), z.object({
+            mapId: z.string(),
+            tileId: z.coerce.number(),
+            layerId: z.string(),
+            address: z.string().optional(),
+            featureIds: z.string().optional(),
+        })]),
         urlParamName: 'ssd',
         urlIncludeInVisualizationOnly: false,
     });
@@ -257,7 +228,10 @@ export class AppStateService implements OnDestroy {
     readonly panelState = this.createState<PanelSizeState>({
         name: 'panel',
         defaultValue: [] as PanelSizeState,
-        schema: PanelStateSchema,
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.coerce.number()]),
+        ]),
     });
 
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
@@ -269,7 +243,10 @@ export class AppStateService implements OnDestroy {
     readonly lastSearchHistoryEntry = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
-        schema: SearchHistorySchema,
+        schema: z.union([
+            z.null(),
+            z.tuple([z.coerce.number(), z.string()]),
+        ]),
     });
 
     constructor(private readonly router: Router) {
@@ -284,7 +261,7 @@ export class AppStateService implements OnDestroy {
         this.isReady = true;
         this.updateScalingFactor(this.cameraViewData.getValue().destination.alt);
         this.persistStates();
-        this.readySubject.next();
+        this.ready.next(true);
 
         this.router.events.pipe(filter(event => event instanceof NavigationEnd)).subscribe(() => {
             this.withHydration(() => this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {}));
@@ -430,6 +407,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    // TODO: This is view logic which shouldn't be in the AppStateService.
     private updateScalingFactor(altitude: number): void {
         if (!Number.isFinite(altitude) || altitude <= 0) {
             this.scalingFactor = 1;
@@ -479,20 +457,7 @@ export class AppStateService implements OnDestroy {
     }
 
     setCameraState(camera: Camera) {
-        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-        const nextView: CameraViewState = {
-            destination: {
-                lon: CesiumMath.toDegrees(currentPositionCartographic.longitude),
-                lat: CesiumMath.toDegrees(currentPositionCartographic.latitude),
-                alt: currentPositionCartographic.height,
-            },
-            orientation: {
-                heading: camera.heading,
-                pitch: camera.pitch,
-                roll: camera.roll,
-            }
-        };
-        this.cameraViewData.next(nextView);
+        this.setView(camera.position, camera);
     }
 
     set2DCameraState(camera: Camera) {
@@ -730,6 +695,10 @@ export class AppStateService implements OnDestroy {
         window.location.href = origin + pathname;
     }
 
+    // TODO: This is view logic which should be in Inspection Panel component upon
+    //  main View template fully moving there as a first-level citizen: currently
+    //  the View implementation is split across Feature and SourceData components
+    //  which complicates their state management.
     onInspectionContainerResize(event: MouseEvent): void {
         const element = event.target as HTMLElement;
         if (!element.classList.contains("resizable-container")) {
