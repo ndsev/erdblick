@@ -11,15 +11,15 @@
                 }
             },
             "root": "",
-            "sourceRoot": "erdblick_app",
-            "prefix": "app",
+            "sourceRoot": "app",
+            "prefix": "",
             "architect": {
                 "build": {
                     "builder": "@angular-builders/custom-webpack:browser",
                     "options": {
                         "outputPath": "static",
-                        "index": "erdblick_app/index.html",
-                        "main": "erdblick_app/main.ts",
+                        "index": "app/index.html",
+                        "main": "app/main.ts",
                         "polyfills": [
                             "zone.js"
                         ],
@@ -76,7 +76,7 @@
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
                             "node_modules/material-icons/iconfont/material-icons.css",
                             "node_modules/material-symbols/index.css",
-                            "erdblick_app/styles.scss"
+                            "app/styles.scss"
                         ],
                         "scripts": [],
                         "customWebpackConfig": {
@@ -158,8 +158,8 @@
                             "namedChunks": false,
                             "fileReplacements": [
                                 {
-                                    "replace": "erdblick_app/environments/environment.ts",
-                                    "with": "erdblick_app/environments/environment.prod.ts"
+                                    "replace": "app/environments/environment.ts",
+                                    "with": "app/environments/environment.prod.ts"
                                 }
                             ]
                         },
@@ -176,8 +176,8 @@
                             "namedChunks": true,
                             "fileReplacements": [
                                 {
-                                    "replace": "erdblick_app/environments/environment.ts",
-                                    "with": "erdblick_app/environments/environment.ts"
+                                    "replace": "app/environments/environment.ts",
+                                    "with": "app/environments/environment.ts"
                                 }
                             ]
                         },
@@ -255,8 +255,8 @@
                             "namedChunks": false,
                             "fileReplacements": [
                                 {
-                                    "replace": "erdblick_app/environments/environment.ts",
-                                    "with": "erdblick_app/environments/environment.visualization-only.ts"
+                                    "replace": "app/environments/environment.ts",
+                                    "with": "app/environments/environment.visualization-only.ts"
                                 }
                             ]
                         },
@@ -274,8 +274,8 @@
                             "namedChunks": true,
                             "fileReplacements": [
                                 {
-                                    "replace": "erdblick_app/environments/environment.ts",
-                                    "with": "erdblick_app/environments/environment.visualization-only.ts"
+                                    "replace": "app/environments/environment.ts",
+                                    "with": "app/environments/environment.visualization-only.ts"
                                 }
                             ]
                         }
@@ -316,7 +316,7 @@
                         "tsConfig": "tsconfig.spec.json",
                         "assets": [],
                         "styles": [
-                            "erdblick_app/styles.scss"
+                            "app/styles.scss"
                         ],
                         "scripts": [],
                         "webWorkerTsConfig": "tsconfig.worker.json"
