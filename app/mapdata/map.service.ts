@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {Fetch} from "./fetch";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {TileVisualization} from "../mapviewer/visualization.model";
+import {TileVisualization} from "../mapview/visualization.model";
 import {BehaviorSubject, Subject, combineLatest, filter, map, startWith} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {FeatureLayerStyle, TileLayerParser, Feature, HighlightMode} from '../../build/libs/core/erdblick-core';
@@ -10,7 +10,7 @@ import {AppStateService, TileFeatureId} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MAX_ZOOM_LEVEL} from "../search/feature.search.service";
-import {PointMergeService} from "../mapviewer/pointmerge.service";
+import {PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
 
@@ -175,7 +175,7 @@ export class MapService {
     clientId: string = "";
 
     constructor(public styleService: StyleService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
@@ -218,7 +218,7 @@ export class MapService {
         this.tileParser = new coreLib.TileLayerParser();
 
         // Use combineLatest to coordinate maps loading with parameter initialization
-        combineLatest([this.maps, this.parameterService.ready]).pipe(
+        combineLatest([this.maps, this.stateService.ready]).pipe(
             filter(([_, ready]) => ready)
         ).subscribe(_ => {
             this.processMapsUpdate();
@@ -243,13 +243,13 @@ export class MapService {
         });
 
         // Apply initial parameter configuration once maps are loaded and parameters are ready
-        combineLatest([this.maps, this.parameterService.ready]).pipe(
+        combineLatest([this.maps, this.stateService.ready]).pipe(
             filter(([maps, ready]) => ready && maps.size > 0),
         ).subscribe(([maps, _]) => {
             for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
-                    [layer.visible, layer.level] = this.parameterService.mapLayerConfig(mapId, layerId, layer.level);
+                    [layer.visible, layer.level] = this.stateService.mapLayerConfig(mapId, layerId, layer.level);
                     if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
                         isAnyLayerVisible = true;
                     }
@@ -261,7 +261,7 @@ export class MapService {
 
         await this.reloadDataSources();
 
-        this.parameterService.selectedFeaturesState.subscribe(selected => {
+        this.stateService.selectedFeaturesState.subscribe(selected => {
             this.highlightFeatures(selected).then();
         });
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
@@ -344,7 +344,7 @@ export class MapService {
     // Pure function that computes new map groups
     private computeMapGroups(): Map<string, GroupInfoItem> {
         const isInitLoad = this.mapGroups.getValue().size === 0;
-        const hasExistingLayers = this.parameterService.layersState.getValue().length > 0;
+        const hasExistingLayers = this.stateService.layersState.getValue().length > 0;
 
         const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
@@ -564,7 +564,7 @@ export class MapService {
                         let layers = new Map<string, LayerInfoItem>();
                         let isAnyLayerVisible = false;
                         for (let [layerId, layerInfo] of Object.entries(mapInfo.layers)) {
-                            [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.parameterService.mapLayerConfig(mapInfo.mapId, layerId, 13);
+                            [layerInfo.visible, layerInfo.level, layerInfo.tileBorders] = this.stateService.mapLayerConfig(mapInfo.mapId, layerId, 13);
                             mapLayerLevels.push([
                                 mapInfo.mapId + '/' + layerId,
                                 layerInfo.level,
@@ -582,7 +582,7 @@ export class MapService {
                         return [mapInfo.mapId, mapInfo];
                     }));
                     this.maps.next(maps);
-                    this.parameterService.setInitialMapLayers(mapLayerLevels);
+                    this.stateService.setInitialMapLayers(mapLayerLevels);
 
                     jsonCompleted = true;
                     checkCompletion();
@@ -618,7 +618,7 @@ export class MapService {
             if (state !== undefined) {
                 layer.visible = state;
             }
-            this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
+            this.stateService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, layer.tileBorders);
             if (!layer.visible) {
                 this.clearSelectionForLayer(mapId, layerId);
             }
@@ -652,7 +652,7 @@ export class MapService {
                     }
                 }
             }
-            this.parameterService.setMapConfig(params);
+            this.stateService.setMapConfig(params);
         }
         if (!deferUpdate) {
             this.processMapsUpdate();
@@ -668,7 +668,7 @@ export class MapService {
             const layer = mapItem.layers.get(layerId)!;
             const hasTileBorders = !layer.tileBorders;
             mapItem.layers.get(layerId)!.tileBorders = hasTileBorders;
-            this.parameterService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
+            this.stateService.setMapLayerConfig(mapId, layerId, layer.level, layer.visible, hasTileBorders);
             this.update().then();
         }
     }
@@ -679,7 +679,7 @@ export class MapService {
             return;
         if (mapItem.layers.has(layerId)) {
             const layer = mapItem.layers.get(layerId)!;
-            this.parameterService.setMapLayerConfig(mapId, layerId, level, layer.visible, layer.tileBorders);
+            this.stateService.setMapLayerConfig(mapId, layerId, level, layer.visible, layer.tileBorders);
         }
         this.update().then();
     }
@@ -712,8 +712,8 @@ export class MapService {
         // Map from level to array of tileIds.
         let tileIdPerLevel = new Map<number, Array<bigint>>();
 
-        const loadLimit = this.parameterService.tilesLoadLimitState.getValue();
-        const visualizeLimit = this.parameterService.tilesVisualizeLimitState.getValue();
+        const loadLimit = this.stateService.tilesLoadLimitState.getValue();
+        const visualizeLimit = this.stateService.tilesVisualizeLimitState.getValue();
 
         for (let level of this.allLevels()) {
             if (!tileIdPerLevel.has(level)) {

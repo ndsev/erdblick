@@ -245,11 +245,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public mapService: MapService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
-                public parametersService: AppStateService) {
-        this.subscriptions.push(this.parametersService.tilesLoadLimitState.subscribe(limit => {
+                public stateService: AppStateService) {
+        this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
-        this.subscriptions.push(this.parametersService.tilesVisualizeLimitState.subscribe(limit => {
+        this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
         }));
     }
@@ -271,8 +271,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        this.parametersService.tilesLoadLimitState.next(Number(this.tilesToLoadInput));
-        this.parametersService.tilesVisualizeLimitState.next(Number(this.tilesToVisualizeInput));
+        this.stateService.tilesLoadLimitState.next(Number(this.tilesToLoadInput));
+        this.stateService.tilesVisualizeLimitState.next(Number(this.tilesToVisualizeInput));
         this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
@@ -296,7 +296,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     clearURLProperties() {
-        this.parametersService.resetStorage();
+        this.stateService.resetStorage();
     }
 
     clearImportedStyles() {

@@ -291,17 +291,17 @@ export class MapPanelComponent {
 
     constructor(public mapService: MapService,
                 public appModeService: AppModeService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 public keyboardService: KeyboardService,
                 public editorService: EditorService,
                 private inspectionService: InspectionService,
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
 
-        this.parameterService.osmEnabledState.subscribe(enabled => {
+        this.stateService.osmEnabledState.subscribe(enabled => {
             this.osmEnabled = enabled;
         });
-        this.parameterService.osmOpacityState.subscribe(opacity => {
+        this.stateService.osmOpacityState.subscribe(opacity => {
             this.osmOpacityValue = opacity;
         });
         // Rebuild metadata menus recursively and prune when needed.
@@ -330,7 +330,7 @@ export class MapPanelComponent {
                 allLeafMaps.push(...this.collectLeafMaps(group));
             }
             // If all layers were pruned (complete maps config change), reinitialize default maps once
-            if (allLeafMaps.length > 0 && this.parameterService.pruneMapLayerConfig(allLeafMaps)) {
+            if (allLeafMaps.length > 0 && this.stateService.pruneMapLayerConfig(allLeafMaps)) {
                 if (!this._reinitializingAfterPrune) {
                     this._reinitializingAfterPrune = true;
                     try {
@@ -473,8 +473,8 @@ export class MapPanelComponent {
     }
 
     updateOSMOverlay() {
-        this.parameterService.osmEnabledState.next(this.osmEnabled);
-        this.parameterService.osmOpacityState.next(this.osmOpacityValue);
+        this.stateService.osmEnabledState.next(this.osmEnabled);
+        this.stateService.osmOpacityState.next(this.osmOpacityValue);
     }
 
     toggleTileBorders(mapName: string, layerName: string) {

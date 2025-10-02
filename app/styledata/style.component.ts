@@ -188,12 +188,12 @@ export class StyleComponent {
     constructor(public mapService: MapService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 public editorService: EditorService) {
 
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
-        this.parameterService.ready.pipe(filter(state => state)).subscribe(_ => {
+        this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(
                 state => state.isUpdated && state.isModified);
         });
@@ -312,7 +312,7 @@ export class StyleComponent {
         if (redraw) {
             this.styleService.reapplyStyle(styleId);
         }
-        this.parameterService.setStyleConfig(styleId, style.params);
+        this.stateService.setStyleConfig(styleId, style.params);
     }
 
     resetStyle(styleId: string) {

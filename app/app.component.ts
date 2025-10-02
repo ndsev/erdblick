@@ -76,11 +76,10 @@ export class AppComponent {
     distributionVersions: Array<Versions> = [];
     distributionVersionsDialogVisible: boolean = false;
 
-
     constructor(private httpClient: HttpClient,
                 public mapService: MapService,
                 public appModeService: AppModeService,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService) {
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
@@ -123,7 +122,7 @@ export class AppComponent {
     }
 
     openLegalInfo() {
-        this.parametersService.legalInfoDialogVisible = true;
+        this.stateService.legalInfoDialogVisible = true;
     }
 
     showExposedVersions() {

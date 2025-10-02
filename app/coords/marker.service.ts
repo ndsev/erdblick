@@ -3,7 +3,6 @@ import {Cartesian2, Cartesian3, Color, HeightReference, BillboardCollection} fro
 import {AppStateService} from "../shared/appstate.service";
 import {FeatureSearchService, SearchResultPrimitiveId} from "../search/feature.search.service";
 import {SearchResultPosition} from "../search/search.worker";
-import {ViewStateService} from "../mapviewer/view.state.service";
 
 interface MarkersParams {
     id?: SearchResultPrimitiveId;
@@ -23,8 +22,7 @@ export class MarkerService {
     markerCollection: BillboardCollection | null = null;
 
     constructor(private featureSearchService: FeatureSearchService,
-                private parameterService: AppStateService,
-                private viewStateService: ViewStateService) {
+                private stateService: AppStateService) {
     }
 
     addMarker(cartesian: Cartesian3) {
@@ -173,8 +171,8 @@ export class MarkerService {
      */
     restoreParameterMarker() {
         try {
-            const markerEnabled = this.parameterService.markerState.getValue();
-            const markedPosition = this.parameterService.markedPositionState.getValue();
+            const markerEnabled = this.stateService.markerState.getValue();
+            const markedPosition = this.stateService.markedPositionState.getValue();
             if (markerEnabled && markedPosition.length === 2) {
                 const markerPosition = Cartesian3.fromDegrees(
                     Number(markedPosition[0]),

@@ -143,7 +143,7 @@ export class DatasourcesComponent {
     private savedConfigSourceSubscription: Subscription = new Subscription();
 
     constructor(private messageService: InfoMessageService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private formlyJsonSchema: FormlyJsonschema,
                 public editorService: EditorService,
                 private http: HttpClient,

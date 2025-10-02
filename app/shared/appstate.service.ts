@@ -5,7 +5,7 @@ import {filter} from "rxjs/operators";
 import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
 import {MapInfoItem} from "../mapdata/map.service";
-import {AppState, AppStateOptions, Boolish} from "./app-state";
+import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
 import {z} from "zod";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
@@ -104,7 +104,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly cameraViewData = this.createState<CameraViewState>({
+    readonly cameraViewData = this.createMapViewState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
@@ -118,7 +118,7 @@ export class AppStateService implements OnDestroy {
             p: z.coerce.number().optional(),
             r: z.coerce.number().optional()
         }),
-        preprocess: (value: any) => ({
+        toStorage: (value: any) => ({
             lon: value.destination.lon,
             lat: value.destination.lat,
             alt: value.destination.alt,
@@ -126,7 +126,7 @@ export class AppStateService implements OnDestroy {
             p: value.orientation.pitch,
             r: value.orientation.roll,
         }),
-        postprocess: (payload: any, currentValue: CameraViewState) => ({
+        fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
                 lon: payload.lon ?? currentValue.destination.lon,
                 lat: payload.lat ?? currentValue.destination.lat,
@@ -141,7 +141,7 @@ export class AppStateService implements OnDestroy {
         urlFormEncode: true,
     });
 
-    readonly viewRectangleState = this.createState<[number, number, number, number] | null>({
+    readonly viewRectangleState = this.createMapViewState<[number, number, number, number] | null>({
         name: 'viewRectangle',
         defaultValue: null,
         schema: z.union([
@@ -152,7 +152,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly mode2dState = this.createState<boolean>({
+    readonly mode2dState = this.createMapViewState<boolean>({
         name: 'mode2d',
         defaultValue: false,
         schema: Boolish,
@@ -160,28 +160,28 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly osmEnabledState = this.createState<boolean>({
+    readonly osmEnabledState = this.createMapViewState<boolean>({
         name: 'osm',
         defaultValue: true,
         schema: Boolish,
         urlParamName: 'osm',
     });
 
-    readonly osmOpacityState = this.createState<number>({
+    readonly osmOpacityState = this.createMapViewState<number>({
         name: 'osmOpacity',
         defaultValue: 30,
         schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
         urlParamName: 'osmOp',
     });
 
-    readonly layersState = this.createState<Array<[string, number, boolean, boolean]>>({
+    readonly layersState = this.createMapViewState<Array<[string, number, boolean, boolean]>>({
         name: 'layers',
         defaultValue: [],
         schema: z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish])),
         urlParamName: 'l',
     });
 
-    readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
+    readonly stylesState = this.createMapViewState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
         schema: z.record(z.string(), z.object({
@@ -259,7 +259,8 @@ export class AppStateService implements OnDestroy {
         this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
         this.isHydrating = false;
         this.isReady = true;
-        this.updateScalingFactor(this.cameraViewData.getValue().destination.alt);
+        // FIXME
+        // this.updateScalingFactor(this.cameraViewData.getValue().destination.alt);
         this.persistStates();
         this.ready.next(true);
 
@@ -298,6 +299,10 @@ export class AppStateService implements OnDestroy {
         return new AppState<T>(this.statePool, options);
     }
 
+    private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
+        return new MapViewState<T>(this.statePool, options);
+    }
+
     private setupStateSubscriptions() {
         // NOTE: Is this the best way to implement the internal subscription mechanism?
         for (const state of this.statePool.values()) {
@@ -309,10 +314,11 @@ export class AppStateService implements OnDestroy {
     }
 
     private onStateChanged(state: AppState<unknown>, value: unknown): void {
-        if (state === this.cameraViewData && value) {
-            const camera = value as CameraViewState;
-            this.updateScalingFactor(camera.destination.alt);
-        }
+        // FIXME
+        // if (state === this.cameraViewData && value) {
+        //     const camera = value as CameraViewState;
+        //     this.updateScalingFactor(camera.destination.alt);
+        // }
 
         if (this.isHydrating || !this.isReady) {
             return;
@@ -430,81 +436,38 @@ export class AppStateService implements OnDestroy {
     // Public API below
     // -----------------
 
-    getCameraOrientation() {
-        return this.cameraViewData.getValue().orientation;
+    getCameraOrientation(viewIndex: number) {
+        return this.cameraViewData.getValue(viewIndex).orientation;
     }
 
-    getCameraPosition() {
-        const destination = this.cameraViewData.getValue().destination;
-        return Cartesian3.fromDegrees(destination.lon, destination.lat, destination.alt);
+    getCameraPosition(viewIndex: number) {
+        const destination = this.cameraViewData.getValue(viewIndex).destination;
+        return new Cartographic(destination.lon, destination.lat, destination.alt);
     }
 
-    setView(destination: Cartesian3, orientation: { heading: number, pitch: number, roll: number }) {
-        const cartographic = Cartographic.fromCartesian(destination);
+    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+        const newOrientation = orientation !== undefined ? orientation : {
+            heading: 0.0,
+            pitch: -90,
+            roll: 0.0
+        }
         const view: CameraViewState = {
             destination: {
-                lon: CesiumMath.toDegrees(cartographic.longitude),
-                lat: CesiumMath.toDegrees(cartographic.latitude),
-                alt: cartographic.height,
+                lon: CesiumMath.toDegrees(destination.longitude),
+                lat: CesiumMath.toDegrees(destination.latitude),
+                alt: destination.height,
             },
             orientation: {
-                heading: orientation.heading,
-                pitch: orientation.pitch,
-                roll: orientation.roll,
+                heading: newOrientation.heading,
+                pitch: newOrientation.pitch,
+                roll: newOrientation.roll,
             }
         };
-        this.cameraViewData.next(view);
+        this.cameraViewData.next(viewIndex, view);
     }
 
-    setCameraState(camera: Camera) {
-        this.setView(camera.position, camera);
-    }
-
-    set2DCameraState(camera: Camera) {
-        const viewRect = camera.computeViewRectangle();
-        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-
-        if (viewRect) {
-            this.viewRectangleState.next([
-                CesiumMath.toDegrees(viewRect.west),
-                CesiumMath.toDegrees(viewRect.south),
-                CesiumMath.toDegrees(viewRect.east),
-                CesiumMath.toDegrees(viewRect.north)
-            ]);
-            const center = Cartographic.fromRadians(
-                (viewRect.west + viewRect.east) / 2,
-                (viewRect.north + viewRect.south) / 2
-            );
-            this.cameraViewData.next({
-                destination: {
-                    lon: CesiumMath.toDegrees(center.longitude),
-                    lat: CesiumMath.toDegrees(center.latitude),
-                    alt: currentPositionCartographic.height,
-                },
-                orientation: {
-                    heading: camera.heading,
-                    pitch: camera.pitch,
-                    roll: camera.roll,
-                }
-            });
-        } else {
-            this.cameraViewData.next({
-                destination: {
-                    lon: CesiumMath.toDegrees(currentPositionCartographic.longitude),
-                    lat: CesiumMath.toDegrees(currentPositionCartographic.latitude),
-                    alt: currentPositionCartographic.height,
-                },
-                orientation: {
-                    heading: camera.heading,
-                    pitch: camera.pitch,
-                    roll: camera.roll,
-                }
-            });
-        }
-    }
-
-    setCameraMode(isEnabled: boolean) {
-        this.mode2dState.next(isEnabled);
+    setProjectionMode(mapViewIndex: number, is2DMode: boolean) {
+        this.mode2dState.next(mapViewIndex, is2DMode);
     }
 
     setSelectedSourceData(selection: SelectedSourceData) {
@@ -551,37 +514,37 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
-        const conf = this.layersState.getValue().find(ml => ml[0] === `${mapId}/${layerId}`);
+    mapLayerConfig(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
+        const conf = this.layersState.getValue(viewIndex).find(ml => ml[0] === `${mapId}/${layerId}`);
         if (conf !== undefined && conf[2]) {
             return [true, conf[1], conf[3]];
         }
-        return [this.layersState.getValue().length === 0, fallbackLevel, false];
+        return [this.layersState.getValue(viewIndex).length === 0, fallbackLevel, false];
     }
 
-    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
+    setMapLayerConfig(viewIndex: number, mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
         if (isSourceOrMetaData(layerId)) {
             return;
         }
         const mapLayerName = `${mapId}/${layerId}`;
-        const layers = [...this.layersState.getValue()];
+        const layers = [...this.layersState.getValue(viewIndex)];
         const index = layers.findIndex(val => val[0] === mapLayerName);
         if (index !== -1) {
             layers[index] = [mapLayerName, level, visible, tileBorders];
         } else if (visible) {
             layers.push([mapLayerName, level, visible, tileBorders]);
         }
-        this.layersState.next(layers);
+        this.layersState.next(viewIndex, layers);
     }
 
-    setMapConfig(layerParams: {
+    setMapConfig(viewIndex: number, layerParams: {
         mapId: string,
         layerId: string,
         level: number,
         visible: boolean,
         tileBorders: boolean
     }[]) {
-        const layers = [...this.layersState.getValue()];
+        const layers = [...this.layersState.getValue(viewIndex)];
         layerParams.forEach(params => {
             if (!isSourceOrMetaData(params.layerId)) {
                 const mapLayerName = `${params.mapId}/${params.layerId}`;
@@ -593,22 +556,22 @@ export class AppStateService implements OnDestroy {
                 }
             }
         });
-        this.layersState.next(layers);
+        this.layersState.next(viewIndex, layers);
     }
 
-    setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
-        if (this.layersState.getValue().length) {
+    setInitialMapLayers(viewIndex: number, layers: Array<[string, number, boolean, boolean]>) {
+        if (this.layersState.getValue(viewIndex).length) {
             return;
         }
         const filtered = layers.filter(layer => !isSourceOrMetaData(layer[0]));
         if (!filtered.length) {
             return;
         }
-        this.layersState.next(filtered);
+        this.layersState.next(viewIndex, filtered);
     }
 
-    setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
-        if (Object.keys(this.stylesState.getValue()).length) {
+    setInitialStyles(viewIndex: number, styles: Map<string, { params: StyleParameters }>) {
+        if (Object.keys(this.stylesState.getValue(viewIndex)).length) {
             return;
         }
         const initial: Record<string, StyleURLParameters> = {};
@@ -619,12 +582,12 @@ export class AppStateService implements OnDestroy {
             }
         });
         if (Object.keys(initial).length) {
-            this.stylesState.next(initial);
+            this.stylesState.next(viewIndex, initial);
         }
     }
 
-    styleConfig(styleId: string): StyleParameters {
-        const styles = this.stylesState.getValue();
+    styleConfig(viewIndex: number, styleId: string): StyleParameters {
+        const styles = this.stylesState.getValue(viewIndex);
         if (styles.hasOwnProperty(styleId)) {
             return this.styleURLParamsToParams(styles[styleId]);
         }
@@ -634,10 +597,10 @@ export class AppStateService implements OnDestroy {
         };
     }
 
-    setStyleConfig(styleId: string, params: StyleParameters) {
-        const styles = {...this.stylesState.getValue()};
+    setStyleConfig(viewIndex: number, styleId: string, params: StyleParameters) {
+        const styles = {...this.stylesState.getValue(viewIndex)};
         styles[styleId] = this.styleParamsToURLParams(params);
-        this.stylesState.next(styles);
+        this.stylesState.next(viewIndex, styles);
     }
 
     setCoordinatesAndTileIds(selectedOptions: Array<string>) {
@@ -723,7 +686,7 @@ export class AppStateService implements OnDestroy {
         this.panelState.next(panel);
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
+    pruneMapLayerConfig(viewIndex: number, mapItems: Array<MapInfoItem>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
@@ -731,10 +694,10 @@ export class AppStateService implements OnDestroy {
             });
         });
 
-        const filteredLayers = this.layersState.getValue().filter(layer => {
+        const filteredLayers = this.layersState.getValue(viewIndex).filter(layer => {
             return mapLayerIds.has(layer[0]) && !isSourceOrMetaData(layer[0]);
         });
-        this.layersState.next(filteredLayers);
+        this.layersState.next(viewIndex, filteredLayers);
         return filteredLayers.length === 0;
     }
 

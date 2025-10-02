@@ -2,8 +2,8 @@ import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {Cartesian3, CesiumMath} from "./integrations/cesium";
-import {CameraService} from "./mapviewer/camera.service";
-import {ViewStateService} from "./mapviewer/view.state.service";
+import {CameraService} from "./mapview/camera.service";
+import {ViewStateService} from "./mapview/view.state.service";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -24,7 +24,7 @@ export class ErdblickDebugApi {
      * Initialize a new ErdblickDebugApi instance.
      */
     constructor(private mapService: MapService,
-                private parametersService: AppStateService,
+                private stateService: AppStateService,
                 private viewStateService: ViewStateService,
                 private cameraService: CameraService) {
     }
@@ -36,7 +36,7 @@ export class ErdblickDebugApi {
      */
     setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.parametersService.setView(
+        this.stateService.setView(
             Cartesian3.fromArray(cameraInfo.position),
             {
                 heading: cameraInfo.orientation.heading,
@@ -52,13 +52,13 @@ export class ErdblickDebugApi {
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
     getCamera() {
-        const destination = this.parametersService.getCameraPosition();
+        const destination = this.stateService.getCameraPosition();
         const position = [
             destination.x,
             destination.y,
             destination.z,
         ];
-        const orientation = this.parametersService.getCameraOrientation();
+        const orientation = this.stateService.getCameraOrientation();
         return JSON.stringify({position, orientation});
     }
 

@@ -86,7 +86,7 @@ export class InspectionPanelComponent {
 
     constructor(public inspectionService: InspectionService,
                 public mapService: MapService,
-                private parameterService: AppStateService) {
+                private stateService: AppStateService) {
         this.pushFeatureInspector();
 
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe(_ => {
@@ -102,7 +102,7 @@ export class InspectionPanelComponent {
                 this.tabs[0].title = `Selected ${this.inspectionService.selectedFeatures.length} Features`;
             }
 
-            const selectedSourceData = this.parameterService.getSelectedSourceData()
+            const selectedSourceData = this.stateService.getSelectedSourceData()
             if (selectedSourceData?.featureIds === featureIds)
                 this.inspectionService.selectedSourceData.next(selectedSourceData);
             else
