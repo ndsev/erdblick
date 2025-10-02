@@ -2,14 +2,14 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapService} from "../mapdata/map.service";
-import {LocateResponse} from "../mapviewer/visualization.model";
+import {LocateResponse} from "../mapview/visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {InspectionService} from "../inspection/inspection.service";
-import {RightClickMenuService} from "../mapviewer/rightclickmenu.service";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 
 export interface SearchTarget {
     icon: string;

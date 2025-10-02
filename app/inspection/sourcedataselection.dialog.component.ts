@@ -1,6 +1,6 @@
 import {Component} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
-import {RightClickMenuService, SourceDataDropdownOption} from "../mapviewer/rightclickmenu.service";
+import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
 import {MapService} from "../mapdata/map.service";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionService} from "./inspection.service";

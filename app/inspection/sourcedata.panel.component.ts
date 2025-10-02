@@ -23,7 +23,7 @@ import {Subscription} from "rxjs";
         <div class="flex resizable-container" #resizeableContainer
              [style.width.px]="inspectionContainerWidth"
              [style.height.px]="inspectionContainerHeight"
-             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             (mouseup)="stateService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
 <!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
 <!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
@@ -127,18 +127,18 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     containerSizeSubscription: Subscription;
 
     constructor(private inspectionService: InspectionService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private renderer: Renderer2,
                 public mapService: MapService) {
-        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        this.containerSizeSubscription = this.parameterService.panelState.subscribe(panel => {
+        this.inspectionContainerWidth = this.stateService.inspectionContainerWidth * this.stateService.baseFontSize;
+        this.inspectionContainerHeight = this.stateService.inspectionContainerHeight * this.stateService.baseFontSize;
+        this.containerSizeSubscription = this.stateService.panelState.subscribe(panel => {
             if (panel.length === 2) {
-                this.inspectionContainerWidth = panel[0] * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (panel[1] + 3) * this.parameterService.baseFontSize;
+                this.inspectionContainerWidth = panel[0] * this.stateService.baseFontSize;
+                this.inspectionContainerHeight = (panel[1] + 3) * this.stateService.baseFontSize;
             } else {
-                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth;
-                this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight + 3 * this.parameterService.baseFontSize;
+                this.inspectionContainerWidth = this.stateService.inspectionContainerWidth;
+                this.inspectionContainerHeight = this.stateService.inspectionContainerHeight + 3 * this.stateService.baseFontSize;
             }
         });
     }

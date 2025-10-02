@@ -93,13 +93,13 @@ export class CoordinatesPanelComponent implements OnDestroy {
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});
         }
         this.subscriptions.push(combineLatest([
-            this.parametersService.markerState,
-            this.parametersService.markedPositionState
+            this.stateService.markerState,
+            this.stateService.markedPositionState
         ]).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
             if (markedPosition.length === 2) {
@@ -125,7 +125,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.subscriptions.push(this.parametersService.enabledCoordsTileIdsState.subscribe(() => {
+        this.subscriptions.push(this.stateService.enabledCoordsTileIdsState.subscribe(() => {
             this.restoreSelectedOptions();
         }));
 
@@ -144,7 +144,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     private restoreSelectedOptions() {
-        for (const option of this.parametersService.getCoordinatesAndTileIds()) {
+        for (const option of this.stateService.getCoordinatesAndTileIds()) {
             if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
                 this.selectedOptions.push({name: option});
             }
@@ -200,26 +200,26 @@ export class CoordinatesPanelComponent implements OnDestroy {
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
             this.isMarkerEnabled = false;
-            this.parametersService.setMarkerState(false);
+            this.stateService.setMarkerState(false);
             this.markerButtonIcon = "location_off";
             this.markerButtonTooltip = "Enable marker placement";
         } else if (this.markerPosition) {
             this.isMarkerEnabled = true;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
             this.markerPosition = null;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "wrong_location";
             this.markerButtonTooltip = "Reset marker";
         }
@@ -234,7 +234,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     updateSelectedOptions() {
-        this.parametersService.setCoordinatesAndTileIds(this.selectedOptions.reduce(
+        this.stateService.setCoordinatesAndTileIds(this.selectedOptions.reduce(
             (array: Array<string>, option) => {
             array.push(option.name);
             return array;

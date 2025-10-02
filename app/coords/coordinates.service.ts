@@ -12,11 +12,11 @@ export class CoordinatesService {
     auxiliaryTileIdsFun: ((x: number, y: number, level: number)=>any) | null = null;
 
     constructor(private httpClient: HttpClient,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService) {
         this.mouseClickCoordinates.pipe(
             skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
         ).subscribe(position => {
-            this.parametersService.setMarkerPosition(position);
+            this.stateService.setMarkerPosition(position);
         });
     }
 

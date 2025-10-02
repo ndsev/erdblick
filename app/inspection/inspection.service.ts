@@ -75,7 +75,7 @@ export class InspectionService {
     constructor(private mapService: MapService,
                 private infoMessageService: InfoMessageService,
                 private keyboardService: KeyboardService,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService) {
 
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
 
@@ -83,7 +83,7 @@ export class InspectionService {
             if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
-                this.parametersService.setSelectedFeatures([]);
+                this.stateService.setSelectedFeatures([]);
                 this.selectedFeatures = [];
                 return;
             }
@@ -118,14 +118,14 @@ export class InspectionService {
             }
             this.loadFeatureData();
 
-            this.parametersService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
+            this.stateService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
         });
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             if (selection) {
-                this.parametersService.setSelectedSourceData(selection);
+                this.stateService.setSelectedSourceData(selection);
             } else {
-                this.parametersService.unsetSelectedSourceData();
+                this.stateService.unsetSelectedSourceData();
             }
         });
     }
