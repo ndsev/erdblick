@@ -11,8 +11,7 @@ import {
 } from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapService} from "../mapdata/map.service";
-import {AppStateService} from "../shared/appstate.service";
-import {distinctUntilChanged} from "rxjs";
+import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
 import {InspectionService} from "../inspection/inspection.service";
@@ -63,61 +62,35 @@ export class MapView2D extends MapView {
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
     }
 
-    protected override restoreCameraState() {
-        // TODO: Query the AppStateService camera data by viewId
+    protected override convertCameraState(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
         if (!this.isAvailable()) {
             console.debug('Cannot restore camera state: missing viewer');
             return;
         }
 
         try {
-            const cameraState = this.stateService.getCameraPosition(this.viewIndex);
-            const viewRectangle = this.stateService.viewRectangleState.getValue(this.viewIndex);
-
             // For 2D mode, use view rectangle if available
             if (viewRectangle) {
-                this.viewer.camera.setView({
-                    destination: viewRectangle
-                });
+                this.viewer.camera.setView({destination: Rectangle.fromDegrees(...viewRectangle)});
             } else {
-                // Fallback: Create a rectangle from position with altitude compensation if needed
-                let restoredHeight = cameraState.height;
-
-                // Apply exact forward compensation when switching from 3D to 2D
-                if (cameraState.savedFromMode === '3D') {
-                    const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                    restoredHeight = this.map3DHeightTo2DHeight(cameraState.height, cameraState.latitude, earthRadius);
-                    console.debug('Applied exact 3D→2D altitude mapping:', {
-                        originalHeight: cameraState.height,
-                        compensatedHeight: restoredHeight,
-                        latitude: CesiumMath.toDegrees(cameraState.latitude)
-                    });
-                } else if (!cameraState.savedFromMode) {
-                    // Backward compatibility: keep legacy behavior to avoid surprises in old persisted states
-                    const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                    if (distortionFactor > 1.5) {
-                        restoredHeight = cameraState.height * Math.sqrt(distortionFactor);
-                        console.debug('Applied backward-compatible 3D→2D altitude compensation:', {
-                            originalHeight: cameraState.height,
-                            compensatedHeight: restoredHeight,
-                            partialDistortionFactor: Math.sqrt(distortionFactor),
-                            latitude: CesiumMath.toDegrees(cameraState.latitude)
-                        });
-                    }
-                }
+                // Apply exact forward conversion when switching from 3D to 2D
+                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+                const restoredHeight = this.map3DHeightTo2DHeight(
+                    cameraData.destination.alt,
+                    cameraData.destination.lat,
+                    earthRadius);
 
                 // Calculate appropriate rectangle size based on compensated altitude
-                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                const visualScale = this.heightToVisualScale(restoredHeight, cameraState.latitude, earthRadius);
+                const visualScale = this.heightToVisualScale(restoredHeight, cameraData.destination.lat, earthRadius);
                 const halfSizeDegrees = visualScale / 2;
                 const halfSizeRad = CesiumMath.toRadians(halfSizeDegrees);
 
                 this.viewer.camera.setView({
                     destination: Rectangle.fromRadians(
-                        cameraState.longitude - halfSizeRad,
-                        cameraState.latitude - halfSizeRad,
-                        cameraState.longitude + halfSizeRad,
-                        cameraState.latitude + halfSizeRad
+                        cameraData.destination.lon - halfSizeRad,
+                        cameraData.destination.lat - halfSizeRad,
+                        cameraData.destination.lon + halfSizeRad,
+                        cameraData.destination.lat + halfSizeRad
                     )
                 });
             }
@@ -129,38 +102,6 @@ export class MapView2D extends MapView {
     protected override setupHandlers() {
         super.setupHandlers();
         this.setupWheelHandler();
-    }
-
-    protected override setupParameterSubscriptions() {
-        super.setupParameterSubscriptions();
-
-        this.subscriptions.push(
-            this.stateService.cameraViewData
-                .pipe(this.viewIndex, distinctUntilChanged())
-                .subscribe(cameraData => {
-                    if (!this.viewer) {
-                        return;
-                    }
-                    const viewRectangle =
-                        this.stateService.viewRectangleState.getValue(this.viewIndex);
-                    if (viewRectangle && viewRectangle.length === 4) {
-                        this.viewer.camera.setView({
-                            destination: Rectangle.fromDegrees(...viewRectangle)
-                        });
-                    } else {
-                        const rect = Rectangle.fromDegrees(
-                            cameraData.destination.lon - 1,
-                            cameraData.destination.lat - 1,
-                            cameraData.destination.lon + 1,
-                            cameraData.destination.lat + 1
-                        );
-                        this.viewer.camera.setView({
-                            destination: rect
-                        });
-                    }
-                    this.updateViewport();
-                })
-        );
     }
 
     /**
@@ -223,13 +164,57 @@ export class MapView2D extends MapView {
         }
     }
 
+    /**
+     * Map a 2D WebMercator height to an equivalent 3D height
+     * by preserving the visual angular field (exact, drift-free).
+     */
+    private map2DHeightTo3DHeight(height2D: number, latitudeRadians: number, earthRadius: number): number {
+        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
+        const halfAngle = Math.atan(height2D / (2 * earthRadius));
+        const height3D = (2 * earthRadius) * Math.tan(halfAngle / distortion);
+        // Enforce a reasonable minimum altitude for stability
+        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height3D);
+    }
+
+    /**
+     * Map a 3D camera height to an equivalent 2D WebMercator height
+     * by preserving the visual angular field (exact, drift-free).
+     */
+    private map3DHeightTo2DHeight(height3D: number, latitudeRadians: number, earthRadius: number): number {
+        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
+        const halfAngle = Math.atan(height3D / (2 * earthRadius));
+        const height2D = (2 * earthRadius) * Math.tan(distortion * halfAngle);
+        // Enforce a reasonable minimum altitude for stability
+        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height2D);
+    }
+
     protected override updateOnCameraChange() {
         if (!this.isAvailable()) {
             console.debug('cameraChangedHandler: viewer is destroyed or unavailable');
             return;
         }
 
-        this.set2DCameraState(this.viewer.camera);
+        const camera = this.viewer.camera;
+        const viewRect = camera.computeViewRectangle();
+        const position = Cartographic.fromCartesian(camera.position);
+        const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
+        const restoredHeight = this.map2DHeightTo3DHeight(position.height, position.latitude, earthRadius);
+
+        if (viewRect) {
+            this.stateService.viewRectangleState.next(this.viewIndex, [
+                CesiumMath.toDegrees(viewRect.west),
+                CesiumMath.toDegrees(viewRect.south),
+                CesiumMath.toDegrees(viewRect.east),
+                CesiumMath.toDegrees(viewRect.north)
+            ]);
+            const center = Cartographic.fromRadians(
+                (viewRect.west + viewRect.east) / 2,
+                (viewRect.north + viewRect.south) / 2,
+                position.height
+            );
+            this.stateService.setView(this.viewIndex, center, camera);
+        }
+        this.stateService.setView(this.viewIndex, new Cartographic(position.longitude, position.latitude, restoredHeight), camera);
     };
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -282,28 +267,6 @@ export class MapView2D extends MapView {
             // Fallback: use position-only movement without changing zoom
             const cameraHeight = this.viewer.camera.positionCartographic.height;
             return [Cartographic.fromDegrees(pos.x, pos.y, cameraHeight), undefined];
-        }
-    }
-
-    set2DCameraState(camera: Camera) {
-        const viewRect = camera.computeViewRectangle();
-        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-
-        if (viewRect) {
-            this.stateService.viewRectangleState.next(this.viewIndex, [
-                CesiumMath.toDegrees(viewRect.west),
-                CesiumMath.toDegrees(viewRect.south),
-                CesiumMath.toDegrees(viewRect.east),
-                CesiumMath.toDegrees(viewRect.north)
-            ]);
-            const center = Cartographic.fromRadians(
-                (viewRect.west + viewRect.east) / 2,
-                (viewRect.north + viewRect.south) / 2,
-                currentPositionCartographic.height
-            );
-            this.stateService.setView(this.viewIndex, center, camera);
-        } else {
-            this.stateService.setView(this.viewIndex, currentPositionCartographic, camera);
         }
     }
 
@@ -481,18 +444,6 @@ export class MapView2D extends MapView {
             console.error('Error in robust rectangle calculation:', error);
             return undefined;
         }
-    }
-
-    /**
-     * Map a 3D camera height to an equivalent 2D WebMercator height
-     * by preserving the visual angular field (exact, drift-free).
-     */
-    private map3DHeightTo2DHeight(height3D: number, latitudeRadians: number, earthRadius: number): number {
-        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
-        const halfAngle = Math.atan(height3D / (2 * earthRadius));
-        const height2D = (2 * earthRadius) * Math.tan(distortion * halfAngle);
-        // Enforce a reasonable minimum altitude for stability
-        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height2D);
     }
 
     override updateViewport() {

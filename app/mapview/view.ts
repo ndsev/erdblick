@@ -14,7 +14,7 @@ import {
     WebMercatorProjection,
     BillboardCollection, defined, ScreenSpaceEventType, Billboard
 } from "../integrations/cesium";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapService} from "../mapdata/map.service";
 import {TileVisualization} from "./visualization.model";
 import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
@@ -222,9 +222,6 @@ export class MapView {
                 this.viewer.fullscreenButton.destroy();
             }
 
-            // Restore camera state
-            this.restoreCameraState();
-
             // Trigger viewport update to fetch tiles for the new viewer
             this.updateViewport();
 
@@ -277,8 +274,8 @@ export class MapView {
     protected setupParameterSubscriptions() {
         this.subscriptions.push(
             combineLatest([
-                this.stateService.osmEnabledState,
-                this.stateService.osmOpacityState
+                this.stateService.osmEnabledState.pipe(this.viewIndex),
+                this.stateService.osmOpacityState.pipe(this.viewIndex)
             ]).subscribe(([osmEnabled, osmOpacity]) => {
                 if (this.openStreetMapLayer) {
                     this.openStreetMapLayer.show = osmEnabled;
@@ -304,6 +301,16 @@ export class MapView {
                 } else {
                     this.markerService.clearMarkers();
                 }
+            })
+        );
+
+        this.subscriptions.push(
+            combineLatest([
+                this.stateService.cameraViewData.pipe(this.viewIndex),
+                this.stateService.viewRectangleState.pipe(this.viewIndex)
+            ]).subscribe(([cameraViewData, viewRect]) => {
+                this.convertCameraState(viewRect, cameraViewData);
+                this.updateViewport();
             })
         );
     }
@@ -711,7 +718,7 @@ export class MapView {
     /**
      * Restore camera state from saved state
      */
-    protected restoreCameraState() {
+    protected convertCameraState(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
         throw new Error('Not Implemented');
     }
 

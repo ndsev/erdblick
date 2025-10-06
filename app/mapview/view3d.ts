@@ -1,7 +1,7 @@
 import {Cartesian2, Cartesian3, Cartographic, CesiumMath, Rectangle, SceneMode} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapService} from "../mapdata/map.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {combineLatest, distinctUntilChanged} from "rxjs";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
@@ -43,55 +43,6 @@ export class MapView3D extends MapView {
         // Reset zoom constraints for 3D mode
         scene.screenSpaceCameraController.minimumZoomDistance = 1;
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
-    }
-
-    protected override restoreCameraState() {
-        // TODO: Query the AppStateService camera data by viewId
-        if (!this.isAvailable()) {
-            console.debug('Cannot restore camera state: missing viewer');
-            return;
-        }
-
-        try {
-            const cameraState = viewerState.cameraState;
-
-            // For 3D mode, restore full camera state with altitude compensation if needed
-            let restoredHeight = cameraState.height;
-
-            // Apply exact inverse compensation when switching from 2D to 3D
-            if (cameraState.savedFromMode === '2D') {
-                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                restoredHeight = this.map2DHeightTo3DHeight(cameraState.height, cameraState.latitude, earthRadius);
-                console.debug('Applied exact 2D→3D altitude mapping:', {
-                    originalHeight: cameraState.height,
-                    compensatedHeight: restoredHeight,
-                    latitude: CesiumMath.toDegrees(cameraState.latitude)
-                });
-            } else if (!cameraState.savedFromMode) {
-                // Backward compatibility: keep legacy behavior to avoid surprises in old persisted states
-                const distortionFactor = this.calculateMercatorDistortionFactor(cameraState.latitude);
-                if (distortionFactor > 1.5) {
-                    restoredHeight = cameraState.height / Math.sqrt(distortionFactor);
-                    console.debug('Applied backward-compatible altitude compensation:', {
-                        originalHeight: cameraState.height,
-                        compensatedHeight: restoredHeight,
-                        partialDistortionFactor: Math.sqrt(distortionFactor),
-                        latitude: CesiumMath.toDegrees(cameraState.latitude)
-                    });
-                }
-            }
-
-            this.stateService.setView(
-                this.viewIndex,
-                new Cartographic(cameraState.longitude, cameraState.latitude, restoredHeight),
-                {
-                    heading: cameraState.heading,
-                    pitch: cameraState.pitch,
-                    roll: cameraState.roll
-                });
-        } catch (error) {
-            console.error('Error restoring camera state:', error);
-        }
     }
 
     override moveUp() {
@@ -136,27 +87,19 @@ export class MapView3D extends MapView {
         }
     }
 
-    protected override setupParameterSubscriptions() {
-        super.setupParameterSubscriptions();
-
-        this.subscriptions.push(
-            this.stateService.cameraViewData
-                .pipe(this.viewIndex, distinctUntilChanged())
-                .subscribe(cameraData => {
-                    if (!this.viewer) {
-                        return;
-                    }
-                    this.viewer.camera.setView({
-                        destination: Cartesian3.fromDegrees(
-                            cameraData.destination.lon,
-                            cameraData.destination.lat,
-                            cameraData.destination.alt
-                        ),
-                        orientation: cameraData.orientation
-                    });
-                    this.updateViewport();
-                })
-        );
+    protected override convertCameraState(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
+        if (!this.isAvailable()) {
+            console.debug('Cannot restore camera state: missing viewer');
+            return;
+        }
+        this.viewer.camera.setView({
+            destination: Cartesian3.fromDegrees(
+                cameraData.destination.lon,
+                cameraData.destination.lat,
+                cameraData.destination.alt
+            ),
+            orientation: cameraData.orientation
+        });
     }
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -188,18 +131,6 @@ export class MapView3D extends MapView {
 
     protected override performSurfaceMovement(newPosition: Cartographic) {
         this.stateService.setView(this.viewIndex, newPosition, this.stateService.getCameraOrientation(this.viewIndex));
-    }
-
-    /**
-     * Map a 2D WebMercator height to an equivalent 3D height
-     * by preserving the visual angular field (exact, drift-free).
-     */
-    private map2DHeightTo3DHeight(height2D: number, latitudeRadians: number, earthRadius: number): number {
-        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
-        const halfAngle = Math.atan(height2D / (2 * earthRadius));
-        const height3D = (2 * earthRadius) * Math.tan(halfAngle / distortion);
-        // Enforce a reasonable minimum altitude for stability
-        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height3D);
     }
 
     override updateViewport() {
