@@ -31,6 +31,12 @@ export interface CameraViewState {
     orientation: { heading: number, pitch: number, roll: number };
 }
 
+export interface LayerViewConfig {
+    level: number;
+    visible: boolean;
+    tileBorders: boolean;
+}
+
 export type PanelSizeState = [] | [number, number];
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
@@ -104,7 +110,13 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readOnly focusedView = this.createState<number>()
+    readonly focusedView = this.createState<number>({
+        name: 'focus',
+        defaultValue: 0,
+        schema: z.number().nonnegative(),
+        urlParamName: 'f',
+        urlIncludeInVisualizationOnly: false,
+    });
 
     readonly cameraViewData = this.createMapViewState<CameraViewState>({
         name: 'cameraView',
@@ -176,12 +188,23 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'osmOp',
     });
 
-    readonly layersState = this.createMapViewState<Array<[string, number, boolean, boolean]>>({
-        name: 'layers',
-        defaultValue: [],
-        schema: z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish])),
-        urlParamName: 'l',
-    });
+    // TODO: Compress like this in URL:
+    //     layers="layer name 1,layer name 2"
+    //     v="0,0:1,0"
+    //     z="13,13:13,13"
+    //     showLanes="0,0:1,0"
+    // readonly layersState = this.createMapViewState<Array<[string, number, boolean, boolean]>>({
+    //     name: 'layers',
+    //     defaultValue: [],
+    //     schema: z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish])),
+    //     urlParamName: 'l',
+    // });
+
+    readonly layerNames = this.createState<Array<string>>();
+    readonly layerVisibility = this.createMapViewState<Array<boolean>>();
+    readonly layerTileBorders = this.createMapViewState<Array<boolean>>();
+    readonly layerZoomLevel = this.createMapViewState<Array<number>>();
+    // readonly layerStyleOptions = new Map<string, MapViewState<Array<boolean|string|number>>>();
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
@@ -273,6 +296,10 @@ export class AppStateService implements OnDestroy {
 
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
+    }
+
+    get numViews() {
+        return this.cameraViewData.appState.getValue().length;
     }
 
     get cameraMoveUnits() {
@@ -516,12 +543,35 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    mapLayerConfig(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
-        const conf = this.layersState.getValue(viewIndex).find(ml => ml[0] === `${mapId}/${layerId}`);
-        if (conf !== undefined && conf[2]) {
-            return [true, conf[1], conf[3]];
+    mapLayerConfig(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number=13): LayerViewConfig[] {
+        const mapLayerId = `${mapId}/${layerId}`;
+        let layerIndex = this.layerNames.getValue().findIndex(ml => ml[0] === mapLayerId);
+        if (layerIndex === undefined) {
+            layerIndex = this.layerNames.getValue().length;
+            // TODO: Ensure that this will not trigger bad things.
+            this.layerNames.next([...this.layerNames.getValue(), mapLayerId]);
         }
-        return [this.layersState.getValue(viewIndex).length === 0, fallbackLevel, false];
+        const result = new Array<LayerViewConfig>();
+        const layerStateValue = (layerState: MapViewState<Array<any>>, viewIndex: number, defaultValue: any) => {
+            let resultForView = layerState.getValue(viewIndex);
+            if (layerIndex >= resultForView.length) {
+                for (let i = resultForView.length; i <= viewIndex; ++i) {
+                    resultForView.push(defaultValue);
+                }
+                // TODO: Ensure that this will not trigger bad things.
+                layerState.next(viewIndex, resultForView);
+            }
+            return resultForView[viewIndex];
+        }
+
+        for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
+            result.push({
+                visible: layerStateValue(this.layerVisibility, viewIndex, false),
+                level: layerStateValue(this.layerZoomLevel, viewIndex, fallbackLevel),
+                tileBorders: layerStateValue(this.layerTileBorders, viewIndex, false),
+            });
+        }
+        return result;
     }
 
     setMapLayerConfig(viewIndex: number, mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {

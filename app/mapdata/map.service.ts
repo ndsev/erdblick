@@ -40,9 +40,9 @@ export interface LayerInfoItem extends Record<string, any> {
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
-    level: number;
-    visible: boolean;
-    tileBorders: boolean;
+
+    // This is an array, because the values are stored per MapView.
+    viewConfig: LayerViewConfig[];
 }
 
 /** Expected structure of a list entry in the /sources endpoint. */
@@ -55,10 +55,10 @@ export interface MapInfoItem extends Record<string, any> {
     nodeId: string;
     protocolVersion: { major: number, minor: number, patch: number };
     addOn: boolean;
-    visible: boolean;
     type: string;
     children?: Array<LayerInfoItem>;
     expanded?: boolean;
+    visible: boolean[]; // This is an array, because the values are stored per MapView.
 }
 
 export interface GroupInfoItem extends Record<string, any> {
@@ -66,8 +66,8 @@ export interface GroupInfoItem extends Record<string, any> {
     groupId: string;
     type: string;
     children: Array<GroupInfoItem | MapInfoItem>;
-    visible: boolean;
     expanded: boolean;
+    visible: boolean[]; // This is an array, because the values are stored per MapView.
 }
 
 const infoUrl = "sources";
@@ -132,7 +132,7 @@ export class MapService {
     tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<any>;
     tileVisualizationDestructionTopic: Subject<any>;
-    moveToWgs84PositionTopic: Subject<{ x: number, y: number, z?: number }>;
+    moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
 
@@ -206,7 +206,7 @@ export class MapService {
         this.tileVisualizationDestructionTopic = new Subject<any>(); // {FeatureTile}
 
         // Triggered when the user requests to zoom to a map layer.
-        this.moveToWgs84PositionTopic = new Subject<{ x: number, y: number }>();
+        this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number }>();
 
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.
@@ -249,9 +249,11 @@ export class MapService {
             for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
-                    [layer.visible, layer.level] = this.stateService.mapLayerConfig(mapId, layerId, layer.level);
-                    if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
-                        isAnyLayerVisible = true;
+                    for (let viewIndex = 0; viewIndex < this.stateService.layersState.length(); ++i) {
+                        [layer.visible, layer.level] = this.stateService.mapLayerConfig(viewIndex, mapId, layerId, layer.level);
+                        if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
+                            isAnyLayerVisible = true;
+                        }
                     }
                 }
                 mapInfo.visible = isAnyLayerVisible;

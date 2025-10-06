@@ -332,6 +332,10 @@ export class MapViewState<T> {
         const arr = this.appState.getValue();
         return arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0];
     }
+
+    length() {
+        return this.appState.getValue().length;
+    }
 }
 
 function compactBooleans(value: unknown): unknown {

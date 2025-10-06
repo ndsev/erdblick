@@ -164,13 +164,16 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            this.mapService.moveToWgs84PositionTopic.subscribe((pos: { x: number, y: number, z?: number }) => {
+            this.mapService.moveToWgs84PositionTopic.subscribe((pos: { targetView: number, x: number, y: number, z?: number }) => {
                 // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot move to WGS84 position: viewer not available');
                     return;
                 }
 
+                if (pos.targetView !== this.viewIndex) {
+                    return;
+                }
                 const [destination, orientation] = this.performConversionForMovePosition(pos);
                 if (orientation) {
                     this.stateService.setView(this.viewIndex, destination, orientation);
@@ -370,6 +373,7 @@ export class MapView {
                     // Convert Cartesian3 position to WGS84 degrees
                     const cartographic = Cartographic.fromCartesian(feature.primitive.position);
                     this.mapService.moveToWgs84PositionTopic.next({
+                        targetView: this.viewIndex,
                         x: CesiumMath.toDegrees(cartographic.longitude),
                         y: CesiumMath.toDegrees(cartographic.latitude),
                         z: cartographic.height + 1000

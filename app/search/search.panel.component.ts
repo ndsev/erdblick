@@ -481,13 +481,15 @@ export class SearchPanelComponent implements AfterViewInit {
         }
         let lat = coordinates[0];
         let lon = coordinates[1];
-        const cameraView = this.stateService.cameraViewData.getValue();
+        const targetViewIndex = this.stateService.focusedView.getValue();
+        const cameraView = this.stateService.cameraViewData.getValue(targetViewIndex);
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : cameraView.destination.alt;
 
         this.mapService.moveToWgs84PositionTopic.next({
             x: lon,
             y: lat,
-            z: alt
+            z: alt,
+            targetView: targetViewIndex
         });
     }
 

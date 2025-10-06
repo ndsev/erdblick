@@ -10,10 +10,10 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {MarkerService} from "../coords/marker.service";
 import {MapView} from "./view";
 import {MapView2D} from "./view2d";
 import {SceneMode} from "../integrations/cesium";
+import {MapView3D} from "./view3d";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -67,7 +67,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
-                public markerService: MarkerService,
                 public appModeService: AppModeService)
     {
     }
@@ -120,10 +119,17 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         if (this.mapView) {
             await this.mapView.destroy();
         }
-        this.mapView = new MapView2D(
-            this.viewIndex(), "mapViewContainer", is2D ? SceneMode.SCENE2D : SceneMode.SCENE3D,
-            this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
-            this.menuService, this.coordinatesService, this.markerService, this.stateService);
+        if (is2D) {
+            this.mapView = new MapView2D(
+                this.viewIndex(), "mapViewContainer", SceneMode.SCENE2D,
+                this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
+                this.menuService, this.coordinatesService, this.stateService);
+        } else {
+            this.mapView = new MapView3D(
+                this.viewIndex(), "mapViewContainer", SceneMode.SCENE3D,
+                this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
+                this.menuService, this.coordinatesService, this.stateService);
+        }
         await this.mapView.setup();
     }
 
