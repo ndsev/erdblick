@@ -118,20 +118,25 @@ function processSearch(task: SearchWorkerTask) {
         postMessage(result);
     }
 
+    let parser: any = null;
+    let tile: TileFeatureLayer | null = null;
+    let search: any = null;
+
     try {
         // Parse the tile.
-        let parser = new coreLib.TileLayerParser();
+        parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.tileBlob);
+        tile = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.tileBlob);
+        if (!tile)
+            throw new Error("Error parsing tile!");
+
         const numFeatures = tile.numFeatures();
         const tileId = tile.tileId();
 
         // Get the query results from the tile.
-        let search = new coreLib.FeatureLayerSearch(tile);
+        search = new coreLib.FeatureLayerSearch(tile);
         const queryResult = search.filter(task.query);
-        search.delete();
-        tile.delete();
 
         if (queryResult["error"]) {
             postError("Error", queryResult.error);
@@ -156,24 +161,33 @@ function processSearch(task: SearchWorkerTask) {
         let error = someException as Error
         postError(error.name, error.message);
     }
+    finally {
+        if (search) search.delete();
+        if (tile) tile.delete();
+        if (parser) parser.delete();
+    }
 }
 
 function processCompletion(task: CompletionWorkerTask) {
+    let parser: any = null;
+    let tile: TileFeatureLayer | null = null;
+    let search: any = null;
+
     try {
         // Parse the tile.
-        let parser = new coreLib.TileLayerParser();
+        parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        tile = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        if (!tile)
+            throw new Error("Error parsing tile!");
 
         // Get the query results from the tile.
-        let search = new coreLib.FeatureLayerSearch(tile);
+        search = new coreLib.FeatureLayerSearch(tile);
 
         const candidates = search.complete(task.query, task.point, {
             limit: task.limit,
         });
-        search.delete();
-        tile.delete();
 
         // We do not show completion errors.
         if (candidates["error"]) {
@@ -204,23 +218,31 @@ function processCompletion(task: CompletionWorkerTask) {
     catch (exc: any) {
         console.error("Completion error", exc);
     }
+    finally {
+        if (search) search.delete();
+        if (tile) tile.delete();
+        if (parser) parser.delete();
+    }
 }
 
 function processDiagnostics(task: DiagnosticsWorkerTask) {
+    let parser: any = null;
+    let tile: TileFeatureLayer | null = null;
+    let search: any = null;
+
     try {
         // Parse the tile.
-        let parser = new coreLib.TileLayerParser();
+        parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        tile = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        if (!tile)
+            throw new Error("Error parsing tile!");
 
         // Get the query results from the tile.
-        let search = new coreLib.FeatureLayerSearch(tile);
+        search = new coreLib.FeatureLayerSearch(tile);
 
         const messages = search.diagnostics(task.query, task.diagnostics);
-
-        search.delete();
-        tile.delete();
 
         postMessage({
             type: 'DiagnosticsResultsForTile',
@@ -232,6 +254,11 @@ function processDiagnostics(task: DiagnosticsWorkerTask) {
     }
     catch (exc: any) {
         console.error("Diagnostics error", exc);
+    }
+    finally {
+        if (search) search.delete();
+        if (tile) tile.delete();
+        if (parser) parser.delete();
     }
 }
 

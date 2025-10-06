@@ -382,7 +382,7 @@ export class StyleService {
         const styleUint8Array = this.textEncoder.encode(style.source);
         const result = uint8ArrayToWasm(
             (wasmBuffer: any) => {
-                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer); // FIXME: No delete? Why create the object twice?
                 if (featureLayerStyle) {
                     style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                     style.options = [];

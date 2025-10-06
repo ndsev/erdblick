@@ -23,15 +23,18 @@ export async function initializeLibrary(): Promise<void> {
  */
 export function uint8ArrayFromWasm(fun: (data: SharedUint8Array)=>any) {
     let sharedGlbArray = new coreLib.SharedUint8Array();
-    if (fun(sharedGlbArray) === false) {
+    try {
+        if (fun(sharedGlbArray) === false) {
+            return null;
+        }
+
+        let objSize = sharedGlbArray.getSize();
+        let bufferPtr = Number(sharedGlbArray.getPointer());
+        let data = new Uint8Array(coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize));
+        return data;
+    } finally {
         sharedGlbArray.delete();
-        return null;
     }
-    let objSize = sharedGlbArray.getSize();
-    let bufferPtr = Number(sharedGlbArray.getPointer());
-    let data = new Uint8Array(coreLib.HEAPU8.buffer.slice(bufferPtr, bufferPtr + objSize));
-    sharedGlbArray.delete();
-    return data;
 }
 
 /**
@@ -40,16 +43,18 @@ export function uint8ArrayFromWasm(fun: (data: SharedUint8Array)=>any) {
  * returns false, null is returned.
  */
 export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
+    let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
     try {
-        let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
         let bufferPtr = Number(sharedGlbArray.getPointer());
         coreLib.HEAPU8.set(inputData, bufferPtr);
+
         let result = fun(sharedGlbArray);
-        sharedGlbArray.delete();
         return (result === false) ? null : result;
     } catch (e) {
         console.error(`Error while parsing UINT8 encoded data: ${e}`)
         return undefined;
+    } finally {
+        sharedGlbArray.delete();
     }
 }
 
@@ -61,11 +66,14 @@ export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uin
  */
 export async function uint8ArrayToWasmAsync(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
     let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
-    let bufferPtr = Number(sharedGlbArray.getPointer());
-    coreLib.HEAPU8.set(inputData, bufferPtr);
-    let result = await fun(sharedGlbArray);
-    sharedGlbArray.delete();
-    return (result === false) ? null : result;
+    try {
+        let bufferPtr = Number(sharedGlbArray.getPointer());
+        coreLib.HEAPU8.set(inputData, bufferPtr);
+        let result = await fun(sharedGlbArray);
+        return (result === false) ? null : result;
+    } finally {
+        sharedGlbArray.delete();
+    }
 }
 
 /** Memory usage log. */
