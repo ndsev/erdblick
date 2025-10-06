@@ -38,7 +38,6 @@ import {AppStateService} from "./shared/appstate.service";
 import {PreferencesComponent} from "./auxiliaries/preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./shared/editor.component";
-import {ErdblickViewComponent} from "./mapview/view.component";
 import {CoordinatesPanelComponent} from "./coords/coordinates.panel.component";
 import {initializeLibrary} from "./integrations/wasm";
 import {CheckboxModule} from "primeng/checkbox";
@@ -92,13 +91,13 @@ import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
 import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
-import {ViewService} from "./mapview/view.service";
-import {CameraService} from "./mapview/camera.service";
 import {MarkerService} from "./coords/marker.service";
-import {ViewStateService} from "./mapview/view.state.service";
 import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./styledata/style.component";
+import {MapViewContainerComponent} from "./mapview/view.container.component";
+import {MapViewComponent} from "./mapview/view.component";
+import {Splitter} from "primeng/splitter";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -186,7 +185,6 @@ export const initializeServices = () => {
         SourceDataPanelComponent,
         PreferencesComponent,
         EditorComponent,
-        ErdblickViewComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         AlertDialogComponent,
@@ -202,7 +200,9 @@ export const initializeServices = () => {
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
         ErdblickViewUIComponent,
-        StyleComponent
+        StyleComponent,
+        MapViewContainerComponent,
+        MapViewComponent
     ],
     bootstrap: [
         AppComponent
@@ -279,7 +279,8 @@ export const initializeServices = () => {
         InputIconModule,
         PopoverModule,
         SelectButtonModule,
-        ChipModule
+        ChipModule,
+        Splitter
     ],
     providers: [
         provideAppInitializer(initializeServices),
@@ -294,9 +295,6 @@ export const initializeServices = () => {
         ClipboardService,
         EditorService,
         RightClickMenuService,
-        ViewStateService,
-        CameraService,
-        ViewService,
         MarkerService,
         provideHttpClient(),
         provideAnimationsAsync(),

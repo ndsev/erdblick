@@ -39,9 +39,9 @@ import {AppStateService} from "../shared/appstate.service";
         </div>
         <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
             <p-button
-                    [ngClass]="{'blue': isMode2d()}"
-                    [label]="isMode2d() ? '2D' : '3D'"
-                    [pTooltip]="isMode2d() ? 'Switch to 3D' : 'Switch to 2D'"
+                    [ngClass]="{'blue': is2D()}"
+                    [label]="is2D() ? '2D' : '3D'"
+                    [pTooltip]="is2D() ? 'Switch to 3D' : 'Switch to 2D'"
                     tooltipPosition="left"
                     (onClick)="toggleSceneMode()"
                     [rounded]="true"
@@ -91,8 +91,8 @@ export class ErdblickViewUIComponent implements AfterViewInit {
                 private keyboardService: KeyboardService) {
     }
 
-    mapView: InputSignal<MapView | null> = input<MapView | null>(null);
-    isMode2d: InputSignal<boolean> = input<boolean>(false);
+    mapView: InputSignal<MapView | undefined> = input<MapView | undefined>(undefined);
+    is2D: InputSignal<boolean> = input<boolean>(false);
 
     ngAfterViewInit() {
         // TODO - refactoring:

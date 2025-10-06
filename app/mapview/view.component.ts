@@ -1,7 +1,7 @@
 import {AppStateService} from "../shared/appstate.service";
-import {AfterViewInit, Component, effect, Input, input, OnDestroy} from "@angular/core";
+import {AfterViewInit, Component, input, InputSignal, OnDestroy} from "@angular/core";
 import {MapService} from "../mapdata/map.service";
-import {DebugWindow, ErdblickDebugApi} from "../app.debugapi.component";
+import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";
@@ -12,8 +12,8 @@ import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {MarkerService} from "../coords/marker.service";
 import {MapView} from "./view";
-import {MapView3D} from "./view3d";
 import {MapView2D} from "./view2d";
+import {SceneMode} from "../integrations/cesium";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -25,7 +25,7 @@ declare let window: DebugWindow;
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()"/>
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
-        <erdblick-view-ui></erdblick-view-ui>
+        <erdblick-view-ui [mapView]="mapView" [is2D]="is2DMode"></erdblick-view-ui>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -41,7 +41,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: MapView;
-    viewIndex = input.required<number>();
+    viewIndex: InputSignal<number> = input.required<number>();
 
     /**
      * Construct a Cesium View with a Model.
@@ -59,23 +59,24 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * @param markerService
      * @param appModeService
      */
-    constructor(private mapService: MapService,
-                private featureSearchService: FeatureSearchService,
-                private stateService: AppStateService,
-                private jumpService: JumpTargetService,
-                private inspectionService: InspectionService,
-                private keyboardService: KeyboardService,
-                private menuService: RightClickMenuService,
-                private coordinatesService: CoordinatesService,
-                private markerService: MarkerService,
+    constructor(public mapService: MapService,
+                public featureSearchService: FeatureSearchService,
+                public stateService: AppStateService,
+                public jumpService: JumpTargetService,
+                public inspectionService: InspectionService,
+                public keyboardService: KeyboardService,
+                public menuService: RightClickMenuService,
+                public coordinatesService: CoordinatesService,
+                public markerService: MarkerService,
                 public appModeService: AppModeService)
     {
     }
 
     ngAfterViewInit() {
-        this.stateService.mode2dState.subscribeFor(this.viewIndex(), mode2d => {
+        this.stateService.mode2dState.subscribe(this.viewIndex(), mode2d => {
+            this.is2DMode = mode2d;
             // Initialize viewer with appropriate projection
-            this.createViewerForMode(this.is2DMode).catch((error) => {
+            this.createViewerForMode(mode2d).catch((error) => {
                 console.error('Failed to initialize viewer:', error);
                 alert('Failed to initialize the map viewer. Please refresh the page.');
             }).finally(() => {
@@ -119,11 +120,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         if (this.mapView) {
             await this.mapView.destroy();
         }
-        if (is2D) {
-            this.mapView = new MapView2D(/* ... */);
-        } else {
-            this.mapView = new MapView3D(/* ... */);
-        }
+        this.mapView = new MapView2D(
+            this.viewIndex(), "mapViewContainer", is2D ? SceneMode.SCENE2D : SceneMode.SCENE3D,
+            this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
+            this.menuService, this.coordinatesService, this.markerService, this.stateService);
         await this.mapView.setup();
     }
 

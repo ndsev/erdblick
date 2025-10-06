@@ -1,9 +1,8 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
-import {Cartesian3, CesiumMath} from "./integrations/cesium";
-import {CameraService} from "./mapview/camera.service";
-import {ViewStateService} from "./mapview/view.state.service";
+import {SceneMode, CesiumMath} from "./integrations/cesium";
+import {MapView} from "./mapview/view";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -24,9 +23,7 @@ export class ErdblickDebugApi {
      * Initialize a new ErdblickDebugApi instance.
      */
     constructor(private mapService: MapService,
-                private stateService: AppStateService,
-                private viewStateService: ViewStateService,
-                private cameraService: CameraService) {
+                private stateService: AppStateService) {
     }
 
     /**
@@ -37,7 +34,8 @@ export class ErdblickDebugApi {
     setCamera(cameraInfoStr: string) {
         const cameraInfo = JSON.parse(cameraInfoStr);
         this.stateService.setView(
-            Cartesian3.fromArray(cameraInfo.position),
+            0,
+            cameraInfo.position,
             {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
@@ -52,13 +50,13 @@ export class ErdblickDebugApi {
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
     getCamera() {
-        const destination = this.stateService.getCameraPosition();
+        const destination = this.stateService.getCameraPosition(0);
         const position = [
-            destination.x,
-            destination.y,
-            destination.z,
+            destination.longitude,
+            destination.latitude,
+            destination.height,
         ];
-        const orientation = this.stateService.getCameraOrientation();
+        const orientation = this.stateService.getCameraOrientation(0);
         return JSON.stringify({position, orientation});
     }
 
@@ -103,21 +101,21 @@ export class ErdblickDebugApi {
      * Diagnostic method to show WebMercator distortion factors at different latitudes
      * Useful for debugging altitude compensation issues
      */
-    showMercatorDistortion() {
+    showMercatorDistortion(mapView: MapView) {
         // Show current camera position distortion first
-        if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
-            const currentPos = this.viewStateService.viewer.camera.positionCartographic;
+        if (mapView.isAvailable()) {
+            const currentPos = mapView.viewer.camera.positionCartographic;
             const currentLatDeg = CesiumMath.toDegrees(currentPos.latitude);
-            const currentFactor = this.cameraService.calculateMercatorDistortionFactor(currentPos.latitude);
+            const currentFactor = mapView.calculateMercatorDistortionFactor(currentPos.latitude);
             const currentHeight = currentPos.height;
 
             console.log('🎯 CURRENT POSITION:');
             console.log(`  Latitude: ${currentLatDeg.toFixed(3)}°`);
             console.log(`  Altitude: ${Math.round(currentHeight)}m`);
             console.log(`  Distortion Factor: ${currentFactor.toFixed(3)}x`);
-            console.log(`  Mode: ${this.viewStateService.is2DMode ? '2D' : '3D'}`);
+            console.log(`  Mode: ${mapView.getSceneMode().valueOf() === SceneMode.SCENE2D ? '2D' : '3D'}`);
 
-            if (this.viewStateService.is2DMode) {
+            if (mapView.getSceneMode().valueOf() === SceneMode.SCENE2D) {
                 const equivalent3D = currentHeight / currentFactor;
                 console.log(`  Equivalent 3D altitude: ${Math.round(equivalent3D)}m`);
             } else {
@@ -130,14 +128,14 @@ export class ErdblickDebugApi {
         const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
         testLatitudes.forEach(latDeg => {
             const latRad = CesiumMath.toRadians(latDeg);
-            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
+            const factor = mapView.calculateMercatorDistortionFactor(latRad);
             console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
         });
 
         console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
         testLatitudes.forEach(latDeg => {
             const latRad = CesiumMath.toRadians(latDeg);
-            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
+            const factor = mapView.calculateMercatorDistortionFactor(latRad);
             const altitude3D = 10000; // 10km
             const altitude2D = altitude3D * factor;
             console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
