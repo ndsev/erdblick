@@ -1,5 +1,6 @@
 #include "layer.h"
 
+#include "mapget/log.h"
 #include "mapget/model/feature.h"
 #include <iostream>
 
@@ -245,7 +246,11 @@ NativeJsValue TileSourceDataLayer::toObject() const
     if (model_->numRoots() == 0)
         return *JsValue::Dict();
 
-    return *visit(JsValue("root"), *model_->root(0));
+    auto root = model_->root(0);
+    if (!root)
+        raise(root.error().message);
+
+    return *visit(JsValue("root"), **root);
 }
 
 std::string TileSourceDataLayer::getError() const
