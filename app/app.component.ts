@@ -12,7 +12,7 @@ interface Versions {
 @Component({
     selector: 'app-root',
     template: `
-        <erdblick-view></erdblick-view>
+        <mapview-container></mapview-container>
         <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
         <p-toast position="top-center" key="tc"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>

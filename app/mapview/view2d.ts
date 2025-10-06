@@ -1,7 +1,5 @@
 import {
-    Camera,
     Cartesian2,
-    Cartesian3,
     Cartographic,
     CesiumMath,
     Ellipsoid,
@@ -17,7 +15,6 @@ import {JumpTargetService} from "../search/jump.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
-import {MarkerService} from "../coords/marker.service";
 
 export class MapView2D extends MapView {
 
@@ -30,10 +27,9 @@ export class MapView2D extends MapView {
                 inspectionService: InspectionService,
                 menuService: RightClickMenuService,
                 coordinatesService: CoordinatesService,
-                markerService: MarkerService,
                 stateService: AppStateService) {
         super(id, canvasId, sceneMode, mapService, featureSearchService, jumpService,
-            inspectionService, menuService, coordinatesService, markerService, stateService);
+            inspectionService, menuService, coordinatesService, stateService);
 
         this.viewer.scene.mode = SceneMode.SCENE2D;
 

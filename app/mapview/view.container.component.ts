@@ -7,7 +7,7 @@ declare let window: DebugWindow;
 @Component({
     selector: 'mapview-container',
     template: `
-        <div class="mapview-container">
+        <div>
             <p-splitter [panelSizes]="panelSizes" class="mb-8">
                 <ng-template #panel *ngFor="let index of viewIndices">
                     <map-view [viewIndex]="index"></map-view>

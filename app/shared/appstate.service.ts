@@ -104,6 +104,8 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
+    readOnly focusedView = this.createState<number>()
+
     readonly cameraViewData = this.createMapViewState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
@@ -181,7 +183,7 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'l',
     });
 
-    readonly stylesState = this.createMapViewState<Record<string, StyleURLParameters>>({
+    readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
         defaultValue: {},
         schema: z.record(z.string(), z.object({
@@ -570,8 +572,8 @@ export class AppStateService implements OnDestroy {
         this.layersState.next(viewIndex, filtered);
     }
 
-    setInitialStyles(viewIndex: number, styles: Map<string, { params: StyleParameters }>) {
-        if (Object.keys(this.stylesState.getValue(viewIndex)).length) {
+    setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
+        if (Object.keys(this.stylesState.getValue()).length) {
             return;
         }
         const initial: Record<string, StyleURLParameters> = {};
@@ -582,12 +584,12 @@ export class AppStateService implements OnDestroy {
             }
         });
         if (Object.keys(initial).length) {
-            this.stylesState.next(viewIndex, initial);
+            this.stylesState.next(initial);
         }
     }
 
-    styleConfig(viewIndex: number, styleId: string): StyleParameters {
-        const styles = this.stylesState.getValue(viewIndex);
+    styleConfig(styleId: string): StyleParameters {
+        const styles = this.stylesState.getValue();
         if (styles.hasOwnProperty(styleId)) {
             return this.styleURLParamsToParams(styles[styleId]);
         }
@@ -597,10 +599,10 @@ export class AppStateService implements OnDestroy {
         };
     }
 
-    setStyleConfig(viewIndex: number, styleId: string, params: StyleParameters) {
-        const styles = {...this.stylesState.getValue(viewIndex)};
+    setStyleConfig(styleId: string, params: StyleParameters) {
+        const styles = {...this.stylesState.getValue()};
         styles[styleId] = this.styleParamsToURLParams(params);
-        this.stylesState.next(viewIndex, styles);
+        this.stylesState.next(styles);
     }
 
     setCoordinatesAndTileIds(selectedOptions: Array<string>) {

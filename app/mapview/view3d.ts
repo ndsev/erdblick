@@ -1,14 +1,12 @@
-import {Cartesian2, Cartesian3, Cartographic, CesiumMath, Rectangle, SceneMode} from "../integrations/cesium";
+import {Cartesian2, Cartesian3, Cartographic, CesiumMath, SceneMode} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
-import {combineLatest, distinctUntilChanged} from "rxjs";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
-import {MarkerService} from "../coords/marker.service";
 
 export class MapView3D extends MapView {
 
@@ -21,10 +19,9 @@ export class MapView3D extends MapView {
                 inspectionService: InspectionService,
                 menuService: RightClickMenuService,
                 coordinatesService: CoordinatesService,
-                markerService: MarkerService,
                 stateService: AppStateService) {
         super(id, canvasId, sceneMode, mapService, featureSearchService, jumpService,
-            inspectionService, menuService, coordinatesService, markerService, stateService);
+            inspectionService, menuService, coordinatesService, stateService);
 
         this.viewer.scene.mode = SceneMode.SCENE3D;
         this.setupModeConstraints();
