@@ -10,6 +10,7 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
+import {AppStateService} from "../shared/appstate.service";
 
 export interface SearchTarget {
     icon: string;
@@ -50,6 +51,7 @@ export class JumpTargetService {
                 private sidePanelService: SidePanelService,
                 private inspectionService: InspectionService,
                 private menuService: RightClickMenuService,
+                private stateService: AppStateService,
                 private searchService: FeatureSearchService) {
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -278,7 +280,7 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        this.highlightByJumpTarget(fjt).then();
+                        this.highlightByJumpTarget(this.stateService.focusedView.getValue(), fjt).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }
@@ -293,17 +295,18 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTargetFilter(viewIndex: number, mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.highlightByJumpTarget(featureJumpTargets[validIndex], false, mapId, mode);
+        await this.highlightByJumpTarget(viewIndex, featureJumpTargets[validIndex], false, mapId, mode);
     }
 
-    async highlightByJumpTarget(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTarget(viewIndex: number, action: FeatureJumpAction, moveCamera: boolean = true,
+                                mapId?: string | null, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -343,7 +346,7 @@ export class JumpTargetService {
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
-        await this.mapService.highlightFeatures([{
+        await this.mapService.highlightFeatures(viewIndex, [{
             mapTileKey: selectThisFeature.tileId,
             featureId: featureId
         }], moveCamera, mode).then();

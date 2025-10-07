@@ -200,10 +200,34 @@ export class AppStateService implements OnDestroy {
     //     urlParamName: 'l',
     // });
 
-    readonly layerNames = this.createState<Array<string>>();
-    readonly layerVisibility = this.createMapViewState<Array<boolean>>();
-    readonly layerTileBorders = this.createMapViewState<Array<boolean>>();
-    readonly layerZoomLevel = this.createMapViewState<Array<number>>();
+    readonly layerNames = this.createState<Array<string>>({
+        name: "layerNames",
+        defaultValue: [],
+        schema: z.array(z.string()),
+        urlParamName: 'l'
+    });
+
+    readonly layerVisibility = this.createMapViewState<Array<boolean>>({
+        name: "visibility",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'v'
+    });
+
+    readonly layerTileBorders = this.createMapViewState<Array<boolean>>({
+        name: "tileBorders",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'tb'
+    });
+
+    readonly layerZoomLevel = this.createMapViewState<Array<number>>({
+        name: "zoomLevel",
+        defaultValue: [],
+        schema: z.array(z.number().min(0).max(15)),
+        urlParamName: 'z'
+    });
+
     // readonly layerStyleOptions = new Map<string, MapViewState<Array<boolean|string|number>>>();
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
@@ -543,25 +567,27 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    mapLayerConfig(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number=13): LayerViewConfig[] {
+    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number = 13): LayerViewConfig[] {
+        if (isSourceOrMetaData(layerId)) {
+            return [];
+        }
         const mapLayerId = `${mapId}/${layerId}`;
-        let layerIndex = this.layerNames.getValue().findIndex(ml => ml[0] === mapLayerId);
-        if (layerIndex === undefined) {
-            layerIndex = this.layerNames.getValue().length;
+        const names = this.layerNames.getValue();
+        let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
+        if (layerIndex === -1) {
+            layerIndex = names.length;
             // TODO: Ensure that this will not trigger bad things.
-            this.layerNames.next([...this.layerNames.getValue(), mapLayerId]);
+            this.layerNames.next([...names, mapLayerId]);
         }
         const result = new Array<LayerViewConfig>();
-        const layerStateValue = (layerState: MapViewState<Array<any>>, viewIndex: number, defaultValue: any) => {
-            let resultForView = layerState.getValue(viewIndex);
-            if (layerIndex >= resultForView.length) {
-                for (let i = resultForView.length; i <= viewIndex; ++i) {
-                    resultForView.push(defaultValue);
-                }
-                // TODO: Ensure that this will not trigger bad things.
-                layerState.next(viewIndex, resultForView);
+        const layerStateValue = <T>(state: MapViewState<Array<T>>, viewIndex: number, defaultValue: T) => {
+            const resultForView = state.getValue(viewIndex);
+            while (resultForView.length <= layerIndex) {
+                resultForView.push(defaultValue);
             }
-            return resultForView[viewIndex];
+            // TODO: Ensure that this will not trigger bad things.
+            state.next(viewIndex, resultForView);
+            return resultForView[layerIndex];
         }
 
         for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
@@ -574,52 +600,78 @@ export class AppStateService implements OnDestroy {
         return result;
     }
 
-    setMapLayerConfig(viewIndex: number, mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
-        if (isSourceOrMetaData(layerId)) {
+    setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
+        if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViews) {
             return;
         }
-        const mapLayerName = `${mapId}/${layerId}`;
-        const layers = [...this.layersState.getValue(viewIndex)];
-        const index = layers.findIndex(val => val[0] === mapLayerName);
-        if (index !== -1) {
-            layers[index] = [mapLayerName, level, visible, tileBorders];
-        } else if (visible) {
-            layers.push([mapLayerName, level, visible, tileBorders]);
+        const mapLayerId = `${mapId}/${layerId}`;
+        const names = this.layerNames.getValue();
+        let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
+        if (layerIndex === -1) {
+            layerIndex = names.length;
+            // TODO: Ensure that this will not trigger bad things.
+            this.layerNames.next([...names, mapLayerId]);
         }
-        this.layersState.next(viewIndex, layers);
+
+        const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
+            const values = state.getValue(viewIndex);
+            while (values.length <= layerIndex) {
+                values.push(defaultValue);
+            }
+            values[layerIndex] = value;
+            // TODO: Ensure that this will not trigger bad things.
+            state.next(viewIndex, values);
+        };
+
+        for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
+            insertLayerState(this.layerVisibility, viewIndex, viewConfig[viewIndex].visible, false);
+            insertLayerState(this.layerZoomLevel, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
+            insertLayerState(this.layerTileBorders, viewIndex, viewConfig[viewIndex].tileBorders,false);
+        }
     }
 
-    setMapConfig(viewIndex: number, layerParams: {
+    // FIXME This was originally used for batch updates
+    setMapConfigForIndex(viewIndex: number, layerParams: {
         mapId: string,
         layerId: string,
-        level: number,
-        visible: boolean,
-        tileBorders: boolean
-    }[]) {
-        const layers = [...this.layersState.getValue(viewIndex)];
+        viewConfig: LayerViewConfig }[], fallbackLevel: number = 13) {
         layerParams.forEach(params => {
             if (!isSourceOrMetaData(params.layerId)) {
-                const mapLayerName = `${params.mapId}/${params.layerId}`;
-                const index = layers.findIndex(val => val[0] === mapLayerName);
-                if (index !== -1) {
-                    layers[index] = [mapLayerName, params.level, params.visible, params.tileBorders];
-                } else if (params.visible) {
-                    layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
+                const mapLayerId = `${params.mapId}/${params.layerId}`;
+                const names = this.layerNames.getValue();
+                let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
+                if (layerIndex === -1) {
+                    layerIndex = names.length;
+                    // TODO: Ensure that this will not trigger bad things.
+                    this.layerNames.next([...names, mapLayerId]);
                 }
+
+                const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
+                    const values = state.getValue(viewIndex);
+                    while (values.length <= layerIndex) {
+                        values.push(defaultValue);
+                    }
+                    values[layerIndex] = value;
+                    // TODO: Ensure that this will not trigger bad things.
+                    state.next(viewIndex, values);
+                };
+
+                insertLayerState(this.layerVisibility, viewIndex, params.viewConfig.visible, false);
+                insertLayerState(this.layerZoomLevel, viewIndex, params.viewConfig.level, fallbackLevel);
+                insertLayerState(this.layerTileBorders, viewIndex, params.viewConfig.tileBorders,false);
             }
         });
-        this.layersState.next(viewIndex, layers);
     }
 
-    setInitialMapLayers(viewIndex: number, layers: Array<[string, number, boolean, boolean]>) {
-        if (this.layersState.getValue(viewIndex).length) {
+    setInitialMapLayers(layersData: Array<[string, string, LayerViewConfig[]]>) {
+        if (this.layerNames.getValue().length) {
             return;
         }
-        const filtered = layers.filter(layer => !isSourceOrMetaData(layer[0]));
-        if (!filtered.length) {
-            return;
-        }
-        this.layersState.next(viewIndex, filtered);
+        layersData.forEach(data => {
+            if (!isSourceOrMetaData(data[1])) {
+                this.setMapLayerConfig(data[0], data[1], data[2]);
+            }
+        });
     }
 
     setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
@@ -738,7 +790,7 @@ export class AppStateService implements OnDestroy {
         this.panelState.next(panel);
     }
 
-    pruneMapLayerConfig(viewIndex: number, mapItems: Array<MapInfoItem>): boolean {
+    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
@@ -746,11 +798,26 @@ export class AppStateService implements OnDestroy {
             });
         });
 
-        const filteredLayers = this.layersState.getValue(viewIndex).filter(layer => {
-            return mapLayerIds.has(layer[0]) && !isSourceOrMetaData(layer[0]);
-        });
-        this.layersState.next(viewIndex, filteredLayers);
-        return filteredLayers.length === 0;
+        const indicesToRemove = this.layerNames.getValue().reduce((acc, l, i) => {
+            if (!mapLayerIds.has(l) || isSourceOrMetaData(l)) {
+                acc.add(i);
+            }
+            return acc;
+        }, new Set<number>());
+
+        const layerNames = this.layerNames.getValue().filter((_, i) => !indicesToRemove.has(i));
+        for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
+            const visibilities = this.layerVisibility.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const levels = this.layerZoomLevel.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const tileBorders = this.layerTileBorders.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            this.layerVisibility.next(viewIndex, visibilities);
+            this.layerZoomLevel.next(viewIndex, levels);
+            this.layerTileBorders.next(viewIndex, tileBorders);
+        }
+        this.layerNames.next(layerNames);
+
+        // If all layers were pruned, return true.
+        return layerNames.length === 0;
     }
 
     private styleParamsToURLParams(params: StyleParameters): StyleURLParameters {

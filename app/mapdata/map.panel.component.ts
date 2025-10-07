@@ -304,6 +304,7 @@ export class MapPanelComponent {
         this.stateService.osmOpacityState.subscribe(opacity => {
             this.osmOpacityValue = opacity;
         });
+
         // Rebuild metadata menus recursively and prune when needed.
         this.mapService.mapGroups.subscribe(mapGroups => {
             this.metadataMenusEntries.clear();

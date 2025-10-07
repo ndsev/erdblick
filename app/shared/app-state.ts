@@ -26,6 +26,23 @@ export const Boolish = z.union([
     z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
 ]);
 
+// TODO: Do we actually need this?
+function unwrapScalar(schema: z.ZodTypeAny): z.ZodTypeAny {
+    // unwrap until it stabilizes
+    while (true) {
+        if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable || schema instanceof z.ZodDefault) {
+            schema = (schema as any)._def.innerType;
+            continue;
+        }
+        if (schema instanceof z.ZodLazy) {
+            schema = (schema as any).schema;
+            continue;
+        }
+        break;
+    }
+    return schema;
+}
+
 function isScalar(schema: z.ZodTypeAny): boolean {
     if (schema === Boolish) {
         return true;
@@ -33,6 +50,7 @@ function isScalar(schema: z.ZodTypeAny): boolean {
     if (schema instanceof z.ZodUnion) {
         return schema.options.every(opt => isScalar(opt as ZodTypeAny));
     }
+    const unwrapped = unwrapScalar(schema);
     const scalarKinds = [
         z.ZodString,
         z.ZodNumber,
@@ -43,17 +61,19 @@ function isScalar(schema: z.ZodTypeAny): boolean {
         z.ZodUndefined,
         z.ZodNull,
     ];
-    return scalarKinds.some(type => schema instanceof type);
+    return scalarKinds.some(type => unwrapped instanceof type);
 }
 
 function coerceFromString(txt: string, schema: ZodTypeAny): any {
-    if (schema === Boolish || schema instanceof z.ZodBoolean) {
+    const unwrapped = unwrapScalar(schema);
+
+    if (unwrapped === Boolish || unwrapped instanceof z.ZodBoolean) {
         const v = txt.trim().toLowerCase();
         return v === '1' || v === 'true';
     }
-    if (schema instanceof z.ZodNumber) return Number(txt);
-    if (schema instanceof z.ZodString) return txt;
-    return txt; // unions/refinements: let zod finalize
+    if (unwrapped instanceof z.ZodNumber) return Number(txt);
+    if (unwrapped instanceof z.ZodString) return txt;
+    return txt; // unions/refinements/others: let zod finalize
 }
 
 function splitCSV(val: string): string[] {
@@ -65,6 +85,31 @@ function splitCSV(val: string): string[] {
 
 function joinCSV(values: unknown[]): string {
     return values.map(v => encodeURIComponent(String(compactBooleans(v)))).join(',');
+}
+
+/** Detect array-of-arrays-of-primitives */
+function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.ZodArray<ZodTypeAny>> {
+    if (!(schema instanceof z.ZodArray)) return false;
+    const el = (schema as z.ZodArray<any>).element;
+    if (!(el instanceof z.ZodArray)) return false;
+    const inner = (el as z.ZodArray<any>).element as ZodTypeAny;
+    return isScalar(inner);
+}
+
+/**
+ * Use colon ":" to join of CSV groups
+ * */
+function joinColonCSV(groups: unknown[][]): string {
+    return groups.map(g => joinCSV(g)).join(':');
+}
+
+/**
+ * Split by colon ":" into CSV groups; empty segment => empty array
+ * */
+function splitColonCSV(val: string): string[][] {
+    return String(val)
+        .split(':')
+        .map(seg => (seg === '' ? [] : splitCSV(seg)));
 }
 
 export class AppState<T> extends BehaviorSubject<T> {
@@ -117,7 +162,7 @@ export class AppState<T> extends BehaviorSubject<T> {
 
     private arrayIsFormObject(): boolean {
         const el = this.arrayElemSchema();
-        return !!el && (el instanceof z.ZodObject) && this.urlFormEncode;
+        return !!el && (unwrapScalar(el) instanceof z.ZodObject) && this.urlFormEncode;
     }
 
     isUrlState(): boolean {
@@ -139,16 +184,22 @@ export class AppState<T> extends BehaviorSubject<T> {
             if (forUrl && this.isArray()) {
                 const base = this.urlParamName ?? this.name;
 
-                // 1) array of primitives -> single CSV
+                // Array of primitives -> single CSV
                 if (this.arrayIsPrimitive()) {
                     result[base] = joinCSV(payload as unknown[]);
                     return result;
                 }
 
-                // 2) array of objects w/ form encoding -> base_field=csv
+                // Array of arrays of primitives -> colon-separated CSV groups
+                if (isArrayOfPrimitiveArrays(this.schema)) {
+                    result[base] = joinColonCSV(payload as unknown[][]);
+                    return result;
+                }
+
+                // Array of objects w/ form encoding -> base_field=csv
                 if (this.arrayIsFormObject()) {
                     const elSchema = this.arrayElemSchema() as z.ZodObject<any>;
-                    const shape = elSchema.shape as Record<string, ZodTypeAny>;
+                    const shape = (unwrapScalar(elSchema) as z.ZodObject<any>).shape as Record<string, ZodTypeAny>;
                     for (const field of Object.keys(shape)) {
                         const column = (payload as any[]).map(item => (item ?? {})[field]);
                         result[field] = joinCSV(column);
@@ -156,7 +207,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                     return result;
                 }
 
-                // 3) other arrays -> JSON
+                // Other arrays -> JSON
                 result[base] = JSON.stringify(payload);
                 return result;
             }
@@ -205,14 +256,20 @@ export class AppState<T> extends BehaviorSubject<T> {
             if (this.isArray()) {
                 const elSchema = this.arrayElemSchema()!;
 
-                // 1) array of primitives from CSV
+                // Array of primitives from CSV
                 if (this.arrayIsPrimitive() && raw[base] !== undefined) {
                     const parts = splitCSV(String(raw[base]));
                     parsed = parts.map(s => coerceFromString(s, elSchema));
                 }
-                // 2) array of objects from per-field CSV
+                // Array of arrays of primitives from colon-separated CSV
+                else if (isArrayOfPrimitiveArrays(this.schema) && raw[base] !== undefined) {
+                    const inner = (elSchema as z.ZodArray<any>).element as ZodTypeAny; // inner primitive schema
+                    const groups = splitColonCSV(String(raw[base])); // string[][]
+                    parsed = groups.map(group => group.map(s => coerceFromString(s, inner)));
+                }
+                // Array of objects from per-field CSV
                 else if (this.arrayIsFormObject()) {
-                    const shape = (elSchema as z.ZodObject<any>).shape as Record<string, ZodTypeAny>;
+                    const shape = (unwrapScalar(elSchema) as z.ZodObject<any>).shape as Record<string, ZodTypeAny>;
                     const fieldArrays: Record<string, string[]> = {};
                     let maxLen = 0;
 
@@ -238,7 +295,7 @@ export class AppState<T> extends BehaviorSubject<T> {
                         parsed = items;
                     }
                 }
-                // 3) other arrays -> JSON param
+                // Other arrays -> JSON param
                 else if (raw[base] !== undefined) {
                     parsed = JSON.parse(String(raw[base]));
                 }
@@ -250,7 +307,9 @@ export class AppState<T> extends BehaviorSubject<T> {
                     if (raw[field] !== undefined) collected[field] = raw[field];
                 }
                 parsed = Object.keys(collected).length ? collected : undefined;
-            } else if (raw[this.urlParamName!]) {
+            }
+            // Accept `"0"` and `""` etc. (only skip if truly undefined)
+            else if (raw[this.urlParamName!] !== undefined) {
                 parsed = isScalar(this.schema) ? raw[this.urlParamName!] : JSON.parse(raw[this.urlParamName!]);
             }
 
@@ -266,8 +325,8 @@ export class AppState<T> extends BehaviorSubject<T> {
 
     getFormFieldNames(): readonly string[] {
         // Keep original behavior for non-array object states
-        if (!this.urlFormEncode || !(this.schema instanceof z.ZodObject)) return [];
-        return Object.keys(this.schema.shape);
+        if (!this.urlFormEncode || !(unwrapScalar(this.schema) instanceof z.ZodObject)) return [];
+        return Object.keys((unwrapScalar(this.schema) as z.ZodObject<any>).shape);
     }
 }
 
@@ -322,9 +381,6 @@ export class MapViewState<T> {
             map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
             distinctUntilChanged()
         );
-        // Forward to Observable#pipe so callers can add any operators
-        // (type cast keeps TS happy for arbitrary operator chains).
-        // If no operators provided, just return the projected stream.
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
     }
 

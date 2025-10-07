@@ -363,7 +363,7 @@ export class MapView {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId, featureInfo.featureId).then(() => {
+                        this.jumpService.highlightByJumpTargetFilter(this.viewIndex, featureInfo.mapId, featureInfo.featureId).then(() => {
                             if (this.inspectionService.selectedFeatures) {
                                 this.inspectionService.zoomToFeature();
                             }
@@ -385,6 +385,7 @@ export class MapView {
                 this.menuService.tileOutline.next(null);
             }
             this.mapService.highlightFeatures(
+                this.viewIndex,
                 Array.isArray(feature?.id) ? feature.id : [feature?.id],
                 false,
                 coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
@@ -422,6 +423,7 @@ export class MapView {
 
                 let feature = this.viewer.scene.pick(position);
                 this.mapService.highlightFeatures(
+                    this.viewIndex,
                     Array.isArray(feature?.id) ? feature.id : [feature?.id],
                     false,
                     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();

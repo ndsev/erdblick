@@ -607,7 +607,7 @@ export class MapView2D extends MapView {
                 return;
             }
 
-            this.mapService.setViewport(viewportData);
+            this.mapService.setViewport(this.viewIndex, viewportData);
 
         } catch (error) {
             console.error('Error updating viewport:', error);
