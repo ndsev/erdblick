@@ -628,6 +628,7 @@ export class AppStateService implements OnDestroy {
             insertLayerState(this.layerZoomLevel, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
             insertLayerState(this.layerTileBorders, viewIndex, viewConfig[viewIndex].tileBorders,false);
         }
+        this.layersState.next(layers);
     }
 
     // FIXME This was originally used for batch updates
@@ -661,6 +662,7 @@ export class AppStateService implements OnDestroy {
                 insertLayerState(this.layerTileBorders, viewIndex, params.viewConfig.tileBorders,false);
             }
         });
+        this.layersState.next(layers);
     }
 
     setInitialMapLayers(layersData: Array<[string, string, LayerViewConfig[]]>) {
