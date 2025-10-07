@@ -226,16 +226,10 @@ export class AppState<T> extends BehaviorSubject<T> {
                 result[this.name] = JSON.stringify(payload);
             }
             return result;
-            }
         } catch (error) {
             console.warn(`[AppState:${this.name}] Failed to serialize value`, error);
             return undefined;
         }
-    }
-
-    isUrlState(): boolean {
-        return (this.urlParamName !== undefined || this.urlFormEncode) &&
-            !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
     }
 
     deserialize(raw: string | Params) {

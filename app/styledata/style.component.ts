@@ -1,7 +1,7 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapService, removeGroupPrefix} from "../mapdata/map.service";
-import {FeatureStyleOptionWithStringType, StyleService} from "./style.service";
+import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle} from "./style.service";
 import {AppStateService} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
@@ -28,7 +28,7 @@ import {filter} from "rxjs/operators";
                             <span>
                                 <p-checkbox [ngModel]="node.visible"
                                             (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(node.id)"
+                                            (ngModelChange)="toggleStyleGroup(0, node.id)"
                                             [binary]="true"
                                             [inputId]="node.id"
                                             [name]="node.id" tabindex="0"/>
@@ -41,7 +41,7 @@ import {filter} from "rxjs/operators";
                             <div class="flex-container">
                                 <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-icons menu-toggler"
-                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
+                                          (click)="showStylesToggleMenu($event, 0, node.id)" tabindex="0">
                                         more_vert
                                     </span>
                                     <span>
@@ -258,7 +258,7 @@ export class StyleComponent {
         ];
     }
 
-    showStylesToggleMenu(event: MouseEvent, styleId: string, viewIndex: number) {
+    showStylesToggleMenu(event: MouseEvent, viewIndex: number, styleId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
@@ -415,7 +415,7 @@ export class StyleComponent {
         return 0;
     }
 
-    toggleStyleGroup(id: string, viewIndex: number) {
+    toggleStyleGroup(viewIndex: number, id: string) {
         if (!id || id === 'ungrouped') {
             return;
         }
