@@ -6,6 +6,7 @@ import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "../integ
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager} from "./job-group";
+import {AppStateService} from "../shared/appstate.service";
 
 export const MAX_ZOOM_LEVEL = 15;
 
@@ -263,7 +264,8 @@ export class FeatureSearchService {
         return `data:image/svg+xml;base64,${btoa(svg)}`;
     };
 
-    constructor(private mapService: MapService) {
+    constructor(private mapService: MapService,
+                private stateService: AppStateService) {
         // Instantiate pin graphics
         this.makeClusterPins();
 

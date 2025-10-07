@@ -258,7 +258,7 @@ export class StyleComponent {
         ];
     }
 
-    showStylesToggleMenu(event: MouseEvent, styleId: string) {
+    showStylesToggleMenu(event: MouseEvent, styleId: string, viewIndex: number) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
@@ -268,7 +268,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.update(viewIndex).then();
                 }
             },
             {
@@ -278,7 +278,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.update(viewIndex).then();
                 }
             },
             {
@@ -288,7 +288,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.update(viewIndex).then();
                 }
             },
             {
@@ -298,7 +298,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.update(viewIndex).then();
                 }
             }
         ];
@@ -415,12 +415,12 @@ export class StyleComponent {
         return 0;
     }
 
-    toggleStyleGroup(id: string) {
+    toggleStyleGroup(id: string, viewIndex: number) {
         if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
-        const group = this.findStyleGroupById(rootGroups, groupId);
+        const group = this.findStyleGroupById(rootGroups, id);
         if (!group || !this.checkIsStyleGroup(group)) {
             return;
         }
@@ -430,13 +430,14 @@ export class StyleComponent {
             this.styleService.toggleStyle(id, target, true);
         }
         this.styleService.reapplyAllStyles();
-        this.mapService.update().then();
+        this.mapService.update(viewIndex).then();
     }
+
     private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
         return e.type === "Group";
     }
 
-    private findStyleGroupById(elements: (ErdblickStyleGroup|ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
+    private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
         for (const elem of elements) {
             if (elem.id === id) {
                 return elem;

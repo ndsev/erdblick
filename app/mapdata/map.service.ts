@@ -63,7 +63,7 @@ export interface MapInfoItem extends Record<string, any> {
 
 export interface GroupInfoItem extends Record<string, any> {
     key: string;
-    groupId: string;
+    id: string;
     type: string;
     children: Array<GroupInfoItem | MapInfoItem>;
     expanded: boolean;
@@ -119,7 +119,7 @@ const DEFAULT_VIEWPORT = {
 export class MapService {
 
     public maps: BehaviorSubject<Map<string, MapInfoItem>> = new BehaviorSubject<Map<string, MapInfoItem>>(new Map<string, MapInfoItem>());
-    public mapGroups: BehaviorSubject<Map<string, GroupInfoItem>> = new BehaviorSubject<Map<string, GroupInfoItem>>(new Map<string, GroupInfoItem>());
+    public mapGroups: BehaviorSubject<(GroupInfoItem | MapInfoItem)[]> = new BehaviorSubject<(GroupInfoItem | MapInfoItem)[]>([]);
     // TODO - refactoring:
     //   1. mapIdsPerViewer: Map<string, Set<string>> should store sets of mapIds associated
     //      with the particular ViewerWrapper.viewerId.
@@ -157,7 +157,7 @@ export class MapService {
      * @param mapId Map identifier.
      * @param layerId Layer identifier within the map.
      */
-    private clearSelectionForLayer(mapId: string, layerId: string, viewIndex: number) {
+    private clearSelectionForLayer(viewIndex: number, mapId: string, layerId: string) {
         const current = this.selectionTopic.getValue();
         const remaining = current.filter(
             fw => !(fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId)
@@ -251,8 +251,8 @@ export class MapService {
             for (let [mapId, mapInfo] of maps) {
                 let isAnyLayerVisible = false;
                 for (let [layerId, layer] of mapInfo.layers) {
-                    for (let viewIndex = 0; viewIndex < this.stateService.layersState.length(); ++i) {
-                        [layer.visible, layer.level] = this.stateService.mapLayerConfig(viewIndex, mapId, layerId, layer.level);
+                    for (let viewIndex = 0; viewIndex < this.stateService.layerNames.getValue().length; ++i) {
+                        viewConfig = this.stateService.mapLayerConfig(viewIndex, mapId, layerId, layer.viewConfig.level);
                         if (!isAnyLayerVisible && layer.type !== "SourceData" && layer.visible) {
                             isAnyLayerVisible = true;
                         }
@@ -330,25 +330,24 @@ export class MapService {
     };
 
     private setMapsLayersIdChildren(mapItem: MapInfoItem, key: string) {
-        mapItem.key = key;
+        mapItem.key = mapItem.mapId;
         mapItem.children = [];
         mapItem.expanded = true;
-        let i = 0;
+        mapItem.type = "Map";
         for (let layer of mapItem.layers.values()) {
             if (layer.type !== "SourceData") {
-                layer.key = `${key}-${i}`;
+                layer.key = `${mapItem.mapId}/${layer.layerId}`;
                 layer.mapId = mapItem.mapId;
                 mapItem.children.push(layer);
-                ++i;
             }
         }
         return mapItem;
     }
 
     // Pure function that computes new map groups
-    private computeMapGroups(): Map<string, GroupInfoItem> {
-        const isInitLoad = this.mapGroups.getValue().size === 0;
-        const hasExistingLayers = this.stateService.layersState.getValue().length > 0;
+    private computeMapGroups(): (GroupInfoItem | MapInfoItem)[] {
+        const isInitLoad = this.mapGroups.getValue().length === 0;
+        const hasExistingLayers = this.stateService.layerNames.getValue().length > 0;
 
         const groups = new Map<string, GroupInfoItem>();
         const ungrouped: Array<MapInfoItem> = [];
@@ -365,10 +364,10 @@ export class MapService {
             } else {
                 current = {
                     key: nextKey(),
-                    groupId: top,
+                    id: top,
                     type: "Group",
                     children: [],
-                    visible: false,
+                    visible: Array.from({ length: this.stateService.numViews }, (_) => false),
                     expanded: true
                 };
                 groups.set(top, current);
@@ -378,7 +377,7 @@ export class MapService {
                 acc = `${acc}/${segments[i]}`;
                 let found: GroupInfoItem | null = null;
                 for (const child of current.children) {
-                    if ((child as any).type === "Group" && (child as GroupInfoItem).groupId === acc) {
+                    if ((child as any).type === "Group" && (child as GroupInfoItem).id === acc) {
                         found = child as GroupInfoItem;
                         break;
                     }
@@ -386,10 +385,10 @@ export class MapService {
                 if (!found) {
                     found = {
                         key: nextKey(),
-                        groupId: acc,
+                        id: acc,
                         type: "Group",
                         children: [],
-                        visible: false,
+                        visible: Array.from({ length: this.stateService.numViews }, (_) => false),
                         expanded: true
                     };
                     current.children.push(found);
@@ -421,14 +420,14 @@ export class MapService {
         }
 
         // compute derived visibility for all groups (any descendant map visible)
-        const computeGroupVisibility = (group: GroupInfoItem): boolean => {
-            let anyVisible = false;
+        const computeGroupVisibility = (group: GroupInfoItem): boolean[] => {
+            let anyVisible: boolean[] = group.visible;
             for (const child of group.children) {
                 if ((child as any).type === "Group") {
                     anyVisible = computeGroupVisibility(child as GroupInfoItem) || anyVisible;
                 } else {
                     const mapChild = child as MapInfoItem;
-                    anyVisible = (mapChild.visible || anyVisible);
+                    anyVisible = anyVisible.map((v, i) => v || mapChild.visible[i]);
                 }
             }
             group.visible = anyVisible;
@@ -439,19 +438,7 @@ export class MapService {
             computeGroupVisibility(topGroup);
         }
 
-        if (ungrouped.length > 0) {
-            const group: GroupInfoItem = {
-                key: nextKey(),
-                groupId: "ungrouped",
-                type: "Group",
-                children: ungrouped,
-                visible: ungrouped.some(m => m.visible),
-                expanded: true
-            };
-            groups.set("ungrouped", group);
-        }
-
-        return groups;
+        return [...groups.values(), ...ungrouped];
     }
 
     public processMapsUpdate() {
@@ -463,18 +450,20 @@ export class MapService {
     }
 
     // Helper to compare map groups for equality
-    private mapGroupsEqual(a: Map<string, GroupInfoItem>, b: Map<string, GroupInfoItem>): boolean {
-        if (a.size !== b.size) return false;
-        for (const [key, aGroup] of a) {
-            const bGroup = b.get(key);
-            if (!bGroup) return false;
-            if (!this.groupsDeepEqual(aGroup, bGroup)) return false;
+    private mapGroupsEqual(a: (GroupInfoItem | MapInfoItem)[], b: (GroupInfoItem | MapInfoItem)[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < b.length; i++) {
+            if (!this.groupsDeepEqual(a[i] as GroupInfoItem, b[i] as GroupInfoItem)) {
+                return false;
+            }
         }
         return true;
-    };
+    }
 
     private groupsDeepEqual(a: GroupInfoItem, b: GroupInfoItem): boolean {
-        if (a.groupId !== b.groupId) return false;
+        if (a.id !== b.id) return false;
         if (a.children.length !== b.children.length) return false;
         for (let i = 0; i < a.children.length; i++) {
             const ac = a.children[i] as any;
@@ -483,9 +472,8 @@ export class MapService {
             if (ac.type === 'Group') {
                 if (!this.groupsDeepEqual(ac as GroupInfoItem, bc as GroupInfoItem)) return false;
             } else {
-                // Map nodes: compare id and visibility
-                if ((ac as MapInfoItem).mapId !== (bc as MapInfoItem).mapId) return false;
-                if ((ac as MapInfoItem).visible !== (bc as MapInfoItem).visible) return false;
+                return ((ac as MapInfoItem).mapId === (bc as MapInfoItem).mapId) &&
+                (ac as MapInfoItem).visible.every((v, i) => v === (bc as MapInfoItem).visible[i]);
             }
         }
         // Optional: group visible flag derives from children; ignore minor differences
@@ -597,16 +585,18 @@ export class MapService {
         });
     }
 
-    getMapLayerVisibility(mapId: string, layerId: string) {
+    getMapLayerVisibility(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.getValue().get(mapId);
-        if (!mapItem)
+        if (!mapItem) {
             return false;
+        }
 
         const layer = mapItem.layers.get(layerId);
         if (layer) {
-            if (layer.type == "SourceData")
+            if (layer.type == "SourceData") {
                 return false;
-            return layer.visible;
+            }
+            return layer.viewConfig[viewIndex];
         }
         return false;
     }
@@ -627,7 +617,7 @@ export class MapService {
             }
             this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
             if (!layer.viewConfig[viewIndex].visible) {
-                this.clearSelectionForLayer(mapId, layerId, viewIndex);
+                this.clearSelectionForLayer(viewIndex, mapId, layerId);
             }
             // Recalculate map visibility based on non-SourceData layers
             mapItem.visible[viewIndex] = mapItem.layers.values().map(layer => {
@@ -643,28 +633,26 @@ export class MapService {
             const params: {
                 mapId: string,
                 layerId: string,
-                level: number,
-                visible: boolean,
-                tileBorders: boolean
+                viewConfig: LayerViewConfig
             }[] = []
             for (const [_, layer] of mapItem.layers) {
                 if (layer.type !== "SourceData") {
-                    layer.visible = mapItem.visible;
+                    layer.viewConfig[viewIndex].visible = mapItem.visible[viewIndex];
                     params.push({
                         mapId: mapItem.mapId,
                         layerId: layer.layerId,
-                        viewConfig: layer.viewConfig
+                        viewConfig: layer.viewConfig[viewIndex]
                     });
-                    if (!layer.visible) {
-                        this.clearSelectionForLayer(mapId, layer.layerId);
+                    if (!layer.viewConfig[viewIndex].visible) {
+                        this.clearSelectionForLayer(viewIndex, mapId, layer.layerId);
                     }
                 }
             }
-            this.stateService.setMapConfig(params);
+            this.stateService.setMapConfigForIndex(viewIndex, params);
         }
         if (!deferUpdate) {
             this.processMapsUpdate();
-            this.update().then();
+            this.update(viewIndex).then();
         }
     }
 
@@ -762,7 +750,7 @@ export class MapService {
             return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v =>
                 v.featureTile.mapTileKey == tileLayer.mapTileKey) &&
                 (!this.currentVisibleTileIds.has(tileLayer.tileId) ||
-                !this.getMapLayerVisibility(tileLayer.mapName, tileLayer.layerName) ||
+                !this.getMapLayerVisibility(viewIndex, tileLayer.mapName, tileLayer.layerName) ||
                 tileLayer.level() != this.getMapLayerLevel(viewIndex, tileLayer.mapName, tileLayer.layerName))
         }
         for (let tileLayer of this.loadedTileLayers.values()) {
@@ -848,7 +836,7 @@ export class MapService {
 
         for (const [mapName, map] of this.maps.getValue()) {
             for (const [layerName, _] of map.layers) {
-                if (!this.getMapLayerVisibility(mapName, layerName)) {
+                if (!this.getMapLayerVisibility(viewIndex, mapName, layerName)) {
                     continue;
                 }
 
