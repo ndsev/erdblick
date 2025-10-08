@@ -125,6 +125,21 @@ export class MapDataService {
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.
         this.clientId = uuid.v4();
+
+        this.stateService.numViewsState.subscribe(numViews => {
+            const diff = numViews - this.viewVisualizationState.length;
+            if (!diff) {
+                return;
+            }
+
+            if (diff > 0) {
+                this.viewVisualizationState.push(
+                    ...Array.from({ length: diff }, () => new ViewVisualizationState())
+                );
+            } else {
+                this.viewVisualizationState.splice(diff);
+            }
+        });
     }
 
     public async initialize() {
@@ -547,9 +562,6 @@ export class MapDataService {
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
-        while (this.stateService.numViews <= viewIndex) {
-            this.viewVisualizationState.push(new ViewVisualizationState());
-        }
         this.viewVisualizationState[viewIndex].viewport = viewport;
         this.setTileLevelForViewport(viewIndex);
         this.update().then();

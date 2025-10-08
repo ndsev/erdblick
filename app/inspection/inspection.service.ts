@@ -370,7 +370,7 @@ export class InspectionService {
             const prefix = isMetadata ? "Metadata" : "SourceData";
             const dataLayers = new Set<string>();
             for (const layer of map.layers.values()) {
-                if (layer.type == "SourceData" && layer.id.startsWith(prefix)) {
+                if (layer.type === "SourceData" && layer.id.startsWith(prefix)) {
                     dataLayers.add(layer.id);
                 }
             }
