@@ -227,7 +227,7 @@ export class MapLayerTree {
 
     getMapLayerVisibility(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
-        if (!mapItem) {
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return false;
         }
 
@@ -275,9 +275,9 @@ export class MapLayerTree {
                 this.clearSelectionForLayer(mapId, layerId);
             }
             // Recalculate map visibility based on non-SourceData layers
-            mapItem.visible[viewIndex] = mapItem.layers.values().map(layer => {
+            mapItem.visible[viewIndex] = mapItem.children.map(layer => {
                 return [layer.type, layer.viewConfig[viewIndex].visible];
-            }).some(result => result[0] !== "SourceData" && result[1]);
+            }).some(result => result[1]);
         } else {
             if (viewIndex >= mapItem.visible.length) {
                 return;
@@ -302,7 +302,7 @@ export class MapLayerTree {
 
     toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.layers.has(layerId)) {
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return;
         }
         const layer = mapItem.layers.get(layerId)!;
@@ -315,7 +315,7 @@ export class MapLayerTree {
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.layers.has(layerId)) {
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return;
         }
         const layer = mapItem.layers.get(layerId)!;
@@ -327,14 +327,20 @@ export class MapLayerTree {
     }
 
     *allLevels(viewIndex: number) {
-        for (let [_, map] of this.maps)
-            for (let [_, layer] of map.layers)
+        for (let [_, map] of this.maps) {
+            for (let layer of map.children) {
+                if (layer.viewConfig.length <= viewIndex) {
+                    console.error(`Attempt to read viewConfig at bad index ${viewIndex}`);
+                    continue;
+                }
                 yield layer.viewConfig[viewIndex].level;
+            }
+        }
     }
 
     getMapLayerLevel(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.layers.has(layerId)) {
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return 13;
         }
         const layer = mapItem.layers.get(layerId)!;
@@ -346,7 +352,7 @@ export class MapLayerTree {
 
     getMapLayerBorderState(viewIndex: number, mapId: string, layerId: string) {
         const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.layers.has(layerId)) {
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return false;
         }
         const layer = mapItem.layers.get(layerId)!;

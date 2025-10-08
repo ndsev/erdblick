@@ -77,6 +77,9 @@ function coerceFromString(txt: string, schema: ZodTypeAny): any {
 }
 
 function splitCSV(val: string): string[] {
+    if (!val) {
+        return [];
+    }
     return String(val)
         .split(',')
         .map(s => decodeURIComponent(s))
@@ -107,6 +110,9 @@ function joinColonCSV(groups: unknown[][]): string {
  * Split by colon ":" into CSV groups; empty segment => empty array
  * */
 function splitColonCSV(val: string): string[][] {
+    if (!val) {
+        return [];
+    }
     return String(val)
         .split(':')
         .map(seg => (seg === '' ? [] : splitCSV(seg)));
