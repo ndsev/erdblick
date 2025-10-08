@@ -157,7 +157,7 @@ export class MapDataService {
         this.stateService.selectedFeaturesState.subscribe(selected => {
             this.highlightFeatures(selected).then();
         });
-        this.stateService.selectionTopic.subscribe(selectedFeatureWrappers => {
+        this.stateService.selectionTopicState.subscribe(selectedFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
         });
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
@@ -270,7 +270,7 @@ export class MapDataService {
         for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
             let newTileLayers = new Map();
             let evictTileLayer = (tileLayer: FeatureTile) => {
-                return !tileLayer.preventCulling && !this.stateService.selectionTopic.getValue().some(v =>
+                return !tileLayer.preventCulling && !this.stateService.selectionTopicState.getValue().some(v =>
                         v.featureTile.mapTileKey == tileLayer.mapTileKey) &&
                     (!this.viewVisualizationState[viewIndex].visibleTileIds.has(tileLayer.tileId) ||
                         !this.maps.getValue().getMapLayerVisibility(viewIndex, tileLayer.mapName, tileLayer.layerName) ||
@@ -630,7 +630,7 @@ export class MapDataService {
                 if (id == "hover-highlight") {
                     features = this.hoverTopic.getValue();
                 } else if (id == "selection-highlight") {
-                    features = this.stateService.selectionTopic.getValue();
+                    features = this.stateService.selectionTopicState.getValue();
                 }
                 continue;
             }
@@ -656,7 +656,7 @@ export class MapDataService {
 
         if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
             if (features.length) {
-                if (featureSetsEqual(this.stateService.selectionTopic.getValue(), features)) {
+                if (featureSetsEqual(this.stateService.selectionTopicState.getValue(), features)) {
                     return;
                 }
             }
@@ -665,13 +665,13 @@ export class MapDataService {
             }
             this.hoverTopic.next(features);
         } else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            if (featureSetsEqual(this.stateService.selectionTopic.getValue(), features)) {
+            if (featureSetsEqual(this.stateService.selectionTopicState.getValue(), features)) {
                 return;
             }
             if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
                 this.hoverTopic.next([]);
             }
-            this.stateService.selectionTopic.next(features);
+            this.stateService.selectionTopicState.next(features);
         } else {
             console.error(`Unsupported highlight mode!`);
         }

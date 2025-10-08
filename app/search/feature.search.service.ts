@@ -396,7 +396,7 @@ export class FeatureSearchService {
         // TODO: What if we move / change the viewport during the search?
         if (!this.cachedWorkQueue.length) {
             let tasks: SearchWorkerTask[] = [];
-            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+            for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
                 this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
                     tasks.push(makeTask(tile));
                 })
@@ -510,7 +510,7 @@ export class FeatureSearchService {
         };
 
         let diagTasks: DiagnosticsWorkerTask[] = [];
-        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
             this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
                 diagTasks.push(makeDiagnosticsTask(tile));
             });
@@ -575,7 +575,7 @@ export class FeatureSearchService {
         this.completionPending.next(true);
         this.completionCandidates.next([]);
 
-        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
             this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
                 this.workQueue.push(makeTask(tile));
             });

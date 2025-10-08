@@ -1,18 +1,20 @@
-import {AfterViewInit, Component, OnDestroy} from "@angular/core";
-import {DebugWindow, ErdblickDebugApi} from "../app.debugapi.component";
-
-// Redeclare window with extended interface
-declare let window: DebugWindow;
+import {AfterViewInit, Component} from "@angular/core";
+import {AppStateService} from "../shared/appstate.service";
+import {map} from "rxjs";
 
 @Component({
     selector: 'mapview-container',
     template: `
         <div>
-            <p-splitter [panelSizes]="panelSizes" class="mb-8">
-                <ng-template #panel *ngFor="let index of viewIndices">
-                    <map-view [viewIndex]="index"></map-view>
-                </ng-template>
-            </p-splitter>
+            <ng-container *ngIf="showSplitter">
+                <p-splitter [panelSizes]="panelSizes$ | async" class="mb-8">
+                    <ng-container *ngFor="let idx of viewIndices$ | async; trackBy: trackByIndex">
+                        <ng-template pTemplate="panel">
+                            <map-view [viewIndex]="idx"></map-view>
+                        </ng-template>
+                    </ng-container>
+                </p-splitter>
+            </ng-container>
         </div>
     `,
     styles: [`
@@ -25,15 +27,27 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
-export class MapViewContainerComponent implements AfterViewInit {
-    viewIndices: number[] = [0];
-    panelSizes: number[] = [100];
+export class MapViewContainerComponent {
+    viewIndices$ = this.stateService.numViewsState.pipe(
+        map(n => Array.from({ length: n }, (_, i) => i))
+    );
+    panelSizes$ = this.stateService.numViewsState.pipe(
+        map(n => Array.from({ length: n }, () => 100 / n))
+    );
+    // A flag to force split-rerender
+    showSplitter = true;
 
-    constructor() {
-
+    constructor(private stateService: AppStateService) {
+        this.stateService.numViewsState.subscribe(() => {
+            // whenever numViews changes, force a quick toggle to remount splitter
+            this.showSplitter = false;
+            setTimeout(() => {
+                this.showSplitter = true;
+            });
+        });
     }
 
-    ngAfterViewInit() {
-        // TODO: Subscribe to adding a new viewer
+    trackByIndex(_: number, i: number) {
+        return i;
     }
 }

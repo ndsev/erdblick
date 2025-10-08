@@ -220,7 +220,7 @@ export class MapLayerTree {
                     featureLayer.info.layerId,
                     defaultVisibility);
             }
-            child.updateVisibilityFromChildren(this.stateService.numViews);
+            child.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());
             defaultVisibility = false;
         }
     }
@@ -247,12 +247,12 @@ export class MapLayerTree {
      * @param layerId Layer identifier within the map.
      */
     private clearSelectionForLayer(mapId: string, layerId: string) {
-        const current = this.stateService.selectionTopic.getValue();
+        const current = this.stateService.selectionTopicState.getValue();
         const remaining = current.filter(
             fw => !(fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId)
         );
         if (remaining.length !== current.length) {
-            this.stateService.selectionTopic.next(remaining);
+            this.stateService.selectionTopicState.next(remaining);
         }
     }
 

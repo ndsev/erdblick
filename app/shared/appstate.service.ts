@@ -70,6 +70,13 @@ export class AppStateService implements OnDestroy {
     private baseCameraZoomM = 100.0;
     private scalingFactor = 1;
 
+    readonly numViewsState = this.createState<number>({
+        name: "numberOfViews",
+        defaultValue: 1,
+        schema: z.coerce.number().positive(),
+        urlParamName: "n"
+    });
+
     readonly searchState = this.createState<[number, string] | []>({
         name: 'search',
         defaultValue: [],
@@ -114,7 +121,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly selectionTopic = this.createState<FeatureWrapper[]>({
+    readonly selectionTopicState = this.createState<FeatureWrapper[]>({
         name: 'selectionTopic',
         defaultValue: [],
         schema: z.array(z.object({
@@ -123,7 +130,7 @@ export class AppStateService implements OnDestroy {
         })),
     });
 
-    readonly focusedView = this.createState<number>({
+    readonly focusedViewState = this.createState<number>({
         name: 'focus',
         defaultValue: 0,
         schema: z.coerce.number().nonnegative(),
@@ -131,7 +138,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly cameraViewData = this.createMapViewState<CameraViewState>({
+    readonly cameraViewDataState = this.createMapViewState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
@@ -201,47 +208,35 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'osmOp',
     });
 
-    // TODO: Compress like this in URL:
-    //     layers="layer name 1,layer name 2"
-    //     v="0,0:1,0"
-    //     z="13,13:13,13"
-    //     showLanes="0,0:1,0"
-    // readonly layersState = this.createMapViewState<Array<[string, number, boolean, boolean]>>({
-    //     name: 'layers',
-    //     defaultValue: [],
-    //     schema: z.array(z.tuple([z.string(), z.coerce.number(), Boolish, Boolish])),
-    //     urlParamName: 'l',
-    // });
-
-    readonly layerNames = this.createState<Array<string>>({
+    readonly layerNamesState = this.createState<Array<string>>({
         name: "layerNames",
         defaultValue: [],
         schema: z.array(z.string()),
         urlParamName: 'l'
     });
 
-    readonly layerVisibility = this.createMapViewState<Array<boolean>>({
+    readonly layerVisibilityState = this.createMapViewState<Array<boolean>>({
         name: "visibility",
         defaultValue: [],
         schema: z.array(Boolish),
         urlParamName: 'v'
     });
 
-    readonly layerTileBorders = this.createMapViewState<Array<boolean>>({
+    readonly layerTileBordersState = this.createMapViewState<Array<boolean>>({
         name: "tileBorders",
         defaultValue: [],
         schema: z.array(Boolish),
         urlParamName: 'tb'
     });
 
-    readonly layerZoomLevel = this.createMapViewState<Array<number>>({
+    readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
         name: "zoomLevel",
         defaultValue: [],
         schema: z.array(z.number().min(0).max(15)),
         urlParamName: 'z'
     });
 
-    // readonly layerStyleOptions = new Map<string, MapViewState<Array<boolean|string|number>>>();
+    // readonly layerStyleOptionsState = new Map<string, MapViewState<Array<boolean|string|number>>>();
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
@@ -302,7 +297,7 @@ export class AppStateService implements OnDestroy {
         schema: Boolish,
     });
 
-    readonly lastSearchHistoryEntry = this.createState<[number, string] | null>({
+    readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
         schema: z.union([
@@ -335,24 +330,12 @@ export class AppStateService implements OnDestroy {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
     }
 
-    get numViews() {
-        return this.cameraViewData.appState.getValue().length;
-    }
-
     get cameraMoveUnits() {
         return this.baseCameraMoveM * this.scalingFactor / 75000;
     }
 
     get cameraZoomUnits() {
         return this.baseCameraZoomM * this.scalingFactor;
-    }
-
-    get legalInfoDialogVisible(): boolean {
-        return this.legalInfoDialogVisibleState.getValue();
-    }
-
-    set legalInfoDialogVisible(value: boolean) {
-        this.legalInfoDialogVisibleState.next(value);
     }
 
     get replaceUrl() {
@@ -502,12 +485,45 @@ export class AppStateService implements OnDestroy {
     // Public API below
     // -----------------
 
+    get numViews() {return this.numViewsState.getValue();}
+    set numViews(val: number) {this.numViewsState.next(val);};
+    get search() {return this.searchState.getValue();}
+    set search(val: [number, string] | []) {this.searchState.next(val);};
+    get marker() {return this.markerState.getValue();}
+    set marker(val: boolean) {this.markerState.next(val);};
+    get markedPosition() {return this.markedPositionState.getValue();}
+    set markedPosition(val: number[]) {this.markedPositionState.next(val);};
+    get selectedFeatures() {return this.selectedFeaturesState.getValue();}
+    set selectedFeatures(val: [number, TileFeatureId][]) {this.selectedFeaturesState.next(val);};
+    get selectionTopic() {return this.selectionTopicState.getValue();}
+    set selectionTopic(val: FeatureWrapper[]) {this.selectionTopicState.next(val);};
+    get focusedView() {return this.focusedViewState.getValue();}
+    set focusedView(val: number) {this.focusedViewState.next(val);};
+    get layerNames() {return this.layerNamesState.getValue();}
+    set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
+    get styles() {return this.stylesState.getValue();}
+    set styles(val: Record<string, StyleURLParameters>) {this.stylesState.next(val);};
+    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
+    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
+    get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
+    set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
+    get selectedSourceData() {return this.selectedSourceDataState.getValue();}
+    set selectedSourceData(val: SelectedSourceData | null) {this.selectedSourceDataState.next(val);};
+    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
+    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
+    get panel() {return this.panelState.getValue();}
+    set panel(val: PanelSizeState) {this.panelState.next(val);};
+    get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
+    set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
+    get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
+    set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+
     getCameraOrientation(viewIndex: number) {
-        return this.cameraViewData.getValue(viewIndex).orientation;
+        return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
 
     getCameraPosition(viewIndex: number) {
-        const destination = this.cameraViewData.getValue(viewIndex).destination;
+        const destination = this.cameraViewDataState.getValue(viewIndex).destination;
         return new Cartographic(destination.lon, destination.lat, destination.alt);
     }
 
@@ -529,33 +545,21 @@ export class AppStateService implements OnDestroy {
                 roll: newOrientation.roll,
             }
         };
-        this.cameraViewData.next(viewIndex, view);
+        this.cameraViewDataState.next(viewIndex, view);
     }
 
     setProjectionMode(mapViewIndex: number, is2DMode: boolean) {
         this.mode2dState.next(mapViewIndex, is2DMode);
     }
 
-    setSelectedSourceData(selection: SelectedSourceData) {
-        this.selectedSourceDataState.next(selection);
-    }
-
-    unsetSelectedSourceData() {
-        this.selectedSourceDataState.next(null);
-    }
-
-    getSelectedSourceData(): SelectedSourceData | null {
-        return this.selectedSourceDataState.getValue();
-    }
-
     setSelectedFeatures(viewIndex: number, newSelection: TileFeatureId[]) {
-        const currentSelection = this.selectedFeaturesState.getValue();
+        const currentSelection = this.selectedFeatures;
         if (newSelection.length === currentSelection.length &&
             newSelection.every((v, i) =>
                 v.featureId === currentSelection[i][1].featureId && v.mapTileKey === currentSelection[i][1].mapTileKey)) {
             return false;
         }
-        this.selectedFeaturesState.next(newSelection.map(feature => ([viewIndex, {...feature}])));
+        this.selectedFeatures = newSelection.map(feature => ([viewIndex, {...feature}]));
         this._replaceUrl = false;
         return true;
     }
@@ -585,12 +589,12 @@ export class AppStateService implements OnDestroy {
             return [];
         }
         const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNames.getValue();
+        const names = this.layerNamesState.getValue();
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
             // TODO: Ensure that this will not trigger bad things.
-            this.layerNames.next([...names, mapLayerId]);
+            this.layerNamesState.next([...names, mapLayerId]);
         }
         const result = new Array<LayerViewConfig>();
         const layerStateValue = <T>(state: MapViewState<Array<T>>, viewIndex: number, defaultValue: T) => {
@@ -603,27 +607,27 @@ export class AppStateService implements OnDestroy {
             return resultForView[layerIndex];
         }
 
-        for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
             result.push({
-                visible: layerStateValue(this.layerVisibility, viewIndex, fallbackVisibility),
-                level: layerStateValue(this.layerZoomLevel, viewIndex, fallbackLevel),
-                tileBorders: layerStateValue(this.layerTileBorders, viewIndex, false),
+                visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
+                level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
+                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, false),
             });
         }
         return result;
     }
 
     setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
-        if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViews) {
+        if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViewsState.getValue()) {
             return;
         }
         const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNames.getValue();
+        const names = this.layerNamesState.getValue();
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
             // TODO: Ensure that this will not trigger bad things.
-            this.layerNames.next([...names, mapLayerId]);
+            this.layerNamesState.next([...names, mapLayerId]);
         }
 
         const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
@@ -637,9 +641,9 @@ export class AppStateService implements OnDestroy {
         };
 
         for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
-            insertLayerState(this.layerVisibility, viewIndex, viewConfig[viewIndex].visible, false);
-            insertLayerState(this.layerZoomLevel, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
-            insertLayerState(this.layerTileBorders, viewIndex, viewConfig[viewIndex].tileBorders,false);
+            insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
+            insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
+            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders,false);
         }
     }
 
@@ -676,18 +680,6 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(styles);
     }
 
-    setCoordinatesAndTileIds(selectedOptions: Array<string>) {
-        this.enabledCoordsTileIdsState.next([...selectedOptions]);
-    }
-
-    getCoordinatesAndTileIds() {
-        return this.enabledCoordsTileIdsState.getValue();
-    }
-
-    resetSearchHistoryState() {
-        this.searchState.next([]);
-    }
-
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
         const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
         if (trimmed && saveHistory) {
@@ -695,7 +687,7 @@ export class AppStateService implements OnDestroy {
         }
         this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
-        this.lastSearchHistoryEntry.next(trimmed);
+        this.lastSearchHistoryEntryState.next(trimmed);
     }
 
     private saveHistoryStateValue(value: [number, string]) {
@@ -767,23 +759,23 @@ export class AppStateService implements OnDestroy {
             });
         });
 
-        const indicesToRemove = this.layerNames.getValue().reduce((acc, l, i) => {
+        const indicesToRemove = this.layerNamesState.getValue().reduce((acc, l, i) => {
             if (!mapLayerIds.has(l) || isSourceOrMetaData(l)) {
                 acc.add(i);
             }
             return acc;
         }, new Set<number>());
 
-        const layerNames = this.layerNames.getValue().filter((_, i) => !indicesToRemove.has(i));
-        for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
-            const visibilities = this.layerVisibility.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            const levels = this.layerZoomLevel.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            const tileBorders = this.layerTileBorders.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            this.layerVisibility.next(viewIndex, visibilities);
-            this.layerZoomLevel.next(viewIndex, levels);
-            this.layerTileBorders.next(viewIndex, tileBorders);
+        const layerNames = this.layerNamesState.getValue().filter((_, i) => !indicesToRemove.has(i));
+        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
+            const visibilities = this.layerVisibilityState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const levels = this.layerZoomLevelState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const tileBorders = this.layerTileBordersState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            this.layerVisibilityState.next(viewIndex, visibilities);
+            this.layerZoomLevelState.next(viewIndex, levels);
+            this.layerTileBordersState.next(viewIndex, tileBorders);
         }
-        this.layerNames.next(layerNames);
+        this.layerNamesState.next(layerNames);
 
         // If all layers were pruned, return true.
         return layerNames.length === 0;

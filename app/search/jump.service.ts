@@ -280,7 +280,7 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        this.highlightByJumpTarget(this.stateService.focusedView.getValue(), fjt).then();
+                        this.highlightByJumpTarget(this.stateService.focusedViewState.getValue(), fjt).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }

@@ -27,6 +27,10 @@ import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from ".
                           icon="pi pi-server" label="" pTooltip="Open datasources configuration"
                           tooltipPosition="bottom" tabindex="0">
                 </p-button>
+                <p-button onEnterClick (click)="addView()" class="osm-button"
+                          icon="pi pi-plus" label="" pTooltip="Add another view for comparison"
+                          tooltipPosition="bottom" tabindex="0">
+                </p-button>
                 <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                 <span style="font-size: 0.9em">OSM Overlay:</span>
                 <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
@@ -468,4 +472,9 @@ export class MapPanelComponent {
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
+
+    addView() {
+        const numViews = this.stateService.numViewsState.getValue();
+        this.stateService.numViewsState.next(numViews + 1);
+    }
 }

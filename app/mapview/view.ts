@@ -319,7 +319,7 @@ export class MapView {
 
         this.subscriptions.push(
             combineLatest([
-                this.stateService.cameraViewData.pipe(this.viewIndex),
+                this.stateService.cameraViewDataState.pipe(this.viewIndex),
                 this.stateService.viewRectangleState.pipe(this.viewIndex)
             ]).subscribe(([cameraViewData, viewRect]) => {
                 this.convertCameraState(viewRect, cameraViewData);

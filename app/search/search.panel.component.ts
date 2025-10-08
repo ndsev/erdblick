@@ -290,14 +290,14 @@ export class SearchPanelComponent implements AfterViewInit {
         this.stateService.searchState.subscribe(search => {
             if (search.length === 2) {
                 const currentEntry: [number, string] = [search[0], search[1]];
-                const lastEntry = this.stateService.lastSearchHistoryEntry.getValue();
+                const lastEntry = this.stateService.lastSearchHistoryEntryState.getValue();
                 if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
-                    this.stateService.lastSearchHistoryEntry.next(currentEntry);
+                    this.stateService.lastSearchHistoryEntryState.next(currentEntry);
                 }
             }
         });
 
-        this.stateService.lastSearchHistoryEntry.subscribe(entry => {
+        this.stateService.lastSearchHistoryEntryState.subscribe(entry => {
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
             if (entry) {
                 const query = entry[1]
@@ -481,8 +481,8 @@ export class SearchPanelComponent implements AfterViewInit {
         }
         let lat = coordinates[0];
         let lon = coordinates[1];
-        const targetViewIndex = this.stateService.focusedView.getValue();
-        const cameraView = this.stateService.cameraViewData.getValue(targetViewIndex);
+        const targetViewIndex = this.stateService.focusedViewState.getValue();
+        const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
         let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : cameraView.destination.alt;
 
         this.mapService.moveToWgs84PositionTopic.next({

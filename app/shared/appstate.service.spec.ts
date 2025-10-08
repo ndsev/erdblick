@@ -126,7 +126,7 @@ describe('AppStateService', () => {
 
         service.setView(1, destination, orientation);
 
-        const view = service.cameraViewData.getValue(1);
+        const view = service.cameraViewDataState.getValue(1);
         expect(view.destination).toEqual({ lon: 90, lat: 45, alt: 500 });
         expect(view.orientation).toEqual(orientation);
 
@@ -181,10 +181,10 @@ describe('AppStateService', () => {
         expect(config).toEqual([
             { visible: false, level: 9, tileBorders: false },
         ]);
-        expect(service.layerNames.getValue()).toEqual(['m1/layerA']);
-        expect(service.layerVisibility.getValue(0)).toEqual([false]);
-        expect(service.layerZoomLevel.getValue(0)).toEqual([9]);
-        expect(service.layerTileBorders.getValue(0)).toEqual([false]);
+        expect(service.layerNamesState.getValue()).toEqual(['m1/layerA']);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
+        expect(service.layerZoomLevelState.getValue(0)).toEqual([9]);
+        expect(service.layerTileBordersState.getValue(0)).toEqual([false]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -204,10 +204,10 @@ describe('AppStateService', () => {
         expect(config).toEqual([
             { visible: false, level: 7, tileBorders: true },
         ]);
-        expect(service.layerNames.getValue()).toEqual(['m2/layerB']);
-        expect(service.layerVisibility.getValue(0)).toEqual([false]);
-        expect(service.layerZoomLevel.getValue(0)).toEqual([7]);
-        expect(service.layerTileBorders.getValue(0)).toEqual([true]);
+        expect(service.layerNamesState.getValue()).toEqual(['m2/layerB']);
+        expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
+        expect(service.layerZoomLevelState.getValue(0)).toEqual([7]);
+        expect(service.layerTileBordersState.getValue(0)).toEqual([true]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
