@@ -1,12 +1,4 @@
-import {
-    Cartesian2,
-    Cartographic,
-    CesiumMath,
-    Ellipsoid,
-    Rectangle,
-    SceneMode,
-    PerspectiveFrustum
-} from "../integrations/cesium";
+import {Cartesian2, Cartographic, CesiumMath, Ellipsoid, PerspectiveFrustum, Rectangle, SceneMode} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
@@ -20,7 +12,6 @@ export class MapView2D extends MapView {
 
     constructor(id: number,
                 canvasId: string,
-                sceneMode: SceneMode,
                 mapService: MapDataService,
                 featureSearchService: FeatureSearchService,
                 jumpService: JumpTargetService,
@@ -28,19 +19,11 @@ export class MapView2D extends MapView {
                 menuService: RightClickMenuService,
                 coordinatesService: CoordinatesService,
                 stateService: AppStateService) {
-        super(id, canvasId, sceneMode, mapService, featureSearchService, jumpService,
+        super(id, canvasId, SceneMode.SCENE2D, mapService, featureSearchService, jumpService,
             inspectionService, menuService, coordinatesService, stateService);
-
-        this.viewer.scene.mode = SceneMode.SCENE2D;
-
-        // Setup
-        this.setupModeConstraints();
-
-        // Handlers
-        this.setupWheelHandler();
     }
 
-    setupModeConstraints() {
+    protected override setupScreenSpaceConstraints() {
         // Enable 2D map interactions
         const scene = this.viewer.scene;
 

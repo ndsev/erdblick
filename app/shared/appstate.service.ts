@@ -106,9 +106,10 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.tuple([
             z.coerce.number().nonnegative(),
             z.object({
-            featureId: z.string(),
-            mapTileKey: z.string(),
-        })])),
+                featureId: z.string(),
+                mapTileKey: z.string(),
+            })
+        ])),
         urlParamName: 'sel',
         urlIncludeInVisualizationOnly: false,
     });
@@ -125,7 +126,7 @@ export class AppStateService implements OnDestroy {
     readonly focusedView = this.createState<number>({
         name: 'focus',
         defaultValue: 0,
-        schema: z.number().nonnegative(),
+        schema: z.coerce.number().nonnegative(),
         urlParamName: 'f',
         urlIncludeInVisualizationOnly: false,
     });

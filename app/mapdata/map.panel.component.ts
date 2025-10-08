@@ -55,9 +55,9 @@ import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from ".
                                 <span>
                                     <p-checkbox [ngModel]="node.visible[0]"
                                                 (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleGroup(0, node.key)"
+                                                (ngModelChange)="toggleGroup(0, node.id)"
                                                 [binary]="true"
-                                                [inputId]="node.key"
+                                                [inputId]="node.id"
                                                 [name]="node.id" tabindex="0"/>
                                     <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
                                         {{ removeGroupPrefix(node.id) }}
@@ -65,27 +65,27 @@ import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from ".
                                 </span>
                             </ng-template>
                             <ng-template let-node pTemplate="Map">
-                                <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)"
+                                <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
                                         [popup]="true"
                                         appendTo="body"/>
                                 <div class="flex-container">
                                 <span>
                                     <p-checkbox [(ngModel)]="node.visible[0]"
                                                 (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleMap(0, node.mapId)"
+                                                (ngModelChange)="toggleMap(0, node.id)"
                                                 [binary]="true"
-                                                [inputId]="node.mapId"
-                                                [name]="node.mapId" tabindex="0"/>
-                                    <label [for]="node.mapId"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.mapId) }}</label>
+                                                [inputId]="node.id"
+                                                [name]="node.id" tabindex="0"/>
+                                    <label [for]="node.id"
+                                           style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                 </span>
                                     <div class="map-controls">
                                         <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                  [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
+                                                  [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
                                                   tooltipPosition="bottom"
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0"
-                                                  [disabled]="!metadataMenusEntries.get(node.mapId)?.length">
+                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
                                             <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
                                                 data_object
                                             </span>
@@ -98,42 +98,42 @@ import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from ".
                                     <div class="font-bold white-space-nowrap"
                                          style="display: flex; align-items: center;">
                                         <span onEnterClick class="material-icons menu-toggler" tabindex="0"
-                                              (click)="showLayersToggleMenu($event, 0, node.mapId, node.layerId)">
+                                              (click)="showLayersToggleMenu($event, 0, node.mapId, node.id)">
                                             more_vert
                                         </span>
                                         <span>
                                         <p-checkbox [(ngModel)]="node.viewConfig[0].visible"
                                                     (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="toggleLayer(0, node.mapId, node.layerId)"
+                                                    (ngModelChange)="toggleLayer(0, node.mapId, node.id)"
                                                     [binary]="true"
-                                                    [inputId]="node.layerId"
-                                                    [name]="node.layerId" tabindex="0"/>
-                                        <label [for]="node.layerId"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
+                                                    [inputId]="node.id"
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id"
+                                               style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
                                         </span>
                                     </div>
                                     <div class="layer-controls">
                                         <p-button onEnterClick
-                                                  (click)="toggleTileBorders(0, node.mapId, node.layerId)"
+                                                  (click)="toggleTileBorders(0, node.mapId, node.id)"
                                                   label="" pTooltip="Toggle tile borders"
                                                   tooltipPosition="bottom"
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0">
                                             <span class="material-icons"
                                                   style="font-size: 1.2em; margin: 0 auto;">
-                                                {{ node.tileBorders ? 'select_all' : 'deselect' }}
+                                                {{ node.viewConfig[0].tileBorders ? 'select_all' : 'deselect' }}
                                             </span>
                                         </p-button>
-                                        <p-button onEnterClick *ngIf="node.coverage.length"
-                                                  (click)="focus(node.coverage[0], $event)"
+                                        <p-button onEnterClick *ngIf="node.info.coverage.length"
+                                                  (click)="focus(node.info.coverage[0], $event)"
                                                   label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0">
                                             <span class="material-icons"
                                                   style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                                         </p-button>
-                                        <p-inputNumber [(ngModel)]="node.level"
-                                                       (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.layerId)"
+                                        <p-inputNumber [(ngModel)]="node.viewConfig[0].level"
+                                                       (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.id)"
                                                        [showButtons]="true" [min]="0" [max]="15"
                                                        buttonLayout="horizontal" spinnerMode="horizontal"
                                                        inputId="horizontal"
@@ -146,7 +146,7 @@ import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from ".
                                         </p-inputNumber>
                                     </div>
                                     <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                           [(ngModel)]="node.level"/>
+                                           [(ngModel)]="node.viewConfig[0].level"/>
                                 </div>
                             </ng-template>
                         </p-tree>

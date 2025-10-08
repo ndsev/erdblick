@@ -1,5 +1,5 @@
 import {AppStateService} from "../shared/appstate.service";
-import {AfterViewInit, Component, input, InputSignal, OnDestroy} from "@angular/core";
+import {AfterViewInit, ChangeDetectorRef, Component, input, InputSignal, OnDestroy} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
 import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
@@ -25,7 +25,9 @@ declare let window: DebugWindow;
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()"/>
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
-        <erdblick-view-ui [mapView]="mapView" [is2D]="is2DMode"></erdblick-view-ui>
+        @defer (when mapView) {
+            <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
+        }
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -53,11 +55,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * @param keyboardService
      * @param menuService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
-     * @param viewStateService
-     * @param viewService
-     * @param cameraService
-     * @param markerService
      * @param appModeService
+     * @param cdr
      */
     constructor(public mapService: MapDataService,
                 public featureSearchService: FeatureSearchService,
@@ -67,9 +66,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
-                public appModeService: AppModeService)
-    {
-    }
+                public appModeService: AppModeService,
+                private cdr: ChangeDetectorRef
+    ) {}
 
     ngAfterViewInit() {
         this.stateService.mode2dState.subscribe(this.viewIndex(), mode2d => {
@@ -84,9 +83,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
                 if (spinner) {
                     spinner.style.display = 'none';
                 }
+                this.setupKeyboardShortcuts();
+                this.cdr.markForCheck();
             });
         });
-        this.setupKeyboardShortcuts();
     }
 
     /**
@@ -121,14 +121,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         }
         if (is2D) {
             this.mapView = new MapView2D(
-                this.viewIndex(), "mapViewContainer", SceneMode.SCENE2D,
-                this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
-                this.menuService, this.coordinatesService, this.stateService);
+                this.viewIndex(), "mapViewContainer", this.mapService, this.featureSearchService,
+                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
         } else {
             this.mapView = new MapView3D(
-                this.viewIndex(), "mapViewContainer", SceneMode.SCENE3D,
-                this.mapService, this.featureSearchService, this.jumpService, this.inspectionService,
-                this.menuService, this.coordinatesService, this.stateService);
+                this.viewIndex(), "mapViewContainer", this.mapService, this.featureSearchService,
+                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
         }
         await this.mapView.setup();
     }

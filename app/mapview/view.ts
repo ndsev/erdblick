@@ -182,8 +182,6 @@ export class MapView {
                 }
             })
         );
-
-        this.viewer.camera.percentageChanged = 0.1;
     }
 
     protected performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -269,6 +267,10 @@ export class MapView {
                 this.viewer.scene.requestRender();
             }
 
+            // TODO: What does it do?
+            this.viewer.camera.percentageChanged = 0.1;
+
+            this.setupScreenSpaceConstraints();
         } catch (error) {
             console.error('Error creating viewer:', error);
         }
@@ -324,6 +326,10 @@ export class MapView {
                 this.updateViewport();
             })
         );
+    }
+
+    protected setupScreenSpaceConstraints() {
+        throw Error("Not Implemented");
     }
 
     /**

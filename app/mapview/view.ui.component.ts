@@ -86,18 +86,12 @@ import {AppStateService} from "../shared/appstate.service";
 export class ErdblickViewUIComponent implements AfterViewInit {
     @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
-    constructor(public appModeService: AppModeService,
-                public stateService: AppStateService,
-                private keyboardService: KeyboardService) {
-    }
-
     mapView: InputSignal<MapView | undefined> = input<MapView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
 
-    ngAfterViewInit() {
-        // TODO - refactoring:
-        //   1. ErdblickViewUIComponent should affect every ViewerWrapper globally and have an equivalent effect
-        //      for every ViewerWrapper simultaneously.
+    constructor(public appModeService: AppModeService,
+                public stateService: AppStateService,
+                private keyboardService: KeyboardService) {
         effect(() => {
             const mapView = this.mapView();
             if (!mapView || !this.needleRef) {
@@ -125,7 +119,9 @@ export class ErdblickViewUIComponent implements AfterViewInit {
                 }
             });
         });
+    }
 
+    ngAfterViewInit() {
         this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
     }
 

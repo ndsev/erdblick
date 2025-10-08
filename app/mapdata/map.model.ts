@@ -31,7 +31,7 @@ export interface LayerInfoItem extends Record<string, any> {
 /** Expected structure of a list entry in the /sources endpoint. */
 export interface MapInfoItem extends Record<string, any> {
     extraJsonAttachment: any;
-    layers: Map<string, LayerInfoItem>;
+    layers: Record<string, LayerInfoItem>;
     mapId: string;
     maxParallelJobs: number;
     nodeId: string;
@@ -69,7 +69,7 @@ export class MapTreeNode {
         this.info = mapInfo;
         this.key = mapInfo.mapId;
         this.id = mapInfo.mapId;
-        this.layers =  new Map(mapInfo.layers.values().map(layerInfo =>
+        this.layers =  new Map(Object.entries(mapInfo.layers).map(([_, layerInfo]) =>
             [layerInfo.layerId, new LayerTreeNode(layerInfo, mapInfo.mapId)])
         );
     }
@@ -197,12 +197,12 @@ export class MapLayerTree {
                 const parentPath = mapItem.mapId.split('/').slice(0, -1).join('/');
                 const currentGroup = getOrCreateGroupByPath(parentPath);
                 const mapNode = new MapTreeNode(mapItem);
-                this.sizeOfTree += 1 + mapItem.layers.size;
+                this.sizeOfTree += 1 + mapNode.layers.size;
                 this.maps.set(mapItem.mapId, mapNode);
                 currentGroup.children.push(mapNode);
             } else {
                 const mapNode = new MapTreeNode(mapItem);
-                this.sizeOfTree += 1 + mapItem.layers.size;
+                this.sizeOfTree += 1 + mapNode.layers.size;
                 this.maps.set(mapItem.mapId, mapNode);
                 ungrouped.push(mapNode);
             }
@@ -326,7 +326,7 @@ export class MapLayerTree {
         this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
     }
 
-    * allLevels(viewIndex: number) {
+    *allLevels(viewIndex: number) {
         for (let [_, map] of this.maps)
             for (let [_, layer] of map.layers)
                 yield layer.viewConfig[viewIndex].level;

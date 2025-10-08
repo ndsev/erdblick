@@ -12,7 +12,6 @@ export class MapView3D extends MapView {
 
     constructor(id: number,
                 canvasId: string,
-                sceneMode: SceneMode,
                 mapService: MapDataService,
                 featureSearchService: FeatureSearchService,
                 jumpService: JumpTargetService,
@@ -20,14 +19,11 @@ export class MapView3D extends MapView {
                 menuService: RightClickMenuService,
                 coordinatesService: CoordinatesService,
                 stateService: AppStateService) {
-        super(id, canvasId, sceneMode, mapService, featureSearchService, jumpService,
+        super(id, canvasId, SceneMode.SCENE3D, mapService, featureSearchService, jumpService,
             inspectionService, menuService, coordinatesService, stateService);
-
-        this.viewer.scene.mode = SceneMode.SCENE3D;
-        this.setupModeConstraints();
     }
 
-    setupModeConstraints() {
+    protected override setupScreenSpaceConstraints() {
         // Re-enable full 3D camera controls
         const scene = this.viewer.scene;
 
