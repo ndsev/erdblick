@@ -1,5 +1,5 @@
 import {AppStateService} from "../shared/appstate.service";
-import {AfterViewInit, ChangeDetectorRef, Component, input, InputSignal, OnDestroy} from "@angular/core";
+import {AfterViewInit, ChangeDetectorRef, Component, OnDestroy, OnInit, input, InputSignal} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
 import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
@@ -14,6 +14,7 @@ import {MapView} from "./view";
 import {MapView2D} from "./view2d";
 import {SceneMode} from "../integrations/cesium";
 import {MapView3D} from "./view3d";
+import {Subscription} from "rxjs";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -39,11 +40,13 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
-export class MapViewComponent implements AfterViewInit, OnDestroy {
+export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: MapView;
     viewIndex: InputSignal<number> = input.required<number>();
+    private modeSubscription?: Subscription;
+    private viewInitialized = false;
 
     /**
      * Construct a Cesium View with a Model.
@@ -70,23 +73,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
                 private cdr: ChangeDetectorRef
     ) {}
 
-    ngAfterViewInit() {
-        this.stateService.mode2dState.subscribe(this.viewIndex(), mode2d => {
+    ngOnInit() {
+        this.is2DMode = this.stateService.mode2dState.getValue(this.viewIndex());
+        this.modeSubscription = this.stateService.mode2dState.subscribe(this.viewIndex(), mode2d => {
+            const needsRebuild = this.is2DMode !== mode2d;
             this.is2DMode = mode2d;
-            // Initialize viewer with appropriate projection
-            this.createViewerForMode(mode2d).catch((error) => {
-                console.error('Failed to initialize viewer:', error);
-                alert('Failed to initialize the map viewer. Please refresh the page.');
-            }).finally(() => {
-                // Hide the global loading spinner
-                const spinner = document.getElementById('global-spinner-container');
-                if (spinner) {
-                    spinner.style.display = 'none';
-                }
-                this.setupKeyboardShortcuts();
-                this.cdr.markForCheck();
-            });
+            if (this.viewInitialized && needsRebuild) {
+                this.initializeViewer(mode2d);
+            }
         });
+    }
+
+    ngAfterViewInit() {
+        this.viewInitialized = true;
+        this.initializeViewer(this.is2DMode);
     }
 
     /**
@@ -135,6 +135,22 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        this.modeSubscription?.unsubscribe();
         this.mapView?.destroy().then();
+    }
+
+    private initializeViewer(mode2d: boolean) {
+        this.createViewerForMode(mode2d).catch((error) => {
+            console.error('Failed to initialize viewer:', error);
+            alert('Failed to initialize the map viewer. Please refresh the page.');
+        }).finally(() => {
+            // Hide the global loading spinner
+            const spinner = document.getElementById('global-spinner-container');
+            if (spinner) {
+                spinner.style.display = 'none';
+            }
+            this.setupKeyboardShortcuts();
+            this.cdr.markForCheck();
+        });
     }
 }

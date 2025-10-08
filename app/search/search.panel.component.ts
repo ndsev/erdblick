@@ -393,7 +393,7 @@ export class SearchPanelComponent implements AfterViewInit {
         localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
         this.reloadSearchHistory();
         if (index == 0) {
-            this.stateService.resetSearchHistoryState();
+            this.stateService.search = [];
         }
     }
 

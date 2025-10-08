@@ -102,7 +102,7 @@ export class InspectionPanelComponent {
                 this.tabs[0].title = `Selected ${this.inspectionService.selectedFeatures.length} Features`;
             }
 
-            const selectedSourceData = this.stateService.getSelectedSourceData()
+            const selectedSourceData = this.stateService.selectedSourceData
             if (selectedSourceData?.featureIds === featureIds)
                 this.inspectionService.selectedSourceData.next(selectedSourceData);
             else

@@ -123,9 +123,9 @@ export class InspectionService {
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             if (selection) {
-                this.stateService.setSelectedSourceData(selection);
+                this.stateService.selectedSourceData = selection;
             } else {
-                this.stateService.unsetSelectedSourceData();
+                this.stateService.selectedSourceData = null;
             }
         });
     }

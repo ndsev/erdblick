@@ -144,7 +144,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     private restoreSelectedOptions() {
-        for (const option of this.stateService.getCoordinatesAndTileIds()) {
+        for (const option of this.stateService.enabledCoordsTileIds) {
             if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
                 this.selectedOptions.push({name: option});
             }
@@ -234,11 +234,11 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     updateSelectedOptions() {
-        this.stateService.setCoordinatesAndTileIds(this.selectedOptions.reduce(
+        this.stateService.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
             array.push(option.name);
             return array;
-        }, new Array<string>()));
+        }, new Array<string>());
     }
 
     compareLevels(a: KeyValue<string, bigint> , b: KeyValue<string, bigint>): number {
