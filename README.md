@@ -454,6 +454,21 @@ You will find the resulting built web app under the directory `./static`.
 You can also build the `erdblick-core` library with a standard C++ compiler
 in an IDE of your choice. This is also useful to run the unit-tests.
 
+### Frontend Unit Tests
+
+Vitest powers the Angular frontend unit tests. After installing the npm dependencies:
+
+```bash
+npm install
+npm run test:vitest
+```
+
+Vitest can also watch for changes while you iterate:
+
+```bash
+npm run test:vitest -- --watch
+```
+
 </details>
 
 ## Concepts

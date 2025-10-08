@@ -586,7 +586,7 @@ export class AppStateService implements OnDestroy {
         }
         const mapLayerId = `${mapId}/${layerId}`;
         const names = this.layerNames.getValue();
-        let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
+        let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
             // TODO: Ensure that this will not trigger bad things.
@@ -619,7 +619,7 @@ export class AppStateService implements OnDestroy {
         }
         const mapLayerId = `${mapId}/${layerId}`;
         const names = this.layerNames.getValue();
-        let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
+        let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
             // TODO: Ensure that this will not trigger bad things.

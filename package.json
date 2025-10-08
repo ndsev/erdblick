@@ -7,6 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:vitest": "vitest run",
     "lint": "eslint app"
   },
   "private": true,
@@ -71,6 +72,8 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "less": "^4.3.0",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "jsdom": "^27.0.0",
+    "vitest": "^2.1.4"
   }
 }
