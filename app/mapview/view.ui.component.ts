@@ -8,7 +8,14 @@ import {AppStateService} from "../shared/appstate.service";
 @Component({
     selector: 'erdblick-view-ui',
     template: `
-        <div class="navigation-controls" *ngIf="!appModeService.isVisualizationOnly">
+        <div class="compass-circle" [ngClass]="{'mirrored-compass': isPrimary}" *ngIf="!appModeService.isVisualizationOnly">
+            <div class="compass-label north">N</div>
+            <div class="compass-label east">E</div>
+            <div class="compass-label south">S</div>
+            <div class="compass-label west">W</div>
+            <div class="compass-needle" #compassNeedle></div>
+        </div>
+        <div class="navigation-controls" [ngClass]="{'mirrored-controls': isPrimary}" *ngIf="!appModeService.isVisualizationOnly">
             <div class="nav-control-group">
                 <p-button icon="pi pi-plus" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
                           size="small" pTooltip="Zoom In (Q)"></p-button>
@@ -30,14 +37,7 @@ import {AppStateService} from "../shared/appstate.service";
             <p-button icon="pi pi-refresh" (onClick)="mapView()?.resetOrientation()" [rounded]="true"
                       severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
         </div>
-        <div class="compass-circle" *ngIf="!appModeService.isVisualizationOnly">
-            <div class="compass-label north">N</div>
-            <div class="compass-label east">E</div>
-            <div class="compass-label south">S</div>
-            <div class="compass-label west">W</div>
-            <div class="compass-needle" #compassNeedle></div>
-        </div>
-        <div class="scene-mode-toggle" *ngIf="!appModeService.isVisualizationOnly">
+        <div class="scene-mode-toggle" [ngClass]="{'mirrored-toggle': isPrimary}" *ngIf="!appModeService.isVisualizationOnly">
             <p-button
                     [ngClass]="{'blue': is2D()}"
                     [label]="is2D() ? '2D' : '3D'"
@@ -53,20 +53,30 @@ import {AppStateService} from "../shared/appstate.service";
     styles: [`
         .scene-mode-toggle {
             position: absolute;
-            bottom: 0.5em;
+            bottom: 5em;
             right: 1em;
             z-index: 110;
         }
 
+        .mirrored-toggle {
+            left: 1em !important;
+            right: unset !important;
+        }
+
         .navigation-controls {
             position: absolute;
-            bottom: 4.5em;
+            bottom: 9em;
             right: 0.5em;
-            z-index: 1;
+            z-index: 110;
             display: flex;
             flex-direction: column;
             gap: 0.5em;
             align-items: center;
+        }
+        
+        .mirrored-controls {
+            left: 0.5em !important;
+            right: unset !important;
         }
 
         .nav-control-group {
@@ -80,6 +90,11 @@ import {AppStateService} from "../shared/appstate.service";
             display: flex;
             gap: 0.25em;
         }
+        
+        .mirrored-compass {
+            left: 0.7em !important;
+            right: unset !important;
+        }
     `],
     standalone: false
 })
@@ -88,6 +103,7 @@ export class ErdblickViewUIComponent implements AfterViewInit {
 
     mapView: InputSignal<MapView | undefined> = input<MapView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
+    isPrimary: boolean = false;
 
     constructor(public appModeService: AppModeService,
                 public stateService: AppStateService,
@@ -123,8 +139,22 @@ export class ErdblickViewUIComponent implements AfterViewInit {
 
     ngAfterViewInit() {
         this.keyboardService.registerShortcut('t', this.toggleSceneMode.bind(this), true);
+
+        this.stateService.numViewsState.subscribe(numViews => {
+            const mapView = this.mapView();
+            if (!mapView) {
+                return;
+            }
+            this.isPrimary = numViews > 1 && mapView.viewIndex === 0;
+        });
     }
 
     toggleSceneMode() {
+        const mapView = this.mapView();
+        if (!mapView) {
+            return;
+        }
+        const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
+        this.stateService.mode2dState.next(mapView.viewIndex, !currentMode);
     }
 }

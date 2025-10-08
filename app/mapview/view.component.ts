@@ -12,7 +12,6 @@ import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {MapView} from "./view";
 import {MapView2D} from "./view2d";
-import {SceneMode} from "../integrations/cesium";
 import {MapView3D} from "./view3d";
 import {Subscription} from "rxjs";
 

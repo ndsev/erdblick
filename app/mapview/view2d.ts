@@ -180,7 +180,7 @@ export class MapView2D extends MapView {
         const restoredHeight = this.map2DHeightTo3DHeight(position.height, position.latitude, earthRadius);
 
         if (viewRect) {
-            this.stateService.viewRectangleState.next(this.viewIndex, [
+            this.stateService.viewRectangleState.next(this._viewIndex, [
                 CesiumMath.toDegrees(viewRect.west),
                 CesiumMath.toDegrees(viewRect.south),
                 CesiumMath.toDegrees(viewRect.east),
@@ -191,9 +191,9 @@ export class MapView2D extends MapView {
                 (viewRect.north + viewRect.south) / 2,
                 position.height
             );
-            this.stateService.setView(this.viewIndex, center, camera);
+            this.stateService.setView(this._viewIndex, center, camera);
         }
-        this.stateService.setView(this.viewIndex, new Cartographic(position.longitude, position.latitude, restoredHeight), camera);
+        this.stateService.setView(this._viewIndex, new Cartographic(position.longitude, position.latitude, restoredHeight), camera);
     };
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -251,7 +251,7 @@ export class MapView2D extends MapView {
 
     protected override performSurfaceMovement(newPosition: Cartographic) {
         // In 2D mode, use setView without orientation to maintain the 2D constraints
-        this.stateService.setView(this.viewIndex, newPosition);
+        this.stateService.setView(this._viewIndex, newPosition);
     }
 
     /**
@@ -291,7 +291,7 @@ export class MapView2D extends MapView {
             }
 
             // Set new camera height while preserving position
-            this.stateService.setView(this.viewIndex, new Cartographic(currentPos.longitude, currentPos.latitude, clampedHeight));
+            this.stateService.setView(this._viewIndex, new Cartographic(currentPos.longitude, currentPos.latitude, clampedHeight));
         } catch (error) {
             console.error('Error in 2D zoom:', error);
         }
@@ -305,8 +305,8 @@ export class MapView2D extends MapView {
         if (!currentView) {
             // Fallback to default movement if view can't be computed
             return {
-                longitudeOffset: this.stateService.cameraMoveUnits,
-                latitudeOffset: this.stateService.cameraMoveUnits
+                longitudeOffset: this.cameraMoveUnits,
+                latitudeOffset: this.cameraMoveUnits
             };
         }
 
@@ -590,7 +590,7 @@ export class MapView2D extends MapView {
                 return;
             }
 
-            this.mapService.setViewport(this.viewIndex, viewportData);
+            this.mapService.setViewport(this._viewIndex, viewportData);
 
         } catch (error) {
             console.error('Error updating viewport:', error);

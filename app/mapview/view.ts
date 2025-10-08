@@ -105,7 +105,7 @@ export class MapView {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     isDestroyingViewer = false;
-    protected viewIndex: number;
+    protected _viewIndex: number;
     viewer!: Viewer;
     canvasId: string;
     tileOutlineEntity: Entity | null = null;
@@ -114,6 +114,10 @@ export class MapView {
     protected subscriptions: Subscription[] = [];
     protected featureSearchVisualization: BillboardCollection | null = null;
     protected markerCollection: BillboardCollection | null = null;
+
+    get viewIndex() {
+        return this._viewIndex;
+    }
 
     /**
      * Centralized camera constants for consistent calculations across all methods
@@ -128,7 +132,7 @@ export class MapView {
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
                 protected stateService: AppStateService) {
-        this.viewIndex = id;
+        this._viewIndex = id;
         this.canvasId = canvasId;
         this.sceneMode = sceneMode;
 
@@ -171,14 +175,14 @@ export class MapView {
                     return;
                 }
 
-                if (pos.targetView !== this.viewIndex) {
+                if (pos.targetView !== this._viewIndex) {
                     return;
                 }
                 const [destination, orientation] = this.performConversionForMovePosition(pos);
                 if (orientation) {
-                    this.stateService.setView(this.viewIndex, destination, orientation);
+                    this.stateService.setView(this._viewIndex, destination, orientation);
                 } else {
-                    this.stateService.setView(this.viewIndex, destination);
+                    this.stateService.setView(this._viewIndex, destination);
                 }
             })
         );
@@ -216,8 +220,8 @@ export class MapView {
 
             // Restore OpenStreetMap layer
             if (this.openStreetMapLayer) {
-                this.openStreetMapLayer.alpha = this.stateService.osmOpacityState.getValue(this.viewIndex);
-                this.openStreetMapLayer.show = this.stateService.osmEnabledState.getValue(this.viewIndex);
+                this.openStreetMapLayer.alpha = this.stateService.osmOpacityState.getValue(this._viewIndex);
+                this.openStreetMapLayer.show = this.stateService.osmEnabledState.getValue(this._viewIndex);
             }
 
             // Recreate OpenStreetMap layer
@@ -287,8 +291,8 @@ export class MapView {
     protected setupAppStateSubscriptions() {
         this.subscriptions.push(
             combineLatest([
-                this.stateService.osmEnabledState.pipe(this.viewIndex),
-                this.stateService.osmOpacityState.pipe(this.viewIndex)
+                this.stateService.osmEnabledState.pipe(this._viewIndex),
+                this.stateService.osmOpacityState.pipe(this._viewIndex)
             ]).subscribe(([osmEnabled, osmOpacity]) => {
                 if (this.openStreetMapLayer) {
                     this.openStreetMapLayer.show = osmEnabled;
@@ -319,8 +323,8 @@ export class MapView {
 
         this.subscriptions.push(
             combineLatest([
-                this.stateService.cameraViewDataState.pipe(this.viewIndex),
-                this.stateService.viewRectangleState.pipe(this.viewIndex)
+                this.stateService.cameraViewDataState.pipe(this._viewIndex),
+                this.stateService.viewRectangleState.pipe(this._viewIndex)
             ]).subscribe(([cameraViewData, viewRect]) => {
                 this.convertCameraState(viewRect, cameraViewData);
                 this.updateViewport();
@@ -369,7 +373,7 @@ export class MapView {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightByJumpTargetFilter(this.viewIndex, featureInfo.mapId, featureInfo.featureId).then(() => {
+                        this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId, featureInfo.featureId).then(() => {
                             if (this.inspectionService.selectedFeatures) {
                                 this.inspectionService.zoomToFeature();
                             }
@@ -379,7 +383,7 @@ export class MapView {
                     // Convert Cartesian3 position to WGS84 degrees
                     const cartographic = Cartographic.fromCartesian(feature.primitive.position);
                     this.mapService.moveToWgs84PositionTopic.next({
-                        targetView: this.viewIndex,
+                        targetView: this._viewIndex,
                         x: CesiumMath.toDegrees(cartographic.longitude),
                         y: CesiumMath.toDegrees(cartographic.latitude),
                         z: cartographic.height + 1000
@@ -391,7 +395,7 @@ export class MapView {
                 this.menuService.tileOutline.next(null);
             }
             this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? [this.viewIndex, feature.id] : [[this.viewIndex, feature?.id]],
+                Array.isArray(feature?.id) ? [this._viewIndex, feature.id] : [[this._viewIndex, feature?.id]],
                 false,
                 coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
             // Handle position update after highlighting, because otherwise
@@ -428,7 +432,7 @@ export class MapView {
 
                 let feature = this.viewer.scene.pick(position);
                 this.mapService.highlightFeatures(
-                    Array.isArray(feature?.id) ? [this.viewIndex, feature.id] : [[this.viewIndex, feature?.id]],
+                    Array.isArray(feature?.id) ? [this._viewIndex, feature.id] : [[this._viewIndex, feature?.id]],
                     false,
                     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
             }
@@ -657,6 +661,26 @@ export class MapView {
         };
     }
 
+    private baseCameraMoveM = 100.0;
+    private baseCameraZoomM = 100.0;
+    private scalingFactor = 1;
+
+    get cameraMoveUnits() {
+        return this.baseCameraMoveM * this.scalingFactor / 75000;
+    }
+
+    get cameraZoomUnits() {
+        return this.baseCameraZoomM * this.scalingFactor;
+    }
+
+    private updateScalingFactor(altitude: number): void {
+        if (!Number.isFinite(altitude) || altitude <= 0) {
+            this.scalingFactor = 1;
+            return;
+        }
+        this.scalingFactor = Math.pow(altitude / 1000, 1.1) / 2;
+    }
+
     moveUp() {
         throw new Error("Not Implemented!");
     }
@@ -689,7 +713,7 @@ export class MapView {
                 return;
             }
 
-            this.stateService.setView(this.viewIndex, this.stateService.getCameraPosition(this.viewIndex), {
+            this.stateService.setView(this._viewIndex, this.viewer.camera.positionCartographic, {
                 heading: 0.0,
                 pitch: CesiumMath.toRadians(CAMERA_CONSTANTS.DEFAULT_PITCH_DEGREES),
                 roll: 0.0
@@ -751,6 +775,8 @@ export class MapView {
 
     updateOnCameraChangedHandler = () => {
         try {
+            const position = this.viewer.camera.positionCartographic;
+            this.updateScalingFactor(position.height);
             this.updateOnCameraChange();
             this.updateViewport();
         } catch (error) {

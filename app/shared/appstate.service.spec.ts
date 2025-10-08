@@ -101,6 +101,7 @@ describe('AppStateService', () => {
 
         expect(service.markerState.getValue()).toBe(true);
 
+        // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
         service.markerState.next(false);
@@ -138,6 +139,7 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router);
 
+        // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
         service.setStyleConfig('overlay', {

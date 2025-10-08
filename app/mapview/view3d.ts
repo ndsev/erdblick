@@ -39,19 +39,19 @@ export class MapView3D extends MapView {
     }
 
     override moveUp() {
-        this.moveCameraOnSurface(0, this.stateService.cameraMoveUnits);
+        this.moveCameraOnSurface(0, this.cameraMoveUnits);
     }
 
     override moveDown() {
-        this.moveCameraOnSurface(0, -this.stateService.cameraMoveUnits);
+        this.moveCameraOnSurface(0, -this.cameraMoveUnits);
     }
 
     override moveLeft() {
-        this.moveCameraOnSurface(-this.stateService.cameraMoveUnits, 0);
+        this.moveCameraOnSurface(-this.cameraMoveUnits, 0);
     }
 
     override moveRight() {
-        this.moveCameraOnSurface(this.stateService.cameraMoveUnits, 0);
+        this.moveCameraOnSurface(this.cameraMoveUnits, 0);
     }
 
     override zoomIn() {
@@ -61,7 +61,7 @@ export class MapView3D extends MapView {
                 return;
             }
 
-            this.viewer.camera.zoomIn(this.stateService.cameraZoomUnits);
+            this.viewer.camera.zoomIn(this.cameraZoomUnits);
         } catch (error) {
             console.error('Error zooming in:', error);
         }
@@ -74,7 +74,7 @@ export class MapView3D extends MapView {
                 return;
             }
 
-            this.viewer.camera.zoomOut(this.stateService.cameraZoomUnits);
+            this.viewer.camera.zoomOut(this.cameraZoomUnits);
         } catch (error) {
             console.error('Error zooming out:', error);
         }
@@ -118,12 +118,12 @@ export class MapView3D extends MapView {
         }
 
         this.stateService.setView(
-            this.viewIndex, Cartographic.fromCartesian(this.viewer.camera.position), this.viewer.camera
+            this._viewIndex, Cartographic.fromCartesian(this.viewer.camera.position), this.viewer.camera
         );
     };
 
     protected override performSurfaceMovement(newPosition: Cartographic) {
-        this.stateService.setView(this.viewIndex, newPosition, this.stateService.getCameraOrientation(this.viewIndex));
+        this.stateService.setView(this._viewIndex, newPosition, this.stateService.getCameraOrientation(this._viewIndex));
     }
 
     override updateViewport() {
@@ -214,7 +214,7 @@ export class MapView3D extends MapView {
                 return;
             }
 
-            this.mapService.setViewport(this.viewIndex, viewportData);
+            this.mapService.setViewport(this._viewIndex, viewportData);
 
         } catch (error) {
             console.error('Error updating viewport:', error);

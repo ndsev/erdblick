@@ -29,16 +29,6 @@ import {map, Subscription} from "rxjs";
 <!--                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"-->
 <!--                              tooltipPosition="bottom" tabindex="0">-->
 <!--                    </p-button>-->
-                    <p-button *ngIf="!index" onEnterClick (click)="addView()" class="osm-button"
-                              [disabled]="stateService.numViews === 2"
-                              icon="pi pi-plus" label="" pTooltip="Add another view for comparison"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <p-button *ngIf="index" onEnterClick (click)="removeView(index)" class="osm-button"
-                              icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
                               icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -54,6 +44,16 @@ import {map, Subscription} from "rxjs";
                                   class="w-full" tabindex="-1">
                         </p-slider>
                     </div>
+                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                    <p-button *ngIf="!index" onEnterClick (click)="addView()" class="osm-button"
+                              [disabled]="stateService.numViews === 2"
+                              icon="pi pi-plus" label="" pTooltip="Add another view for comparison"
+                              tooltipPosition="bottom" tabindex="0">
+                    </p-button>
+                    <p-button *ngIf="index" onEnterClick (click)="removeView(index)" class="osm-button"
+                              icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
+                              tooltipPosition="bottom" tabindex="0">
+                    </p-button>
                 </div>
                 <p-fieldset class="map-tab" legend="Maps and Layers" [toggleable]="true" [(collapsed)]="mapsCollapsed">
                     <ng-container *ngIf="mapService.maps | async as mapGroups">

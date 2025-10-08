@@ -66,10 +66,6 @@ export class AppStateService implements OnDestroy {
     inspectionContainerWidth: number = 40;
     inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
 
-    private baseCameraMoveM = 100.0;
-    private baseCameraZoomM = 100.0;
-    private scalingFactor = 1;
-
     readonly numViewsState = this.createState<number>({
         name: "numberOfViews",
         defaultValue: 1,
@@ -321,14 +317,6 @@ export class AppStateService implements OnDestroy {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
     }
 
-    get cameraMoveUnits() {
-        return this.baseCameraMoveM * this.scalingFactor / 75000;
-    }
-
-    get cameraZoomUnits() {
-        return this.baseCameraZoomM * this.scalingFactor;
-    }
-
     get replaceUrl() {
         const currentValue = this._replaceUrl;
         this._replaceUrl = true;
@@ -451,15 +439,6 @@ export class AppStateService implements OnDestroy {
                 state.deserialize(params);
             }
         });
-    }
-
-    // TODO: This is view logic which shouldn't be in the AppStateService.
-    private updateScalingFactor(altitude: number): void {
-        if (!Number.isFinite(altitude) || altitude <= 0) {
-            this.scalingFactor = 1;
-            return;
-        }
-        this.scalingFactor = Math.pow(altitude / 1000, 1.1) / 2;
     }
 
     private withHydration(callback: () => void): void {
