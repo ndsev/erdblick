@@ -79,7 +79,7 @@ export class InspectionService {
 
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
 
-        this.stateService.selectionTopicState.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
+        this.mapService.selectionTopic.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
             if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";

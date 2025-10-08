@@ -474,7 +474,6 @@ export class MapPanelComponent {
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
     addView() {
-        const numViews = this.stateService.numViewsState.getValue();
-        this.stateService.numViewsState.next(numViews + 1);
+        this.stateService.numViews += 1;
     }
 }

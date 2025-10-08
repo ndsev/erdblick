@@ -57,8 +57,6 @@ class ViewVisualizationState {
 @Injectable({providedIn: 'root'})
 export class MapDataService {
 
-    public maps: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.stateService));
-
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
@@ -76,6 +74,9 @@ export class MapDataService {
     tileVisualizationDestructionTopic: Subject<any>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+    selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+
+    public maps: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService));
 
     /**
      * When true, clearing the selection does not reset the side panel state.
@@ -157,7 +158,7 @@ export class MapDataService {
         this.stateService.selectedFeaturesState.subscribe(selected => {
             this.highlightFeatures(selected).then();
         });
-        this.stateService.selectionTopicState.subscribe(selectedFeatureWrappers => {
+        this.selectionTopic.subscribe(selectedFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
         });
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
@@ -230,18 +231,18 @@ export class MapDataService {
             })
             .withJsonCallback((result: Array<MapInfoItem>) => {
                 let maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
-                this.maps.next(new MapLayerTree(maps, this.stateService));
+                this.maps.next(new MapLayerTree(maps, this.selectionTopic, this.stateService));
             })
             .go();
     }
 
     async update() {
         let tileIdPerLevel = new Map<number, Array<bigint>>();
-        const loadLimit = this.stateService.tilesLoadLimitState.getValue() / this.viewVisualizationState.length;
-        const visualizeLimit = this.stateService.tilesVisualizeLimitState.getValue() / this.viewVisualizationState.length;
+        const loadLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
+        const visualizeLimit = this.stateService.tilesVisualizeLimit / this.stateService.numViews;
 
         // Get the tile IDs for the current viewport.
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             this.viewVisualizationState[viewIndex].visibleTileIds = new Set<bigint>();
             this.viewVisualizationState[viewIndex].highDetailTileIds = new Set<bigint>();
             for (let level of this.maps.getValue().allLevels(viewIndex)) {
@@ -267,10 +268,10 @@ export class MapDataService {
         }
 
         // Evict present non-required tile layers.
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             let newTileLayers = new Map();
             let evictTileLayer = (tileLayer: FeatureTile) => {
-                return !tileLayer.preventCulling && !this.stateService.selectionTopicState.getValue().some(v =>
+                return !tileLayer.preventCulling && !this.selectionTopic.getValue().some(v =>
                         v.featureTile.mapTileKey == tileLayer.mapTileKey) &&
                     (!this.viewVisualizationState[viewIndex].visibleTileIds.has(tileLayer.tileId) ||
                         !this.maps.getValue().getMapLayerVisibility(viewIndex, tileLayer.mapName, tileLayer.layerName) ||
@@ -287,7 +288,7 @@ export class MapDataService {
         }
 
         // Update visualizations.
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             for (const styleId of this.viewVisualizationState[viewIndex].visualizedTileLayers.keys()) {
                 const tileVisus = this.viewVisualizationState[viewIndex].visualizedTileLayers
                     .get(styleId)?.filter(tileVisu => {
@@ -320,7 +321,7 @@ export class MapDataService {
 
         // Update Tile Visualization Queue.
         this.tileVisualizationQueue = [];
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             for (const [styleId, tileVisus] of this.viewVisualizationState[viewIndex].visualizedTileLayers) {
                 tileVisus.forEach(tileVisu => {
                     if (tileVisu.isDirty()) {
@@ -366,7 +367,7 @@ export class MapDataService {
 
         for (const [mapName, map] of this.maps.getValue().maps) {
             for (const [layerName, _] of map.layers) {
-                for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+                for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     if (!this.maps.getValue().getMapLayerVisibility(viewIndex, mapName, layerName)) {
                         continue;
                     }
@@ -478,7 +479,7 @@ export class MapDataService {
         // Schedule the visualization of the newly added tile layer,
         // but don't do it synchronously to avoid stalling the main thread.
         setTimeout(() => {
-            for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                 if (style && styleId) {
                     this.renderTileLayer(viewIndex, tileLayer, style, styleId);
                 } else {
@@ -492,7 +493,7 @@ export class MapDataService {
 
     private removeTileLayer(tileLayer: FeatureTile) {
         tileLayer.destroy();
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             for (const styleId of this.viewVisualizationState[viewIndex].visualizedTileLayers.keys()) {
                 const tileVisus = this.viewVisualizationState[viewIndex].visualizedTileLayers
                     .get(styleId)?.filter(tileVisu => {
@@ -546,7 +547,7 @@ export class MapDataService {
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
-        while (this.viewVisualizationState.length <= viewIndex) {
+        while (this.stateService.numViews <= viewIndex) {
             this.viewVisualizationState.push(new ViewVisualizationState());
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;
@@ -630,7 +631,7 @@ export class MapDataService {
                 if (id == "hover-highlight") {
                     features = this.hoverTopic.getValue();
                 } else if (id == "selection-highlight") {
-                    features = this.stateService.selectionTopicState.getValue();
+                    features = this.selectionTopic.getValue();
                 }
                 continue;
             }
@@ -656,7 +657,7 @@ export class MapDataService {
 
         if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
             if (features.length) {
-                if (featureSetsEqual(this.stateService.selectionTopicState.getValue(), features)) {
+                if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
                     return;
                 }
             }
@@ -665,13 +666,13 @@ export class MapDataService {
             }
             this.hoverTopic.next(features);
         } else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            if (featureSetsEqual(this.stateService.selectionTopicState.getValue(), features)) {
+            if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
                 return;
             }
             if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
                 this.hoverTopic.next([]);
             }
-            this.stateService.selectionTopicState.next(features);
+            this.selectionTopic.next(features);
         } else {
             console.error(`Unsupported highlight mode!`);
         }
@@ -691,7 +692,7 @@ export class MapDataService {
 
     setTileLevelForViewport(viewIndex: number) {
         // Validate viewport data
-        if (this.viewVisualizationState.length <= viewIndex || !this.viewVisualizationState[viewIndex].viewport ||
+        if (this.stateService.numViews <= viewIndex || !this.viewVisualizationState[viewIndex].viewport ||
             !isFinite(this.viewVisualizationState[viewIndex].viewport.south) ||
             !isFinite(this.viewVisualizationState[viewIndex].viewport.west) ||
             !isFinite(this.viewVisualizationState[viewIndex].viewport.width) ||
@@ -802,7 +803,7 @@ export class MapDataService {
      * Clean up all tile visualizations - used during viewer recreation
      */
     clearAllTileVisualizations(viewer: any): void {
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             for (const [styleId, tileVisualizations] of this.viewVisualizationState[viewIndex].visualizedTileLayers) {
                 tileVisualizations.forEach(tileVisu => {
                     try {

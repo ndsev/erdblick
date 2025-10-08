@@ -121,15 +121,6 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly selectionTopicState = this.createState<FeatureWrapper[]>({
-        name: 'selectionTopic',
-        defaultValue: [],
-        schema: z.array(z.object({
-            featureId: z.string(),
-            featureTile: z.object()
-        })),
-    });
-
     readonly focusedViewState = this.createState<number>({
         name: 'focus',
         defaultValue: 0,
@@ -495,8 +486,6 @@ export class AppStateService implements OnDestroy {
     set markedPosition(val: number[]) {this.markedPositionState.next(val);};
     get selectedFeatures() {return this.selectedFeaturesState.getValue();}
     set selectedFeatures(val: [number, TileFeatureId][]) {this.selectedFeaturesState.next(val);};
-    get selectionTopic() {return this.selectionTopicState.getValue();}
-    set selectionTopic(val: FeatureWrapper[]) {this.selectionTopicState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
     get layerNames() {return this.layerNamesState.getValue();}
@@ -589,7 +578,7 @@ export class AppStateService implements OnDestroy {
             return [];
         }
         const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNamesState.getValue();
+        const names = this.layerNames;
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
@@ -622,7 +611,7 @@ export class AppStateService implements OnDestroy {
             return;
         }
         const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNamesState.getValue();
+        const names = this.layerNames;
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;

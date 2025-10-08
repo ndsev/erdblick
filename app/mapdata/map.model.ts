@@ -1,6 +1,7 @@
 import {AppStateService, LayerViewConfig} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
-import {skip, Subscription} from "rxjs";
+import {BehaviorSubject, skip, Subscription} from "rxjs";
+import {FeatureWrapper} from "./features.model";
 
 export function removeGroupPrefix(id: string) {
     if (id.includes('/')) {
@@ -141,7 +142,10 @@ export class MapLayerTree {
     private mapsForMapIds: Map<string, MapTreeNode> = new Map();
     private sizeOfTree: number = 0;
 
-    constructor(mapInfo: MapInfoItem[], private stateService: AppStateService) {
+    constructor(
+        mapInfo: MapInfoItem[],
+        private selectionTopic: BehaviorSubject<Array<FeatureWrapper>>,
+        private stateService: AppStateService) {
         this.initializeMapGroups(mapInfo);
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
             this.configureTreeParameters();
@@ -247,12 +251,12 @@ export class MapLayerTree {
      * @param layerId Layer identifier within the map.
      */
     private clearSelectionForLayer(mapId: string, layerId: string) {
-        const current = this.stateService.selectionTopicState.getValue();
+        const current = this.selectionTopic.getValue();
         const remaining = current.filter(
             fw => !(fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId)
         );
         if (remaining.length !== current.length) {
-            this.stateService.selectionTopicState.next(remaining);
+            this.selectionTopic.next(remaining);
         }
     }
 

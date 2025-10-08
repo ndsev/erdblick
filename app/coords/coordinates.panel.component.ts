@@ -249,7 +249,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     focusOnMarker(markerPosition:  {x: number, y: number}) {
-        const focusedViewIndex = this.stateService.focusedViewState.getValue();
+        const focusedViewIndex = this.stateService.focusedView;
         this.mapService.moveToWgs84PositionTopic.next({
             targetView: focusedViewIndex,
             x: markerPosition.x,
