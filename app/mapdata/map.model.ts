@@ -150,6 +150,9 @@ export class MapLayerTree {
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
             this.configureTreeParameters();
         });
+        this.stateService.numViewsState.subscribe(_ => {
+            this.configureTreeParameters();
+        });
     }
 
     get maps() {

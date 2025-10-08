@@ -22,7 +22,7 @@ declare let window: DebugWindow;
 @Component({
     selector: 'map-view',
     template: `
-        <div #viewer id="mapViewContainer" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()"/>
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
@@ -121,11 +121,11 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         }
         if (is2D) {
             this.mapView = new MapView2D(
-                this.viewIndex(), "mapViewContainer", this.mapService, this.featureSearchService,
+                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
                 this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
         } else {
             this.mapView = new MapView3D(
-                this.viewIndex(), "mapViewContainer", this.mapService, this.featureSearchService,
+                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
                 this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
         }
         await this.mapView.setup();
@@ -152,5 +152,9 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
             this.setupKeyboardShortcuts();
             this.cdr.markForCheck();
         });
+    }
+
+    get canvasId(): string {
+        return `mapViewContainer-${this.viewIndex()}`;
     }
 }

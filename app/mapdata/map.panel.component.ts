@@ -41,10 +41,10 @@ import {map, Subscription} from "rxjs";
                     <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
-                              icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                              icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                               label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
                     </p-button>
-                    <div *ngIf="osmEnabled" style="display: inline-block">
+                    <div *ngIf="osmEnabled[index]" style="display: inline-block">
                         <input type="text" pInputText [(ngModel)]="osmOpacityValue[index]"
                                (input)="onOsmOpacityInput($event, index)"
                                (keydown.enter)="updateOSMOverlay(index)"
@@ -199,7 +199,6 @@ import {map, Subscription} from "rxjs";
 export class MapPanelComponent {
 
     subscriptions: Subscription[] = [];
-    osmSubscriptions: Subscription[] = [];
     viewIndices: number[] = [];
 
     isMainButtonHovered: boolean = false;
@@ -282,22 +281,15 @@ export class MapPanelComponent {
 
         this.subscriptions.push(
             this.stateService.numViewsState.subscribe(numViews => {
-                this.viewIndices = Array.from({length: numViews}, (_, i) => i);
                 this.osmEnabled = [];
                 this.osmOpacityValue = [];
-                this.osmSubscriptions.forEach(subscription => subscription.unsubscribe());
                 this.viewIndices.forEach(viewIndex => {
-                    this.osmSubscriptions.push(
-                        this.stateService.osmEnabledState.subscribe(viewIndex, enabled => {
-                            this.osmEnabled.push(enabled);
-                        })
-                    );
-                    this.osmSubscriptions.push(
-                        this.stateService.osmOpacityState.subscribe(viewIndex, opacity => {
-                            this.osmOpacityValue.push(opacity);
-                        })
-                    );
+                    this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
+                    this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
                 });
+                setTimeout(() => {
+                    this.viewIndices = Array.from({length: numViews}, (_, i) => i);
+                }, 150);
             })
         );
     }
@@ -308,7 +300,7 @@ export class MapPanelComponent {
 
         // Extract only numerical characters and decimal points
         const numericalOnly = value.replace(/[^0-9.]/g, '');
-        let numValue = parseFloat(numericalOnly);
+        let numValue = parseInt(numericalOnly);
 
         // Validate and clamp the value
         if (isNaN(numValue) || numValue < 0) {
@@ -504,6 +496,7 @@ export class MapPanelComponent {
         // Right now we just decrement, but for more than 2 views we should consider the actual indices
         // We cannot have fewer views than at least 1
         if (this.stateService.numViews > 1) {
+            this.viewIndices.pop();
             this.stateService.numViews -= 1;
         }
     }

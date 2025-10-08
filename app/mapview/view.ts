@@ -196,7 +196,7 @@ export class MapView {
 
             // TODO: Wait for the viewer to be initialised to proceed with the rest of the method
             //  Maybe wrap it in Promise or something?
-            this.viewer = new Viewer("mapViewContainer", {
+            this.viewer = new Viewer(this.canvasId, {
                 baseLayerPicker: false,
                 animation: false,
                 geocoder: false,
