@@ -1,7 +1,7 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
@@ -242,7 +242,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     private subscriptions: Subscription[] = [];
 
     constructor(private messageService: InfoMessageService,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public styleService: StyleService,
                 public inspectionService: InspectionService,
                 public stateService: AppStateService) {

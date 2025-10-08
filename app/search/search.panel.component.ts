@@ -2,7 +2,7 @@ import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild
 import {Cartesian3} from "../integrations/cesium";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {Dialog} from "primeng/dialog";
@@ -252,7 +252,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,

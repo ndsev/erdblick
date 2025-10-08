@@ -1,6 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
-import {MapService, removeGroupPrefix} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle} from "./style.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -12,6 +12,7 @@ import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
 import {filter} from "rxjs/operators";
+import {removeGroupPrefix} from "../mapdata/map.model"
 
 
 @Component({
@@ -41,7 +42,7 @@ import {filter} from "rxjs/operators";
                             <div class="flex-container">
                                 <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-icons menu-toggler"
-                                          (click)="showStylesToggleMenu($event, 0, node.id)" tabindex="0">
+                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                         more_vert
                                     </span>
                                     <span>
@@ -185,7 +186,7 @@ export class StyleComponent {
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
@@ -258,7 +259,7 @@ export class StyleComponent {
         ];
     }
 
-    showStylesToggleMenu(event: MouseEvent, viewIndex: number, styleId: string) {
+    showStylesToggleMenu(event: MouseEvent, styleId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
@@ -268,7 +269,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update(viewIndex).then();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -278,7 +279,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update(viewIndex).then();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -288,7 +289,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update(viewIndex).then();
+                    this.mapService.update().then();
                 }
             },
             {
@@ -298,7 +299,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update(viewIndex).then();
+                    this.mapService.update().then();
                 }
             }
         ];
@@ -430,7 +431,7 @@ export class StyleComponent {
             this.styleService.toggleStyle(id, target, true);
         }
         this.styleService.reapplyAllStyles();
-        this.mapService.update(viewIndex).then();
+        this.mapService.update().then();
     }
 
     private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {

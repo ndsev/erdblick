@@ -1,7 +1,7 @@
 import {Component} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {InspectionService} from "./inspection.service";
 import {CallbackProperty, Color, HeightReference, Rectangle} from "../integrations/cesium";
@@ -81,7 +81,7 @@ export class SourceDataLayerSelectionDialogComponent {
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
-    constructor(private mapService: MapService,
+    constructor(private mapService: MapDataService,
                 private inspectionService: InspectionService,
                 public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
@@ -150,11 +150,11 @@ export class SourceDataLayerSelectionDialogComponent {
 
     *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
         const level = coreLib.getTileLevel(tileId);
-        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.getValue().maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
-                    if (!layerInfo.zoomLevels.length || layerInfo.zoomLevels.includes(level)) {
-                        yield { id: mapInfo.mapId, name: mapInfo.mapId };
+                    if (!layerInfo.info.zoomLevels.length || layerInfo.info.zoomLevels.includes(level)) {
+                        yield { id: mapInfo.id, name: mapInfo.id };
                         break;
                     }
                 }

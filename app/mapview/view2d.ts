@@ -8,7 +8,7 @@ import {
     PerspectiveFrustum
 } from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
@@ -21,7 +21,7 @@ export class MapView2D extends MapView {
     constructor(id: number,
                 canvasId: string,
                 sceneMode: SceneMode,
-                mapService: MapService,
+                mapService: MapDataService,
                 featureSearchService: FeatureSearchService,
                 jumpService: JumpTargetService,
                 inspectionService: InspectionService,

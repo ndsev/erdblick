@@ -1,5 +1,5 @@
 import { Component } from "@angular/core";
-import { MapService } from "../mapdata/map.service";
+import { MapDataService } from "../mapdata/map.service";
 import { debounceTime } from "rxjs";
 import { ClipboardService } from "../shared/clipboard.service";
 
@@ -81,7 +81,7 @@ export class StatsDialogComponent {
     public consideredTilesCount: number = 0;
     public needsUpdate: boolean = false;
 
-    constructor(public mapService: MapService, public clipboardService: ClipboardService) {
+    constructor(public mapService: MapDataService, public clipboardService: ClipboardService) {
         this.update();
         this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.needsUpdate = true);
         this.mapService.statsDialogNeedsUpdate.pipe(debounceTime(1000)).subscribe(_ => this.update());

@@ -1,6 +1,6 @@
 import {Component} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {AppModeService} from "./shared/app-mode.service";
 
@@ -77,7 +77,7 @@ export class AppComponent {
     distributionVersionsDialogVisible: boolean = false;
 
     constructor(private httpClient: HttpClient,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService) {
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({

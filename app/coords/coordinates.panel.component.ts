@@ -1,6 +1,6 @@
 import {Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {CesiumMath} from "../integrations/cesium";
 import {ClipboardService} from "../shared/clipboard.service";
@@ -57,7 +57,7 @@ interface PanelOption {
                 </div>
             </p-card>
             <p-button *ngIf="isMarkerEnabled && markerPosition"
-                      (click)="mapService.moveToWgs84PositionTopic.next(markerPosition)"
+                      (click)="focusOnMarker(markerPosition)"
                       label="" pTooltip="Focus on marker" tooltipPosition="bottom"
                       [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
@@ -89,7 +89,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
     private subscriptions: Subscription[] = [];
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
@@ -246,5 +246,14 @@ export class CoordinatesPanelComponent implements OnDestroy {
         const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
 
         return aLevel - bLevel;
+    }
+
+    focusOnMarker(markerPosition:  {x: number, y: number}) {
+        const focusedViewIndex = this.stateService.focusedView.getValue();
+        this.mapService.moveToWgs84PositionTopic.next({
+            targetView: focusedViewIndex,
+            x: markerPosition.x,
+            y: markerPosition.y
+        });
     }
 }

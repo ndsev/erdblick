@@ -1,7 +1,7 @@
 import {EventEmitter, Injectable} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {BehaviorSubject, distinctUntilChanged, Subject} from "rxjs";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {Feature, TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {AppStateService} from "../shared/appstate.service";
@@ -72,18 +72,18 @@ export class InspectionService {
     // Event called when the active inspector of the inspection panel changed
     inspectionPanelChanged  = new EventEmitter<void>();
 
-    constructor(private mapService: MapService,
+    constructor(private mapService: MapDataService,
                 private infoMessageService: InfoMessageService,
                 private keyboardService: KeyboardService,
                 public stateService: AppStateService) {
 
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
 
-        this.mapService.selectionTopic.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
+        this.stateService.selectionTopic.pipe(distinctUntilChanged(selectedFeaturesEqualTo)).subscribe(selectedFeatures => {
             if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
-                this.stateService.setSelectedFeatures([]);
+                this.stateService.setSelectedFeatures(0, []);
                 this.selectedFeatures = [];
                 return;
             }
@@ -118,7 +118,7 @@ export class InspectionService {
             }
             this.loadFeatureData();
 
-            this.stateService.setSelectedFeatures(this.selectedFeatures.map(f => f.key()));
+            this.stateService.setSelectedFeatures(0, this.selectedFeatures.map(f => f.key()));
         });
 
         this.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
@@ -255,6 +255,7 @@ export class InspectionService {
             }
         } else if (this.selectedFeatureCenter) {
             this.mapService.moveToWgs84PositionTopic.next({
+                targetView: 0,
                 x: this.selectedFeatureCenter.x,
                 y: this.selectedFeatureCenter.y,
                 z: this.selectedFeatureCenter.z + 3 * this.selectedFeatureBoundingRadius
@@ -349,13 +350,13 @@ export class InspectionService {
      * @param layerName Layer id to get the name for
      */
     sourceDataLayerIdForLayerName(layerName: string) {
-        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.getValue().maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
-                    if (this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName ||
-                        this.layerNameForSourceDataLayerId(layerInfo.layerId) == layerName.replace('-', '.') ||
-                        layerInfo.layerId == layerName) {
-                        return layerInfo.layerId;
+                    if (this.layerNameForSourceDataLayerId(layerInfo.id) == layerName ||
+                        this.layerNameForSourceDataLayerId(layerInfo.id) == layerName.replace('-', '.') ||
+                        layerInfo.id == layerName) {
+                        return layerInfo.id;
                     }
                 }
             }
@@ -364,13 +365,13 @@ export class InspectionService {
     }
 
     findLayersForMapId(mapId: string, isMetadata: boolean = false) {
-        const map = this.mapService.maps.getValue().get(mapId);
+        const map = this.mapService.maps.getValue().maps.get(mapId);
         if (map) {
             const prefix = isMetadata ? "Metadata" : "SourceData";
             const dataLayers = new Set<string>();
             for (const layer of map.layers.values()) {
-                if (layer.type == "SourceData" && layer.layerId.startsWith(prefix)) {
-                    dataLayers.add(layer.layerId);
+                if (layer.type == "SourceData" && layer.id.startsWith(prefix)) {
+                    dataLayers.add(layer.id);
                 }
             }
             return [...dataLayers].map(layerId => ({

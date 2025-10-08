@@ -24,7 +24,7 @@ import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
@@ -91,7 +91,6 @@ import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
 import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
-import {MarkerService} from "./coords/marker.service";
 import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./styledata/style.component";
@@ -164,7 +163,7 @@ export function typeValidationMessage({ schemaType }: any) {
 
 export const initializeServices = () => {
     const styleService = inject(StyleService);
-    const mapService = inject(MapService);
+    const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
 
     return (async () => {
@@ -284,7 +283,7 @@ export const initializeServices = () => {
     ],
     providers: [
         provideAppInitializer(initializeServices),
-        MapService,
+        MapDataService,
         MessageService,
         InfoMessageService,
         JumpTargetService,
@@ -295,7 +294,6 @@ export const initializeServices = () => {
         ClipboardService,
         EditorService,
         RightClickMenuService,
-        MarkerService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

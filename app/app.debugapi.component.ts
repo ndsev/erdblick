@@ -1,5 +1,5 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {SceneMode, CesiumMath} from "./integrations/cesium";
 import {MapView} from "./mapview/view";
@@ -22,7 +22,7 @@ export class ErdblickDebugApi {
     /**
      * Initialize a new ErdblickDebugApi instance.
      */
-    constructor(private mapService: MapService,
+    constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
     }
 

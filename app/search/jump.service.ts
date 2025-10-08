@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {LocateResponse} from "../mapview/visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
@@ -46,7 +46,7 @@ export class JumpTargetService {
     setSelectedMap: ((choice: string|null)=>void)|null = null;
 
     constructor(private httpClient: HttpClient,
-                private mapService: MapService,
+                private mapService: MapDataService,
                 private messageService: InfoMessageService,
                 private sidePanelService: SidePanelService,
                 private inspectionService: InspectionService,
@@ -203,7 +203,7 @@ export class JumpTargetService {
             }
 
             if (matches.length > 1 && matches[1]) {
-                if (!this.mapService.maps.getValue().has(matches[1])) {
+                if (!this.mapService.maps.getValue().maps.has(matches[1])) {
                     label += `<br><span class="search-option-warning">Map ID not found.</span>`;
                     valid = false;
                 }
@@ -346,9 +346,9 @@ export class JumpTargetService {
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
-        await this.mapService.highlightFeatures(viewIndex, [{
+        await this.mapService.highlightFeatures([[viewIndex, {
             mapTileKey: selectThisFeature.tileId,
             featureId: featureId
-        }], moveCamera, mode).then();
+        }]], moveCamera, mode).then();
     }
 }

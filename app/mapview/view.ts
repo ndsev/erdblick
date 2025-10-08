@@ -14,7 +14,7 @@ import {
     BillboardCollection, defined, ScreenSpaceEventType, Billboard, HeightReference
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {TileVisualization} from "./visualization.model";
 import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {FeatureSearchService, SearchResultPrimitiveId} from "../search/feature.search.service";
@@ -121,7 +121,7 @@ export class MapView {
     constructor(id: number,
                 canvasId: string,
                 sceneMode: SceneMode,
-                protected mapService: MapService,
+                protected mapService: MapDataService,
                 protected featureSearchService: FeatureSearchService,
                 protected jumpService: JumpTargetService,
                 protected inspectionService: InspectionService,
@@ -385,8 +385,7 @@ export class MapView {
                 this.menuService.tileOutline.next(null);
             }
             this.mapService.highlightFeatures(
-                this.viewIndex,
-                Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                Array.isArray(feature?.id) ? [this.viewIndex, feature.id] : [[this.viewIndex, feature?.id]],
                 false,
                 coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
             // Handle position update after highlighting, because otherwise
@@ -423,8 +422,7 @@ export class MapView {
 
                 let feature = this.viewer.scene.pick(position);
                 this.mapService.highlightFeatures(
-                    this.viewIndex,
-                    Array.isArray(feature?.id) ? feature.id : [feature?.id],
+                    Array.isArray(feature?.id) ? [this.viewIndex, feature.id] : [[this.viewIndex, feature?.id]],
                     false,
                     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
             }

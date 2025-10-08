@@ -1,12 +1,13 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {BehaviorSubject, ReplaySubject, skip, Subscription} from "rxjs";
+import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
-import {Camera, Cartesian3, Cartographic, CesiumMath} from "../integrations/cesium";
+import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
-import {MapInfoItem} from "../mapdata/map.service";
 import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
 import {z} from "zod";
+import {MapTreeNode} from "../mapdata/map.model";
+import {FeatureTile, FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -99,15 +100,26 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly selectedFeaturesState = this.createState<TileFeatureId[]>({
+    readonly selectedFeaturesState = this.createState<[number, TileFeatureId][]>({
         name: 'selected',
+        defaultValue: [],
+        schema: z.array(z.tuple([
+            z.coerce.number().nonnegative(),
+            z.object({
+            featureId: z.string(),
+            mapTileKey: z.string(),
+        })])),
+        urlParamName: 'sel',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly selectionTopic = this.createState<FeatureWrapper[]>({
+        name: 'selectionTopic',
         defaultValue: [],
         schema: z.array(z.object({
             featureId: z.string(),
-            mapTileKey: z.string(),
+            featureTile: z.object()
         })),
-        urlParamName: 'sel',
-        urlIncludeInVisualizationOnly: false,
     });
 
     readonly focusedView = this.createState<number>({
@@ -535,14 +547,14 @@ export class AppStateService implements OnDestroy {
         return this.selectedSourceDataState.getValue();
     }
 
-    setSelectedFeatures(newSelection: TileFeatureId[]) {
+    setSelectedFeatures(viewIndex: number, newSelection: TileFeatureId[]) {
         const currentSelection = this.selectedFeaturesState.getValue();
         if (newSelection.length === currentSelection.length &&
             newSelection.every((v, i) =>
-                v.featureId === currentSelection[i].featureId && v.mapTileKey === currentSelection[i].mapTileKey)) {
+                v.featureId === currentSelection[i][1].featureId && v.mapTileKey === currentSelection[i][1].mapTileKey)) {
             return false;
         }
-        this.selectedFeaturesState.next(newSelection.map(feature => ({...feature})));
+        this.selectedFeaturesState.next(newSelection.map(feature => ([viewIndex, {...feature}])));
         this._replaceUrl = false;
         return true;
     }
@@ -567,7 +579,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number = 13): LayerViewConfig[] {
+    mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
         if (isSourceOrMetaData(layerId)) {
             return [];
         }
@@ -592,7 +604,7 @@ export class AppStateService implements OnDestroy {
 
         for (let viewIndex = 0; viewIndex < this.numViews; viewIndex++) {
             result.push({
-                visible: layerStateValue(this.layerVisibility, viewIndex, false),
+                visible: layerStateValue(this.layerVisibility, viewIndex, fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevel, viewIndex, fallbackLevel),
                 tileBorders: layerStateValue(this.layerTileBorders, viewIndex, false),
             });
@@ -628,50 +640,6 @@ export class AppStateService implements OnDestroy {
             insertLayerState(this.layerZoomLevel, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
             insertLayerState(this.layerTileBorders, viewIndex, viewConfig[viewIndex].tileBorders,false);
         }
-    }
-
-    // FIXME This was originally used for batch updates
-    setMapConfigForIndex(viewIndex: number, layerParams: {
-        mapId: string,
-        layerId: string,
-        viewConfig: LayerViewConfig }[], fallbackLevel: number = 13) {
-        layerParams.forEach(params => {
-            if (!isSourceOrMetaData(params.layerId)) {
-                const mapLayerId = `${params.mapId}/${params.layerId}`;
-                const names = this.layerNames.getValue();
-                let layerIndex = names.findIndex(ml => ml[0] === mapLayerId);
-                if (layerIndex === -1) {
-                    layerIndex = names.length;
-                    // TODO: Ensure that this will not trigger bad things.
-                    this.layerNames.next([...names, mapLayerId]);
-                }
-
-                const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
-                    const values = state.getValue(viewIndex);
-                    while (values.length <= layerIndex) {
-                        values.push(defaultValue);
-                    }
-                    values[layerIndex] = value;
-                    // TODO: Ensure that this will not trigger bad things.
-                    state.next(viewIndex, values);
-                };
-
-                insertLayerState(this.layerVisibility, viewIndex, params.viewConfig.visible, false);
-                insertLayerState(this.layerZoomLevel, viewIndex, params.viewConfig.level, fallbackLevel);
-                insertLayerState(this.layerTileBorders, viewIndex, params.viewConfig.tileBorders,false);
-            }
-        });
-    }
-
-    setInitialMapLayers(layersData: Array<[string, string, LayerViewConfig[]]>) {
-        if (this.layerNames.getValue().length) {
-            return;
-        }
-        layersData.forEach(data => {
-            if (!isSourceOrMetaData(data[1])) {
-                this.setMapLayerConfig(data[0], data[1], data[2]);
-            }
-        });
     }
 
     setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
@@ -790,11 +758,11 @@ export class AppStateService implements OnDestroy {
         this.panelState.next(panel);
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
+    pruneMapLayerConfig(mapItems: Array<MapTreeNode>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
-                mapLayerIds.add(`${mapItem.mapId}/${layerId}`);
+                mapLayerIds.add(`${mapItem.id}/${layerId}`);
             });
         });
 

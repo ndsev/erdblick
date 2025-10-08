@@ -10,7 +10,7 @@ import {
 } from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {InspectionService, SelectedSourceData} from "./inspection.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTable} from "primeng/treetable";
@@ -129,7 +129,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     constructor(private inspectionService: InspectionService,
                 public stateService: AppStateService,
                 private renderer: Renderer2,
-                public mapService: MapService) {
+                public mapService: MapDataService) {
         this.inspectionContainerWidth = this.stateService.inspectionContainerWidth * this.stateService.baseFontSize;
         this.inspectionContainerHeight = this.stateService.inspectionContainerHeight * this.stateService.baseFontSize;
         this.containerSizeSubscription = this.stateService.panelState.subscribe(panel => {

@@ -1,6 +1,6 @@
 import {AppStateService} from "../shared/appstate.service";
 import {AfterViewInit, Component, input, InputSignal, OnDestroy} from "@angular/core";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
@@ -59,7 +59,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * @param markerService
      * @param appModeService
      */
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 public featureSearchService: FeatureSearchService,
                 public stateService: AppStateService,
                 public jumpService: JumpTargetService,

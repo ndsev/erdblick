@@ -1,5 +1,5 @@
 import { Component } from "@angular/core";
-import { MapService } from "../mapdata/map.service";
+import { MapDataService } from "../mapdata/map.service";
 import { AppStateService } from "../shared/appstate.service";
 
 @Component({
@@ -53,7 +53,7 @@ import { AppStateService } from "../shared/appstate.service";
 export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
-    constructor(private mapService: MapService,
+    constructor(private mapService: MapDataService,
                 public stateService: AppStateService) {
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.aggregatedLegalInfo = [];

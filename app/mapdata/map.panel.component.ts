@@ -1,5 +1,5 @@
 import {Component, ViewChild} from "@angular/core";
-import {CoverageRectItem, MapService, removeGroupPrefix, MapInfoItem, GroupInfoItem} from "./map.service";
+import {MapDataService} from "./map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {KeyValue} from "@angular/common";
@@ -11,7 +11,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {EditorService} from "../shared/editor.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {ErdblickStyle, ErdblickStyleGroup} from "../styledata/style.service";
+import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from "./map.model";
 
 
 @Component({
@@ -45,22 +45,22 @@ import {ErdblickStyle, ErdblickStyleGroup} from "../styledata/style.service";
                 </div>
             </div>
             <p-fieldset class="map-tab" legend="Maps and Layers" [toggleable]="true" [(collapsed)]="mapsCollapsed">
-                <ng-container *ngIf="mapService.mapGroups | async as mapGroups">
-                    <div *ngIf="!mapGroups.length" style="margin-top: 0.75em">
+                <ng-container *ngIf="mapService.maps | async as mapGroups">
+                    <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
                         No maps loaded.
                     </div>
-                    <div *ngIf="mapGroups.length" class="maps-container">
-                        <p-tree [value]="mapGroups">
+                    <div *ngIf="mapGroups.size" class="maps-container">
+                        <p-tree [value]="mapGroups.nodes">
                             <ng-template let-node pTemplate="Group">
                                 <span>
                                     <p-checkbox [ngModel]="node.visible[0]"
                                                 (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleGroup(0, node.groupId)"
+                                                (ngModelChange)="toggleGroup(0, node.key)"
                                                 [binary]="true"
-                                                [inputId]="node.groupId"
-                                                [name]="node.groupId" tabindex="0"/>
-                                    <label [for]="node.groupId" style="margin-left: 0.5em; cursor: pointer">
-                                        {{ removeGroupPrefix(node.groupId) }}
+                                                [inputId]="node.key"
+                                                [name]="node.id" tabindex="0"/>
+                                    <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
+                                        {{ removeGroupPrefix(node.id) }}
                                     </label>
                                 </span>
                             </ng-template>
@@ -200,7 +200,7 @@ export class MapPanelComponent {
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
     private _reinitializingAfterPrune: boolean = false;
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
@@ -217,7 +217,7 @@ export class MapPanelComponent {
         });
 
         // Rebuild metadata menus recursively and prune when needed.
-        this.mapService.mapGroups.subscribe(mapGroups => {
+        this.mapService.maps.subscribe(mapGroups => {
             this.metadataMenusEntries.clear();
             const collectMaps = (node: any) => {
                 if (!node) {
@@ -311,9 +311,9 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All off but This',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id == layerName;
+                    if (this.mapService.maps.getValue().maps.has(mapName)) {
+                        for (const id of this.mapService.maps.getValue().maps.get(mapName)!.layers.keys()!) {
+                            this.mapService.maps.getValue().maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id == layerName;
                             this.toggleLayer(viewIndex, mapName, layerName);
                         }
                     }
@@ -322,9 +322,9 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All on but This',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id != layerName;
+                    if (this.mapService.maps.getValue().maps.has(mapName)) {
+                        for (const id of this.mapService.maps.getValue().maps.get(mapName)!.layers.keys()!) {
+                            this.mapService.maps.getValue().maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id != layerName;
                             this.toggleLayer(viewIndex, mapName, layerName);
                         }
                     }
@@ -333,9 +333,9 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All Off',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = false;
+                    if (this.mapService.maps.getValue().maps.has(mapName)) {
+                        for (const id of this.mapService.maps.getValue().maps.get(mapName)!.layers.keys()!) {
+                            this.mapService.maps.getValue().maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = false;
                             this.toggleLayer(viewIndex, mapName, layerName);
                         }
                     }
@@ -344,9 +344,9 @@ export class MapPanelComponent {
             {
                 label: 'Toggle All On',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = true;
+                    if (this.mapService.maps.getValue().maps.has(mapName)) {
+                        for (const id of this.mapService.maps.getValue().maps.get(mapName)!.layers.keys()!) {
+                            this.mapService.maps.getValue().maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = true;
                             this.toggleLayer(viewIndex, mapName, layerName);
                         }
                     }
@@ -421,7 +421,7 @@ export class MapPanelComponent {
         if (!id || id === 'ungrouped') {
             return;
         }
-        const rootGroups = this.mapService.mapGroups.getValue();
+        const rootGroups = this.mapService.maps.getValue().nodes;
         const group = this.findGroupById(rootGroups, id);
         if (!group || !this.checkIsMapGroup(group)) {
             return;
@@ -431,15 +431,15 @@ export class MapPanelComponent {
         for (const id of mapIds) {
             this.mapService.toggleMapLayerVisibility(viewIndex, id, "", target, true);
         }
-        this.mapService.processMapsUpdate();
-        this.mapService.update(viewIndex).then();
+        this.mapService.maps.getValue().configureTreeParameters();
+        this.mapService.update().then();
     }
 
-    private checkIsMapGroup (e: any): e is GroupInfoItem {
+    private checkIsMapGroup (e: any): e is GroupTreeNode {
         return e.type === "Group";
     }
 
-    private findGroupById(elements: (GroupInfoItem | MapInfoItem)[], id: string): GroupInfoItem | MapInfoItem | undefined {
+    private findGroupById(elements: (GroupTreeNode | MapTreeNode)[], id: string): GroupTreeNode | MapTreeNode | undefined {
         for (const elem of elements) {
             if (elem.id === id) {
                 return elem;
@@ -452,7 +452,7 @@ export class MapPanelComponent {
         return undefined;
     }
 
-    private collectMapIds(group: GroupInfoItem): string[] {
+    private collectMapIds(group: GroupTreeNode): string[] {
         const ids: string[] = [];
         if (!group || !group.children) {
             return ids;
@@ -461,7 +461,7 @@ export class MapPanelComponent {
             if (this.checkIsMapGroup(child)) {
                 ids.push(...this.collectMapIds(child));
             } else {
-                ids.push(child.mapId);
+                ids.push(child.id);
             }
         }
         return ids;

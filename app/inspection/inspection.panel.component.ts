@@ -4,7 +4,7 @@ import {distinctUntilChanged} from "rxjs";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {AppStateService} from "../shared/appstate.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 
 interface InspectorTab {
     title: string,
@@ -85,7 +85,7 @@ export class InspectionPanelComponent {
     selectedLayerItem?: SourceLayerMenuItem;
 
     constructor(public inspectionService: InspectionService,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 private stateService: AppStateService) {
         this.pushFeatureInspector();
 
@@ -112,25 +112,25 @@ export class InspectionPanelComponent {
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             if (selection) {
                 this.reset();
-                const map = this.mapService.maps.getValue().get(selection.mapId);
+                const map = this.mapService.maps.getValue().maps.get(selection.mapId);
                 if (map) {
                     // TODO: Fix missing entries for the metadata on tile 0
                     this.layerMenuItems = Array.from(map.layers.values())
                         .filter(item => item.type == "SourceData")
                         .filter(item => {
-                            return item.layerId.startsWith("SourceData") ||
-                                (item.layerId.startsWith("Metadata") && selection.tileId === 0);
+                            return item.id.startsWith("SourceData") ||
+                                (item.id.startsWith("Metadata") && selection.tileId === 0);
                         })
                         .map(item => {
                             return {
                                 label: this.inspectionService.layerNameForSourceDataLayerId(
-                                    item.layerId,
-                                    item.layerId.startsWith("Metadata")
+                                    item.id,
+                                    item.id.startsWith("Metadata")
                                 ),
-                                disabled: item.layerId === selection.layerId,
+                                disabled: item.id === selection.layerId,
                                 command: () => {
                                     let sourceData = {...selection};
-                                    sourceData.layerId = item.layerId;
+                                    sourceData.layerId = item.id;
                                     sourceData.address = BigInt(0);
                                     this.inspectionService.selectedSourceData.next(sourceData);
                                 },
