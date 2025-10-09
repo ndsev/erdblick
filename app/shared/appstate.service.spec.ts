@@ -52,6 +52,7 @@ import type { Event, Router } from '@angular/router';
 import { Cartographic } from '../integrations/cesium';
 import { AppStateService } from './appstate.service';
 
+// @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {
     routerState: {
         snapshot: {

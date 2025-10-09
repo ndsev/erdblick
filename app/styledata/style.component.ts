@@ -12,7 +12,7 @@ import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
 import {filter} from "rxjs/operators";
-import {removeGroupPrefix} from "../mapdata/map.model"
+import {removeGroupPrefix} from "../mapdata/map.tree.model"
 
 
 @Component({

@@ -144,6 +144,11 @@ export class MapView {
                     return;
                 }
 
+                // Do not render the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+
                 tileVis.render(this.viewer).then(wasRendered => {
                     if (wasRendered && this.isAvailable()) {
                         this.viewer.scene.requestRender();
@@ -157,6 +162,11 @@ export class MapView {
                 // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot destroy tile visualization: viewer not available');
+                    return;
+                }
+
+                // Do not destroy the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
                     return;
                 }
 

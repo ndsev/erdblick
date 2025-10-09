@@ -120,11 +120,10 @@ map-view {
 
 .compass-circle {
   position: absolute;
-  top: 2em;
-  right: 0.5em;
+  bottom: 0.5em;
+  right: 0.7em;
   width: 4em;
   height: 4em;
-  border: 0.15em solid var(--p-button-secondary-border-color);
   border-radius: 50%;
   pointer-events: none;
   display: flex;

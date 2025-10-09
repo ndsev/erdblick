@@ -150,7 +150,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
     *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
         const level = coreLib.getTileLevel(tileId);
-        for (const [_, mapInfo] of this.mapService.maps.getValue().maps.entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
                     if (!layerInfo.info.zoomLevels.length || layerInfo.info.zoomLevels.includes(level)) {

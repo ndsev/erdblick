@@ -203,7 +203,7 @@ export class JumpTargetService {
             }
 
             if (matches.length > 1 && matches[1]) {
-                if (!this.mapService.maps.getValue().maps.has(matches[1])) {
+                if (!this.mapService.maps.maps.has(matches[1])) {
                     label += `<br><span class="search-option-warning">Map ID not found.</span>`;
                     valid = false;
                 }

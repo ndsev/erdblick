@@ -141,23 +141,25 @@ export class TileVisualization {
     isHighDetail: boolean;
     showTileBorder: boolean = false;
     specialBorderColour: Color | undefined;
+    readonly viewIndex: number;
 
-    private readonly style: StyleWithIsDeleted;
-    private readonly styleName: string;
     private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
+    private deleted: boolean = false;
+    private readonly style: StyleWithIsDeleted;
+    private readonly styleName: string;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
-    private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
     private readonly options: Record<string, boolean|number>;
     private readonly pointMergeService: PointMergeService;
 
     /**
      * Create a tile visualization.
+     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
      * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
@@ -174,7 +176,8 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile,
+    constructor(viewIndex: number,
+                tile: FeatureTile,
                 pointMergeService: PointMergeService,
                 auxTileFun: (key: string) => FeatureTile | null,
                 style: FeatureLayerStyle,
@@ -195,6 +198,7 @@ export class TileVisualization {
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
         this.pointMergeService = pointMergeService;
+        this.viewIndex = viewIndex;
     }
 
     /**

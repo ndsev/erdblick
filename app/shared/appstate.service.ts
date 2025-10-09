@@ -6,7 +6,7 @@ import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
 import {z} from "zod";
-import {MapTreeNode} from "../mapdata/map.model";
+import {MapTreeNode} from "../mapdata/map.tree.model";
 import {FeatureTile, FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;

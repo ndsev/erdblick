@@ -350,7 +350,7 @@ export class InspectionService {
      * @param layerName Layer id to get the name for
      */
     sourceDataLayerIdForLayerName(layerName: string) {
-        for (const [_, mapInfo] of this.mapService.maps.getValue().maps.entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
                     if (this.layerNameForSourceDataLayerId(layerInfo.id) == layerName ||
@@ -365,7 +365,7 @@ export class InspectionService {
     }
 
     findLayersForMapId(mapId: string, isMetadata: boolean = false) {
-        const map = this.mapService.maps.getValue().maps.get(mapId);
+        const map = this.mapService.maps.maps.get(mapId);
         if (map) {
             const prefix = isMetadata ? "Metadata" : "SourceData";
             const dataLayers = new Set<string>();

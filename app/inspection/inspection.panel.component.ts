@@ -112,7 +112,7 @@ export class InspectionPanelComponent {
         this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
             if (selection) {
                 this.reset();
-                const map = this.mapService.maps.getValue().maps.get(selection.mapId);
+                const map = this.mapService.maps.maps.get(selection.mapId);
                 if (map) {
                     // TODO: Fix missing entries for the metadata on tile 0
                     this.layerMenuItems = Array.from(map.layers.values())
