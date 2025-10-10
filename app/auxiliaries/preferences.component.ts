@@ -5,6 +5,7 @@ import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
+import {EditorService} from "../shared/editor.service";
 
 @Component({
     selector: 'pref-components',
@@ -21,6 +22,10 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from
             <p-button (click)="showStatsDialog()" label="" class="pref-button"
                       pTooltip="Statistics" tooltipPosition="right">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
+            </p-button>
+            <p-button (click)="openDatasources()" class="pref-button"
+                      icon="pi pi-server" label="" pTooltip="Datasources"
+                      tooltipPosition="bottom" tabindex="0">
             </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
@@ -244,8 +249,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     constructor(private messageService: InfoMessageService,
                 public mapService: MapDataService,
                 public styleService: StyleService,
-                public inspectionService: InspectionService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                public editorService: EditorService,
+                public inspectionService: InspectionService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
@@ -357,6 +363,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
             this.mediaQueryList = undefined;
         }
+    }
+
+    openDatasources() {
+        this.editorService.styleEditorVisible = false;
+        this.editorService.datasourcesEditorVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

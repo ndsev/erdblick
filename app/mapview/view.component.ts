@@ -70,7 +70,14 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
                 private cdr: ChangeDetectorRef
-    ) {}
+    ) {
+        // TODO: Consider only if the view is focused?
+        //   Fix the tile outline
+        this.menuService.menuItems.subscribe(items => {
+            // if (this.stateService.focusedView === this.mapView?.viewIndex)
+            this.menuItems = [...items];
+        });
+    }
 
     ngOnInit() {
         this.is2DMode = this.stateService.mode2dState.getValue(this.viewIndex());
@@ -118,16 +125,15 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         if (this.mapView) {
             await this.mapView.destroy();
         }
-        if (is2D) {
-            this.mapView = new MapView2D(
+        const mapView = is2D
+            ? new MapView2D(
+                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService)
+            : new MapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
                 this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
-        } else {
-            this.mapView = new MapView3D(
-                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
-        }
-        await this.mapView.setup();
+        await mapView.setup();
+        this.mapView = mapView;
     }
 
     /**
@@ -155,5 +161,13 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
 
     get canvasId(): string {
         return `mapViewContainer-${this.viewIndex()}`;
+    }
+
+    onContainerResized(): void {
+        if (this.mapView) {
+            // Notify Cesium viewer to resize to new container dimensions
+            this.mapView.viewer.resize();
+            this.mapView.viewer.scene.requestRender();
+        }
     }
 }

@@ -1,6 +1,8 @@
-import {Component, signal} from "@angular/core";
+import {Component, QueryList, signal, ViewChildren} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
 import {map} from "rxjs";
+import {MapViewComponent} from "./view.component";
+import {SplitterResizeEndEvent} from "primeng/splitter";
 
 @Component({
     selector: 'mapview-container',
@@ -8,7 +10,7 @@ import {map} from "rxjs";
         <ng-container *ngIf="viewModel$ | async as vm">
             @if (vm.panelCount > 0) {
                 @for (v of [version()]; track v) {
-                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8">
+                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8" (onResizeEnd)="handleResizeEnd($event)">>
                         @for (idx of vm.viewIndices; track idx) {
                             <ng-template pTemplate="panel">
                                 <map-view [viewIndex]="idx"></map-view>
@@ -30,6 +32,8 @@ import {map} from "rxjs";
     standalone: false
 })
 export class MapViewContainerComponent {
+    @ViewChildren(MapViewComponent) mapViewComponents!: QueryList<MapViewComponent>;
+
     version = signal(0);
 
     viewModel$ = this.stateService.numViewsState.pipe(
@@ -47,7 +51,10 @@ export class MapViewContainerComponent {
         this.viewModel$.subscribe(vm => this.version.update(_ => vm.panelCount));
     }
 
-    trackByIndex(_: number, i: number) {
-        return i;
+    handleResizeEnd(event: SplitterResizeEndEvent) {
+        // Loop through each MapViewComponent and call its resize handler
+        // for (const mapViewComp of this.mapViewComponents.toArray()) {
+        //     mapViewComp.onContainerResized();
+        // }
     }
 }

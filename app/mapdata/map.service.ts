@@ -166,7 +166,10 @@ export class MapDataService {
             this.viewVisualizationState.forEach((state, viewIndex) => {
                 state.visualizedTileLayers.set(styleId, []);
                 for (let [_, tileLayer] of this.loadedTileLayers) {
-                    this.renderTileLayer(viewIndex, tileLayer, this.styleService.styles.get(styleId)!, styleId);
+                    const style = this.styleService.styles.get(styleId);
+                    if (style) {
+                        this.renderTileLayer(viewIndex, tileLayer, style);
+                    }
                 }
             });
         });
@@ -291,10 +294,8 @@ export class MapDataService {
                 return false;
             }
             // Is the tile needed for any view?
-            return this.viewVisualizationState.every((state, viewIndex) => {
-                return !state.visibleTileIds.has(tileLayer.tileId) ||
-                    !this.maps.getMapLayerVisibility(viewIndex, tileLayer.mapName, tileLayer.layerName) ||
-                    tileLayer.level() != this.maps.getMapLayerLevel(viewIndex, tileLayer.mapName, tileLayer.layerName);
+            return this.viewVisualizationState.every((_, viewIndex) => {
+                return !this.viewNeedsFeatureTile(viewIndex, tileLayer);
             });
         }
         let newTileLayers = new Map();
@@ -313,8 +314,7 @@ export class MapDataService {
                 const tileVisus = value.filter(tileVisu => {
                     const mapName = tileVisu.tile.mapName;
                     const layerName = tileVisu.tile.layerName;
-                    // FIXME: Will never destroy a visualisation if at least one view still keeps the tile alive
-                    if (tileVisu.tile.disposed) {
+                    if (tileVisu.tile.disposed || !this.viewNeedsFeatureTile(viewIndex, tileVisu.tile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         return false;
                     }
@@ -340,16 +340,30 @@ export class MapDataService {
 
         // Update Tile Visualization Queue.
         this.tileVisualizationQueue = [];
-        this.viewVisualizationState.forEach((state) => {
-            // FIXME: Queue visualizations which are not yet present,
-            //  for which the tile data is already there.
+        this.viewVisualizationState.forEach((state, viewIndex) => {
+            // Schedule updates for visualizations which have changed (high-detail, border etc.)
+            const visualizedTileLayers: Map<string, Set<string>> = new Map();
             state.visualizedTileLayers.forEach((tileVisus, styleId) => {
                 tileVisus.forEach(tileVisu => {
                     if (tileVisu.isDirty()) {
                         this.tileVisualizationQueue.push(tileVisu);
                     }
+                    // Take note that this visualization already exists (for step 2).
+                    if (!visualizedTileLayers.has(styleId)) {
+                        visualizedTileLayers.set(styleId, new Set<string>());
+                    }
+                    visualizedTileLayers.get(styleId)!.add(tileVisu.tile.mapTileKey);
                 });
             });
+
+            // Schedule new visualizations for which the data is already present.
+            for (const [styleId, style] of this.styleService.styles) {
+                for (let [tileKey, tile] of this.loadedTileLayers) {
+                    if (this.viewNeedsFeatureTile(viewIndex, tile) && !visualizedTileLayers.get(styleId)?.has(tileKey)) {
+                        this.renderTileLayer(viewIndex, tile, style);
+                    }
+                }
+            }
         });
 
         // Rest of this function: Request non-present required tile layers.
@@ -507,18 +521,17 @@ export class MapDataService {
         setTimeout(() => {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                 // Do not render the tile for any view that doesn't need it.
-                if (!this.maps.getMapLayerVisibility(viewIndex, tileLayer.mapName, tileLayer.layerName) ||
-                    this.maps.getMapLayerLevel(viewIndex, tileLayer.mapName, tileLayer.layerName) !== tileLayer.level()) {
+                if (!this.viewNeedsFeatureTile(viewIndex, tileLayer)) {
                     continue;
                 }
 
                 if (style && styleId) {
-                    this.renderTileLayer(viewIndex, tileLayer, style, styleId);
+                    this.renderTileLayer(viewIndex, tileLayer, style);
                 } else {
                     // TODO: Don't render for each style anymore.
                     //   (render if style is active and relevant for map layer...)
-                    this.styleService.styles.forEach((style, styleId) => {
-                        this.renderTileLayer(viewIndex, tileLayer, style, styleId);
+                    this.styleService.styles.forEach((style) => {
+                        this.renderTileLayer(viewIndex, tileLayer, style);
                     });
                 }
             }
@@ -551,7 +564,7 @@ export class MapDataService {
         this.statsDialogNeedsUpdate.next();
     }
 
-    private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle, styleId: string = "") {
+    private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         const wasmStyle = style.featureLayerStyle;
         if (!wasmStyle) {
             return;
@@ -560,6 +573,7 @@ export class MapDataService {
             return;
         }
 
+        const styleId = style.id;
         const mapName = tileLayer.mapName;
         const layerName = tileLayer.layerName;
         let visu = new TileVisualization(
@@ -582,6 +596,11 @@ export class MapDataService {
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
+        const maxIndex = this.viewVisualizationState.length - 1;
+        if (viewIndex > maxIndex) {
+            console.error(`Attempted to write @ viewIndex: ${viewIndex} but it is out of bounds (${maxIndex})`);
+            return;
+        }
         this.viewVisualizationState[viewIndex].viewport = viewport;
         this.setTileLevelForViewport(viewIndex);
         this.update().then();
@@ -799,8 +818,7 @@ export class MapDataService {
         for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
             // TODO: Only run the visualization with style sheets that are relevant for the feature.
             // Do not render the highlight for any view that doesn't need it.
-            if (!this.maps.getMapLayerVisibility(viewIndex, featureTile.mapName, featureTile.layerName) ||
-                this.maps.getMapLayerLevel(viewIndex, featureTile.mapName, featureTile.layerName) !== featureTile.level()) {
+            if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
                 continue;
             }
 
@@ -838,7 +856,7 @@ export class MapDataService {
      */
     clearAllTileVisualizations(viewer: any): void {
         for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-            for (const [styleId, tileVisualizations] of this.viewVisualizationState[viewIndex].visualizedTileLayers) {
+            for (const [_, tileVisualizations] of this.viewVisualizationState[viewIndex].visualizedTileLayers) {
                 tileVisualizations.forEach(tileVisu => {
                     try {
                         tileVisu.destroy(viewer);
@@ -893,5 +911,18 @@ export class MapDataService {
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);
         this.update().then();
+    }
+
+    private viewNeedsFeatureTile(viewIndex: number, tile: FeatureTile) {
+        if (viewIndex >= this.viewVisualizationState.length) {
+            console.error("Attempt to access non-existing view index.");
+            return false;
+        }
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState.visibleTileIds.has(tile.tileId)) {
+            return false;
+        }
+        return this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName) &&
+            tile.level() === this.maps.getMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
     }
 }

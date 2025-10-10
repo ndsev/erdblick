@@ -8,11 +8,10 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
-import {EditorService} from "../shared/editor.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from "./map.tree.model";
-import {map, Subscription} from "rxjs";
+import {Subscription} from "rxjs";
 
 
 @Component({
@@ -25,10 +24,6 @@ import {map, Subscription} from "rxjs";
                   'border-bottom-left-radius': '0 !important' }">
             <ng-container *ngFor="let index of viewIndices">
                 <div class="osm-controls">
-<!--                    <p-button onEnterClick (click)="openDatasources()" class="osm-button"-->
-<!--                              icon="pi pi-server" label="" pTooltip="Open datasources configuration"-->
-<!--                              tooltipPosition="bottom" tabindex="0">-->
-<!--                    </p-button>-->
                     <span style="font-size: 0.9em">OSM Overlay:</span>
                     <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
                               icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
@@ -220,7 +215,6 @@ export class MapPanelComponent {
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
-                public editorService: EditorService,
                 private inspectionService: InspectionService,
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
@@ -229,33 +223,44 @@ export class MapPanelComponent {
             // Rebuild metadata menus recursively and prune when needed.
             this.mapService.maps$.subscribe(mapGroups => {
                 this.metadataMenusEntries.clear();
-                const collectMaps = (node: any) => {
-                    if (!node) {
-                        return;
-                    }
-                    if (this.checkIsMapGroup(node)) {
-                        for (const child of node.children) {
-                            collectMaps(child);
-                        }
-                    } else {
-                        const mapItem = node;
-                        this.metadataMenusEntries.set(
-                            mapItem.mapId,
-                            this.inspectionService.findLayersForMapId(mapItem.mapId, true)
-                                .map(layer => ({
-                                    label: layer.name,
-                                    command: () => {
-                                        this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
-                                    }
-                                }))
-                        );
-                    }
-                };
+                for (const [_, mapItem] of mapGroups.maps) {
+                    this.metadataMenusEntries.set(
+                        mapItem.id,
+                        this.inspectionService.findLayersForMapId(mapItem.id, true)
+                            .map(layer => ({
+                                label: layer.name,
+                                command: () => {
+                                    this.inspectionService.loadSourceDataInspectionForService(mapItem.id, layer.id)
+                                }
+                            }))
+                    );
+                }
+                // const collectMaps = (node: any) => {
+                //     if (!node) {
+                //         return;
+                //     }
+                //     if (this.checkIsMapGroup(node)) {
+                //         for (const child of node.children) {
+                //             collectMaps(child);
+                //         }
+                //     } else {
+                //         const mapItem = node;
+                //         this.metadataMenusEntries.set(
+                //             mapItem.mapId,
+                //             this.inspectionService.findLayersForMapId(mapItem.mapId, true)
+                //                 .map(layer => ({
+                //                     label: layer.name,
+                //                     command: () => {
+                //                         this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
+                //                     }
+                //                 }))
+                //         );
+                //     }
+                // };
 
                 // const allLeafMaps: MapInfoItem[] = [];
-                // for (const [_, group] of mapGroups) {
+                // for (const group of mapGroups.nodes) {
                 //     collectMaps(group);
-                //     allLeafMaps.push(...this.collectLeafMaps(group));
                 // }
                 // // If all layers were pruned (complete maps config change), reinitialize default maps once
                 // if (allLeafMaps.length > 0 && this.stateService.pruneMapLayerConfig(allLeafMaps)) {
@@ -420,11 +425,6 @@ export class MapPanelComponent {
 
     unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
         return 0;
-    }
-
-    openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
     }
 
     toggleMap(viewIndex: number, mapId: string) {
