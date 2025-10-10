@@ -9,7 +9,7 @@ import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {InspectionService} from "./inspection.service";
 import {JumpTargetService} from "../search/jump.service";
 import {Menu} from "primeng/menu";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {distinctUntilChanged, Subscription} from "rxjs";
 import {coreLib} from "../integrations/wasm";
 import {ClipboardService} from "../shared/clipboard.service";
@@ -37,7 +37,7 @@ interface Column {
                    class="pi pi-times clear-icon" style="cursor: pointer"></i>
             </p-iconfield>
             <div>
-                <p-button (click)="mapService.focusOnFeature(inspectionService.selectedFeatures[0])"
+                <p-button (click)="mapService.focusOnFeature(0, inspectionService.selectedFeatures[0])"
                           label="" pTooltip="Focus on feature" tooltipPosition="bottom"
                           [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                     <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
@@ -54,7 +54,7 @@ interface Column {
         <div class="flex resizable-container" #resizeableContainer
              [style.width.px]="inspectionContainerWidth"
              [style.height.px]="inspectionContainerHeight"
-             (mouseup)="parameterService.onInspectionContainerResize($event)"
+             (mouseup)="stateService.onInspectionContainerResize($event)"
              [ngClass]="{'resizable-container-expanded': isExpanded}">
 <!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
 <!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
@@ -196,10 +196,10 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
                 public jumpService: JumpTargetService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private renderer: Renderer2,
                 private messageService: InfoMessageService,
-                public mapService: MapService) {
+                public mapService: MapDataService) {
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
             this.jsonTree = tree;
             this.filteredTree = tree ? JSON.parse(tree) : [];
@@ -220,15 +220,15 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
             }, 0);
         });
 
-        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
-            if (parameter.panel.length == 2) {
-                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = parameter.panel[1] * this.parameterService.baseFontSize;
+        this.inspectionContainerWidth = this.stateService.inspectionContainerWidth * this.stateService.baseFontSize;
+        this.inspectionContainerHeight = this.stateService.inspectionContainerHeight * this.stateService.baseFontSize;
+        this.containerSizeSubscription = this.stateService.panelState.subscribe(panel => {
+            if (panel.length === 2) {
+                this.inspectionContainerWidth = panel[0] * this.stateService.baseFontSize;
+                this.inspectionContainerHeight = panel[1] * this.stateService.baseFontSize;
             } else {
-                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (window.innerHeight - this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+                this.inspectionContainerWidth = this.stateService.inspectionContainerWidth;
+                this.inspectionContainerHeight = this.stateService.inspectionContainerHeight;
             }
         });
     }
@@ -394,6 +394,7 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
 
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
+                0,
                 rowData["mapId"],
                 rowData["value"]).then();
         }
@@ -402,14 +403,15 @@ export class FeaturePanelComponent implements OnInit, AfterViewInit, OnDestroy  
     private highlightHoveredEntry(rowData: any) {
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
+                0,
                 rowData["mapId"],
                 rowData["value"],
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         } else if (rowData["hoverId"]) {
-            this.mapService.highlightFeatures([{
+            this.mapService.highlightFeatures([[0, {
                 mapTileKey: this.inspectionService.selectedFeatures[rowData["featureIndex"]].featureTile.mapTileKey,
                 featureId: rowData["hoverId"]
-            }], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            }]], false, coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         }
     }
 

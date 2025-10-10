@@ -12,6 +12,7 @@ import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, StyleParameters} from "../shared/appstate.service";
+import {filter} from "rxjs/operators";
 
 interface StyleConfigEntry {
     id: string,
@@ -75,18 +76,14 @@ export class StyleService {
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
-    constructor(private httpClient: HttpClient, private parameterService: AppStateService)
+    constructor(private httpClient: HttpClient, private stateService: AppStateService)
     {
-        this.parameterService.parameters.subscribe(_ => {
-            // This subscription exists specifically to catch the values of the query parameters.
-            if (this.parameterService.initialQueryParamsSet) {
-                return;
-            }
+        this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             for (let [styleId, style] of this.styles) {
-                style.params = this.parameterService.styleConfig(styleId);
+                style.params = this.stateService.styleConfig(styleId);
             }
             this.reapplyAllStyles();
-        })
+        });
     }
 
     async initializeStyles(): Promise<void> {
@@ -116,7 +113,7 @@ export class StyleService {
                     id: styleId,
                     modified: false,
                     imported: false,
-                    params: this.parameterService.styleConfig(styleId),
+                    params: this.stateService.styleConfig(styleId),
                     source: styleString,
                     featureLayerStyle: null,
                     options: [],
@@ -135,7 +132,11 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.parameterService.setInitialStyles(this.styles);
+        this.stateService.setInitialStyles(this.styles);
+
+        if (this.styles.size) {
+            this.reapplyStyles([...this.styles.keys()]);
+        }
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
@@ -178,7 +179,7 @@ export class StyleService {
                             id: styleId,
                             modified: false,
                             imported: false,
-                            params: this.parameterService.styleConfig(styleId),
+                            params: this.stateService.styleConfig(styleId),
                             source: styleString,
                             featureLayerStyle: null,
                             options: [],
@@ -352,7 +353,7 @@ export class StyleService {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 if (this.styles.has(styleId)) {
                     style.featureLayerStyle = null;
-                    style.params = this.parameterService.styleConfig(styleId);
+                    style.params = this.stateService.styleConfig(styleId);
                     this.styles.set(styleId, style);
                     const hash = this.styleHashes.get(styleId);
                     if (hash) {
@@ -550,7 +551,7 @@ export class StyleService {
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
-        this.parameterService.setStyleConfig(styleId, style.params);
+        this.stateService.setStyleConfig(styleId, style.params);
     }
 
     toggleOption(styleId: string, optionId: string, enabled: boolean) {

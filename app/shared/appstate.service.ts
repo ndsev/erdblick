@@ -1,19 +1,17 @@
-import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
-import {Cartesian3, Cartographic, CesiumMath, Camera} from "../integrations/cesium";
-import {Params} from "@angular/router";
+import {Injectable, OnDestroy} from "@angular/core";
+import {NavigationEnd, Params, Router} from "@angular/router";
+import {BehaviorSubject, skip, Subscription} from "rxjs";
+import {filter} from "rxjs/operators";
+import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
-import {AppModeService} from "./app-mode.service";
-import {MapInfoItem} from "../mapdata/map.service";
-import {ErdblickStyle} from "../styledata/style.service";
+import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
+import {z} from "zod";
+import {MapTreeNode} from "../mapdata/map.tree.model";
+import {FeatureTile, FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 
-/**
- * Combination of a tile id and a feature id, which may be resolved
- * to a feature object.
- */
 export interface TileFeatureId {
     featureId: string,
     mapTileKey: string,
@@ -29,308 +27,294 @@ export interface StyleURLParameters {
     o: Record<string, boolean|number>
 }
 
-interface ErdblickParameters extends Record<string, any> {
-    search: [number, string] | [],
-    marker: boolean,
-    markedPosition: Array<number>,
-    selected: TileFeatureId[],
-    heading: number,
-    pitch: number,
-    roll: number,
-    lon: number,
-    lat: number,
-    alt: number,
-    mode2d: boolean,
-    viewRectangle: [number, number, number, number] | null,  // [west, south, east, north] in degrees
-    osm: boolean,
-    osmOpacity: number,
-    layers: Array<[string, number, boolean, boolean]>,
-    styles: Record<string, StyleURLParameters>,
-    tilesLoadLimit: number,
-    tilesVisualizeLimit: number,
-    enabledCoordsTileIds: Array<string>,
-    selectedSourceData: Array<any>,
-    panel: Array<number>
+export interface CameraViewState {
+    destination: { lon: number, lat: number, alt: number };
+    orientation: { heading: number, pitch: number, roll: number };
 }
 
-interface ParameterDescriptor {
-    // Convert the setting to the correct type, e.g. Number.
-    converter: (val: any) => any,
-    // Check if the converted value is good, or the default must be used.
-    validator: (val: any) => boolean,
-    // Default value.
-    default: any,
-    // Include in the url
-    urlParam: boolean
+export interface LayerViewConfig {
+    level: number;
+    visible: boolean;
+    tileBorders: boolean;
 }
 
-/**
- * !!! THE RETURNED FUNCTION MAY MUTATE THE VALIDATED VALUES !!!
- *
- * Function to create an object or array types validator given a key-typeof-value
- * dictionary or a types array.
- *
- * Note: For boolean values, this function contains an extra mechanism to
- * turn compact (0/1) boolean representations into true/false inside the validated objects.
- */
-function validateObjectsAndTypes(fields: Record<string, string> | Array<string>) {
-    return (o: object | Array<any>) => {
-        if (!Array.isArray(fields)) {
-            if (typeof o !== "object") {
-                return false;
-            }
-            for (let [key, value] of Object.entries(o)) {
-                const valueType = typeof value;
-                if (valueType === "number" && fields[key] === "boolean" && (value === 0 || value === 1)) {
-                    (o as Record<string, any>)[key] = !!value;  // Turn the compact boolean into a primitive boolean.
-                    continue;
-                }
-                if (fields.hasOwnProperty(key) && valueType !== fields[key]) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        if (Array.isArray(fields) && Array.isArray(o) && o.length == fields.length) {
-            for (let i = 0; i < fields.length; i++) {
-                const valueType = typeof o[i] ;
-                if (valueType  === "number" && fields[i] === "boolean" && (o[i] === 0 || o[i] === 1)) {
-                    o[i] = !!o[i];  // Turn the compact boolean into a primitive boolean.
-                    continue;
-                }
-                if (valueType !== fields[i]) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return false;
-    };
+export type PanelSizeState = [] | [number, number];
+
+function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
+    return mapLayerNameOrLayerId.includes('/SourceData-') ||
+        mapLayerNameOrLayerId.includes('/Metadata-');
 }
-
-const erdblickParameters: Record<string, ParameterDescriptor> = {
-    search: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && (val.length === 0 || (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'string')),
-        default: [],
-        urlParam: true
-    },
-    marker: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: false,
-        urlParam: true
-    },
-    markedPosition: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'number'),
-        default: [],
-        urlParam: true
-    },
-    selected: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes({mapTileKey: "string", featureId: "string"})),
-        default: [],
-        urlParam: true
-    },
-    heading: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 6.0,
-        urlParam: true
-    },
-    pitch: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: -1.55,
-        urlParam: true
-    },
-    roll: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 0.25,
-        urlParam: true
-    },
-    lon: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 22.837473,
-        urlParam: true
-    },
-    lat: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 38.490817,
-        urlParam: true
-    },
-    alt: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val),
-        default: 16000000,
-        urlParam: true
-    },
-    mode2d: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: false,
-        urlParam: true
-    },
-    viewRectangle: {
-        converter: val => val === 'null' ? null : JSON.parse(val),
-        validator: val => val === null || (Array.isArray(val) && val.length === 4 && val.every(v => typeof v === 'number')),
-        default: null,
-        urlParam: true
-    },
-    osmOpacity: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0 && val <= 100,
-        default: 30,
-        urlParam: true
-    },
-    osm: {
-        converter: val => val === 'true' || val === '1',
-        validator: val => typeof val === 'boolean',
-        default: true,
-        urlParam: true
-    },
-    layers: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(validateObjectsAndTypes(["string", "number", "boolean", "boolean"])),
-        default: [],
-        urlParam: true
-    },
-    styles: {
-        converter: val => JSON.parse(val),
-        validator: val => {
-            return typeof val === "object" && Object.entries(val as Record<string, ErdblickParameters>).every(
-                ([_, v]) => validateObjectsAndTypes({v: "boolean", o: "object"})(v));
-        },
-        default: {},
-        urlParam: true
-    },
-    tilesLoadLimit: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_LOAD,
-        urlParam: true
-    },
-    tilesVisualizeLimit: {
-        converter: Number,
-        validator: val => typeof val === 'number' && !isNaN(val) && val >= 0,
-        default: MAX_NUM_TILES_TO_VISUALIZE,
-        urlParam: true
-    },
-    enabledCoordsTileIds: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && val.every(item => typeof item === 'string'),
-        default: ["WGS84"],
-        urlParam: false
-    },
-    selectedSourceData: {
-        converter: val => JSON.parse(val),
-        validator: Array.isArray,
-        default: [],
-        urlParam: true
-    },
-    panel: {
-        converter: val => JSON.parse(val),
-        validator: val => Array.isArray(val) && (!val.length || val.length == 2 && val.every(item => typeof item === 'number')),
-        default: [],
-        urlParam: true
-    }
-};
-
-/** Set of parameter keys allowed in visualization-only mode */
-// TODO: Reflect this in the parameter descriptors, instead
-// of having a separate set.
-// NOTE: Currently parameter access restrictions for visualization-only mode are maintained
-// in this hardcoded set. Should be integrated into the parameter descriptor system for
-// better maintainability and to avoid duplication.
-const VISUALIZATION_ONLY_ALLOWED = new Set([
-    'heading',
-    'pitch',
-    'roll',
-    'lon',
-    'lat',
-    'alt',
-    'osm',
-    'osmOpacity',
-    'tilesLoadLimit',
-    'tilesVisualizeLimit',
-    'styles',
-    'layers'
-]);
 
 @Injectable({providedIn: 'root'})
-export class AppStateService {
+export class AppStateService implements OnDestroy {
 
-    private _replaceUrl: boolean = true;
-    parameters: BehaviorSubject<ErdblickParameters>;
-    initialQueryParamsSet: boolean = false;
-    
-    // Observable that emits when initialization is complete
-    private ready = new Subject<void>();
-    public ready$ = this.ready.asObservable();
+    private readonly statePool = new Map<string, AppState<unknown>>();
+    readonly ready = new BehaviorSubject<boolean>(false);
 
-    // Store filtered parameter descriptors based on mode
-    private parameterDescriptors: Record<string, ParameterDescriptor>;
+    private readonly stateSubscriptions: Subscription[] = [];
 
-    cameraViewData: BehaviorSubject<{
-        destination: Cartesian3,
-        orientation: { heading: number, pitch: number, roll: number }
-    }> =
-        new BehaviorSubject<{
-            destination: Cartesian3,
-            orientation: { heading: number, pitch: number, roll: number }
-        }>({
-            destination: Cartesian3.fromDegrees(22.837473, 38.490817, 16000000),
-            orientation: {
-                heading: 6.0,
-                pitch: -1.55,
-                roll: 0.25,
-            }
-        });
+    private _replaceUrl = true;
 
-    lastSearchHistoryEntry: BehaviorSubject<[number, string] | null> = new BehaviorSubject<[number, string] | null>(null);
+    private isHydrating = false;
+    private isReady = false;
+    private pendingUrlSync = false;
+    private pendingStorageSync = false;
+    private flushHandle: Promise<void> | null = null;
 
+    // Base UI metrics
     baseFontSize: number = 16;
     inspectionContainerWidth: number = 40;
     inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
 
-    private baseCameraMoveM = 100.0;
-    private baseCameraZoomM = 100.0;
-    private scalingFactor = 1;
+    readonly numViewsState = this.createState<number>({
+        name: "numberOfViews",
+        defaultValue: 1,
+        schema: z.coerce.number().positive(),
+        urlParamName: "n"
+    });
 
-    legalInfoDialogVisible: boolean = false;
+    readonly searchState = this.createState<[number, string] | []>({
+        name: 'search',
+        defaultValue: [],
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.string()]),
+        ]),
+        urlParamName: 's',
+        urlIncludeInVisualizationOnly: false,
+    });
 
-    constructor(public appModeService: AppModeService) {
-        // Filter parameter descriptors based on mode
-        this.parameterDescriptors = appModeService.isVisualizationOnly
-            ? Object.fromEntries(
-                Object.entries(erdblickParameters)
-                    .filter(([key]) => VISUALIZATION_ONLY_ALLOWED.has(key))
-            )
-            : erdblickParameters;
+    readonly markerState = this.createState<boolean>({
+        name: 'marker',
+        defaultValue: false,
+        schema: Boolish,
+        urlParamName: 'm',
+        urlIncludeInVisualizationOnly: false,
+    });
 
+    readonly markedPositionState = this.createState<number[]>({
+        name: 'markedPosition',
+        defaultValue: [],
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.coerce.number()]),
+        ]),
+        urlParamName: 'mp',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly selectedFeaturesState = this.createState<[number, TileFeatureId][]>({
+        name: 'selected',
+        defaultValue: [],
+        schema: z.array(z.tuple([
+            z.coerce.number().nonnegative(),
+            z.object({
+                featureId: z.string(),
+                mapTileKey: z.string(),
+            })
+        ])),
+        urlParamName: 'sel',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly focusedViewState = this.createState<number>({
+        name: 'focus',
+        defaultValue: 0,
+        schema: z.coerce.number().nonnegative(),
+        urlParamName: 'f',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly cameraViewDataState = this.createMapViewState<CameraViewState>({
+        name: 'cameraView',
+        defaultValue: {
+            destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
+            orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
+        },
+        schema: z.object({
+            lon: z.coerce.number().optional(),
+            lat: z.coerce.number().optional(),
+            alt: z.coerce.number().optional(),
+            h: z.coerce.number().optional(),
+            p: z.coerce.number().optional(),
+            r: z.coerce.number().optional()
+        }),
+        toStorage: (value: any) => ({
+            lon: value.destination.lon,
+            lat: value.destination.lat,
+            alt: value.destination.alt,
+            h: value.orientation.heading,
+            p: value.orientation.pitch,
+            r: value.orientation.roll,
+        }),
+        fromStorage: (payload: any, currentValue: CameraViewState) => ({
+            destination: {
+                lon: payload.lon ?? currentValue.destination.lon,
+                lat: payload.lat ?? currentValue.destination.lat,
+                alt: payload.alt ?? currentValue.destination.alt,
+            },
+            orientation: {
+                heading: payload.h ?? currentValue.orientation.heading,
+                pitch: payload.p ?? currentValue.orientation.pitch,
+                roll: payload.r ?? currentValue.orientation.roll,
+            },
+        }),
+        urlFormEncode: true,
+    });
+
+    readonly viewRectangleState = this.createMapViewState<[number, number, number, number] | null>({
+        name: 'viewRectangle',
+        defaultValue: null,
+        schema: z.union([
+            z.null(),
+            z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]),
+        ]),
+        urlParamName: 'vr',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly mode2dState = this.createMapViewState<boolean>({
+        name: 'mode2d',
+        defaultValue: false,
+        schema: Boolish,
+        urlParamName: 'm2d',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly osmEnabledState = this.createMapViewState<boolean>({
+        name: 'osm',
+        defaultValue: true,
+        schema: Boolish,
+        urlParamName: 'osm',
+    });
+
+    readonly osmOpacityState = this.createMapViewState<number>({
+        name: 'osmOpacity',
+        defaultValue: 30,
+        schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
+        urlParamName: 'osmOp',
+    });
+
+    readonly layerNamesState = this.createState<Array<string>>({
+        name: "layerNames",
+        defaultValue: [],
+        schema: z.array(z.string()),
+        urlParamName: 'l'
+    });
+
+    readonly layerVisibilityState = this.createMapViewState<Array<boolean>>({
+        name: "visibility",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'v'
+    });
+
+    readonly layerTileBordersState = this.createMapViewState<Array<boolean>>({
+        name: "tileBorders",
+        defaultValue: [],
+        schema: z.array(Boolish),
+        urlParamName: 'tb'
+    });
+
+    readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
+        name: "zoomLevel",
+        defaultValue: [],
+        schema: z.array(z.number().min(0).max(15)),
+        urlParamName: 'z'
+    });
+
+    // readonly layerStyleOptionsState = new Map<string, MapViewState<Array<boolean|string|number>>>();
+
+    readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
+        name: 'styles',
+        defaultValue: {},
+        schema: z.record(z.string(), z.object({
+            v: Boolish,
+            o: z.record(z.string(), z.union([z.boolean(), z.number()])),
+        })),
+        urlParamName: 'sty',
+    });
+
+    readonly tilesLoadLimitState = this.createState<number>({
+        name: 'tilesLoadLimit',
+        defaultValue: MAX_NUM_TILES_TO_LOAD,
+        schema: z.coerce.number().nonnegative(),
+        urlParamName: 'tll',
+    });
+
+    readonly tilesVisualizeLimitState = this.createState<number>({
+        name: 'tilesVisualizeLimit',
+        defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
+        schema: z.coerce.number().nonnegative(),
+        urlParamName: 'tvl',
+    });
+
+    readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
+        name: 'selectedSourceData',
+        defaultValue: null,
+        schema: z.union([z.null(), z.object({
+            mapId: z.string(),
+            tileId: z.coerce.number(),
+            layerId: z.string(),
+            address: z.string().optional(),
+            featureIds: z.string().optional(),
+        })]),
+        urlParamName: 'ssd',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly enabledCoordsTileIdsState = this.createState<string[]>({
+        name: 'enabledCoordsTileIds',
+        defaultValue: ["WGS84"],
+        schema: z.array(z.string()),
+    });
+
+    readonly panelState = this.createState<PanelSizeState>({
+        name: 'panel',
+        defaultValue: [] as PanelSizeState,
+        schema: z.union([
+            z.tuple([]),
+            z.tuple([z.coerce.number(), z.coerce.number()]),
+        ]),
+    });
+
+    readonly legalInfoDialogVisibleState = this.createState<boolean>({
+        name: 'legalInfoDialogVisible',
+        defaultValue: false,
+        schema: Boolish,
+    });
+
+    readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
+        name: 'lastSearchHistoryEntry',
+        defaultValue: null,
+        schema: z.union([
+            z.null(),
+            z.tuple([z.coerce.number(), z.string()]),
+        ]),
+    });
+
+    constructor(private readonly router: Router) {
         this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+        this.inspectionContainerWidth = 40 * this.baseFontSize;
+        this.inspectionContainerHeight = window.innerHeight - 10.5 * this.baseFontSize;
 
-        let parameters = this.loadSavedParameters();
-        this.parameters = new BehaviorSubject<ErdblickParameters>(parameters!);
-        this.saveParameters();
-        this.parameters.subscribe(parameters => {
-            if (parameters) {
-                this.scalingFactor = Math.pow(parameters.alt / 1000, 1.1) / 2;
-                this.saveParameters();
-            }
+        this.setupStateSubscriptions();
+        this.hydrateFromStorage();
+        this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+        this.isHydrating = false;
+        this.isReady = true;
+        // FIXME
+        // this.updateScalingFactor(this.cameraViewData.getValue().destination.alt);
+        this.persistStates();
+        this.ready.next(true);
+
+        this.router.events.pipe(filter(event => event instanceof NavigationEnd)).subscribe(() => {
+            this.withHydration(() => this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {}));
         });
     }
 
-    get cameraMoveUnits() {
-        return this.baseCameraMoveM * this.scalingFactor / 75000;
-    }
-
-    get cameraZoomUnits() {
-        return this.baseCameraZoomM * this.scalingFactor;
+    ngOnDestroy(): void {
+        this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
     }
 
     get replaceUrl() {
@@ -339,95 +323,219 @@ export class AppStateService {
         return currentValue;
     }
 
-    p() {
-        return this.parameters.getValue();
+    private createState<T>(options: AppStateOptions<T>): AppState<T> {
+        return new AppState<T>(this.statePool, options);
     }
 
-    private isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
-        return mapLayerNameOrLayerId.includes('/SourceData-') ||
-            mapLayerNameOrLayerId.includes('/Metadata-');
+    private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
+        return new MapViewState<T>(this.statePool, options);
     }
 
-    public setSelectedSourceData(selection: SelectedSourceData) {
-        this.p().selectedSourceData = [
-            selection.tileId,
-            selection.layerId,
-            selection.mapId,
-            selection.address ? selection.address.toString() : "",
-            selection.featureIds ? selection.featureIds : "",
-        ];
-        this.parameters.next(this.p());
-    }
-
-    public unsetSelectedSourceData() {
-        this.p().selectedSourceData = [];
-        this.parameters.next(this.p());
-    }
-
-    public getSelectedSourceData(): SelectedSourceData | null {
-        const sd = this.p().selectedSourceData;
-        if (!sd || !sd.length)
-            return null;
-
-        return {
-            tileId: sd[0],
-            layerId: sd[1],
-            mapId: sd[2],
-            address: BigInt(sd[3] || '0'),
-            featureIds: sd[4],
-        };
-    }
-
-    setInitialMapLayers(layers: Array<[string, number, boolean, boolean]>) {
-        // Only set map layers, if there are no configured values yet.
-        if (this.p().layers.length) {
-            return;
+    private setupStateSubscriptions() {
+        // NOTE: Is this the best way to implement the internal subscription mechanism?
+        for (const state of this.statePool.values()) {
+            const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe(value => {
+                this.onStateChanged(state as AppState<unknown>, value);
+            });
+            this.stateSubscriptions.push(subscription);
         }
-        this.p().layers = layers.filter(l => !this.isSourceOrMetaData(l[0]));
-        this.parameters.next(this.p());
     }
 
-    setInitialStyles(styles: Map<string, ErdblickStyle>) {
-        // In visualization-only mode, ignore style updates
-        if (this.appModeService.isVisualizationOnly) {
+    private onStateChanged(state: AppState<unknown>, value: unknown): void {
+        // FIXME
+        // if (state === this.cameraViewData && value) {
+        //     const camera = value as CameraViewState;
+        //     this.updateScalingFactor(camera.destination.alt);
+        // }
+
+        if (this.isHydrating || !this.isReady) {
             return;
         }
 
-        this.p().styles = Object.fromEntries([...styles.entries()].map(([k, v]) =>
-            [k, this.styleParamsToURLParams(v.params)]));
-        this.parameters.next(this.p());
+        this.pendingStorageSync = true;
+        if (state.isUrlState()) {
+            this.pendingUrlSync = true;
+        }
+
+        this.scheduleFlush();
     }
 
-    setSelectedFeatures(newSelection: TileFeatureId[]) {
-        const currentSelection = this.p().selected;
-        if (currentSelection.length == newSelection.length) {
-            let selectedFeaturesAreSame = true;
-            for (let i = 0; i < currentSelection.length; ++i) {
-                const a = currentSelection[i];
-                const b = newSelection[i];
-                if (a.featureId != b.featureId || a.mapTileKey != b.mapTileKey) {
-                    selectedFeaturesAreSame = false;
-                    break;
+    private scheduleFlush(): void {
+        if (this.flushHandle) {
+            return;
+        }
+        this.flushHandle = Promise.resolve().then(() => {
+            this.flushHandle = null;
+            if (this.isHydrating) {
+                this.pendingStorageSync = false;
+                this.pendingUrlSync = false;
+                return;
+            }
+            if (this.pendingStorageSync) {
+                this.persistStates();
+            }
+            if (this.pendingUrlSync) {
+                this.syncUrl();
+            }
+            this.pendingStorageSync = false;
+            this.pendingUrlSync = false;
+        });
+    }
+
+    private persistStates(): void {
+        for (const state of this.statePool.values()) {
+            try {
+                const serialized = state.serialize(false);
+                if (serialized === undefined) {
+                    continue;
+                }
+                for (const [k, v] of Object.entries(serialized)) {
+                    localStorage.setItem(k, v);
+                }
+            } catch (error) {
+                console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
+            }
+        }
+    }
+
+    private syncUrl(): void {
+        const params: Record<string, string> = {};
+        for (const state of this.statePool.values()) {
+            if (!state.isUrlState()) {
+                continue;
+            }
+            const serialized = state.serialize(true);
+            if (serialized === undefined) {
+                continue;
+            }
+            for (const [k, v] of Object.entries(serialized)) {
+                params[k] = v;
+            }
+        }
+        const replaceUrl = this.replaceUrl;
+        this.router.navigate([], {
+            queryParams: params,
+            queryParamsHandling: 'merge',
+            replaceUrl
+        }).catch(error => {
+            console.error('[AppStateService] Failed to sync URL parameters', error);
+        });
+    }
+
+    private hydrateFromStorage(): void {
+        this.withHydration(() => {
+            for (const state of this.statePool.values()) {
+                const raw = localStorage.getItem(state.name);
+                if (raw) {
+                    state.deserialize(raw);
                 }
             }
+        });
+    }
 
-            if (selectedFeaturesAreSame) {
-                return false;
+    private hydrateFromUrl(params: Params): void {
+        this.withHydration(() => {
+            for (const state of this.statePool.values()) {
+                state.deserialize(params);
             }
-        }
+        });
+    }
 
-        this.p().selected = newSelection;
+    private withHydration(callback: () => void): void {
+        const previous = this.isHydrating;
+        this.isHydrating = true;
+        try {
+            callback();
+        } finally {
+            this.isHydrating = previous;
+        }
+    }
+
+    // -----------------
+    // Public API below
+    // -----------------
+
+    get numViews() {return this.numViewsState.getValue();}
+    set numViews(val: number) {this.numViewsState.next(val);};
+    get search() {return this.searchState.getValue();}
+    set search(val: [number, string] | []) {this.searchState.next(val);};
+    get marker() {return this.markerState.getValue();}
+    set marker(val: boolean) {this.markerState.next(val);};
+    get markedPosition() {return this.markedPositionState.getValue();}
+    set markedPosition(val: number[]) {this.markedPositionState.next(val);};
+    get selectedFeatures() {return this.selectedFeaturesState.getValue();}
+    set selectedFeatures(val: [number, TileFeatureId][]) {this.selectedFeaturesState.next(val);};
+    get focusedView() {return this.focusedViewState.getValue();}
+    set focusedView(val: number) {this.focusedViewState.next(val);};
+    get layerNames() {return this.layerNamesState.getValue();}
+    set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
+    get styles() {return this.stylesState.getValue();}
+    set styles(val: Record<string, StyleURLParameters>) {this.stylesState.next(val);};
+    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
+    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
+    get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
+    set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
+    get selectedSourceData() {return this.selectedSourceDataState.getValue();}
+    set selectedSourceData(val: SelectedSourceData | null) {this.selectedSourceDataState.next(val);};
+    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
+    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
+    get panel() {return this.panelState.getValue();}
+    set panel(val: PanelSizeState) {this.panelState.next(val);};
+    get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
+    set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
+    get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
+    set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+
+    getCameraOrientation(viewIndex: number) {
+        return this.cameraViewDataState.getValue(viewIndex).orientation;
+    }
+
+    getCameraPosition(viewIndex: number) {
+        const destination = this.cameraViewDataState.getValue(viewIndex).destination;
+        return new Cartographic(destination.lon, destination.lat, destination.alt);
+    }
+
+    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+        const newOrientation = orientation !== undefined ? orientation : {
+            heading: 0.0,
+            pitch: -90,
+            roll: 0.0
+        }
+        const view: CameraViewState = {
+            destination: {
+                lon: CesiumMath.toDegrees(destination.longitude),
+                lat: CesiumMath.toDegrees(destination.latitude),
+                alt: destination.height,
+            },
+            orientation: {
+                heading: newOrientation.heading,
+                pitch: newOrientation.pitch,
+                roll: newOrientation.roll,
+            }
+        };
+        this.cameraViewDataState.next(viewIndex, view);
+    }
+
+    setProjectionMode(mapViewIndex: number, is2DMode: boolean) {
+        this.mode2dState.next(mapViewIndex, is2DMode);
+    }
+
+    setSelectedFeatures(viewIndex: number, newSelection: TileFeatureId[]) {
+        const currentSelection = this.selectedFeatures;
+        if (newSelection.length === currentSelection.length &&
+            newSelection.every((v, i) =>
+                v.featureId === currentSelection[i][1].featureId && v.mapTileKey === currentSelection[i][1].mapTileKey)) {
+            return false;
+        }
+        this.selectedFeatures = newSelection.map(feature => ([viewIndex, {...feature}]));
         this._replaceUrl = false;
-        this.parameters.next(this.p());
         return true;
     }
 
     setMarkerState(enabled: boolean) {
-        this.p().marker = enabled;
-        if (enabled) {
-            this.parameters.next(this.p());
-        } else {
-            this.setMarkerPosition(null);
+        this.markerState.next(enabled);
+        if (!enabled) {
+            this.setMarkerPosition(null, false);
         }
     }
 
@@ -435,68 +543,98 @@ export class AppStateService {
         if (position) {
             const longitude = CesiumMath.toDegrees(position.longitude);
             const latitude = CesiumMath.toDegrees(position.latitude);
-            this.p().markedPosition = [longitude, latitude];
+            this.markedPositionState.next([longitude, latitude]);
         } else {
-            this.p().markedPosition = [];
+            this.markedPositionState.next([]);
         }
         if (!delayUpdate) {
             this._replaceUrl = false;
-            this.parameters.next(this.p());
         }
     }
 
-    mapLayerConfig(mapId: string, layerId: string, fallbackLevel: number): [boolean, number, boolean] {
-        const conf = this.p().layers.find(ml => ml[0] == mapId + "/" + layerId);
-        if (conf !== undefined && conf[2]) {
-            return [true, conf[1], conf[3]];
+    mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
+        if (isSourceOrMetaData(layerId)) {
+            return [];
         }
-        return [!this.p().layers.length, fallbackLevel, false];
+        const mapLayerId = `${mapId}/${layerId}`;
+        const names = this.layerNames;
+        let layerIndex = names.findIndex(ml => ml === mapLayerId);
+        if (layerIndex === -1) {
+            layerIndex = names.length;
+            // TODO: Ensure that this will not trigger bad things.
+            this.layerNamesState.next([...names, mapLayerId]);
+        }
+        const result = new Array<LayerViewConfig>();
+        const layerStateValue = <T>(state: MapViewState<Array<T>>, viewIndex: number, defaultValue: T) => {
+            const resultForView = state.getValue(viewIndex);
+            while (resultForView.length <= layerIndex) {
+                resultForView.push(defaultValue);
+            }
+            // TODO: Ensure that this will not trigger bad things.
+            state.next(viewIndex, resultForView);
+            return resultForView[layerIndex];
+        }
+
+        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
+            result.push({
+                visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
+                level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
+                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, false),
+            });
+        }
+        return result;
     }
 
-    setMapLayerConfig(mapId: string, layerId: string, level: number, visible: boolean, tileBorders: boolean) {
-        if (this.isSourceOrMetaData(layerId)) {
+    setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
+        if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViewsState.getValue()) {
             return;
         }
-        const mapLayerName = mapId + "/" + layerId;
-        let conf = this.p().layers.find(val => val[0] == mapLayerName);
-        if (conf !== undefined) {
-            conf[1] = level;
-            conf[2] = visible;
-            conf[3] = tileBorders;
-        } else if (visible) {
-            this.p().layers.push([mapLayerName, level, visible, tileBorders]);
+        const mapLayerId = `${mapId}/${layerId}`;
+        const names = this.layerNames;
+        let layerIndex = names.findIndex(ml => ml === mapLayerId);
+        if (layerIndex === -1) {
+            layerIndex = names.length;
+            // TODO: Ensure that this will not trigger bad things.
+            this.layerNamesState.next([...names, mapLayerId]);
         }
-        this.parameters.next(this.p());
+
+        const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
+            const values = state.getValue(viewIndex);
+            while (values.length <= layerIndex) {
+                values.push(defaultValue);
+            }
+            values[layerIndex] = value;
+            // TODO: Ensure that this will not trigger bad things.
+            state.next(viewIndex, values);
+        };
+
+        for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
+            insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
+            insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
+            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders,false);
+        }
     }
 
-    setMapConfig(layerParams: {
-        mapId: string,
-        layerId: string,
-        level: number,
-        visible: boolean,
-        tileBorders: boolean
-    }[]) {
-        layerParams.forEach(params => {
-            if (!this.isSourceOrMetaData(params.layerId)) {
-                const mapLayerName = params.mapId + "/" + params.layerId;
-                let conf = this.p().layers.find(
-                    val => val[0] == mapLayerName
-                );
-                if (conf !== undefined) {
-                    conf[1] = params.level;
-                    conf[2] = params.visible;
-                    conf[3] = params.tileBorders;
-                } else if (params.visible) {
-                    this.p().layers.push([mapLayerName, params.level, params.visible, params.tileBorders]);
-                }
+    setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
+        if (Object.keys(this.stylesState.getValue()).length) {
+            return;
+        }
+        const initial: Record<string, StyleURLParameters> = {};
+        styles.forEach((style, styleId) => {
+            const params = style?.params;
+            if (params) {
+                initial[styleId] = this.styleParamsToURLParams(params);
             }
         });
-        this.parameters.next(this.p());
+        if (Object.keys(initial).length) {
+            this.stylesState.next(initial);
+        }
     }
 
     styleConfig(styleId: string): StyleParameters {
-        if (this.p().styles.hasOwnProperty(styleId)) {
-            return this.styleURLParamsToParams(this.p().styles[styleId]);
+        const styles = this.stylesState.getValue();
+        if (styles.hasOwnProperty(styleId)) {
+            return this.styleURLParamsToParams(styles[styleId]);
         }
         return {
             visible: true,
@@ -505,221 +643,58 @@ export class AppStateService {
     }
 
     setStyleConfig(styleId: string, params: StyleParameters) {
-        this.p().styles[styleId] = this.styleParamsToURLParams(params);
-        this.parameters.next(this.p());
-    }
-
-    setCameraState(camera: Camera) {
-        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-        this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
-        this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
-        this.p().alt = currentPositionCartographic.height;
-        this.p().heading = camera.heading;
-        this.p().pitch = camera.pitch;
-        this.p().roll = camera.roll;
-        this.parameters.next(this.p());
-        this.setView(Cartesian3.fromDegrees(this.p().lon, this.p().lat, this.p().alt), {
-            heading: this.p().heading,
-            pitch: this.p().pitch,
-            roll: this.p().roll
-        });
-    }
-
-    set2DCameraState(camera: Camera) {
-        // In 2D mode, store the view rectangle AND altitude for proper mode switching
-        const viewRect = camera.computeViewRectangle();
-        const currentPositionCartographic = Cartographic.fromCartesian(camera.position);
-
-        if (viewRect) {
-            this.p().viewRectangle = [
-                CesiumMath.toDegrees(viewRect.west),
-                CesiumMath.toDegrees(viewRect.south),
-                CesiumMath.toDegrees(viewRect.east),
-                CesiumMath.toDegrees(viewRect.north)
-            ];
-            // Update center position for compatibility
-            const center = Cartographic.fromRadians(
-                (viewRect.west + viewRect.east) / 2,
-                (viewRect.north + viewRect.south) / 2
-            );
-            this.p().lon = CesiumMath.toDegrees(center.longitude);
-            this.p().lat = CesiumMath.toDegrees(center.latitude);
-        } else {
-            // Fallback if view rectangle can't be computed
-            this.p().lon = CesiumMath.toDegrees(currentPositionCartographic.longitude);
-            this.p().lat = CesiumMath.toDegrees(currentPositionCartographic.latitude);
-        }
-
-        // CRITICAL: Store altitude in 2D mode for consistent mode switching
-        this.p().alt = currentPositionCartographic.height;
-
-        // Store 2D-specific camera orientation (always top-down view)
-        this.p().heading = camera.heading;
-        this.p().pitch = camera.pitch;
-        this.p().roll = camera.roll;
-
-        this.parameters.next(this.p());
-    }
-
-    setCameraMode(isEnabled: boolean) {
-        this.p().mode2d = isEnabled;
-        this.parameters.next(this.p());
-    }
-
-    loadSavedParameters(): ErdblickParameters | null {
-        let parsedParameters: Record<string, any> = {};
-        const parameters = localStorage.getItem('erdblickParameters');
-        if (parameters) {
-            parsedParameters = JSON.parse(parameters);
-        }
-
-        // First create an object with all default values from the full parameter set
-        let defaultParameters = Object.keys(erdblickParameters).reduce((acc, key: string) => {
-            acc[key] = erdblickParameters[key].default;
-            return acc;
-        }, {} as any);
-
-        // Then override with valid values from the filtered parameter descriptors
-        Object.keys(this.parameterDescriptors).forEach(key => {
-            const descriptor = this.parameterDescriptors[key];
-            if (parsedParameters.hasOwnProperty(key)) {
-                const value = parsedParameters[key];
-                if (descriptor.validator(value)) {
-                    defaultParameters[key] = value;
-                }
-            }
-        });
-
-        return defaultParameters;
-    }
-
-    parseAndApplyQueryParams(params: Params) {
-        let currentParameters = this.p();
-        let updatedParameters: ErdblickParameters = {...currentParameters};
-
-        Object.keys(this.parameterDescriptors).forEach(key => {
-            const descriptor = this.parameterDescriptors[key];
-            if (params.hasOwnProperty(key)) {
-                try {
-                    const value = descriptor.converter(params[key]);
-                    if (descriptor.validator(value)) {
-                        // If the parameter to update is an object (dict), only
-                        // overlay the keys present in the url, and leave other
-                        // dict entries untouched.
-                        if (value && typeof value === 'object' && !Array.isArray(value)) {
-                            for (const [entryKey, entryValue] of Object.entries(value)) {
-                                updatedParameters[key][entryKey] = entryValue;
-                            }
-                        } else {
-                            updatedParameters[key] = value;
-                        }
-                    } else {
-                        console.warn(`Invalid query param ${params[key]} for ${key}, using default.`);
-                        updatedParameters[key] = descriptor.default;
-                    }
-                } catch (e) {
-                    console.warn(`Invalid query param  ${params[key]} for ${key}, using default.`);
-                    updatedParameters[key] = descriptor.default;
-                }
-            }
-        });
-
-        if (Array.isArray(updatedParameters.layers)) {
-            updatedParameters.layers = updatedParameters.layers.filter(l => Array.isArray(l) && typeof l[0] === 'string' && !this.isSourceOrMetaData(l[0]));
-        }
-
-        if (!this.initialQueryParamsSet) {
-            this.setView(Cartesian3.fromDegrees(updatedParameters.lon, updatedParameters.lat, updatedParameters.alt), {
-                heading: updatedParameters.heading,
-                pitch: updatedParameters.pitch,
-                roll: updatedParameters.roll
-            });
-        }
-
-        this.parameters.next(updatedParameters);
-        this.initialQueryParamsSet = true;
-        
-        // Emit ready signal for subscribers waiting for initialization
-        this.ready.next();
-    }
-
-    resetStorage() {
-        localStorage.removeItem('erdblickParameters');
-        localStorage.removeItem('searchHistory');
-        const {origin, pathname} = window.location;
-        window.location.href = origin + pathname;
-    }
-
-    private saveParameters() {
-        localStorage.setItem('erdblickParameters', JSON.stringify(this.p()));
-    }
-
-    setView(destination: Cartesian3, orientation: { heading: number, pitch: number, roll: number }) {
-        this.cameraViewData.next({
-            destination: destination,
-            orientation: orientation
-        });
-    }
-
-    getCameraOrientation() {
-        return this.cameraViewData.getValue().orientation;
-    }
-
-    getCameraPosition() {
-        return this.cameraViewData.getValue().destination;
-    }
-
-    setCoordinatesAndTileIds(selectedOptions: Array<string>) {
-        this.p().enabledCoordsTileIds = selectedOptions;
-        this.parameters.next(this.p());
-    }
-
-    getCoordinatesAndTileIds() {
-        return this.p().enabledCoordsTileIds;
-    }
-
-    isUrlParameter(name: string) {
-        if (this.parameterDescriptors.hasOwnProperty(name)) {
-            return this.parameterDescriptors[name].urlParam;
-        }
-        return false;
-    }
-
-    resetSearchHistoryState() {
-        this.p().search = [];
-        this.parameters.next(this.p());
+        const styles = {...this.stylesState.getValue()};
+        styles[styleId] = this.styleParamsToURLParams(params);
+        this.stylesState.next(styles);
     }
 
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
-        if (value) {
-            value[1] = value[1].trim();
-            if (saveHistory) {
-                this.saveHistoryStateValue(value);
-            }
+        const trimmed = value ? [value[0], value[1].trim()] as [number, string] : null;
+        if (trimmed && saveHistory) {
+            this.saveHistoryStateValue(trimmed);
         }
-        this.p().search = value ? value : [];
+        this.searchState.next(trimmed ? trimmed : []);
         this._replaceUrl = false;
-        this.lastSearchHistoryEntry.next(value);
-        this.parameters.next(this.p())
+        this.lastSearchHistoryEntryState.next(trimmed);
     }
 
     private saveHistoryStateValue(value: [number, string]) {
         const searchHistoryString = localStorage.getItem("searchHistory");
         if (searchHistoryString) {
-            let searchHistory = JSON.parse(searchHistoryString) as Array<[number, string]>;
-            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] == value[0] && entry[1] == value[1]));
+            let parsed = JSON.parse(searchHistoryString) as any;
+            let searchHistory: Array<[number, string]>;
+            if (Array.isArray(parsed) && parsed.length && Array.isArray(parsed[0])) {
+                searchHistory = parsed as Array<[number, string]>;
+            } else if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'number' && typeof parsed[1] === 'string') {
+                searchHistory = [parsed as [number, string]];
+            } else {
+                searchHistory = [];
+            }
+            searchHistory = searchHistory.filter((entry: [number, string]) => !(entry[0] === value[0] && entry[1] === value[1]));
             searchHistory.unshift(value);
-            let ldiff = searchHistory.length - 100;
-            while (ldiff > 0) {
+            while (searchHistory.length > 100) {
                 searchHistory.pop();
-                ldiff -= 1;
             }
             localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
         } else {
-            localStorage.setItem("searchHistory", JSON.stringify(value));
+            localStorage.setItem("searchHistory", JSON.stringify([value]));
         }
     }
 
+    resetStorage() {
+        for (const state of this.statePool.values()) {
+            state.resetToDefault();
+            localStorage.removeItem(state.name);
+        }
+        localStorage.removeItem('searchHistory');
+        const {origin, pathname} = window.location;
+        window.location.href = origin + pathname;
+    }
+
+    // TODO: This is view logic which should be in Inspection Panel component upon
+    //  main View template fully moving there as a first-level citizen: currently
+    //  the View implementation is split across Feature and SourceData components
+    //  which complicates their state management.
     onInspectionContainerResize(event: MouseEvent): void {
         const element = event.target as HTMLElement;
         if (!element.classList.contains("resizable-container")) {
@@ -737,34 +712,48 @@ export class AppStateService {
         }
         this.inspectionContainerHeight = element.offsetHeight;
 
-        this.p().panel = [
+        const panel: PanelSizeState = [
             this.inspectionContainerWidth / this.baseFontSize,
             this.inspectionContainerHeight / this.baseFontSize
         ];
-        this.parameters.next(this.p());
+        this.panelState.next(panel);
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapInfoItem>): boolean {
+    pruneMapLayerConfig(mapItems: Array<MapTreeNode>): boolean {
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
-                mapLayerIds.add(`${mapItem.mapId}/${layerId}`);
+                mapLayerIds.add(`${mapItem.id}/${layerId}`);
             });
         });
 
-        this.p().layers = this.p().layers.filter(layer => {
-            return mapLayerIds.has(layer[0]) && !this.isSourceOrMetaData(layer[0]);
-        });
-        const hasLayersAfterPruning = this.p().layers.length > 0;
-        this.parameters.next(this.p());
-        return !hasLayersAfterPruning; // Need to reinitialise the layers if none configured anymore
+        const indicesToRemove = this.layerNamesState.getValue().reduce((acc, l, i) => {
+            if (!mapLayerIds.has(l) || isSourceOrMetaData(l)) {
+                acc.add(i);
+            }
+            return acc;
+        }, new Set<number>());
+
+        const layerNames = this.layerNamesState.getValue().filter((_, i) => !indicesToRemove.has(i));
+        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
+            const visibilities = this.layerVisibilityState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const levels = this.layerZoomLevelState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            const tileBorders = this.layerTileBordersState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
+            this.layerVisibilityState.next(viewIndex, visibilities);
+            this.layerZoomLevelState.next(viewIndex, levels);
+            this.layerTileBordersState.next(viewIndex, tileBorders);
+        }
+        this.layerNamesState.next(layerNames);
+
+        // If all layers were pruned, return true.
+        return layerNames.length === 0;
     }
 
     private styleParamsToURLParams(params: StyleParameters): StyleURLParameters {
         return { v: params.visible, o: params.options };
     }
 
-    private styleURLParamsToParams(params: StyleURLParameters): StyleParameters{
+    private styleURLParamsToParams(params: StyleURLParameters): StyleParameters {
         return { visible: params.v, options: params.o };
     }
 }

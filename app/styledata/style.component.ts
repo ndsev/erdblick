@@ -1,7 +1,7 @@
 import {Component, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
-import {MapService, removeGroupPrefix} from "../mapdata/map.service";
-import {FeatureStyleOptionWithStringType, StyleService} from "./style.service";
+import {MapDataService} from "../mapdata/map.service";
+import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle} from "./style.service";
 import {AppStateService} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
@@ -11,6 +11,8 @@ import {KeyValue} from "@angular/common";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
+import {filter} from "rxjs/operators";
+import {removeGroupPrefix} from "../mapdata/map.tree.model"
 
 
 @Component({
@@ -27,7 +29,7 @@ import {EditorService} from "../shared/editor.service";
                             <span>
                                 <p-checkbox [ngModel]="node.visible"
                                             (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(node.id)"
+                                            (ngModelChange)="toggleStyleGroup(0, node.id)"
                                             [binary]="true"
                                             [inputId]="node.id"
                                             [name]="node.id" tabindex="0"/>
@@ -184,15 +186,15 @@ export class StyleComponent {
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 public editorService: EditorService) {
 
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
-        this.parameterService.ready$.subscribe(_ => {
+        this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(
                 state => state.isUpdated && state.isModified);
         });
@@ -311,7 +313,7 @@ export class StyleComponent {
         if (redraw) {
             this.styleService.reapplyStyle(styleId);
         }
-        this.parameterService.setStyleConfig(styleId, style.params);
+        this.stateService.setStyleConfig(styleId, style.params);
     }
 
     resetStyle(styleId: string) {
@@ -414,12 +416,12 @@ export class StyleComponent {
         return 0;
     }
 
-    toggleStyleGroup(groupId: string) {
-        if (!groupId) {
+    toggleStyleGroup(viewIndex: number, id: string) {
+        if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
-        const group = this.findStyleGroupById(rootGroups, groupId);
+        const group = this.findStyleGroupById(rootGroups, id);
         if (!group || !this.checkIsStyleGroup(group)) {
             return;
         }
@@ -436,7 +438,7 @@ export class StyleComponent {
         return e.type === "Group";
     }
 
-    private findStyleGroupById(elements: (ErdblickStyleGroup|ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
+    private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | ErdblickStyle | undefined {
         for (const elem of elements) {
             if (elem.id === id) {
                 return elem;

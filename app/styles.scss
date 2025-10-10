@@ -66,12 +66,17 @@ body {
   }
 }
 
-.mapviewer-renderlayer {
-  width: 100%;
+map-view {
+  display: block;
   height: 100%;
-  position: fixed;
-  left: 0;
-  top: 0;
+  width: 100%;
+  position: relative;
+}
+
+.mapviewer-renderlayer {
+  position: relative;
+  height: 100vh;
+  inset: 0;
   overflow: hidden;
   user-select: none;
   -moz-user-select: none;
@@ -80,7 +85,7 @@ body {
   -o-user-select: none;
 }
 
-#mapViewContainer .cesium-widget-credits {
+[id^="mapViewContainer"] .cesium-widget-credits {
   display: none !important;
 }
 
@@ -116,11 +121,10 @@ body {
 
 .compass-circle {
   position: absolute;
-  top: 2em;
-  right: 0.5em;
+  bottom: 0.5em;
+  right: 0.7em;
   width: 4em;
   height: 4em;
-  border: 0.15em solid var(--p-button-secondary-border-color);
   border-radius: 50%;
   pointer-events: none;
   display: flex;
