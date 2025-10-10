@@ -48,7 +48,9 @@ export class MapViewContainerComponent {
     );
 
     constructor(private stateService: AppStateService) {
-        this.viewModel$.subscribe(vm => this.version.update(_ => vm.panelCount));
+        this.viewModel$.subscribe(vm => {
+            this.version.update(_ => vm.panelCount);
+        });
     }
 
     handleResizeEnd(event: SplitterResizeEndEvent) {

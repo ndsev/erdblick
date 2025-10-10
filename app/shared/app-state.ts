@@ -118,6 +118,69 @@ function splitColonCSV(val: string): string[][] {
         .map(seg => (seg === '' ? [] : splitCSV(seg)));
 }
 
+function deepEquals(a: unknown, b: unknown): boolean {
+    if (a === b) {
+        return true;
+    }
+
+    // Handle NaN comparisons explicitly
+    if (typeof a === 'number' && typeof b === 'number') {
+        return Number.isNaN(a) && Number.isNaN(b);
+    }
+
+    if (a === null || b === null) {
+        return false;
+    }
+
+    const typeA = typeof a;
+    const typeB = typeof b;
+    if (typeA !== typeB) {
+        return false;
+    }
+
+    if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (!deepEquals(a[i], b[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (typeA === 'object') {
+        // Treat Date objects explicitly
+        if (a instanceof Date && b instanceof Date) {
+            return a.getTime() === b.getTime();
+        }
+
+        if (Array.isArray(a) || Array.isArray(b)) {
+            return false;
+        }
+
+        const objA = a as Record<string, unknown>;
+        const objB = b as Record<string, unknown>;
+        const keysA = Object.keys(objA);
+        const keysB = Object.keys(objB);
+        if (keysA.length !== keysB.length) {
+            return false;
+        }
+        for (const key of keysA) {
+            if (!Object.prototype.hasOwnProperty.call(objB, key)) {
+                return false;
+            }
+            if (!deepEquals(objA[key], objB[key])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
 export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
@@ -245,8 +308,11 @@ export class AppState<T> extends BehaviorSubject<T> {
                 if (raw) {
                     const parsed = JSON.parse(raw);
                     const verified = this.schema.parse(parsed);
-                    const value = this.postprocess ? this.postprocess(verified as any, this.getValue()) : verified;
-                    this.next(value as T);
+                    const currentValue = this.getValue();
+                    const value = this.postprocess ? this.postprocess(verified as any, currentValue) : verified;
+                    if (!deepEquals(currentValue, value as T)) {
+                        this.next(value as T);
+                    }
                 }
                 return;
             }
@@ -321,8 +387,11 @@ export class AppState<T> extends BehaviorSubject<T> {
 
             if (parsed !== undefined) {
                 const verified = this.schema.parse(parsed);
-                const value = this.postprocess ? this.postprocess(verified as any, this.getValue()) : verified;
-                this.next(value as T);
+                const currentValue = this.getValue();
+                const value = this.postprocess ? this.postprocess(verified as any, currentValue) : verified;
+                if (!deepEquals(currentValue, value as T)) {
+                    this.next(value as T);
+                }
             }
         } catch (error) {
             console.error(`[AppState:${this.name}:${this.urlParamName}] Failed to deserialize value from `, raw, error);

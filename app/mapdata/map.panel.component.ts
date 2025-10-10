@@ -221,9 +221,9 @@ export class MapPanelComponent {
 
         this.subscriptions.push(
             // Rebuild metadata menus recursively and prune when needed.
-            this.mapService.maps$.subscribe(mapGroups => {
+            this.mapService.maps$.subscribe(mapTree => {
                 this.metadataMenusEntries.clear();
-                for (const [_, mapItem] of mapGroups.maps) {
+                for (const [_, mapItem] of mapTree.maps) {
                     this.metadataMenusEntries.set(
                         mapItem.id,
                         this.inspectionService.findLayersForMapId(mapItem.id, true)
