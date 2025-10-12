@@ -128,7 +128,6 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
     simfil::CompletionOptions opts;
     opts.limit = limit;
     opts.timeoutMs = timeoutMs;
-    opts.autoWildcard = true;
 
     std::string errorMessage;
     std::set<simfil::CompletionCandidate> joinedResult;
