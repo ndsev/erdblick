@@ -25,12 +25,13 @@ import {filter} from "rxjs/operators";
 @Component({
     selector: 'erdblick-view-ui',
     template: `
-        <div class="compass-circle" [ngClass]="{'mirrored-compass': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly">
+        <div class="compass-circle" [ngClass]="{'mirrored-compass': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly" 
+             (click)="mapView()?.resetOrientation()" pTooltip="Reset Orientation (R)">
             <div class="compass-label north">N</div>
             <div class="compass-label east">E</div>
             <div class="compass-label south">S</div>
             <div class="compass-label west">W</div>
-            <div class="compass-needle" #compassNeedle></div>
+            <div class="compass-needle" #compassNeedle (click)="mapView()?.resetOrientation()"></div>
         </div>
         <div class="navigation-controls" [ngClass]="{'mirrored-controls': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly">
             <div class="nav-control-group">
@@ -51,8 +52,6 @@ import {filter} from "rxjs/operators";
                 <p-button icon="pi pi-arrow-down" (onClick)="mapView()?.moveDown()" [rounded]="true"
                           severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
             </div>
-            <p-button icon="pi pi-refresh" (onClick)="mapView()?.resetOrientation()" [rounded]="true"
-                      severity="secondary" size="small" pTooltip="Reset View (R)"></p-button>
         </div>
         <div class="scene-mode-toggle" [ngClass]="{'mirrored-toggle': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly">
             <p-button
