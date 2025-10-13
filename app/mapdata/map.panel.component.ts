@@ -131,7 +131,7 @@ import {Subscription} from "rxjs";
                                             </span>
                                             </p-button>
                                             <p-button onEnterClick *ngIf="node.info.coverage.length"
-                                                      (click)="focus(node.info.coverage[0], $event)"
+                                                      (click)="focus($event, index, node.info.coverage[0])"
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
@@ -384,19 +384,19 @@ export class MapPanelComponent {
         }
     }
 
-    focus(coverage: number | CoverageRectItem, event?: any) {
-        event?.stopPropagation();
+    focus(event: any, viewIndex: number, coverage: number | CoverageRectItem) {
+        event.stopPropagation();
         if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
             let coverageStruct = coverage as CoverageRectItem;
             let minPos = coreLib.getTilePosition(BigInt(coverageStruct.min));
             let maxPos = coreLib.getTilePosition(BigInt(coverageStruct.max));
             this.mapService.moveToWgs84PositionTopic.next(
-                {targetView: 0, x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
+                {targetView: viewIndex, x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
             );
         } else {
             const position = coreLib.getTilePosition(BigInt(coverage as number));
             this.mapService.moveToWgs84PositionTopic.next(
-                {targetView: 0, x: position.x, y: position.y}
+                {targetView: viewIndex, x: position.x, y: position.y}
             );
         }
     }

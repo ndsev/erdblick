@@ -35,6 +35,7 @@ export class MapViewContainerComponent {
     @ViewChildren(MapViewComponent) mapViewComponents!: QueryList<MapViewComponent>;
 
     version = signal(0);
+    private previousPanelSizes: number[] = [];
 
     viewModel$ = this.stateService.numViewsState.pipe(
         map(n => n > 0
@@ -54,9 +55,29 @@ export class MapViewContainerComponent {
     }
 
     handleResizeEnd(event: SplitterResizeEndEvent) {
-        // Loop through each MapViewComponent and call its resize handler
-        // for (const mapViewComp of this.mapViewComponents.toArray()) {
-        //     mapViewComp.onContainerResized();
-        // }
+        if (this.mapViewComponents.length === 0) {
+            return;
+        }
+
+        const sizes = event?.sizes ?? [];
+        const fallbackPercent = this.mapViewComponents.length > 0 ? 100 / this.mapViewComponents.length : 0;
+
+        if (this.previousPanelSizes.length !== this.mapViewComponents.length) {
+            this.previousPanelSizes = Array.from({ length: this.mapViewComponents.length }, () => fallbackPercent);
+        }
+
+        this.mapViewComponents.forEach((view, index) => {
+            const sizePercent = typeof sizes[index] === 'number' ? sizes[index]! : fallbackPercent;
+            const previousPercent = this.previousPanelSizes[index] ?? fallbackPercent;
+            if (sizePercent > 50) {
+                view.applyCameraScaleFromWidthChange(previousPercent, sizePercent * 1.1);
+            } else {
+                view.applyCameraScaleFromWidthChange(1, 1);
+            }
+        });
+
+        this.previousPanelSizes = this.mapViewComponents.map((_, index) =>
+            typeof sizes[index] === 'number' ? sizes[index]! : fallbackPercent
+        );
     }
 }

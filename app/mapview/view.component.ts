@@ -1,5 +1,15 @@
 import {AppStateService} from "../shared/appstate.service";
-import {AfterViewInit, ChangeDetectorRef, Component, OnDestroy, OnInit, input, InputSignal} from "@angular/core";
+import {
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    OnDestroy,
+    OnInit,
+    ViewChild,
+    input,
+    InputSignal
+} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
 import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
@@ -44,6 +54,7 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
     is2DMode: boolean = false;
     mapView?: MapView;
     viewIndex: InputSignal<number> = input.required<number>();
+    @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
     private modeSubscription?: Subscription;
     private viewInitialized = false;
 
@@ -163,11 +174,22 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         return `mapViewContainer-${this.viewIndex()}`;
     }
 
-    onContainerResized(): void {
-        if (this.mapView) {
-            // Notify Cesium viewer to resize to new container dimensions
-            this.mapView.viewer.resize();
-            this.mapView.viewer.scene.requestRender();
+    applyCameraScaleFromWidthChange(previousPercent: number, currentPercent: number): void {
+        if (!this.mapView) {
+            return;
         }
+        if (!Number.isFinite(previousPercent) || previousPercent <= 0) {
+            return;
+        }
+
+        const scaleFactor = currentPercent / previousPercent;
+        if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+            return;
+        }
+        if (Math.abs(scaleFactor - 1) < 0.01) {
+            return;
+        }
+
+        this.mapView.adjustCameraForViewportChange(scaleFactor);
     }
 }

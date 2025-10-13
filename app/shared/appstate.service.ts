@@ -1,6 +1,6 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subscription} from "rxjs";
+import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
@@ -261,6 +261,35 @@ export class AppStateService implements OnDestroy {
         })]),
         urlParamName: 'ssd',
         urlIncludeInVisualizationOnly: false,
+        toStorage: (value) => {
+            if (!value) {
+                return value;
+            }
+            const address = value.address !== undefined ? value.address.toString() : undefined;
+            return {
+                ...value,
+                address,
+            };
+        },
+        fromStorage: (payload) => {
+            if (!payload) {
+                return null;
+            }
+            const stored = payload as any;
+            let address: bigint | undefined = undefined;
+            if (stored.address !== undefined && stored.address !== null && stored.address !== "") {
+                try {
+                    address = BigInt(stored.address);
+                } catch (error) {
+                    console.warn('[AppStateService] Failed to parse persisted source data address', stored.address, error);
+                    address = undefined;
+                }
+            }
+            return {
+                ...stored,
+                address,
+            } as SelectedSourceData;
+        },
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
@@ -298,18 +327,14 @@ export class AppStateService implements OnDestroy {
         this.inspectionContainerWidth = 40 * this.baseFontSize;
         this.inspectionContainerHeight = window.innerHeight - 10.5 * this.baseFontSize;
 
-        this.setupStateSubscriptions();
-        this.hydrateFromStorage();
-        this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
-        this.isHydrating = false;
-        this.isReady = true;
-        // FIXME
-        // this.updateScalingFactor(this.cameraViewData.getValue().destination.alt);
-        this.persistStates();
-        this.ready.next(true);
-
-        this.router.events.pipe(filter(event => event instanceof NavigationEnd)).subscribe(() => {
-            this.withHydration(() => this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {}));
+        this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
+            this.setupStateSubscriptions();
+            this.hydrateFromStorage();
+            this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+            this.isHydrating = false;
+            this.isReady = true;
+            this.persistStates();
+            this.ready.next(true);
         });
     }
 
@@ -342,12 +367,6 @@ export class AppStateService implements OnDestroy {
     }
 
     private onStateChanged(state: AppState<unknown>, value: unknown): void {
-        // FIXME
-        // if (state === this.cameraViewData && value) {
-        //     const camera = value as CameraViewState;
-        //     this.updateScalingFactor(camera.destination.alt);
-        // }
-
         if (this.isHydrating || !this.isReady) {
             return;
         }

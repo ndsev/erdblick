@@ -794,6 +794,35 @@ export class MapView {
         }
     }
 
+    adjustCameraForViewportChange(scaleFactor: number): void {
+        try {
+            if (!this.isAvailable()) {
+                console.debug('Cannot adjust camera for viewport change: viewer unavailable');
+                return;
+            }
+            if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+                return;
+            }
+
+            const currentPosition = this.viewer.camera.positionCartographic;
+            const desiredHeight = currentPosition.height * scaleFactor;
+
+            if (!Number.isFinite(desiredHeight) || desiredHeight <= 0) {
+                return;
+            }
+
+            const newPosition = new Cartographic(
+                currentPosition.longitude,
+                currentPosition.latitude,
+                desiredHeight
+            );
+
+            this.stateService.setView(this._viewIndex, newPosition, this.viewer.camera);
+        } catch (error) {
+            console.error('Error adjusting camera for viewport change:', error);
+        }
+    }
+
     isAvailable() {
         return !!this.viewer && !!this.viewer.scene && typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed();
     }
