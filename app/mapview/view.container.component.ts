@@ -3,6 +3,8 @@ import {AppStateService} from "../shared/appstate.service";
 import {map} from "rxjs";
 import {MapViewComponent} from "./view.component";
 import {SplitterResizeEndEvent} from "primeng/splitter";
+import {KeyboardService} from "../shared/keyboard.service";
+import {environment} from "../environments/environment";
 
 @Component({
     selector: 'mapview-container',
@@ -10,7 +12,7 @@ import {SplitterResizeEndEvent} from "primeng/splitter";
         <ng-container *ngIf="viewModel$ | async as vm">
             @if (vm.panelCount > 0) {
                 @for (v of [version()]; track v) {
-                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8" (onResizeEnd)="handleResizeEnd($event)">>
+                    <p-splitter [panelSizes]="vm.panelSizes" class="mb-8">
                         @for (idx of vm.viewIndices; track idx) {
                             <ng-template pTemplate="panel">
                                 <map-view [viewIndex]="idx"></map-view>
@@ -35,7 +37,6 @@ export class MapViewContainerComponent {
     @ViewChildren(MapViewComponent) mapViewComponents!: QueryList<MapViewComponent>;
 
     version = signal(0);
-    private previousPanelSizes: number[] = [];
 
     viewModel$ = this.stateService.numViewsState.pipe(
         map(n => n > 0
@@ -48,36 +49,50 @@ export class MapViewContainerComponent {
         )
     );
 
-    constructor(private stateService: AppStateService) {
+    constructor(private stateService: AppStateService, private keyboardService: KeyboardService) {
         this.viewModel$.subscribe(vm => {
             this.version.update(_ => vm.panelCount);
         });
+
+        // Register a shortcut to cycle the view focus.
+        this.keyboardService.registerShortcut("Ctrl+ArrowRight", this.cycleViewFocus.bind(this, 1));
+        this.keyboardService.registerShortcut("Ctrl+ArrowLeft", this.cycleViewFocus.bind(this, -1));
+
+        // Ensure that keyboard shortcuts are always registered for the focused view.
+        this.stateService.focusedViewState.subscribe(_ => {
+            this.setupKeyboardShortcutsForFocusedView();
+        });
     }
 
-    handleResizeEnd(event: SplitterResizeEndEvent) {
-        if (this.mapViewComponents.length === 0) {
+    cycleViewFocus(direction: number) {
+        console.assert(direction === -1 || direction === 1);
+        const nextView = (this.stateService.focusedView + direction) % this.stateService.numViews;
+        this.stateService.focusedView = nextView < 0 ? this.stateService.numViews - 1 : nextView;
+    }
+
+    /**
+     * Setup keyboard shortcuts
+     */
+    private setupKeyboardShortcutsForFocusedView() {
+        if (environment.visualizationOnly) {
             return;
         }
 
-        const sizes = event?.sizes ?? [];
-        const fallbackPercent = this.mapViewComponents.length > 0 ? 100 / this.mapViewComponents.length : 0;
-
-        if (this.previousPanelSizes.length !== this.mapViewComponents.length) {
-            this.previousPanelSizes = Array.from({ length: this.mapViewComponents.length }, () => fallbackPercent);
-        }
-
-        this.mapViewComponents.forEach((view, index) => {
-            const sizePercent = typeof sizes[index] === 'number' ? sizes[index]! : fallbackPercent;
-            const previousPercent = this.previousPanelSizes[index] ?? fallbackPercent;
-            if (sizePercent > 50) {
-                view.applyCameraScaleFromWidthChange(previousPercent, sizePercent * 1.1);
-            } else {
-                view.applyCameraScaleFromWidthChange(1, 1);
+        for (const viewComponent of this.mapViewComponents) {
+            if (viewComponent.mapView?.viewIndex !== this.stateService.focusedView) {
+                continue;
             }
-        });
-
-        this.previousPanelSizes = this.mapViewComponents.map((_, index) =>
-            typeof sizes[index] === 'number' ? sizes[index]! : fallbackPercent
-        );
+            const mapView = viewComponent.mapView;
+            if (mapView) {
+                this.keyboardService.registerShortcut('q', mapView.zoomIn.bind(mapView), true);
+                this.keyboardService.registerShortcut('e', mapView.zoomOut.bind(mapView), true);
+                this.keyboardService.registerShortcut('w', mapView.moveUp.bind(mapView), true);
+                this.keyboardService.registerShortcut('a', mapView.moveLeft.bind(mapView), true);
+                this.keyboardService.registerShortcut('s', mapView.moveDown.bind(mapView), true);
+                this.keyboardService.registerShortcut('d', mapView.moveRight.bind(mapView), true);
+                this.keyboardService.registerShortcut('r', mapView.resetOrientation.bind(mapView), true);
+            }
+            break;
+        }
     }
 }

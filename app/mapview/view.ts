@@ -13,7 +13,7 @@ import {
     WebMercatorProjection,
     BillboardCollection, defined, ScreenSpaceEventType, Billboard, HeightReference
 } from "../integrations/cesium";
-import {AppStateService, CameraViewState} from "../shared/appstate.service";
+import {AppStateService, CameraViewState, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TileVisualization} from "./visualization.model";
 import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
@@ -376,6 +376,9 @@ export class MapView {
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
             if (environment.visualizationOnly) return;
+
+            // Focus on this view
+            this.stateService.focusedView = this._viewIndex;
 
             const position = movement.position;
             let feature = this.viewer.scene.pick(position);
@@ -791,35 +794,6 @@ export class MapView {
             this.updateViewport();
         } catch (error) {
             console.error('Error on camera change update:', error);
-        }
-    }
-
-    adjustCameraForViewportChange(scaleFactor: number): void {
-        try {
-            if (!this.isAvailable()) {
-                console.debug('Cannot adjust camera for viewport change: viewer unavailable');
-                return;
-            }
-            if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
-                return;
-            }
-
-            const currentPosition = this.viewer.camera.positionCartographic;
-            const desiredHeight = currentPosition.height * scaleFactor;
-
-            if (!Number.isFinite(desiredHeight) || desiredHeight <= 0) {
-                return;
-            }
-
-            const newPosition = new Cartographic(
-                currentPosition.longitude,
-                currentPosition.latitude,
-                desiredHeight
-            );
-
-            this.stateService.setView(this._viewIndex, newPosition, this.viewer.camera);
-        } catch (error) {
-            console.error('Error adjusting camera for viewport change:', error);
         }
     }
 

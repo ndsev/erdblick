@@ -9,7 +9,7 @@ import {
 import {coreLib} from "../integrations/wasm";
 import {TileFeatureId} from "../shared/appstate.service";
 
-type MapLayerStyleRule = string;
+export type MapViewLayerStyleRule = string;
 type PositionHash = string;
 type Cartographic = {x: number, y: number, z: number};
 
@@ -35,7 +35,7 @@ export interface MergedPointVisualization {
  */
 export class MergedPointsTile {
     tileId: bigint = 0n;  // NW tile ID
-    mapLayerStyleRuleId: MapLayerStyleRule = "";
+    mapLayerStyleRuleId: MapViewLayerStyleRule = "";
 
     referencingTiles: Array<bigint> = [];
 
@@ -109,6 +109,7 @@ export class MergedPointsTile {
             viewer.scene.primitives.add(this.labelPrimitives)
         }
 
+        // TODO: Move under debug api
         // On-demand debug visualization:
         // Adding debug bounding box and label for tile ID and feature count
         // const tileBounds = coreLib.getCornerTileBox(this.tileId);
@@ -168,12 +169,12 @@ export class MergedPointsTile {
 @Injectable({providedIn: 'root'})
 export class PointMergeService
 {
-    mergedPointsTiles: Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapLayerStyleRule, Map<bigint, MergedPointsTile>>();
+    mergedPointsTiles: Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>> = new Map<MapViewLayerStyleRule, Map<bigint, MergedPointsTile>>();
 
     /**
      * Count how many points have been merged for the given position and style rule so far.
      */
-    count(geoPos: Cartographic, hashPos: PositionHash, level: number, mapLayerStyleRuleId: MapLayerStyleRule): number {
+    count(geoPos: Cartographic, hashPos: PositionHash, level: number, mapLayerStyleRuleId: MapViewLayerStyleRule): number {
         return this.getCornerTileByPosition(geoPos, level, mapLayerStyleRuleId).count(hashPos);
     }
 
@@ -183,7 +184,7 @@ export class PointMergeService
      * is north if the tile center, the tile IDs y component is decremented (unless it is already 0).
      * If the position is west of the tile center, the tile IDs x component is decremented (unless it is already 0).
      */
-    getCornerTileByPosition(geoPos: Cartographic, level: number, mapLayerStyleRuleId: MapLayerStyleRule): MergedPointsTile {
+    getCornerTileByPosition(geoPos: Cartographic, level: number, mapLayerStyleRuleId: MapViewLayerStyleRule): MergedPointsTile {
         // Calculate the correct corner tile ID.
         let tileId = coreLib.getTileIdFromPosition(geoPos.x, geoPos.y, level);
         let tilePos = coreLib.getTilePosition(tileId);
@@ -200,7 +201,7 @@ export class PointMergeService
     /**
      * Get (or create) a corner tile by its style-rule-id + tile-id combo.
      */
-    getCornerTileById(tileId: bigint, mapLayerStyleRuleId: MapLayerStyleRule): MergedPointsTile {
+    getCornerTileById(tileId: bigint, mapLayerStyleRuleId: MapViewLayerStyleRule): MergedPointsTile {
         // Get or create the tile-map for the mapLayerStyleRuleId.
         let styleRuleMap = this.mergedPointsTiles.get(mapLayerStyleRuleId);
         if (!styleRuleMap) {
@@ -225,7 +226,7 @@ export class PointMergeService
      * the missingTiles of each. MergedPointsTiles with empty referencingTiles (requiring render)
      * are yielded. The sourceTileId is also added to the MergedPointsTiles referencingTiles set.
      */
-    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, mapLayerStyleRuleId: MapLayerStyleRule): Generator<MergedPointsTile> {
+    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, mapLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
         // Insert the points into the relevant corner tiles.
         let level = coreLib.getTileLevel(sourceTileId);
         for (let point of points) {

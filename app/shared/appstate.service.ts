@@ -7,10 +7,11 @@ import {SelectedSourceData} from "../inspection/inspection.service";
 import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
-import {FeatureTile, FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
+export const VIEW_SYNC_PROJECTION = "proj";
+export const VIEW_SYNC_POSITION = "pos";
 
 export interface TileFeatureId {
     featureId: string,
@@ -122,6 +123,14 @@ export class AppStateService implements OnDestroy {
         defaultValue: 0,
         schema: z.coerce.number().nonnegative(),
         urlParamName: 'f',
+        urlIncludeInVisualizationOnly: false,
+    });
+
+    readonly viewSyncState = this.createState<string[]>({
+        name: 'viewSync',
+        defaultValue: [],
+        schema: z.array(z.union([z.literal(VIEW_SYNC_PROJECTION), z.literal(VIEW_SYNC_POSITION)])),
+        urlParamName: 'sync',
         urlIncludeInVisualizationOnly: false,
     });
 
@@ -504,6 +513,8 @@ export class AppStateService implements OnDestroy {
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
+    get viewSync() {return this.viewSyncState.getValue();}
+    set viewSync(val: string[]) {this.viewSyncState.next(val);};
 
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -514,7 +525,7 @@ export class AppStateService implements OnDestroy {
         return new Cartographic(destination.lon, destination.lat, destination.alt);
     }
 
-    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+    private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
         const newOrientation = orientation !== undefined ? orientation : {
             heading: 0.0,
             pitch: -90,
@@ -535,8 +546,35 @@ export class AppStateService implements OnDestroy {
         this.cameraViewDataState.next(viewIndex, view);
     }
 
-    setProjectionMode(mapViewIndex: number, is2DMode: boolean) {
-        this.mode2dState.next(mapViewIndex, is2DMode);
+    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+        if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
+            // Unfocused view is trying to update itself when the views are synchronized
+            if (viewIndex !== this.focusedView) {
+                return;
+            }
+
+            for (let i = 0; i < this.numViews; i++) {
+                this._setView(i, destination, orientation);
+            }
+            return;
+        }
+
+        this._setView(viewIndex, destination, orientation);
+    }
+
+    setProjectionMode(viewIndex: number, is2DMode: boolean) {
+        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
+            // Unfocused view is trying to update itself when the views are synchronized
+            if (viewIndex !== this.focusedView) {
+                return;
+            }
+
+            for (let i = 0; i < this.numViews; i++) {
+                this.mode2dState.next(i, is2DMode);
+            }
+            return;
+        }
+        this.mode2dState.next(viewIndex, is2DMode);
     }
 
     setSelectedFeatures(viewIndex: number, newSelection: TileFeatureId[]) {

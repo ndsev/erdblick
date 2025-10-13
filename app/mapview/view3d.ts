@@ -38,6 +38,7 @@ export class MapView3D extends MapView {
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
     }
 
+    // TODO: Make sure that we transform the offest according to the heading of the camera
     override moveUp() {
         this.moveCameraOnSurface(0, this.cameraMoveUnits);
     }
@@ -120,6 +121,8 @@ export class MapView3D extends MapView {
         this.stateService.setView(
             this._viewIndex, Cartographic.fromCartesian(this.viewer.camera.position), this.viewer.camera
         );
+
+        // this.syncPositionToThisOnDemand();
     };
 
     protected override performSurfaceMovement(newPosition: Cartographic) {

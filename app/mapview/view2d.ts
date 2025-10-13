@@ -193,7 +193,11 @@ export class MapView2D extends MapView {
             );
             this.stateService.setView(this._viewIndex, center, camera);
         }
-        this.stateService.setView(this._viewIndex, new Cartographic(position.longitude, position.latitude, restoredHeight), camera);
+        else {
+            this.stateService.setView(this._viewIndex, new Cartographic(position.longitude, position.latitude, restoredHeight), camera);
+        }
+
+        // this.syncPositionToThisOnDemand();
     };
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):

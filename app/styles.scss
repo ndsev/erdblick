@@ -71,22 +71,60 @@ map-view {
   height: 100%;
   width: 100%;
   position: relative;
-}
 
-.mapviewer-renderlayer {
-  position: relative;
-  height: 100vh;
-  inset: 0;
-  overflow: hidden;
-  user-select: none;
-  -moz-user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  -o-user-select: none;
-}
+  .viewsync-select {
+    position: absolute;
+    left: 0.5em;
+    top: 0.5em;
+    z-index: 110;
+    opacity: 0.75;
+  }
 
-[id^="mapViewContainer"] .cesium-widget-credits {
-  display: none !important;
+  .viewsync-select:hover {
+    opacity: 1;
+  }
+
+  .p-multiselect {
+    box-shadow: none;
+    border: none;
+  }
+
+  .p-multiselect-dropdown-icon {
+    margin-left: -0.5em;
+  }
+
+  .p-multiselect-label {
+    display: none;
+  }
+
+  .p-multiselect-header {
+    display: none;
+  }
+
+  .p-multiselect {
+    width: 2em;
+    height: 2em;
+  }
+
+  .mapviewer-renderlayer {
+    position: relative;
+    height: 100vh;
+    inset: 0;
+    overflow: hidden;
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+
+    &.outlined {
+      border: 0.1em solid var(--p-focus-ring-color);
+    }
+  }
+
+  [id^="mapViewContainer"] .cesium-widget-credits {
+    display: none !important;
+  }
 }
 
 /* Shared styles for both panels */

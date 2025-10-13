@@ -1,4 +1,4 @@
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -31,7 +31,10 @@ declare let window: DebugWindow;
 @Component({
     selector: 'map-view',
     template: `
-        <div #viewer [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer [ngClass]="{'outlined': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <p-multiSelect *ngIf="showSyncMenu" dropdownIcon="pi pi-link" [options]="syncOptions" [(ngModel)]="selectedOptions"
+                       (ngModelChange)="updateSelectedOptions()" optionLabel="name" filter="false" showToggleAll="false"
+                       placeholder="" class="viewsync-select"/>
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()"/>
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
@@ -54,7 +57,15 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
     is2DMode: boolean = false;
     mapView?: MapView;
     viewIndex: InputSignal<number> = input.required<number>();
+    outlined: boolean = false;
+    showSyncMenu: boolean = false;
+    syncOptions: {name: string, value: string}[] = [
+        {name: "Position", value: VIEW_SYNC_POSITION},
+        {name: "Projection", value: VIEW_SYNC_PROJECTION}
+    ];
+    selectedOptions: {name: string, value: string}[] = [];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
+
     private modeSubscription?: Subscription;
     private viewInitialized = false;
 
@@ -88,6 +99,10 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
             // if (this.stateService.focusedView === this.mapView?.viewIndex)
             this.menuItems = [...items];
         });
+
+        this.stateService.focusedViewState.subscribe(focusedViewIndex => {
+            this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
+        });
     }
 
     ngOnInit() {
@@ -106,21 +121,6 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         this.initializeViewer(this.is2DMode);
     }
 
-    /**
-     * Setup keyboard shortcuts
-     */
-    private setupKeyboardShortcuts() {
-        if (!this.appModeService.isVisualizationOnly) {
-            // TODO: Only react to shortcuts if we are the focused view!
-            this.keyboardService.registerShortcut('q', this.mapView!.zoomIn.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('e', this.mapView!.zoomOut.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('w', this.mapView!.moveUp.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('a', this.mapView!.moveLeft.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('s', this.mapView!.moveDown.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('d', this.mapView!.moveRight.bind(this.mapView!), true);
-            this.keyboardService.registerShortcut('r', this.mapView!.resetOrientation.bind(this.mapView!), true);
-        }
-    }
 
     onContextMenuHide() {
         if (!this.menuService.tileSourceDataDialogVisible) {
@@ -165,7 +165,8 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
             if (spinner) {
                 spinner.style.display = 'none';
             }
-            this.setupKeyboardShortcuts();
+            this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
+            this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
             this.cdr.markForCheck();
         });
     }
@@ -174,22 +175,7 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         return `mapViewContainer-${this.viewIndex()}`;
     }
 
-    applyCameraScaleFromWidthChange(previousPercent: number, currentPercent: number): void {
-        if (!this.mapView) {
-            return;
-        }
-        if (!Number.isFinite(previousPercent) || previousPercent <= 0) {
-            return;
-        }
-
-        const scaleFactor = currentPercent / previousPercent;
-        if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
-            return;
-        }
-        if (Math.abs(scaleFactor - 1) < 0.01) {
-            return;
-        }
-
-        this.mapView.adjustCameraForViewportChange(scaleFactor);
+    updateSelectedOptions() {
+        this.stateService.viewSync = this.selectedOptions.map(option => option.value);
     }
 }

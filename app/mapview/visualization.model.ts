@@ -16,7 +16,7 @@ import {
     RectangleOutlineGeometry
 } from "../integrations/cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
-import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
@@ -295,7 +295,7 @@ export class TileVisualization {
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
-                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, `${this.viewIndex}:${mapLayerStyleRuleId}`)) {
                             finishedCornerTile.render(viewer);
                         }
                     }
@@ -344,7 +344,7 @@ export class TileVisualization {
         // Remove point-merge contributions that were made by this map-layer+style visualization combo.
         let removedCornerTiles = this.pointMergeService.remove(
             this.tile.tileId,
-            this.mapLayerStyleId());
+            this.mapViewLayerStyleId());
         for (let removedCornerTile of removedCornerTiles) {
             removedCornerTile.remove(viewer);
         }
@@ -387,7 +387,7 @@ export class TileVisualization {
      * (in combination with the tile id) uniquely identifies that rendered contents
      * if this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
-    private mapLayerStyleId() {
-        return `${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
+    private mapViewLayerStyleId(): MapViewLayerStyleRule {
+        return `${this.viewIndex}:${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
     }
 }
