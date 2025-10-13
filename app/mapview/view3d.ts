@@ -1,4 +1,4 @@
-import {Cartesian2, Cartesian3, Cartographic, CesiumMath, SceneMode} from "../integrations/cesium";
+import {Cartesian3, Cartographic, CesiumMath, SceneMode, Rectangle} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
@@ -81,7 +81,7 @@ export class MapView3D extends MapView {
         }
     }
 
-    protected override convertCameraState(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
+    protected override updateOnAppStateChange(_: [number, number, number, number] | null, cameraData: CameraViewState) {
         if (!this.isAvailable()) {
             console.debug('Cannot restore camera state: missing viewer');
             return;
@@ -121,107 +121,15 @@ export class MapView3D extends MapView {
         this.stateService.setView(
             this._viewIndex, Cartographic.fromCartesian(this.viewer.camera.position), this.viewer.camera
         );
-
-        // this.syncPositionToThisOnDemand();
     };
 
     protected override performSurfaceMovement(newPosition: Cartographic) {
         this.stateService.setView(this._viewIndex, newPosition, this.stateService.getCameraOrientation(this._viewIndex));
     }
 
-    override updateViewport() {
-        try {
-            // Check if the viewer is destroyed
-            if (!this.isAvailable()) {
-                console.debug('Cannot update viewport: viewer is destroyed or unavailable');
-                return;
-            }
-
-            let canvas = this.viewer.scene.canvas;
-            if (!canvas) {
-                console.debug('Cannot update viewport: canvas not available');
-                return;
-            }
-
-            let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-            let centerCartesian = this.viewer.camera.pickEllipsoid(center);
-            let centerLon, centerLat;
-
-            if (centerCartesian !== undefined) {
-                let centerCartographic = Cartographic.fromCartesian(centerCartesian);
-                centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
-                centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
-            } else {
-                let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
-                centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
-                centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
-            }
-
-            // First try: Pass ellipsoid explicitly (workaround for Cesium issue)
-            let rectangle = this.viewer.camera.computeViewRectangle(
-                this.viewer.scene.globe.ellipsoid
-            );
-
-            if (!rectangle) {
-                return;
-            }
-
-            let west = CesiumMath.toDegrees(rectangle.west);
-            let south = CesiumMath.toDegrees(rectangle.south);
-            let east = CesiumMath.toDegrees(rectangle.east);
-            let north = CesiumMath.toDegrees(rectangle.north);
-            let sizeLon = east - west;
-            let sizeLat = north - south;
-
-            // Check for suspicious viewport dimensions
-            if (Math.abs(sizeLon) > 360 || Math.abs(sizeLat) > 180) {
-                console.error('Suspicious viewport dimensions:', {sizeLon, sizeLat});
-            }
-
-            // Final validation of all viewport parameters
-            if (!isFinite(centerLon) || !isFinite(centerLat) ||
-                !isFinite(west) || !isFinite(east) || !isFinite(south) || !isFinite(north) ||
-                !isFinite(sizeLon) || !isFinite(sizeLat)) {
-                console.error('Invalid viewport parameters detected, skipping update:', {
-                    centerLon, centerLat, west, east, south, north, sizeLon, sizeLat
-                });
-                return;
-            }
-
-            // Ensure dimensions are positive
-            if (sizeLon <= 0 || sizeLat <= 0) {
-                console.error('Invalid viewport dimensions:', {sizeLon, sizeLat});
-                return;
-            }
-
-            // Grow the viewport rectangle by 25%
-            let expandLon = sizeLon * 0.25;
-            let expandLat = sizeLat * 0.25;
-
-            const viewportData = {
-                south: south - expandLat,
-                west: west - expandLon,
-                width: sizeLon + expandLon * 2,
-                height: sizeLat + expandLat * 2,
-                camPosLon: centerLon,
-                camPosLat: centerLat,
-                orientation: -this.viewer.camera.heading + Math.PI * .5,
-            };
-
-            // Final validation of viewport data
-            if (!isFinite(viewportData.south) || !isFinite(viewportData.west) ||
-                !isFinite(viewportData.width) || !isFinite(viewportData.height) ||
-                !isFinite(viewportData.camPosLon) || !isFinite(viewportData.camPosLat) ||
-                !isFinite(viewportData.orientation)) {
-                console.error('Invalid viewport data calculated, skipping update:', viewportData);
-                return;
-            }
-
-            this.mapService.setViewport(this._viewIndex, viewportData);
-
-        } catch (error) {
-            console.error('Error updating viewport:', error);
-            console.error('Error stack:', (error as Error)?.stack || 'No stack trace available');
-        }
+    protected override computeViewRectangle(): Rectangle | undefined {
+        return this.viewer.camera.computeViewRectangle(
+            this.viewer.scene.globe.ellipsoid
+        );
     }
 }

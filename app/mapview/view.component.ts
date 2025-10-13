@@ -23,10 +23,8 @@ import {AppModeService} from "../shared/app-mode.service";
 import {MapView} from "./view";
 import {MapView2D} from "./view2d";
 import {MapView3D} from "./view3d";
-import {Subscription} from "rxjs";
-
-// Redeclare window with extended interface
-declare let window: DebugWindow;
+import {combineLatest, Subscription} from "rxjs";
+import {filter} from "rxjs/operators";
 
 @Component({
     selector: 'map-view',
@@ -52,7 +50,7 @@ declare let window: DebugWindow;
     `],
     standalone: false
 })
-export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
+export class MapViewComponent implements AfterViewInit, OnDestroy {
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: MapView;
@@ -105,22 +103,18 @@ export class MapViewComponent implements OnInit, AfterViewInit, OnDestroy {
         });
     }
 
-    ngOnInit() {
-        this.is2DMode = this.stateService.mode2dState.getValue(this.viewIndex());
-        this.modeSubscription = this.stateService.mode2dState.subscribe(this.viewIndex(), mode2d => {
-            const needsRebuild = this.is2DMode !== mode2d;
+    ngAfterViewInit() {
+        this.modeSubscription = combineLatest([
+            this.stateService.ready.pipe(filter(ready => ready)),
+            this.stateService.mode2dState.pipe(this.viewIndex())
+        ]).subscribe(([_, mode2d]) => {
+            const needsRebuild = this.is2DMode !== mode2d || !this.mapView;
             this.is2DMode = mode2d;
-            if (this.viewInitialized && needsRebuild) {
+            if (needsRebuild) {
                 this.initializeViewer(mode2d);
             }
         });
     }
-
-    ngAfterViewInit() {
-        this.viewInitialized = true;
-        this.initializeViewer(this.is2DMode);
-    }
-
 
     onContextMenuHide() {
         if (!this.menuService.tileSourceDataDialogVisible) {

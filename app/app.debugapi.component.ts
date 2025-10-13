@@ -3,6 +3,7 @@ import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {SceneMode, CesiumMath} from "./integrations/cesium";
 import {MapView} from "./mapview/view";
+import {MapView2D} from "./mapview/view2d";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -103,7 +104,7 @@ export class ErdblickDebugApi {
      */
     showMercatorDistortion(mapView: MapView) {
         // Show current camera position distortion first
-        if (mapView.isAvailable()) {
+        if (mapView instanceof MapView2D && mapView.isAvailable()) {
             const currentPos = mapView.viewer.camera.positionCartographic;
             const currentLatDeg = CesiumMath.toDegrees(currentPos.latitude);
             const currentFactor = mapView.calculateMercatorDistortionFactor(currentPos.latitude);
@@ -122,23 +123,23 @@ export class ErdblickDebugApi {
                 const equivalent2D = currentHeight * currentFactor;
                 console.log(`  Equivalent 2D altitude: ${Math.round(equivalent2D)}m`);
             }
+
+            console.log('📊 WebMercator Distortion Factors by Latitude:');
+            const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
+            testLatitudes.forEach(latDeg => {
+                const latRad = CesiumMath.toRadians(latDeg);
+                const factor = mapView.calculateMercatorDistortionFactor(latRad);
+                console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
+            });
+
+            console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
+            testLatitudes.forEach(latDeg => {
+                const latRad = CesiumMath.toRadians(latDeg);
+                const factor = mapView.calculateMercatorDistortionFactor(latRad);
+                const altitude3D = 10000; // 10km
+                const altitude2D = altitude3D * factor;
+                console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
+            });
         }
-
-        console.log('📊 WebMercator Distortion Factors by Latitude:');
-        const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
-        testLatitudes.forEach(latDeg => {
-            const latRad = CesiumMath.toRadians(latDeg);
-            const factor = mapView.calculateMercatorDistortionFactor(latRad);
-            console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
-        });
-
-        console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
-        testLatitudes.forEach(latDeg => {
-            const latRad = CesiumMath.toRadians(latDeg);
-            const factor = mapView.calculateMercatorDistortionFactor(latRad);
-            const altitude3D = 10000; // 10km
-            const altitude2D = altitude3D * factor;
-            console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
-        });
     }
 }

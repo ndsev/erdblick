@@ -78,6 +78,10 @@ export class MapViewContainerComponent {
             return;
         }
 
+        if (this.mapViewComponents === undefined) {
+            return;
+        }
+
         for (const viewComponent of this.mapViewComponents) {
             if (viewComponent.mapView?.viewIndex !== this.stateService.focusedView) {
                 continue;

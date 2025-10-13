@@ -3,6 +3,10 @@ import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {AppModeService} from "./shared/app-mode.service";
+import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
+
+// Redeclare window with extended interface
+declare let window: DebugWindow;
 
 interface Versions {
     name: string;
@@ -80,6 +84,11 @@ export class AppComponent {
                 public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService) {
+        window.ebDebug = new ErdblickDebugApi(
+            this.mapService,
+            this.stateService
+        );
+
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {

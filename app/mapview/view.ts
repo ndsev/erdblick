@@ -11,7 +11,12 @@ import {
     Viewer,
     ScreenSpaceEventHandler,
     WebMercatorProjection,
-    BillboardCollection, defined, ScreenSpaceEventType, Billboard, HeightReference
+    Rectangle,
+    BillboardCollection,
+    defined,
+    ScreenSpaceEventType,
+    Billboard,
+    HeightReference
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -336,7 +341,7 @@ export class MapView {
                 this.stateService.cameraViewDataState.pipe(this._viewIndex),
                 this.stateService.viewRectangleState.pipe(this._viewIndex)
             ]).subscribe(([cameraViewData, viewRect]) => {
-                this.convertCameraState(viewRect, cameraViewData);
+                this.updateOnAppStateChange(viewRect, cameraViewData);
                 this.updateViewport();
             })
         );
@@ -619,70 +624,6 @@ export class MapView {
         this.isDestroyingViewer = false;
     }
 
-    /**
-     * Calculate WebMercator distortion factor at a given latitude
-     * Based on the avgMercatorStretch calculation from core library
-     * @param latitudeRadians Latitude in radians
-     * @returns Distortion factor (1.0 at equator, increases towards poles)
-     */
-    calculateMercatorDistortionFactor(latitudeRadians: number): number {
-        // Clamp to valid WebMercator range
-        const clampedLat = Math.max(
-            -CAMERA_CONSTANTS.WEBMERCATOR_MAX_LATITUDE_RAD,
-            Math.min(CAMERA_CONSTANTS.WEBMERCATOR_MAX_LATITUDE_RAD, latitudeRadians)
-        );
-
-        // WebMercator distortion factor: sec(latitude)
-        return 1.0 / Math.cos(clampedLat);
-    }
-
-    /**
-     * Convert camera height to visual scale with WebMercator distortion compensation
-     * @param cameraHeight Camera height in meters
-     * @param latitudeRadians Latitude in radians for distortion compensation
-     * @param earthRadius Earth radius in meters
-     * @returns Visual angular scale in degrees
-     */
-    heightToVisualScale(cameraHeight: number, latitudeRadians: number, earthRadius: number): number {
-        const angularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
-        const distortionFactor = this.calculateMercatorDistortionFactor(latitudeRadians);
-        return CesiumMath.toDegrees(angularSize) / distortionFactor;
-    }
-
-    /**
-     * Convert visual scale to camera height with WebMercator distortion compensation
-     * @param visualScaleDegrees Visual scale in degrees
-     * @param latitudeRadians Latitude in radians for distortion compensation
-     * @param earthRadius Earth radius in meters
-     * @returns Camera height in meters
-     */
-    visualScaleToHeight(visualScaleDegrees: number, latitudeRadians: number, earthRadius: number): number {
-        const distortionFactor = this.calculateMercatorDistortionFactor(latitudeRadians);
-        const compensatedScale = CesiumMath.toRadians(visualScaleDegrees * distortionFactor);
-        return (2 * earthRadius) * Math.tan(compensatedScale / 2);
-    }
-
-    /**
-     * Get the WebMercator maximum latitude in radians for use by other services
-     * @returns Maximum latitude in radians
-     */
-    getWebMercatorMaxLatitudeRad(): number {
-        return CAMERA_CONSTANTS.WEBMERCATOR_MAX_LATITUDE_RAD;
-    }
-
-    /**
-     * Get size bounds for viewport dimensions
-     * @returns Object with min/max longitude and latitude bounds
-     */
-    getSizeBounds(): { minLon: number, maxLon: number, minLat: number, maxLat: number } {
-        return {
-            minLon: CAMERA_CONSTANTS.MIN_SIZE_LONGITUDE,
-            maxLon: CAMERA_CONSTANTS.MAX_SIZE_LONGITUDE,
-            minLat: CAMERA_CONSTANTS.MIN_SIZE_LATITUDE,
-            maxLat: CAMERA_CONSTANTS.MAX_SIZE_LATITUDE
-        };
-    }
-
     private baseCameraMoveM = 100.0;
     private baseCameraZoomM = 100.0;
     private scalingFactor = 1;
@@ -784,15 +725,90 @@ export class MapView {
     /**
      * Restore camera state from saved state
      */
-    protected convertCameraState(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
+    protected updateOnAppStateChange(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
         throw new Error('Not Implemented');
     }
 
     /**
      * Update the visible viewport, and communicate it to the model.
      */
-    updateViewport() {
-        throw Error('Not Implemented!');
+    protected updateViewport() {
+        try {
+            // Check if the viewer is destroyed
+            if (!this.isAvailable()) {
+                console.debug('Cannot update viewport: viewer is destroyed or unavailable');
+                return;
+            }
+
+            let canvas = this.viewer.scene.canvas;
+            if (!canvas) {
+                console.debug('Cannot update viewport: canvas not available');
+                return;
+            }
+
+            let center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+            let centerCartesian = this.viewer.camera.pickEllipsoid(center);
+            let centerLon, centerLat;
+
+            if (centerCartesian !== undefined) {
+                let centerCartographic = Cartographic.fromCartesian(centerCartesian);
+                centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
+                centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
+            } else {
+                let cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
+                centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
+                centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
+            }
+
+            const rectangle = this.computeViewRectangle();
+            if (!rectangle) {
+                return;
+            }
+
+            let west = CesiumMath.toDegrees(rectangle.west);
+            let south = CesiumMath.toDegrees(rectangle.south);
+            let east = CesiumMath.toDegrees(rectangle.east);
+            let north = CesiumMath.toDegrees(rectangle.north);
+            let sizeLon = Math.abs(east - west);
+            let sizeLat = Math.abs(north - south);
+
+            // Check for suspicious viewport dimensions
+            if (Math.abs(sizeLon) > 360 || Math.abs(sizeLat) > 180) {
+                console.error('Suspicious viewport dimensions:', {sizeLon, sizeLat});
+            }
+
+            // Don't handle antimeridian - let Cesium's continuous chaining work naturally
+            // The sizeLon can be any value in continuous 2D mode
+
+            // Final validation of all viewport parameters
+            if (!isFinite(centerLon) || !isFinite(centerLat) ||
+                !isFinite(west) || !isFinite(east) || !isFinite(south) || !isFinite(north) ||
+                !isFinite(sizeLon) || !isFinite(sizeLat)) {
+                console.error('Invalid viewport parameters detected, skipping update:', {
+                    centerLon, centerLat, west, east, south, north, sizeLon, sizeLat
+                });
+                return;
+            }
+
+            // Grow the viewport rectangle by 25%
+            let expandLon = sizeLon * 0.25;
+            let expandLat = sizeLat * 0.25;
+
+            const viewportData = {
+                south: south - expandLat,
+                west: west - expandLon,
+                width: sizeLon + expandLon * 2,
+                height: sizeLat + expandLat * 2,
+                camPosLon: centerLon,
+                camPosLat: centerLat,
+                orientation: -this.viewer.camera.heading + Math.PI * .5,
+            };
+
+            this.mapService.setViewport(this._viewIndex, viewportData);
+        } catch (error) {
+            console.error('Error updating viewport:', error);
+            console.error('Error stack:', (error as Error)?.stack || 'No stack trace available');
+        }
     }
 
     updateOnCameraChangedHandler = () => {
@@ -960,5 +976,9 @@ export class MapView {
         } catch (error) {
             console.error('Error rendering feature search result tree:', error);
         }
+    }
+
+    protected computeViewRectangle(): Rectangle | undefined {
+        throw Error("Not implemented");
     }
 }
