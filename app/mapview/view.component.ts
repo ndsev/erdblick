@@ -36,7 +36,7 @@ declare let window: DebugWindow;
                        (ngModelChange)="updateSelectedOptions()" optionLabel="name" filter="false" showToggleAll="false"
                        placeholder="" class="viewsync-select"/>
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
-                       (onHide)="onContextMenuHide()"/>
+                       (onHide)="onContextMenuHide()" appendTo="body" />
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
         @defer (when mapView) {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>

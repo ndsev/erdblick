@@ -350,10 +350,17 @@ export class MapView {
      * Setup event handlers and subscriptions for mouse handler
      */
     private setupMouseEventHandlers() {
-        if (!this.mouseHandler) return;
+        if (!this.mouseHandler) {
+            return;
+        }
 
         this.mouseHandler.setInputAction((movement: any) => {
-            if (environment.visualizationOnly) return;
+            if (environment.visualizationOnly) {
+                return;
+            }
+
+            // Focus on this view
+            this.stateService.focusedView = this._viewIndex;
 
             const position = movement.position;
             const cartesian = this.viewer.camera.pickEllipsoid(
@@ -375,7 +382,9 @@ export class MapView {
 
         // Add a handler for selection.
         this.mouseHandler.setInputAction((movement: any) => {
-            if (environment.visualizationOnly) return;
+            if (environment.visualizationOnly) {
+                return;
+            }
 
             // Focus on this view
             this.stateService.focusedView = this._viewIndex;
