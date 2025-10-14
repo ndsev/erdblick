@@ -1,4 +1,4 @@
-import {Cartesian3, Cartographic, CesiumMath, SceneMode, Rectangle} from "../integrations/cesium";
+import {Cartesian3, Cartographic, CesiumMath, SceneMode, Rectangle, Entity, Color} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
@@ -81,11 +81,12 @@ export class MapView3D extends MapView {
         }
     }
 
-    protected override updateOnAppStateChange(_: [number, number, number, number] | null, cameraData: CameraViewState) {
+    protected override updateOnAppStateChange(cameraData: CameraViewState) {
         if (!this.isAvailable()) {
             console.debug('Cannot restore camera state: missing viewer');
             return;
         }
+
         this.viewer.camera.setView({
             destination: Cartesian3.fromDegrees(
                 cameraData.destination.lon,

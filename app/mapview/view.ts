@@ -42,7 +42,7 @@ export interface CameraConstants {
 
     // Altitude limits and defaults
     readonly MIN_ALTITUDE_METERS: number;
-    readonly MAX_VIEW_RECTANGLE_DEGREES: number;
+    readonly MAX_ALTITUDE_METERS: number;
     readonly DEFAULT_PITCH_DEGREES: number;
 
     // Movement and zoom parameters
@@ -70,8 +70,8 @@ export const CAMERA_CONSTANTS: CameraConstants = {
     WEBMERCATOR_MAX_LATITUDE_RAD: CesiumMath.toRadians(85.05113),
 
     // Altitude limits and defaults
-    MIN_ALTITUDE_METERS: 100, // Minimum camera altitude for reasonable zoom
-    MAX_VIEW_RECTANGLE_DEGREES: 45, // Maximum view rectangle to prevent excessive zoom out
+    MIN_ALTITUDE_METERS: 10, // Minimum camera altitude for reasonable zoom
+    MAX_ALTITUDE_METERS: 2000000, // Maximum camera altitude for reasonable zoom
     DEFAULT_PITCH_DEGREES: -90.0, // Top-down view for camera
 
     // Movement and zoom parameters
@@ -119,6 +119,7 @@ export class MapView {
     protected subscriptions: Subscription[] = [];
     protected featureSearchVisualization: BillboardCollection | null = null;
     protected markerCollection: BillboardCollection | null = null;
+    private ignoreNextCamAppStateUpdate: boolean = false;
 
     get viewIndex() {
         return this._viewIndex;
@@ -337,11 +338,12 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            combineLatest([
-                this.stateService.cameraViewDataState.pipe(this._viewIndex),
-                this.stateService.viewRectangleState.pipe(this._viewIndex)
-            ]).subscribe(([cameraViewData, viewRect]) => {
-                this.updateOnAppStateChange(viewRect, cameraViewData);
+            this.stateService.cameraViewDataState.pipe(this._viewIndex).subscribe(cameraViewData => {
+                if (this.ignoreNextCamAppStateUpdate) {
+                    this.ignoreNextCamAppStateUpdate = false;
+                    return;
+                }
+                this.updateOnAppStateChange(cameraViewData);
                 this.updateViewport();
             })
         );
@@ -725,7 +727,7 @@ export class MapView {
     /**
      * Restore camera state from saved state
      */
-    protected updateOnAppStateChange(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
+    protected updateOnAppStateChange(cameraData: CameraViewState) {
         throw new Error('Not Implemented');
     }
 
@@ -814,6 +816,7 @@ export class MapView {
     updateOnCameraChangedHandler = () => {
         try {
             const position = this.viewer.camera.positionCartographic;
+            this.ignoreNextCamAppStateUpdate = true;
             this.updateScalingFactor(position.height);
             this.updateOnCameraChange();
             this.updateViewport();

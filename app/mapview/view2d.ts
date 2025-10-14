@@ -1,4 +1,14 @@
-import {Cartesian2, Cartographic, CesiumMath, Ellipsoid, PerspectiveFrustum, Rectangle, SceneMode} from "../integrations/cesium";
+import {
+    BoundingSphere, Camera,
+    Cartesian2,
+    Cartesian3,
+    Cartographic,
+    CesiumMath,
+    Ellipsoid,
+    PerspectiveFrustum,
+    Rectangle,
+    SceneMode
+} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
@@ -33,51 +43,31 @@ export class MapView2D extends MapView {
 
         // Enable standard 2D interactions
         scene.screenSpaceCameraController.enableTranslate = true;
-        scene.screenSpaceCameraController.enableZoom = true; // Disable Cesium's zoom to use only our custom handler
+        scene.screenSpaceCameraController.enableZoom = true;
         scene.screenSpaceCameraController.enableLook = false;
-
-        // Set zoom constraints for 2D mode (not used since we disabled zoom)
-        scene.screenSpaceCameraController.minimumZoomDistance = 100;
-        scene.screenSpaceCameraController.maximumZoomDistance = 12500000;
+        scene.screenSpaceCameraController.minimumZoomDistance = 10;
+        scene.screenSpaceCameraController.maximumZoomDistance = CAMERA_CONSTANTS.MAX_ALTITUDE_METERS * 4; // NOT SURE WHY THIS REQUIRES A MULTIPLICATION FACTOR
     }
 
-    protected override updateOnAppStateChange(viewRectangle: [number, number, number, number] | null, cameraData: CameraViewState) {
-        /*
+    protected override updateOnAppStateChange(cameraData: CameraViewState) {
         if (!this.isAvailable()) {
             console.debug('Cannot restore camera state: missing viewer');
             return;
         }
 
-        try {
-            // For 2D mode, use view rectangle if available
-            if (viewRectangle) {
-                this.viewer.camera.setView({destination: Rectangle.fromDegrees(...viewRectangle)});
-            } else {
-                // Apply exact forward conversion when switching from 3D to 2D
-                const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-                const restoredHeight = this.map3DHeightTo2DHeight(
-                    cameraData.destination.alt,
-                    cameraData.destination.lat,
-                    earthRadius);
-
-                // Calculate appropriate rectangle size based on compensated altitude
-                const visualScale = this.heightToFov(restoredHeight, cameraData.destination.lat, earthRadius);
-                const halfSizeDegrees = visualScale / 2;
-                const halfSizeRad = CesiumMath.toRadians(halfSizeDegrees);
-
-                this.viewer.camera.setView({
-                    destination: Rectangle.fromRadians(
-                        cameraData.destination.lon - halfSizeRad,
-                        cameraData.destination.lat - halfSizeRad,
-                        cameraData.destination.lon + halfSizeRad,
-                        cameraData.destination.lat + halfSizeRad
-                    )
-                });
-            //}
-        } catch (error) {
-            console.error('Error restoring camera state:', error);
+        const tracking3DCam = new Camera(this.viewer.scene);
+        tracking3DCam.setView({
+            destination: Cartesian3.fromDegrees(
+                cameraData.destination.lon,
+                cameraData.destination.lat,
+                Math.min(cameraData.destination.alt, CAMERA_CONSTANTS.MAX_ALTITUDE_METERS)),
+            orientation: this.viewer.camera
+        });
+        const rectangle = tracking3DCam.computeViewRectangle();
+        if (rectangle) {
+            this.viewer.camera.setView({destination: rectangle});
+            return;
         }
-     */
     }
 
     protected override setupHandlers() {
@@ -87,17 +77,6 @@ export class MapView2D extends MapView {
     /**
      * Setup custom wheel handler for 2D mode
      */
-    // private setupWheelHandler() {
-    //     return;
-    //     this.viewer.scene.canvas.addEventListener('wheel', (event: WheelEvent) => {
-    //         event.preventDefault();
-    //         event.stopPropagation();
-    //
-    //         const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9;
-    //
-    //         this.zoom2D(zoomFactor);
-    //     });
-    // }
 
     override moveUp() {
         const distance = this.get2DMovementDistance();
@@ -125,7 +104,7 @@ export class MapView2D extends MapView {
                 console.debug('Cannot zoom in: viewer not available or is destroyed');
                 return;
             }
-            this.viewer.camera.zoomIn(CAMERA_CONSTANTS.ZOOM_IN_FACTOR_2D);
+            this.viewer.camera.zoomIn(this.cameraZoomUnits);
         } catch (error) {
             console.error('Error zooming in:', error);
         }
@@ -137,35 +116,10 @@ export class MapView2D extends MapView {
                 console.debug('Cannot zoom out: viewer not available or is destroyed');
                 return;
             }
-            this.viewer.camera.zoomOut(CAMERA_CONSTANTS.ZOOM_OUT_FACTOR_2D);
+            this.viewer.camera.zoomOut(this.cameraZoomUnits);
         } catch (error) {
             console.error('Error zooming out:', error);
         }
-    }
-
-    /**
-     * Map a 2D WebMercator height to an equivalent 3D height
-     * by preserving the visual angular field (exact, drift-free).
-     */
-    private map2DHeightTo3DHeight(viewRect: Rectangle, latitudeRadians: number, earthRadius: number): number {
-
-        // const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
-        const halfAngle = viewRect.width / 2;
-        const height3D = (earthRadius) * Math.tan(halfAngle);
-        // Enforce a reasonable minimum altitude for stability
-        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height3D);
-    }
-
-    /**
-     * Map a 3D camera height to an equivalent 2D WebMercator height
-     * by preserving the visual angular field (exact, drift-free).
-     */
-    private map3DHeightTo2DHeight(height3D: number, latitudeRadians: number, earthRadius: number): number {
-        const distortion = this.calculateMercatorDistortionFactor(latitudeRadians); // sec(phi)
-        const halfAngle = Math.atan(height3D / (2 * earthRadius));
-        const height2D = (2 * earthRadius) * Math.tan(distortion * halfAngle);
-        // Enforce a reasonable minimum altitude for stability
-        return Math.max(CAMERA_CONSTANTS.MIN_ALTITUDE_METERS, height2D);
     }
 
     protected override updateOnCameraChange() {
@@ -180,16 +134,9 @@ export class MapView2D extends MapView {
             return;
         }
 
-        const position = Cartographic.fromCartesian(camera.position);
-        const restoredHeight = this.map2DHeightTo3DHeight(viewRect, position.latitude,
-            this.viewer.scene.globe.ellipsoid.maximumRadius);
-        const center = Cartographic.fromRadians(
-            (viewRect.west + viewRect.east) / 2,
-            (viewRect.north + viewRect.south) / 2,
-            restoredHeight
-        );
-        console.log("Camera: ", camera.position.z, "Cartographic: ", position.height, "Restored: ", restoredHeight);
-        this.stateService.setView(this._viewIndex, center, camera);
+        const tracking3DCam = new Camera(this.viewer.scene);
+        tracking3DCam.setView({destination: viewRect, orientation: camera});
+        this.stateService.setView(this._viewIndex, Cartographic.fromCartesian(tracking3DCam.position), tracking3DCam);
     };
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -250,49 +197,6 @@ export class MapView2D extends MapView {
     }
 
     /**
-     * 2D zoom using height-based approach with WebMercator distortion compensation
-     */
-    // private zoom2D(zoomFactor: number): void {
-    //     try {
-    //         // Check if the viewer is destroyed
-    //         if (!this.isAvailable()) {
-    //             console.debug('Cannot zoom in 2D: viewer is missing or destroyed');
-    //             return;
-    //         }
-    //
-    //         const camera = this.viewer.camera;
-    //         const currentPos = camera.positionCartographic;
-    //         const earthRadius = this.viewer.scene.globe.ellipsoid.maximumRadius;
-    //
-    //         // Get current camera height and calculate desired new height
-    //         const currentHeight = currentPos.height;
-    //         const desiredHeight = currentHeight * zoomFactor;
-    //
-    //         // Apply altitude limits using centralized constants
-    //         const minHeight = CAMERA_CONSTANTS.MIN_ALTITUDE_METERS;
-    //         const maxVisualScale = CAMERA_CONSTANTS.MAX_VIEW_RECTANGLE_DEGREES;
-    //         const maxHeight = this.visualScaleToHeight(maxVisualScale, currentPos.latitude, earthRadius);
-    //
-    //         let clampedHeight = Math.max(minHeight, Math.min(maxHeight, desiredHeight));
-    //         let wasClampedToLimit = (clampedHeight !== desiredHeight);
-    //
-    //         if (wasClampedToLimit) {
-    //             console.debug('Zoom clamped to altitude limits:', {
-    //                 desired: desiredHeight,
-    //                 clamped: clampedHeight,
-    //                 min: minHeight,
-    //                 max: maxHeight
-    //             });
-    //         }
-    //
-    //         // Set new camera height while preserving position
-    //         this.stateService.setView(this._viewIndex, new Cartographic(currentPos.longitude, currentPos.latitude, clampedHeight));
-    //     } catch (error) {
-    //         console.error('Error in 2D zoom:', error);
-    //     }
-    // }
-
-    /**
      * Get movement distance for 2D mode based on current viewport
      */
     private get2DMovementDistance(): { longitudeOffset: number, latitudeOffset: number } {
@@ -323,49 +227,6 @@ export class MapView2D extends MapView {
                 Math.min(CAMERA_CONSTANTS.MAX_LATITUDE_MOVEMENT, latitudeOffset)
             )
         };
-    }
-
-    /**
-     * Convert visual scale to camera height with WebMercator distortion compensation
-     * @param visualScaleDegrees Visual scale in degrees
-     * @param latitudeRadians Latitude in radians for distortion compensation
-     * @param earthRadius Earth radius in meters
-     * @returns Camera height in meters
-     */
-    visualScaleToHeight(visualScaleDegrees: number, latitudeRadians: number, earthRadius: number): number {
-        const distortionFactor = this.calculateMercatorDistortionFactor(latitudeRadians);
-        const compensatedScale = CesiumMath.toRadians(visualScaleDegrees * distortionFactor);
-        return (2 * earthRadius) * Math.tan(compensatedScale / 2);
-    }
-
-    /**
-     * Convert camera height to angular fov with WebMercator distortion compensation
-     * @param cameraHeight Camera height in meters
-     * @param latitudeRadians Latitude in radians for distortion compensation
-     * @param earthRadius Earth radius in meters
-     * @returns Visual angular scale in degrees
-     */
-    heightToFov(cameraHeight: number, latitudeRadians: number, earthRadius: number): number {
-        const angularSize = 2 * Math.atan(cameraHeight / (2 * earthRadius));
-        const distortionFactor = this.calculateMercatorDistortionFactor(latitudeRadians);
-        return CesiumMath.toDegrees(angularSize) / distortionFactor;
-    }
-
-    /**
-     * Calculate WebMercator distortion factor at a given latitude
-     * Based on the avgMercatorStretch calculation from core library
-     * @param latitudeRadians Latitude in radians
-     * @returns Distortion factor (1.0 at equator, increases towards poles)
-     */
-    calculateMercatorDistortionFactor(latitudeRadians: number): number {
-        // Clamp to valid WebMercator range
-        const clampedLat = Math.max(
-            -CAMERA_CONSTANTS.WEBMERCATOR_MAX_LATITUDE_RAD,
-            Math.min(CAMERA_CONSTANTS.WEBMERCATOR_MAX_LATITUDE_RAD, latitudeRadians)
-        );
-
-        // WebMercator distortion factor: sec(latitude)
-        return 1.0 / Math.cos(clampedLat);
     }
 
     protected override computeViewRectangle(): Rectangle | undefined {

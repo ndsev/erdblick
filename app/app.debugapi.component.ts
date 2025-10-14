@@ -97,49 +97,4 @@ export class ErdblickDebugApi {
             })
         }
     }
-
-    /**
-     * Diagnostic method to show WebMercator distortion factors at different latitudes
-     * Useful for debugging altitude compensation issues
-     */
-    showMercatorDistortion(mapView: MapView) {
-        // Show current camera position distortion first
-        if (mapView instanceof MapView2D && mapView.isAvailable()) {
-            const currentPos = mapView.viewer.camera.positionCartographic;
-            const currentLatDeg = CesiumMath.toDegrees(currentPos.latitude);
-            const currentFactor = mapView.calculateMercatorDistortionFactor(currentPos.latitude);
-            const currentHeight = currentPos.height;
-
-            console.log('🎯 CURRENT POSITION:');
-            console.log(`  Latitude: ${currentLatDeg.toFixed(3)}°`);
-            console.log(`  Altitude: ${Math.round(currentHeight)}m`);
-            console.log(`  Distortion Factor: ${currentFactor.toFixed(3)}x`);
-            console.log(`  Mode: ${mapView.getSceneMode().valueOf() === SceneMode.SCENE2D ? '2D' : '3D'}`);
-
-            if (mapView.getSceneMode().valueOf() === SceneMode.SCENE2D) {
-                const equivalent3D = currentHeight / currentFactor;
-                console.log(`  Equivalent 3D altitude: ${Math.round(equivalent3D)}m`);
-            } else {
-                const equivalent2D = currentHeight * currentFactor;
-                console.log(`  Equivalent 2D altitude: ${Math.round(equivalent2D)}m`);
-            }
-
-            console.log('📊 WebMercator Distortion Factors by Latitude:');
-            const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
-            testLatitudes.forEach(latDeg => {
-                const latRad = CesiumMath.toRadians(latDeg);
-                const factor = mapView.calculateMercatorDistortionFactor(latRad);
-                console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
-            });
-
-            console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
-            testLatitudes.forEach(latDeg => {
-                const latRad = CesiumMath.toRadians(latDeg);
-                const factor = mapView.calculateMercatorDistortionFactor(latRad);
-                const altitude3D = 10000; // 10km
-                const altitude2D = altitude3D * factor;
-                console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
-            });
-        }
-    }
 }

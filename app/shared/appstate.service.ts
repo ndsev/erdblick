@@ -522,7 +522,7 @@ export class AppStateService implements OnDestroy {
 
     getCameraPosition(viewIndex: number) {
         const destination = this.cameraViewDataState.getValue(viewIndex).destination;
-        return new Cartographic(destination.lon, destination.lat, destination.alt);
+        return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
     private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
