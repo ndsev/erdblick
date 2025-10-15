@@ -71,12 +71,13 @@ export class ErdblickDebugApi {
         let style = coreLib.generateTestStyle();
         this.mapService.addTileFeatureLayer(tile, {
             id: "_builtin",
+            shortId: "TEST",
             modified: false,
             imported: false,
-            params: {visible: true, options: {}},
             source: "",
             featureLayerStyle: style,
-            options: []
+            options: [],
+            visible: true
         }, "_builtin", true);
     }
 

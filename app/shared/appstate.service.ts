@@ -4,7 +4,7 @@ import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {SelectedSourceData} from "../inspection/inspection.service";
-import {AppState, AppStateOptions, Boolish, MapViewState} from "./app-state";
+import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
 
@@ -60,9 +60,11 @@ export class AppStateService implements OnDestroy {
 
     private isHydrating = false;
     private isReady = false;
+    private subscriptionsSetup = false;
     private pendingUrlSync = false;
     private pendingStorageSync = false;
     private flushHandle: Promise<void> | null = null;
+    private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
 
     // Base UI metrics
     baseFontSize: number = 16;
@@ -223,42 +225,7 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'z'
     });
 
-    /*
-    Style Option State Encoding:
-
-       We have a compact schema for encoding style option values on a
-       per-stylesheet per-map-layer per-view basis. For each style sheet,
-       we encode its option values in a single URL parameter. This URL
-       parameter is composed as follows:
-
-       <short-style-id>~<dash-separated-layerName-indices>~<tilde-separated-option-names>=
-       <tilde-separated-array-per-option-of-colon-separated-array-per-view-of-comma-separated-values-per-layer>
-
-    For example:
-
-       NY0X~1-2-3~showLanes~showLaneGroups~ADAS=1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0
-
-       NY0X   - is the short style id.
-       1-2-3  - The indices of the layer names in the layerNames state for which values are stored.
-       showLanes~showLaneGroups~ADAS - The style option IDs for which values are stored.
-       1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0 - breaks down into three pairs of tilde-separated per-view-per-layer option value arrays:
-       a) 1,0,0:1,0,0 - The values for the showLanes option. Two arrays of values (one for each map view).
-                        Three values, as there are three affected layers (1-2-3).
-       b) 1,1,1:0,0,0 - The values for the showLaneGroups option. Again, two sets of values (per view) and three values
-                        (one per layer) per view.
-       b) 0,0,0:0,0,0 - The values for the ADAS option. Same encoding as for showLanes and showLaneGroups.
-    */
-    // TODO: Add a member variable which contains this information
-
-    readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
-        name: 'styles',
-        defaultValue: {},
-        schema: z.record(z.string(), z.object({
-            v: Boolish,
-            o: z.record(z.string(), z.union([z.boolean(), z.number()])),
-        })),
-        urlParamName: 'sty',
-    });
+    readonly stylesState = new StyleState(this.statePool);
 
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
@@ -382,6 +349,7 @@ export class AppStateService implements OnDestroy {
     }
 
     private setupStateSubscriptions() {
+        if (this.subscriptionsSetup) return;
         // NOTE: Is this the best way to implement the internal subscription mechanism?
         for (const state of this.statePool.values()) {
             const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe(value => {
@@ -389,6 +357,7 @@ export class AppStateService implements OnDestroy {
             });
             this.stateSubscriptions.push(subscription);
         }
+        this.subscriptionsSetup = true;
     }
 
     private onStateChanged(state: AppState<unknown>, value: unknown): void {
@@ -514,7 +483,6 @@ export class AppStateService implements OnDestroy {
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
-    set styles(val: Record<string, StyleURLParameters>) {this.stylesState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
@@ -688,15 +656,43 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    styleOptionValues(
+        mapId: string,
+        layerId: string,
+        shortStyleId: string,
+        optionId: string,
+        optionType: string,
+        defaultValue: string|number|boolean
+    ): (string|number|boolean)[] {
+        const mapLayerId = `${mapId}/${layerId}`;
+        const layerIndex = this.layerNames.indexOf(mapLayerId);
+        if (layerIndex === -1) {
+            throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when reading style option values`);
+        }
 
-    /**
-     * Get style option values for a specific map layer style option.
-     * The returned values correspond to the number of parallel views.
-     * Note: This will NOT change the layerConfig array. Instead, if the
-     * map layer does not exist in layerNames, an exception will be thrown.
-     */
-    styleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, optionType: string, defaultValue: string|number|boolean): (string|number|boolean)[] {
-        // TODO: Implement
+        const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
+        const views = this.numViewsState.getValue();
+
+        let values = this.styles.get(key);
+        if (!values) {
+            values = Array.from({length: views}, () => defaultValue);
+            this.styles.set(key, values);
+            return values.slice();
+        }
+
+        // Ensure array length matches the number of views
+        if (values.length < views) {
+            const pad = Array.from({length: views - values.length}, () => defaultValue);
+            values = values.concat(pad);
+            this.styles.set(key, values);
+        } else if (values.length > views) {
+            values = values.slice(0, views);
+            this.styles.set(key, values);
+        }
+
+        // Trigger a URL update, as we might have added style option values for some view(s).
+        this.stylesState.next(this.styles);
+        return values.map(v => this.stylesState.coerceOptionValue(v, optionType));
     }
 
     /**
@@ -705,43 +701,24 @@ export class AppStateService implements OnDestroy {
      *  map layer does not exist in layerNames, an exception will be thrown.
      */
     setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, viewOptionValues: (string|number|boolean)[]) {
-        // TODO: Implement
-    }
-
-    /** DEPRECATED */
-    setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
-        if (Object.keys(this.stylesState.getValue()).length) {
-            return;
+        const mapLayerId = `${mapId}/${layerId}`;
+        const layerIndex = this.layerNames.indexOf(mapLayerId);
+        if (layerIndex === -1) {
+            throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when writing style option values`);
         }
-        const initial: Record<string, StyleURLParameters> = {};
-        styles.forEach((style, styleId) => {
-            const params = style?.params;
-            if (params) {
-                initial[styleId] = this.styleParamsToURLParams(params);
-            }
-        });
-        if (Object.keys(initial).length) {
-            this.stylesState.next(initial);
-        }
-    }
+        const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
+        const views = this.numViewsState.getValue();
 
-    /** DEPRECATED - Will be replaced in favor of new per-view per-layer styleOptionValues API. */
-    styleConfig(styleId: string): StyleParameters {
-        const styles = this.stylesState.getValue();
-        if (styles.hasOwnProperty(styleId)) {
-            return this.styleURLParamsToParams(styles[styleId]);
+        let nextValues: (string|number|boolean)[] = Array.isArray(viewOptionValues) ? [...viewOptionValues] : [];
+        if (nextValues.length < views) {
+            const last = nextValues.length ? nextValues[nextValues.length - 1] : false;
+            nextValues = nextValues.concat(Array.from({length: views - nextValues.length}, () => last));
+        } else if (nextValues.length > views) {
+            nextValues = nextValues.slice(0, views);
         }
-        return {
-            visible: true,
-            options: {}
-        };
-    }
 
-    /** DEPRECATED - Will be replaced in favor of new per-view per-layer styleOptionValues API. */
-    setStyleConfig(styleId: string, params: StyleParameters) {
-        const styles = {...this.stylesState.getValue()};
-        styles[styleId] = this.styleParamsToURLParams(params);
-        this.stylesState.next(styles);
+        this.styles.set(key, nextValues);
+        this.stylesState.next(this.styles);
     }
 
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {
@@ -783,6 +760,7 @@ export class AppStateService implements OnDestroy {
             localStorage.removeItem(state.name);
         }
         localStorage.removeItem('searchHistory');
+        localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         const {origin, pathname} = window.location;
         window.location.href = origin + pathname;
     }
@@ -845,15 +823,5 @@ export class AppStateService implements OnDestroy {
 
         // If all layers were pruned, return true.
         return layerNames.length === 0;
-    }
-
-    /** DEPRECATED */
-    private styleParamsToURLParams(params: StyleParameters): StyleURLParameters {
-        return { v: params.visible, o: params.options };
-    }
-
-    /** DEPRECATED */
-    private styleURLParamsToParams(params: StyleURLParameters): StyleParameters {
-        return { visible: params.v, options: params.o };
     }
 }

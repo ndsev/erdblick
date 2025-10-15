@@ -1,6 +1,6 @@
 import {BehaviorSubject, distinctUntilChanged, map, Observable, OperatorFunction} from "rxjs";
 import {z, ZodTypeAny} from "zod";
-import {Params} from "@angular/router";
+import type {Params} from "@angular/router";
 import {environment} from "../environments/environment";
 
 export type AppStateToStorageFun<T> = (value: T) => unknown;
@@ -480,4 +480,256 @@ function compactBooleans(value: unknown): unknown {
         return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, compactBooleans(entry)]));
     }
     return value;
+}
+
+/**
+ * Style Option State Encoding:
+ *
+ *    We have a compact schema for encoding style option values on a
+ *    per-stylesheet per-map-layer per-view basis. For each style sheet,
+ *    we encode its option values in a single URL parameter. This URL
+ *    parameter is composed as follows:
+ *
+ *    <short-style-id>~<dash-separated-layerName-indices>~<tilde-separated-option-names>=
+ *    <tilde-separated-array-per-option-of-colon-separated-array-per-view-of-comma-separated-values-per-layer>
+ *
+ * For example:
+ *
+ *    NY0X~1-2-3~showLanes~showLaneGroups~ADAS=1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0
+ *
+ *    NY0X   - is the short style id.
+ *    1-2-3  - The indices of the layer names in the layerNames state for which values are stored.
+ *    showLanes~showLaneGroups~ADAS - The style option IDs for which values are stored.
+ *    1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0 - breaks down into three pairs of tilde-separated per-view-per-layer option value arrays:
+ *    a) 1,0,0:1,0,0 - The values for the showLanes option. Two arrays of values (one for each map view).
+ *                     Three values, as there are three affected layers (1-2-3).
+ *    b) 1,1,1:0,0,0 - The values for the showLaneGroups option. Again, two sets of values (per view) and three values
+ *                     (one per layer) per view.
+ *    b) 0,0,0:0,0,0 - The values for the ADAS option. Same encoding as for showLanes and showLaneGroups.
+ */
+export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
+    layerNamesState: AppState<string[]>;
+    numViewsState: AppState<number>;
+
+    constructor(pool: Map<string, AppState<unknown>>) {
+        super(pool, {
+            name: "styleOptions",
+            schema: z.record(z.string(), z.string()),
+            defaultValue: new Map<string, (string|number|boolean)[]>()
+        });
+        const layerNamesState = pool.get("layerNames");
+        if (layerNamesState === undefined) {
+            throw Error("Expected layerNames state, got undefined!");
+        }
+        // Backward-compat: accept either 'numberOfViews' or legacy 'numViews'
+        const numViewsState = pool.get("numberOfViews");
+        if (numViewsState === undefined) {
+            throw Error("Expected numberOfViews state, got undefined!");
+        }
+        this.layerNamesState = layerNamesState as AppState<string[]>;
+        this.numViewsState = numViewsState as AppState<number>;
+    }
+
+    override isUrlState(): boolean {
+        return true;
+    }
+
+    override serialize(_: boolean): Record<string, string> | undefined {
+        const result: Record<string, string> = {};
+        if (this.value.size === 0) {
+            return result;
+        }
+
+        const layerNames = this.layerNamesState.getValue();
+        const numViews = this.numViewsState.getValue();
+
+        // Group by style -> option -> mapLayerId
+        // E.g. {
+        //   'NY0X': {
+        //     'showLanes': {'Bavaria/Island2/Lane': [0, 1], 'Bavaria/Island6/Lane': [0, 0]},
+        //     'showLaneGroups': {'Bavaria/Island2/Lane': [0, 0], 'Bavaria/Island6/Lane': [1, 1]}
+        //   }
+        // }
+        const grouped = new Map<string, Map<string, Map<string, (string|number|boolean)[]>>>();
+
+        for (const [fullKey, values] of this.value.entries()) {
+            const fullKeyParts = fullKey.split("/");
+            const optionId = fullKeyParts[fullKeyParts.length - 1];
+            const shortStyleId = fullKeyParts[fullKeyParts.length - 2];
+            const mapLayerId = fullKeyParts.slice(0, -2).join("/");
+            const layerIndex = layerNames.indexOf(mapLayerId);
+            if (layerIndex < 0) {
+                continue; // ignore layers not present anymore
+            }
+            if (!grouped.has(shortStyleId)) {
+                grouped.set(shortStyleId, new Map());
+            }
+            const byOption = grouped.get(shortStyleId)!;
+            if (!byOption.has(optionId)) {
+                byOption.set(optionId, new Map());
+            }
+            const byLayer = byOption.get(optionId)!;
+
+            if (values.length < numViews) {
+                throw new Error(`Styles serialization error: Expected length: ${numViews}, got: ${values.length}!`);
+            } else if (values.length > numViews) {
+                byLayer.set(mapLayerId, values.slice(0, numViews));
+            } else {
+                byLayer.set(mapLayerId, values);
+            }
+        }
+
+        // Build one param per style id
+        for (const [shortStyleId, byOption] of grouped.entries()) {
+            // Determine layer indices to include (union across options)
+            const layerSet = new Set<number>();
+            for (const byLayer of byOption.values()) {
+                for (const mapLayerId of byLayer.keys()) {
+                    const idx = layerNames.indexOf(mapLayerId);
+                    if (idx >= 0) {
+                        layerSet.add(idx);
+                    }
+                }
+            }
+            if (layerSet.size === 0) {
+                continue;
+            }
+
+            // Build value body per option
+            const optionBodies: string[] = [];
+            for (const optionId of byOption.keys()) {
+                const byLayer = byOption.get(optionId)!;
+                const perViewStrings: string[] = [];
+                for (let view = 0; view < numViews; view++) {
+                    const perLayerValues: string[] = [];
+                    for (const li of layerSet) {
+                        const mapLayerId = layerNames[li];
+                        const arr = byLayer.get(mapLayerId) ?? [];
+                        const raw = arr[view];
+                        const enc = (val: any) => {
+                            if (typeof val === 'boolean') return val ? '1' : '0';
+                            if (typeof val === 'number') return String(val);
+                            if (val === null || val === undefined) return '';
+                            return String(val);
+                        };
+                        perLayerValues.push(enc(raw));
+                    }
+                    perViewStrings.push(perLayerValues.join(','));
+                }
+                optionBodies.push(perViewStrings.join(':'));
+            }
+
+            const paramKey = `${shortStyleId}~${[...layerSet].join('-')}~${[...byOption.keys()].join('~')}`;
+            result[paramKey] = optionBodies.join('~');
+        }
+
+        return result;
+    }
+
+    override deserialize(raw: string | Params) {
+        // A raw local storage string must be converted to the Record<string, string>
+        if (typeof raw === 'string') {
+            raw = JSON.parse(raw);
+            z.parse(this.schema, raw);
+        }
+
+        const layerNames = this.layerNamesState.getValue();
+        const numViews = this.numViewsState.getValue();
+
+        for (const [key, value] of Object.entries(raw)) {
+            if (!this.isStyleOptionUrlParamKey(key)) {
+                continue;
+            }
+            const parts = key.split('~');
+            const shortStyleId = parts[0];
+            const layerIndices = parts[1].split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
+            const optionIds = parts.slice(2); // remaining parts are option IDs
+
+            if (!optionIds.length || !layerIndices.length) {
+                continue;
+            }
+
+            // Split value by '~' per option, same order as in key
+            const optionValueSegments = value.split('~');
+            if (optionValueSegments.length < optionIds.length) {
+                // If fewer bodies than option ids, skip
+                continue;
+            }
+
+            for (let oi = 0; oi < optionIds.length; oi++) {
+                const optionId = optionIds[oi];
+                const optionBody = optionValueSegments[oi] ?? '';
+                const perView = optionBody.split(':'); // per-view strings
+
+                for (let view = 0; view < numViews; view++) {
+                    const layerCsv = perView[view] ?? '';
+                    const perLayer = layerCsv.length ? layerCsv.split(',') : [];
+                    for (let li = 0; li < layerIndices.length; li++) {
+                        const layerIndex = layerIndices[li];
+                        if (layerIndex < 0 || layerIndex >= layerNames.length) {
+                            continue;
+                        }
+                        const mapLayerId = layerNames[layerIndex];
+                        const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
+                        const valuesForStoreKey = this.value.get(storeKey) || [];
+                        const rawVal = perLayer[li] ?? '';
+
+                        // Ensure length up to current view
+                        while (valuesForStoreKey.length <= view) {
+                            valuesForStoreKey.push(false);
+                        }
+                        valuesForStoreKey[view] = rawVal;
+                        this.value.set(storeKey, valuesForStoreKey);
+                    }
+                }
+            }
+        }
+    }
+
+    private isStyleOptionUrlParamKey(key: string): boolean {
+        // Example: NY0X~1-2-3~showLanes~showLaneGroups
+        // Constraints: at least 3 segments separated by '~' (styleId, layers, one option)
+        if (!key) {
+            return false;
+        }
+        const parts = key.split('~');
+        if (parts.length < 3) return false;
+        // layers part must be dash-separated indices
+        const layerPart = parts[1];
+        return /^\d+(?:-\d+)*$/.test(layerPart);
+    }
+
+    public styleOptionKey(mapId: string, layerId: string, shortStyleId: string, optionId: string): string {
+        // Use a slash-delimited compound key; mapId may contain '/'.
+        const mapLayerId = `${mapId}/${layerId}`;
+        return `${mapLayerId}/${shortStyleId}/${optionId}`;
+    }
+
+    private styleOptionKeyFromMapLayer(mapLayerId: string, shortStyleId: string, optionId: string): string {
+        return `${mapLayerId}/${shortStyleId}/${optionId}`;
+    }
+
+    public coerceOptionValue(value: any, optionType: string): string|number|boolean {
+        const t = (optionType || '').toLowerCase();
+        if (t === 'bool' || t === 'boolean') {
+            if (typeof value === 'boolean') return value;
+            if (typeof value === 'number') return value !== 0;
+            if (typeof value === 'string') {
+                const v = value.trim().toLowerCase();
+                return v === '1' || v === 'true';
+            }
+            return false;
+        }
+        if (t === 'number') {
+            if (typeof value === 'number') return value;
+            const n = Number(value);
+            return Number.isNaN(n) ? 0 : n;
+        }
+        if (t === 'string') {
+            if (value === null || value === undefined) return '';
+            return String(value);
+        }
+        // Default to boolean semantics
+        return typeof value === 'boolean' ? value : false;
+    }
 }

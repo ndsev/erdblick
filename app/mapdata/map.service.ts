@@ -321,7 +321,7 @@ export class MapDataService {
                     }
                     let styleEnabled = false;
                     if (this.styleService.styles.has(styleId)) {
-                        styleEnabled = this.styleService.styles.get(styleId)?.params.visible!;
+                        styleEnabled = this.styleService.styles.get(styleId)!.visible;
                     }
                     if (styleId != "_builtin" && !styleEnabled) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
@@ -570,7 +570,7 @@ export class MapDataService {
         if (!wasmStyle) {
             return;
         }
-        if (style.params !== undefined && !style.params.visible) {
+        if (!style.visible) {
             return;
         }
 
@@ -824,7 +824,7 @@ export class MapDataService {
             }
 
             for (let [_, style] of this.styleService.styles) {
-                if (style.featureLayerStyle && style.params.visible) {
+                if (style.featureLayerStyle && style.visible) {
                     let visu = new TileVisualization(
                         viewIndex,
                         featureTile,
@@ -835,7 +835,7 @@ export class MapDataService {
                         mode,
                         featureIds,
                         false,
-                        style.params.options);
+                        this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName));
                     this.tileVisualizationTopic.next(visu);
                     visualizationCollection.push(visu);
                 }

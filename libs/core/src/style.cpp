@@ -22,6 +22,11 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
             name_ = name.Scalar();
     }
 
+    if (auto layer = styleYaml["layer"]) {
+        if (layer.IsScalar())
+            layerAffinity_ = layer.as<std::string>();
+    }
+
     if (!styleYaml["rules"] || !(styleYaml["rules"].IsSequence())) {
         std::cout << "YAML stylesheet error: Spec does not contain any rules?" << std::endl;
         return;
@@ -54,6 +59,13 @@ const std::vector<FeatureStyleRule>& FeatureLayerStyle::rules() const
 const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
 {
     return options_;
+}
+
+bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
+    if (!layerAffinity_) {
+        return true;
+    }
+    return std::regex_match(layerName.begin(), layerName.end(), *layerAffinity_);
 }
 
 std::string const& FeatureLayerStyle::name() const {

@@ -5,6 +5,9 @@
 #include "rule.h"
 #include "cesium-interface/object.h"
 
+#include <regex>
+#include <optional>
+
 namespace erdblick
 {
 
@@ -44,12 +47,14 @@ public:
     [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
     [[nodiscard]] std::string const& name() const;
+    [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
 
 private:
     std::vector<FeatureStyleRule> rules_;
     std::vector<FeatureStyleOption> options_;
     bool valid_ = false;
     std::string name_;
+    std::optional<std::regex> layerAffinity_;
 };
 
 }

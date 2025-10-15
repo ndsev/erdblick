@@ -140,36 +140,30 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router);
 
+        // Prepare one layer so style options can be encoded
+        service.layerNamesState.next(['m1/layerA']);
+
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.setStyleConfig('overlay', {
-            visible: true,
-            options: { opacity: 0.5, debug: false },
-        });
+        // Set two options for style 'overlay'
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [false]);
         await flushMicrotasks();
 
-        expect(service.stylesState.getValue()).toEqual({
-            overlay: {
-                v: true,
-                o: {
-                    opacity: 0.5,
-                    debug: false,
-                },
-            },
-        });
+        // Expect StyleState internal map to contain entries for both options
+        const stylesMap = service.stylesState.getValue();
+        expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5]);
+        expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([false]);
 
-        const stored = localStorage.getItem('styles');
-        expect(stored).not.toBeNull();
-        expect(JSON.parse(stored!)).toEqual({
-            overlay: {
-                v: 1,
-                o: {
-                    opacity: 0.5,
-                    debug: 0,
-                },
-            },
-        });
+        // Expect URL sync to use compact style option encoding
+        expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: expect.objectContaining({
+                'overlay~0~opacity~debug': '0.5~0',
+            }),
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
 
         service.ngOnDestroy();
         routerStub.events.complete();

@@ -46,7 +46,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                                         more_vert
                                     </span>
                                     <span>
-                                        <p-checkbox [(ngModel)]="node.params.visible"
+                                        <p-checkbox [(ngModel)]="node.visible"
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(node.id)"
                                                     [binary]="true"
@@ -79,18 +79,10 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                             <div style="display: flex; align-items: center;">
                                 <span onEnterClick class="material-icons menu-toggler"
                                       (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
-                                      [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
                                       tabindex="0">
                                     more_vert
                                 </span>
-                                <span [ngClass]="{'disabled': !styleService.styles.get(node.styleId)?.params?.visible}"
-                                      style="font-style: oblique">
-                                    <p-checkbox
-                                            [(ngModel)]="styleService.styles.get(node.styleId)!.params.options[node.id]"
-                                            (ngModelChange)="toggleOption(node.styleId)"
-                                            [binary]="true"
-                                            [inputId]="node.styleId + '_' + node.id"
-                                            [name]="node.styleId + '_' + node.id"/>
+                                <span style="font-style: oblique">
                                     <label [for]="node.styleId + '_' + node.id"
                                            style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
                                 </span>
@@ -211,9 +203,9 @@ export class StyleComponent {
                     if (style === undefined || style === null) {
                         return;
                     }
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, id == optionId);
-                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id == optionId);
+                    // }
                     this.applyStyleConfig(style.id);
                 }
             },
@@ -224,9 +216,9 @@ export class StyleComponent {
                     if (style === undefined || style === null) {
                         return;
                     }
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, id != optionId);
-                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id != optionId);
+                    // }
                     this.applyStyleConfig(style.id);
                 }
             },
@@ -237,9 +229,9 @@ export class StyleComponent {
                     if (style === undefined || style === null) {
                         return;
                     }
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, false);
-                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, false);
+                    // }
                     this.applyStyleConfig(style.id);
                 }
             },
@@ -250,9 +242,9 @@ export class StyleComponent {
                     if (style === undefined || style === null) {
                         return;
                     }
-                    for (const id in style.params.options) {
-                        this.styleService.toggleOption(style.id, id, true);
-                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, true);
+                    // }
                     this.applyStyleConfig(style.id);
                 }
             }
@@ -313,7 +305,7 @@ export class StyleComponent {
         if (redraw) {
             this.styleService.reapplyStyle(styleId);
         }
-        this.stateService.setStyleConfig(styleId, style.params);
+        // this.stateService.setStyleConfig(styleId, style.params);
     }
 
     resetStyle(styleId: string) {

@@ -54,7 +54,7 @@ export class StyleOptionNode {
     constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, shortStyleId: string) {
         this.id = definition.id;
         this.shortStyleId = shortStyleId;
-        this.type = definition.type;
+        this.type = definition.type as string;
         this.info = definition;
         this.mapId = mapId;
         this.layerId = layerId;
@@ -245,7 +245,7 @@ export class MapLayerTree {
         for (const map of this.maps.values()) {
             for (const layer of map.allFeatureLayers()) {
                 for (const style of styleSheets) {
-                    if (style.featureLayerStyle.hasLayerAffinity(layer.id)) {
+                    if (style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
                         for (const option of style.options) {
                             layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.shortId));
                         }
@@ -264,7 +264,14 @@ export class MapLayerTree {
                     featureLayer.info.layerId,
                     defaultVisibility);
                 for (const option of featureLayer.children) {
-                    option.value = this.stateService.getStyleOptionValues(featureLayer.mapId, featureLayer.id, option.shortStyleId, option.id, option.type);
+                    option.value = this.stateService.styleOptionValues(
+                        featureLayer.mapId,
+                        featureLayer.id,
+                        option.shortStyleId,
+                        option.id,
+                        option.type,
+                        option.info.defaultValue
+                    );
                 }
             }
             child.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());

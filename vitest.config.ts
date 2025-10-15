@@ -6,7 +6,6 @@ export default defineConfig({
         globals: true,
         clearMocks: true,
         pool: 'forks',
-        threads: false,
         isolate: false,
         include: ['app/**/*.spec.ts'],
         exclude: [

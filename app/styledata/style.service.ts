@@ -32,7 +32,6 @@ export interface ErdblickStyle {
     id: string,
     modified: boolean,
     imported: boolean,
-    params: StyleParameters,
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
     options: Array<FeatureStyleOptionWithStringType>,
@@ -40,7 +39,8 @@ export interface ErdblickStyle {
     key?: string,
     type?: string,
     children?: Array<FeatureStyleOptionWithStringType>,
-    expanded?: boolean
+    expanded?: boolean,
+    visible: boolean
 }
 
 export interface ErdblickStyleGroup extends Record<string, any> {
@@ -79,9 +79,6 @@ export class StyleService {
     constructor(private httpClient: HttpClient, private stateService: AppStateService)
     {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
-            for (let [styleId, style] of this.styles) {
-                style.params = this.stateService.styleConfig(styleId);
-            }
             this.reapplyAllStyles();
         });
     }
@@ -113,14 +110,14 @@ export class StyleService {
                     id: styleId,
                     modified: false,
                     imported: false,
-                    params: this.stateService.styleConfig(styleId),
                     source: styleString,
                     featureLayerStyle: null,
                     options: [],
                     shortId: shortId4(styleId),
                     key: `${this.styles.size}`,
                     type: "Style",
-                    children: []
+                    children: [],
+                    visible: true
                 });
                 this.builtinStylesCount++;
                 styleUrls.forEach(styleUrl => {
@@ -133,7 +130,6 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.stateService.setInitialStyles(this.styles);
 
         if (this.styles.size) {
             this.reapplyStyles([...this.styles.keys()]);
@@ -180,14 +176,14 @@ export class StyleService {
                             id: styleId,
                             modified: false,
                             imported: false,
-                            params: this.stateService.styleConfig(styleId),
                             source: styleString,
                             featureLayerStyle: null,
                             options: [],
                             shortId: shortId4(styleId),
                             key: `${this.styles.size}`,
                             type: "Style",
-                            children: []
+                            children: [],
+                            visible: true
                         });
                         this.saveModifiedBuiltinStyles();
                         this.reapplyStyle(styleId);
@@ -270,17 +266,14 @@ export class StyleService {
             id: styleId,
             modified: false,
             imported: true,
-            params: {
-                visible: true,
-                options: {}
-            },
             source: styleData,
             featureLayerStyle: null,
             options: [],
             shortId: shortId4(styleId),
             key: `${this.styles.size}`,
             type: "Style",
-            children: []
+            children: [],
+            visible: true
         });
 
         ++this.importedStylesCount;
@@ -356,7 +349,6 @@ export class StyleService {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
                 if (this.styles.has(styleId)) {
                     style.featureLayerStyle = null;
-                    style.params = this.stateService.styleConfig(styleId);
                     this.styles.set(styleId, style);
                     const hash = this.styleHashes.get(styleId);
                     if (hash) {
@@ -396,18 +388,9 @@ export class StyleService {
                         const option = options.get(i)! as FeatureStyleOptionWithStringType;
                         style.options.push(option);
 
-                        // Apply the default value for the option, if no value is stored yet.
-                        if (!style.params.options.hasOwnProperty(option.id)) {
-                            style.params.options[option.id] = option.defaultValue;
-                        }
-
-                        // From the pre-initialized option value, ensure that it complies
-                        // with the expected data type. Also, we need to convert the value
-                        // type to a string, so it is understood by prime-ng p-tree.
-                        const currentValue = style.params.options[option.id];
+                        // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
                         if (option.type === coreLib.FeatureStyleOptionType.Bool) {
                             option.type = "Bool";
-                            style.params.options[option.id] = !!currentValue;
                         }
                     }
                     options.delete();
@@ -436,9 +419,6 @@ export class StyleService {
         this.initializeWasmStyle(styleId);
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
-        if (style.params.visible) {
-            this.styleAddedForId.next(styleId);
-        }
     }
 
     private setStylesIdChildren(style: ErdblickStyle) {
@@ -447,8 +427,6 @@ export class StyleService {
         style.expanded = true;
         style.type = "Style";
         for (let option of style.options) {
-            option.key = `${style.id}/${option.id}`;
-            option.styleId = style.id;
             style.children.push(option);
         }
         return style;
@@ -523,7 +501,6 @@ export class StyleService {
                     anyVisible = computeGroupVisibility(child as ErdblickStyleGroup) || anyVisible;
                 } else {
                     const styleChild = child as ErdblickStyle;
-                    anyVisible = (styleChild.params.visible || anyVisible);
                 }
             }
             group.visible = anyVisible;
@@ -550,16 +527,6 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.params.visible = enabled !== undefined ? enabled : !style.params.visible;
-        if (delayRepaint) {
-            this.reapplyStyle(styleId);
-        }
-        this.stateService.setStyleConfig(styleId, style.params);
-    }
-
-    toggleOption(styleId: string, optionId: string, enabled: boolean) {
-        const style = this.styles.get(styleId)!;
-        style.params.options[optionId] = enabled;
     }
 
     private loadStyleHashes(): Map<string, string> {
@@ -590,6 +557,7 @@ export class StyleService {
     }
 
     private async styleSha256(input: string): Promise<string> {
+        // TODO: We have our own hash in hash.ts that we can use.
         if (globalThis.isSecureContext && globalThis.crypto?.subtle) {
             const data = new TextEncoder().encode(input);
             const buffer = await crypto.subtle.digest('SHA-256', data);
