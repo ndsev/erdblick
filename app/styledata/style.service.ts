@@ -76,8 +76,7 @@ export class StyleService {
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
-    constructor(private httpClient: HttpClient, private stateService: AppStateService)
-    {
+    constructor(private httpClient: HttpClient, private stateService: AppStateService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -419,6 +418,9 @@ export class StyleService {
         this.initializeWasmStyle(styleId);
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
+        if (style.visible) {
+            this.styleAddedForId.next(styleId);
+        }
     }
 
     private setStylesIdChildren(style: ErdblickStyle) {
@@ -527,6 +529,11 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
+        style.visible = enabled !== undefined ? enabled : !style.visible;
+        if (delayRepaint) {
+            this.reapplyStyle(styleId);
+        }
+        this.stateService.setStyleVisibility(styleId, style.visible);
     }
 
     private loadStyleHashes(): Map<string, string> {

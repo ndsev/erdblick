@@ -2,7 +2,7 @@ import {AppStateService, LayerViewConfig} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
-import {ErdblickStyle, FeatureStyleOptionWithStringType} from "../styledata/style.service";
+import {ErdblickStyle, FeatureStyleOptionWithStringType, StyleService} from "../styledata/style.service";
 
 export function removeGroupPrefix(id: string) {
     if (id.includes('/')) {
@@ -70,6 +70,7 @@ export class LayerTreeNode {
     key: string;
     viewConfig: LayerViewConfig[] = [];  // This is an array, because the values are stored per MapView.
     children: StyleOptionNode[] = [];
+    expanded: boolean = true;
 
     constructor(layerInfo: LayerInfoItem, mapId: string) {
         this.info = layerInfo;
@@ -168,9 +169,15 @@ export class MapLayerTree {
     constructor(
         mapInfo: MapInfoItem[],
         private selectionTopic: BehaviorSubject<Array<FeatureWrapper>>,
-        private stateService: AppStateService) {
+        private stateService: AppStateService,
+        private styleService: StyleService) {
         this.initializeMapGroups(mapInfo);
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
+            this.initializeStyleOptions([...this.styleService.styles.values()]);
+            this.configureTreeParameters();
+        });
+        this.styleService.styleGroups.subscribe(_ => {
+            this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
         });
         this.stateService.numViewsState.subscribe(_ => {
@@ -244,6 +251,7 @@ export class MapLayerTree {
     private initializeStyleOptions(styleSheets: ErdblickStyle[]) {
         for (const map of this.maps.values()) {
             for (const layer of map.allFeatureLayers()) {
+                layer.children = [];
                 for (const style of styleSheets) {
                     if (style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
                         for (const option of style.options) {

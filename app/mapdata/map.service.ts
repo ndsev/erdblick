@@ -76,7 +76,7 @@ export class MapDataService {
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
 
-    maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService));
+    maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
     get maps() {
         return this.maps$.getValue();
     }
@@ -252,7 +252,7 @@ export class MapDataService {
             })
             .withJsonCallback((result: Array<MapInfoItem>) => {
                 let maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
-                this.maps$.next(new MapLayerTree(maps, this.selectionTopic, this.stateService));
+                this.maps$.next(new MapLayerTree(maps, this.selectionTopic, this.stateService, this.styleService));
             })
             .go();
     }

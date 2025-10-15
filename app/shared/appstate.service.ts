@@ -227,6 +227,12 @@ export class AppStateService implements OnDestroy {
 
     readonly stylesState = new StyleState(this.statePool);
 
+    readonly styleVisibilityState = this.createState<Record<string, boolean>>({
+        name: 'styleVisiblity',
+        schema: z.record(z.string(), z.boolean()),
+        defaultValue: {}
+    });
+
     readonly tilesLoadLimitState = this.createState<number>({
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
@@ -483,6 +489,8 @@ export class AppStateService implements OnDestroy {
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
+    get styleVisibility() {return this.styleVisibilityState.getValue();}
+    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
@@ -719,6 +727,19 @@ export class AppStateService implements OnDestroy {
 
         this.styles.set(key, nextValues);
         this.stylesState.next(this.styles);
+    }
+
+    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
+        if (this.styleVisibility.hasOwnProperty(styleId)) {
+            return this.styleVisibility[styleId];
+        }
+        return fallback;
+    }
+
+    setStyleVisibility(styleId: string, val: boolean) {
+        this.styleVisibility[styleId] = val;
+        // Trigger BehaviorSubject update.
+        this.styleVisibilityState.next(this.styleVisibility);
     }
 
     setSearchHistoryState(value: [number, string] | null, saveHistory: boolean = true) {

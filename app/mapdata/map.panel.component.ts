@@ -155,6 +155,25 @@ import {Subscription} from "rxjs";
                                                [(ngModel)]="node.viewConfig[index].level"/>
                                     </div>
                                 </ng-template>
+                                <ng-template let-node pTemplate="Bool">
+                                    <div style="display: flex; align-items: center;">
+                                <span onEnterClick class="material-icons menu-toggler"
+                                      (click)="alert()"
+                                      tabindex="0">
+                                    more_vert
+                                </span>
+                                        <span style="font-style: oblique">
+                                            <p-checkbox
+                                                    [(ngModel)]="node.value[index]"
+                                                    (ngModelChange)="alert()"
+                                                    [binary]="true"
+                                                    [inputId]="node.styleId + '_' + node.id"
+                                                    [name]="node.styleId + '_' + node.id"/>
+                                    <label [for]="node.styleId + '_' + node.id"
+                                           style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
+                                </span>
+                                    </div>
+                                </ng-template>
                             </p-tree>
                         </div>
                     </ng-container>
@@ -501,4 +520,6 @@ export class MapPanelComponent {
             this.stateService.numViews -= 1;
         }
     }
+
+    protected readonly alert = alert;
 }
