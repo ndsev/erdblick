@@ -2,6 +2,7 @@ import {AppStateService, LayerViewConfig} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
+import {ErdblickStyle, FeatureStyleOptionWithStringType} from "../styledata/style.service";
 
 export function removeGroupPrefix(id: string) {
     if (id.includes('/')) {
@@ -40,6 +41,27 @@ export interface MapInfoItem extends Record<string, any> {
     addOn: boolean;
 }
 
+export class StyleOptionNode {
+    id: string;
+    type: string;
+    key: string;
+    info: FeatureStyleOptionWithStringType;
+    mapId: string;
+    layerId: string;
+    value: (boolean|number|string)[] = [];
+    shortStyleId: string;
+
+    constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, shortStyleId: string) {
+        this.id = definition.id;
+        this.shortStyleId = shortStyleId;
+        this.type = definition.type;
+        this.info = definition;
+        this.mapId = mapId;
+        this.layerId = layerId;
+        this.key = `${mapId}/${layerId}/${shortStyleId}/${definition.id}`;
+    }
+}
+
 export class LayerTreeNode {
     id: string;
     type: string;
@@ -47,6 +69,7 @@ export class LayerTreeNode {
     mapId: string;
     key: string;
     viewConfig: LayerViewConfig[] = [];  // This is an array, because the values are stored per MapView.
+    children: StyleOptionNode[] = [];
 
     constructor(layerInfo: LayerInfoItem, mapId: string) {
         this.info = layerInfo;
@@ -218,6 +241,20 @@ export class MapLayerTree {
         this.nodes = [...groups.values(), ...ungrouped];
     }
 
+    private initializeStyleOptions(styleSheets: ErdblickStyle[]) {
+        for (const map of this.maps.values()) {
+            for (const layer of map.allFeatureLayers()) {
+                for (const style of styleSheets) {
+                    if (style.featureLayerStyle.hasLayerAffinity(layer.id)) {
+                        for (const option of style.options) {
+                            layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.shortId));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     configureTreeParameters() {
         let defaultVisibility = true;
         for (const child of this.nodes) {
@@ -226,6 +263,9 @@ export class MapLayerTree {
                     featureLayer.mapId,
                     featureLayer.info.layerId,
                     defaultVisibility);
+                for (const option of featureLayer.children) {
+                    option.value = this.stateService.getStyleOptionValues(featureLayer.mapId, featureLayer.id, option.shortStyleId, option.id, option.type);
+                }
             }
             child.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());
             defaultVisibility = false;
@@ -367,5 +407,19 @@ export class MapLayerTree {
             return false;
         }
         return layer.viewConfig[viewIndex].tileBorders;
+    }
+
+    getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string): Record<string, boolean|number|string> | undefined {
+        const mapItem = this.maps.get(mapId);
+        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
+            return;
+        }
+        const layer = mapItem.layers.get(layerId)!;
+        if (layer.children.some(option => option.value.length <= viewIndex)) {
+            return;
+        }
+        return Object.fromEntries(
+            layer.children.map(option => [option.id, option.value[viewIndex]])
+        ) as Record<string, boolean|number|string>;
     }
 }

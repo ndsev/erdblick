@@ -154,7 +154,7 @@ export class TileVisualization {
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
-    private readonly options: Record<string, boolean|number>;
+    private readonly options: Record<string, boolean|number|string>;
     private readonly pointMergeService: PointMergeService;
 
     /**
@@ -185,7 +185,7 @@ export class TileVisualization {
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 featureIdSubset?: string[],
                 boxGrid?: boolean,
-                options?: Record<string, boolean|number>) {
+                options?: Record<string, boolean|number|string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
         this.styleName = this.style.name();

@@ -11,7 +11,6 @@ import {
     InputSignal
 } from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
-import {DebugWindow} from "../app.debugapi.component";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";

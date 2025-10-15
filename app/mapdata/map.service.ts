@@ -174,6 +174,7 @@ export class MapDataService {
             });
         });
 
+        // TODO: Subscription to the style options state? take(1) and proceed with the initialisation
         await this.reloadDataSources();
 
         this.stateService.selectedFeaturesState.subscribe(selected => {
@@ -586,7 +587,7 @@ export class MapDataService {
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.maps.getMapLayerBorderState(viewIndex, mapName, layerName),
-            style.params !== undefined ? style.params.options : {});
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName));
         this.tileVisualizationQueue.push(visu);
         if (this.viewVisualizationState[viewIndex].visualizedTileLayers.has(styleId)) {
             this.viewVisualizationState[viewIndex].visualizedTileLayers.get(styleId)?.push(visu);

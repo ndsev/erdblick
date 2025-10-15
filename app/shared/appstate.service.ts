@@ -37,6 +37,8 @@ export interface LayerViewConfig {
     level: number;
     visible: boolean;
     tileBorders: boolean;
+
+    // TODO: We need style options here.
 }
 
 export type PanelSizeState = [] | [number, number];
@@ -171,17 +173,6 @@ export class AppStateService implements OnDestroy {
         urlFormEncode: true,
     });
 
-    readonly viewRectangleState = this.createMapViewState<[number, number, number, number] | null>({
-        name: 'viewRectangle',
-        defaultValue: null,
-        schema: z.union([
-            z.null(),
-            z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]),
-        ]),
-        urlParamName: 'vr',
-        urlIncludeInVisualizationOnly: false,
-    });
-
     readonly mode2dState = this.createMapViewState<boolean>({
         name: 'mode2d',
         defaultValue: false,
@@ -232,7 +223,32 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'z'
     });
 
-    // readonly layerStyleOptionsState = new Map<string, MapViewState<Array<boolean|string|number>>>();
+    /*
+    Style Option State Encoding:
+
+       We have a compact schema for encoding style option values on a
+       per-stylesheet per-map-layer per-view basis. For each style sheet,
+       we encode its option values in a single URL parameter. This URL
+       parameter is composed as follows:
+
+       <short-style-id>~<dash-separated-layerName-indices>~<tilde-separated-option-names>=
+       <tilde-separated-array-per-option-of-colon-separated-array-per-view-of-comma-separated-values-per-layer>
+
+    For example:
+
+       NY0X~1-2-3~showLanes~showLaneGroups~ADAS=1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0
+
+       NY0X   - is the short style id.
+       1-2-3  - The indices of the layer names in the layerNames state for which values are stored.
+       showLanes~showLaneGroups~ADAS - The style option IDs for which values are stored.
+       1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0 - breaks down into three pairs of tilde-separated per-view-per-layer option value arrays:
+       a) 1,0,0:1,0,0 - The values for the showLanes option. Two arrays of values (one for each map view).
+                        Three values, as there are three affected layers (1-2-3).
+       b) 1,1,1:0,0,0 - The values for the showLaneGroups option. Again, two sets of values (per view) and three values
+                        (one per layer) per view.
+       b) 0,0,0:0,0,0 - The values for the ADAS option. Same encoding as for showLanes and showLaneGroups.
+    */
+    // TODO: Add a member variable which contains this information
 
     readonly stylesState = this.createState<Record<string, StyleURLParameters>>({
         name: 'styles',
@@ -812,5 +828,9 @@ export class AppStateService implements OnDestroy {
 
     private styleURLParamsToParams(params: StyleURLParameters): StyleParameters {
         return { visible: params.v, options: params.o };
+    }
+
+    getStyleOptionValues(mapId: string, layerId: string, optionId: string) {
+        return [];
     }
 }

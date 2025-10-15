@@ -13,6 +13,7 @@ import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/e
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService, StyleParameters} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
+import {shortId4} from "./hash";
 
 interface StyleConfigEntry {
     id: string,
@@ -25,8 +26,6 @@ export type FeatureStyleOptionWithStringType = {
     type: FeatureStyleOptionType | string,
     defaultValue: any,
     description: string,
-    styleId?: string,
-    key?: string
 };
 
 export interface ErdblickStyle {
@@ -37,6 +36,7 @@ export interface ErdblickStyle {
     source: string,
     featureLayerStyle: FeatureLayerStyle | null,
     options: Array<FeatureStyleOptionWithStringType>,
+    shortId: string,
     key?: string,
     type?: string,
     children?: Array<FeatureStyleOptionWithStringType>,
@@ -117,6 +117,7 @@ export class StyleService {
                     source: styleString,
                     featureLayerStyle: null,
                     options: [],
+                    shortId: shortId4(styleId),
                     key: `${this.styles.size}`,
                     type: "Style",
                     children: []
@@ -183,6 +184,7 @@ export class StyleService {
                             source: styleString,
                             featureLayerStyle: null,
                             options: [],
+                            shortId: shortId4(styleId),
                             key: `${this.styles.size}`,
                             type: "Style",
                             children: []
@@ -275,6 +277,7 @@ export class StyleService {
             source: styleData,
             featureLayerStyle: null,
             options: [],
+            shortId: shortId4(styleId),
             key: `${this.styles.size}`,
             type: "Style",
             children: []
@@ -385,7 +388,7 @@ export class StyleService {
             (wasmBuffer: any) => {
                 const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                 if (featureLayerStyle) {
-                    style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                    style.featureLayerStyle = featureLayerStyle;
                     style.options = [];
                     // Transport FeatureStyleOptions from WASM array to JS.
                     let options = style.featureLayerStyle.options();
