@@ -688,6 +688,27 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+
+    /**
+     * Get style option values for a specific map layer style option.
+     * The returned values correspond to the number of parallel views.
+     * Note: This will NOT change the layerConfig array. Instead, if the
+     * map layer does not exist in layerNames, an exception will be thrown.
+     */
+    styleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, optionType: string, defaultValue: string|number|boolean): (string|number|boolean)[] {
+        // TODO: Implement
+    }
+
+    /**
+     * Set style option values for a specific map layer style combination.
+     * Note: This will NOT change the layerConfig array. Instead, if the
+     *  map layer does not exist in layerNames, an exception will be thrown.
+     */
+    setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, viewOptionValues: (string|number|boolean)[]) {
+        // TODO: Implement
+    }
+
+    /** DEPRECATED */
     setInitialStyles(styles: Map<string, { params: StyleParameters }>) {
         if (Object.keys(this.stylesState.getValue()).length) {
             return;
@@ -704,6 +725,7 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** DEPRECATED - Will be replaced in favor of new per-view per-layer styleOptionValues API. */
     styleConfig(styleId: string): StyleParameters {
         const styles = this.stylesState.getValue();
         if (styles.hasOwnProperty(styleId)) {
@@ -715,6 +737,7 @@ export class AppStateService implements OnDestroy {
         };
     }
 
+    /** DEPRECATED - Will be replaced in favor of new per-view per-layer styleOptionValues API. */
     setStyleConfig(styleId: string, params: StyleParameters) {
         const styles = {...this.stylesState.getValue()};
         styles[styleId] = this.styleParamsToURLParams(params);
@@ -793,6 +816,8 @@ export class AppStateService implements OnDestroy {
     }
 
     pruneMapLayerConfig(mapItems: Array<MapTreeNode>): boolean {
+        // TODO: Fix, use.
+        // TODO: Must also prune style options for the pruned layers.
         const mapLayerIds = new Set<string>();
         mapItems.forEach(mapItem => {
             mapItem.layers.keys().forEach(layerId => {
@@ -822,15 +847,13 @@ export class AppStateService implements OnDestroy {
         return layerNames.length === 0;
     }
 
+    /** DEPRECATED */
     private styleParamsToURLParams(params: StyleParameters): StyleURLParameters {
         return { v: params.visible, o: params.options };
     }
 
+    /** DEPRECATED */
     private styleURLParamsToParams(params: StyleURLParameters): StyleParameters {
         return { visible: params.v, options: params.o };
-    }
-
-    getStyleOptionValues(mapId: string, layerId: string, optionId: string) {
-        return [];
     }
 }
