@@ -21,13 +21,15 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
 }
 
 FeatureLayerVisualization::FeatureLayerVisualization(
+    int viewIndex,
     std::string const& mapTileKey,
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
     NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
     NativeJsValue const& rawFeatureIdSubset)
-    : mapTileKey_(mapTileKey),
+    : viewIndex_(viewIndex),
+      mapTileKey_(mapTileKey),
       coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
       coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
       coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
@@ -117,7 +119,8 @@ void FeatureLayerVisualization::run()
 std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex) const
 {
     return fmt::format(
-        "{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}",
+        viewIndex_,
         tile_->mapId(),
         tile_->layerInfo()->layerId_,
         style_.name(),

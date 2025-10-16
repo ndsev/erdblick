@@ -10,7 +10,7 @@ import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix} from "./map.tree.model";
+import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
 
 
@@ -165,7 +165,7 @@ import {Subscription} from "rxjs";
                                         <span style="font-style: oblique">
                                             <p-checkbox
                                                     [(ngModel)]="node.value[index]"
-                                                    (ngModelChange)="alert()"
+                                                    (ngModelChange)="updateStyleOption(node, index)"
                                                     [binary]="true"
                                                     [inputId]="node.styleId + '_' + node.id"
                                                     [name]="node.styleId + '_' + node.id"/>
@@ -519,6 +519,11 @@ export class MapPanelComponent {
             this.viewIndices.pop();
             this.stateService.numViews -= 1;
         }
+    }
+
+    updateStyleOption(node: StyleOptionNode, viewIndex: number) {
+        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
+        this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
     }
 
     protected readonly alert = alert;

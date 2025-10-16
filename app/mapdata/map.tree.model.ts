@@ -50,10 +50,12 @@ export class StyleOptionNode {
     layerId: string;
     value: (boolean|number|string)[] = [];
     shortStyleId: string;
+    styleId: string;
 
-    constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, shortStyleId: string) {
+    constructor(mapId: string, layerId: string, definition: FeatureStyleOptionWithStringType, styleId: string, shortStyleId: string) {
         this.id = definition.id;
         this.shortStyleId = shortStyleId;
+        this.styleId = styleId;
         this.type = definition.type as string;
         this.info = definition;
         this.mapId = mapId;
@@ -255,7 +257,7 @@ export class MapLayerTree {
                 for (const style of styleSheets) {
                     if (style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
                         for (const option of style.options) {
-                            layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.shortId));
+                            layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.id, style.shortId));
                         }
                     }
                 }
@@ -424,7 +426,7 @@ export class MapLayerTree {
         return layer.viewConfig[viewIndex].tileBorders;
     }
 
-    getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string): Record<string, boolean|number|string> | undefined {
+    getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return;
@@ -434,7 +436,7 @@ export class MapLayerTree {
             return;
         }
         return Object.fromEntries(
-            layer.children.map(option => [option.id, option.value[viewIndex]])
+            layer.children.filter(option => option.styleId === styleId).map(option => [option.id, option.value[viewIndex]])
         ) as Record<string, boolean|number|string>;
     }
 }

@@ -10,10 +10,10 @@ import {AppStateService, TileFeatureId} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MAX_ZOOM_LEVEL} from "../search/feature.search.service";
-import {PointMergeService} from "../mapview/pointmerge.service";
+import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
-import {MapInfoItem, MapLayerTree} from "./map.tree.model";
+import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
 
 const infoUrl = "sources";
 const tileUrl = "tiles";
@@ -48,7 +48,7 @@ class ViewVisualizationState {
  * of the following objects:
  *  (1) available maps
  *  (2) currently loaded tiles
- *  (3) available style sheets.
+ *  (3) rendered visualizations per view and affine style sheets.
  *
  * As the viewport changes, it requests new tiles from the mapget server
  * and triggers their conversion to Cesium tiles according to the active
@@ -72,9 +72,11 @@ export class MapDataService {
     tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<TileVisualization>;
     tileVisualizationDestructionTopic: Subject<TileVisualization>;
+    mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
     hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
     selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+    styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
 
     maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
     get maps() {
@@ -117,10 +119,11 @@ export class MapDataService {
         this.viewVisualizationState = [];
 
         // Triggered when a tile layer is freshly rendered and should be added to the frontend.
-        this.tileVisualizationTopic = new Subject<any>(); // {FeatureTile}
+        this.tileVisualizationTopic = new Subject<TileVisualization>();
 
         // Triggered when a tile layer is being removed.
-        this.tileVisualizationDestructionTopic = new Subject<any>(); // {FeatureTile}
+        this.tileVisualizationDestructionTopic = new Subject<TileVisualization>();
+        this.mergedTileVisualizationDestructionTopic = new Subject<MergedPointsTile>();
 
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number }>();
@@ -173,8 +176,33 @@ export class MapDataService {
                 }
             });
         });
+        this.styleOptionChangedTopic.subscribe(([optionNode, viewIndex]) => {
+            const visualizationsForStyle = this.viewVisualizationState[viewIndex]?.visualizedTileLayers.get(optionNode.styleId);
+            if (!visualizationsForStyle) {
+                return;
+            }
+            // Get rid of all merged point tiles for the view+map+layer+style.
+            const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
+                viewIndex,
+                optionNode.mapId,
+                optionNode.layerId,
+                optionNode.styleId,
+                coreLib.HighlightMode.NO_HIGHLIGHT);
+            for (const removedMergedPointsTile of this.pointMergeService.clear(mapViewLayerStyleId)) {
+                this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
+            }
+            // Redraw all visualizations for the map+layer+style.
+            for (const visu of visualizationsForStyle) {
+                console.assert(
+                    visu.viewIndex === viewIndex,
+                    `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`);
+                if (visu.tile.mapName === optionNode.mapId && visu.tile.layerName === optionNode.layerId) {
+                    visu.setStyleOption(optionNode.id, optionNode.value[viewIndex]);
+                    this.tileVisualizationQueue.unshift(visu);
+                }
+            }
+        })
 
-        // TODO: Subscription to the style options state? take(1) and proceed with the initialisation
         await this.reloadDataSources();
 
         this.stateService.selectedFeaturesState.subscribe(selected => {
@@ -527,12 +555,16 @@ export class MapDataService {
                 }
 
                 if (style && styleId) {
-                    this.renderTileLayer(viewIndex, tileLayer, style);
+                    if (style.visible && style.featureLayerStyle?.hasLayerAffinity(tileLayer.layerName)) {
+                        this.renderTileLayer(viewIndex, tileLayer, style);
+                    }
                 } else {
                     // TODO: Don't render for each style anymore.
                     //   (render if style is active and relevant for map layer...)
                     this.styleService.styles.forEach((style) => {
-                        this.renderTileLayer(viewIndex, tileLayer, style);
+                        if (style.visible && style.featureLayerStyle?.hasLayerAffinity(tileLayer.layerName)) {
+                            this.renderTileLayer(viewIndex, tileLayer, style);
+                        }
                     });
                 }
             }
@@ -587,7 +619,7 @@ export class MapDataService {
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.maps.getMapLayerBorderState(viewIndex, mapName, layerName),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName));
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId));
         this.tileVisualizationQueue.push(visu);
         if (this.viewVisualizationState[viewIndex].visualizedTileLayers.has(styleId)) {
             this.viewVisualizationState[viewIndex].visualizedTileLayers.get(styleId)?.push(visu);
@@ -824,7 +856,7 @@ export class MapDataService {
             }
 
             for (let [_, style] of this.styleService.styles) {
-                if (style.featureLayerStyle && style.visible) {
+                if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
                     let visu = new TileVisualization(
                         viewIndex,
                         featureTile,
@@ -835,7 +867,7 @@ export class MapDataService {
                         mode,
                         featureIds,
                         false,
-                        this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName));
+                        this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id));
                     this.tileVisualizationTopic.next(visu);
                     visualizationCollection.push(visu);
                 }

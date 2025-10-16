@@ -18,16 +18,6 @@ export interface TileFeatureId {
     mapTileKey: string,
 }
 
-export interface StyleParameters {
-    visible: boolean,
-    options: Record<string, boolean|number>
-}
-
-export interface StyleURLParameters {
-    v: boolean,
-    o: Record<string, boolean|number>
-}
-
 export interface CameraViewState {
     destination: { lon: number, lat: number, alt: number };
     orientation: { heading: number, pitch: number, roll: number };
@@ -37,8 +27,6 @@ export interface LayerViewConfig {
     level: number;
     visible: boolean;
     tileBorders: boolean;
-
-    // TODO: We need style options here.
 }
 
 export type PanelSizeState = [] | [number, number];
@@ -61,8 +49,8 @@ export class AppStateService implements OnDestroy {
     private isHydrating = false;
     private isReady = false;
     private subscriptionsSetup = false;
-    private pendingUrlSync = false;
-    private pendingStorageSync = false;
+    private pendingUrlSyncStates = new Set<AppState<any>>;
+    private pendingStorageSyncStates = new Set<AppState<any>>;
     private flushHandle: Promise<void> | null = null;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
 
@@ -330,8 +318,11 @@ export class AppStateService implements OnDestroy {
             this.hydrateFromStorage();
             this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
             this.isHydrating = false;
+
+            // Ensure that the merged app state after hydration is reflected in local storage and URL.
+            this.statePool.values().forEach(state => this.onStateChanged(state, true))
+
             this.isReady = true;
-            this.persistStates();
             this.ready.next(true);
         });
     }
@@ -359,21 +350,21 @@ export class AppStateService implements OnDestroy {
         // NOTE: Is this the best way to implement the internal subscription mechanism?
         for (const state of this.statePool.values()) {
             const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe(value => {
-                this.onStateChanged(state as AppState<unknown>, value);
+                this.onStateChanged(state as AppState<unknown>);
             });
             this.stateSubscriptions.push(subscription);
         }
         this.subscriptionsSetup = true;
     }
 
-    private onStateChanged(state: AppState<unknown>, value: unknown): void {
-        if (this.isHydrating || !this.isReady) {
+    private onStateChanged(state: AppState<unknown>, force: boolean = false): void {
+        if (!force && (this.isHydrating || !this.isReady)) {
             return;
         }
 
-        this.pendingStorageSync = true;
+        this.pendingStorageSyncStates.add(state);
         if (state.isUrlState()) {
-            this.pendingUrlSync = true;
+            this.pendingUrlSyncStates.add(state);
         }
 
         this.scheduleFlush();
@@ -386,23 +377,17 @@ export class AppStateService implements OnDestroy {
         this.flushHandle = Promise.resolve().then(() => {
             this.flushHandle = null;
             if (this.isHydrating) {
-                this.pendingStorageSync = false;
-                this.pendingUrlSync = false;
+                this.pendingStorageSyncStates.clear();
+                this.pendingUrlSyncStates.clear();
                 return;
             }
-            if (this.pendingStorageSync) {
-                this.persistStates();
-            }
-            if (this.pendingUrlSync) {
-                this.syncUrl();
-            }
-            this.pendingStorageSync = false;
-            this.pendingUrlSync = false;
+            this.syncStorage();
+            this.syncUrl();
         });
     }
 
-    private persistStates(): void {
-        for (const state of this.statePool.values()) {
+    private syncStorage(): void {
+        for (const state of this.pendingStorageSyncStates) {
             try {
                 const serialized = state.serialize(false);
                 if (serialized === undefined) {
@@ -415,14 +400,12 @@ export class AppStateService implements OnDestroy {
                 console.error(`[AppStateService] Failed to persist state '${state.name}'`, error);
             }
         }
+        this.pendingStorageSyncStates.clear();
     }
 
     private syncUrl(): void {
         const params: Record<string, string> = {};
-        for (const state of this.statePool.values()) {
-            if (!state.isUrlState()) {
-                continue;
-            }
+        for (const state of this.pendingUrlSyncStates) {
             const serialized = state.serialize(true);
             if (serialized === undefined) {
                 continue;
@@ -431,6 +414,7 @@ export class AppStateService implements OnDestroy {
                 params[k] = v;
             }
         }
+        this.pendingUrlSyncStates.clear();
         const replaceUrl = this.replaceUrl;
         this.router.navigate([], {
             queryParams: params,
@@ -708,7 +692,7 @@ export class AppStateService implements OnDestroy {
      * Note: This will NOT change the layerConfig array. Instead, if the
      *  map layer does not exist in layerNames, an exception will be thrown.
      */
-    setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, viewOptionValues: (string|number|boolean)[]) {
+    setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, value: (string|number|boolean)[]) {
         const mapLayerId = `${mapId}/${layerId}`;
         const layerIndex = this.layerNames.indexOf(mapLayerId);
         if (layerIndex === -1) {
@@ -717,7 +701,7 @@ export class AppStateService implements OnDestroy {
         const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
         const views = this.numViewsState.getValue();
 
-        let nextValues: (string|number|boolean)[] = Array.isArray(viewOptionValues) ? [...viewOptionValues] : [];
+        let nextValues: (string|number|boolean)[] = Array.isArray(value) ? [...value] : [];
         if (nextValues.length < views) {
             const last = nextValues.length ? nextValues[nextValues.length - 1] : false;
             nextValues = nextValues.concat(Array.from({length: views - nextValues.length}, () => last));

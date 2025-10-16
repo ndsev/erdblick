@@ -30,6 +30,7 @@ import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {SearchResultPosition} from "../search/search.worker";
+import {MergedPointsTile, MergedPointVisualization} from "./pointmerge.service";
 
 /**
  * Camera constants object to centralize all numerical values for easier maintenance
@@ -182,6 +183,26 @@ export class MapView {
                 }
             })
         );
+
+        this.subscriptions.push(
+            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot destroy merged points tile: viewer not available');
+                    return;
+                }
+
+                // Do not destroy the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+
+                tileVis.remove(this.viewer);
+                if (this.isAvailable()) {
+                    this.viewer.scene.requestRender();
+                }
+            })
+        )
 
         this.subscriptions.push(
             this.mapService.moveToWgs84PositionTopic.subscribe((pos: { targetView: number, x: number, y: number, z?: number }) => {

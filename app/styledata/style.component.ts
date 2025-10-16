@@ -323,13 +323,7 @@ export class StyleComponent {
         if (event.files && event.files.length > 0) {
             const file: File = event.files[0];
             let styleId = file.name;
-            if (styleId.toLowerCase().endsWith(".yaml")) {
-                styleId = styleId.slice(0, -5);
-            } else if (styleId.toLowerCase().endsWith(".yml")) {
-                styleId = styleId.slice(0, -4);
-            }
-            styleId = `${styleId} (Imported)`
-            this.styleService.importStyleYamlFile(event, file, styleId, this.styleUploader)
+            this.styleService.importStyleYamlFile(event, file, this.styleUploader)
                 .then((ok) => {
                     if (!ok) {
                         this.messageService.showError(`Could not read empty data for: ${styleId}`);

@@ -82,6 +82,7 @@ public:
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
      */
      FeatureLayerVisualization(
+        int viewIndex,
         std::string const& mapTileKey,
         const FeatureLayerStyle& style,
         NativeJsValue const& rawOptionValues,
@@ -270,6 +271,7 @@ private:
 
     /// =========== Generic Members ===========
 
+    int viewIndex_;
     JsValue mapTileKey_;
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;

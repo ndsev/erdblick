@@ -2,17 +2,13 @@ import {FeatureTile} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
-    Entity,
     PrimitiveCollection,
     Rectangle,
     Viewer,
-    CallbackProperty,
-    HeightReference,
     ColorGeometryInstanceAttribute,
     GeometryInstance,
     PerInstanceColorAppearance,
     Primitive,
-    RectangleGeometry,
     RectangleOutlineGeometry
 } from "../integrations/cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
@@ -225,6 +221,7 @@ export class TileVisualization {
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                    this.viewIndex,
                     this.tile.mapTileKey,
                     this.style,
                     this.options,
@@ -295,7 +292,7 @@ export class TileVisualization {
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
-                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, `${this.viewIndex}:${mapLayerStyleRuleId}`)) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
                             finishedCornerTile.render(viewer);
                         }
                     }
@@ -384,10 +381,14 @@ export class TileVisualization {
 
     /**
      * Combination of map name, layer name, style name and highlight mode which
-     * (in combination with the tile id) uniquely identifies that rendered contents
-     * if this TileVisualization as expected by the surrounding MergedPointsTiles.
+     * (in combination with the tile id) uniquely identifies the rendered contents
+     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
     private mapViewLayerStyleId(): MapViewLayerStyleRule {
-        return `${this.viewIndex}:${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
+        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleName, this.highlightMode);
+    }
+
+    public setStyleOption(optionId: string, value: string|number|boolean) {
+        this.options[optionId] = value;
     }
 }

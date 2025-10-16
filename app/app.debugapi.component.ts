@@ -77,7 +77,8 @@ export class ErdblickDebugApi {
             source: "",
             featureLayerStyle: style,
             options: [],
-            visible: true
+            visible: true,
+            url: ""
         }, "_builtin", true);
     }
 
