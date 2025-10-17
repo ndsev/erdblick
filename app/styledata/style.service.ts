@@ -146,6 +146,7 @@ export class StyleService {
             this.deleteStyle(knownStyleId);
         }
 
+        const isVisible = this.stateService.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
         this.styles.set(styleId, {
             id: styleId,
             modified: modified,
@@ -157,9 +158,12 @@ export class StyleService {
             key: `${this.styles.size}`,
             type: "Style",
             children: [],
-            visible: wasmStyle.defaultEnabled(),
+            visible: isVisible,
             url: styleUrl
         });
+
+        // Ensure that if the style was renamed, its visibility is retained.
+        this.stateService.setStyleVisibility(styleId, isVisible);
 
         return styleId;
     }
