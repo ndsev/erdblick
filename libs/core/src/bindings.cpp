@@ -352,7 +352,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
         .function("name", &FeatureLayerStyle::name)
-        .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity);
+        .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
+        .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")

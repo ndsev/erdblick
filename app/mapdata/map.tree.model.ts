@@ -255,7 +255,7 @@ export class MapLayerTree {
             for (const layer of map.allFeatureLayers()) {
                 layer.children = [];
                 for (const style of styleSheets) {
-                    if (style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
+                    if (style.visible && style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
                         for (const option of style.options) {
                             layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.id, style.shortId));
                         }

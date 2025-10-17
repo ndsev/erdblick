@@ -22,6 +22,11 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
             name_ = name.Scalar();
     }
 
+    if (auto enabled = styleYaml["default"]) {
+        if (enabled.IsScalar())
+            enabled_ = enabled.as<bool>();
+    }
+
     if (auto layer = styleYaml["layer"]) {
         if (layer.IsScalar())
             layerAffinity_ = layer.as<std::string>();
@@ -66,6 +71,11 @@ bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
         return true;
     }
     return std::regex_match(layerName.begin(), layerName.end(), *layerAffinity_);
+}
+
+bool FeatureLayerStyle::defaultEnabled() const
+{
+    return enabled_;
 }
 
 std::string const& FeatureLayerStyle::name() const {

@@ -48,11 +48,13 @@ public:
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
     [[nodiscard]] std::string const& name() const;
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
+    [[nodiscard]] bool defaultEnabled() const;
 
 private:
     std::vector<FeatureStyleRule> rules_;
     std::vector<FeatureStyleOption> options_;
     bool valid_ = false;
+    bool enabled_ = true;
     std::string name_;
     std::optional<std::regex> layerAffinity_;
 };

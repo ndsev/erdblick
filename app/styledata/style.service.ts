@@ -157,7 +157,7 @@ export class StyleService {
             key: `${this.styles.size}`,
             type: "Style",
             children: [],
-            visible: true,
+            visible: wasmStyle.defaultEnabled(),
             url: styleUrl
         });
 
