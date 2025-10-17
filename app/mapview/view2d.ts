@@ -74,52 +74,28 @@ export class MapView2D extends MapView {
         super.setupHandlers();
     }
 
-    /**
-     * Setup custom wheel handler for 2D mode
-     */
-
     override moveUp() {
+        super.moveUp();
         const distance = this.get2DMovementDistance();
         this.moveCameraOnSurface(0, distance.latitudeOffset);
     }
 
     override moveDown() {
+        super.moveDown();
         const distance = this.get2DMovementDistance();
         this.moveCameraOnSurface(0, -distance.latitudeOffset);
     }
 
     override moveLeft() {
+        super.moveLeft();
         const distance = this.get2DMovementDistance();
         this.moveCameraOnSurface(-distance.longitudeOffset, 0);
     }
 
     override moveRight() {
+        super.moveRight();
         const distance = this.get2DMovementDistance();
         this.moveCameraOnSurface(distance.longitudeOffset, 0);
-    }
-
-    override zoomIn() {
-        try {
-            if (!this.isAvailable()) {
-                console.debug('Cannot zoom in: viewer not available or is destroyed');
-                return;
-            }
-            this.viewer.camera.zoomIn(this.cameraZoomUnits);
-        } catch (error) {
-            console.error('Error zooming in:', error);
-        }
-    }
-
-    override zoomOut() {
-        try {
-            if (!this.isAvailable()) {
-                console.debug('Cannot zoom out: viewer not available or is destroyed');
-                return;
-            }
-            this.viewer.camera.zoomOut(this.cameraZoomUnits);
-        } catch (error) {
-            console.error('Error zooming out:', error);
-        }
     }
 
     protected override updateOnCameraChange() {

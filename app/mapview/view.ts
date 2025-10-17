@@ -16,7 +16,7 @@ import {
     defined,
     ScreenSpaceEventType,
     Billboard,
-    HeightReference
+    HeightReference, Camera
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -30,7 +30,7 @@ import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {SearchResultPosition} from "../search/search.worker";
-import {MergedPointsTile, MergedPointVisualization} from "./pointmerge.service";
+import {MergedPointsTile} from "./pointmerge.service";
 
 /**
  * Camera constants object to centralize all numerical values for easier maintenance
@@ -308,14 +308,16 @@ export class MapView {
                 this.viewer.scene.requestRender();
             }
 
-            // TODO: What does it do?
-            this.viewer.camera.percentageChanged = 0.1;
+            // Camera movement threshold percentage to throttle camera-changed calls
+            this.viewer.camera.percentageChanged = 0.01;
 
             this.setupScreenSpaceConstraints();
         } catch (error) {
             console.error('Error creating viewer:', error);
         }
     }
+
+
 
     protected setupHandlers() {
         this.mouseHandler = new ScreenSpaceEventHandler(this.viewer.scene.canvas);
@@ -414,9 +416,6 @@ export class MapView {
                 return;
             }
 
-            // Focus on this view
-            this.stateService.focusedView = this._viewIndex;
-
             const position = movement.position;
             let feature = this.viewer.scene.pick(position);
             if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
@@ -487,6 +486,18 @@ export class MapView {
                     coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
+
+        // Add a handler for scroll-zooming.
+        this.mouseHandler.setInputAction((_: any) => {
+            // Focus on this view
+            this.stateService.focusedView = this._viewIndex;
+        }, ScreenSpaceEventType.WHEEL);
+
+        this.mouseHandler.setInputAction((_: any) => {
+            // Focus on this view
+            this.stateService.focusedView = this._viewIndex;
+        }, ScreenSpaceEventType.LEFT_DOWN);
+
     }
 
     /**
@@ -613,7 +624,7 @@ export class MapView {
             // CRITICAL: Clean up all tiles and visualizations bound to the old viewer
             // This ensures they can be recreated for the new viewer
             if (this.isAvailable()) {
-                this.mapService.clearAllTileVisualizations(this.viewer);
+                this.mapService.clearAllTileVisualizations(this._viewIndex, this.viewer);
             }
             this.mapService.clearAllLoadedTiles();
 
@@ -668,27 +679,45 @@ export class MapView {
     }
 
     moveUp() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
     }
 
     moveDown() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
     }
 
     moveLeft() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
     }
 
     moveRight() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
     }
 
     zoomIn() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
+        try {
+            if (!this.isAvailable()) {
+                console.debug('Cannot zoom in: viewer not available or is destroyed');
+                return;
+            }
+            this.viewer.camera.zoomIn(this.cameraZoomUnits);
+        } catch (error) {
+            console.error('Error zooming in:', error);
+        }
     }
 
     zoomOut() {
-        throw new Error("Not Implemented!");
+        this.stateService.focusedView = this._viewIndex;
+        try {
+            if (!this.isAvailable()) {
+                console.debug('Cannot zoom out: viewer not available or is destroyed');
+                return;
+            }
+            this.viewer.camera.zoomOut(this.cameraZoomUnits);
+        } catch (error) {
+            console.error('Error zooming out:', error);
+        }
     }
 
     resetOrientation() {

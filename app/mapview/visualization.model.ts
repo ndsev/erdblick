@@ -146,7 +146,7 @@ export class TileVisualization {
     private renderingInProgress: boolean = false;
     private deleted: boolean = false;
     private readonly style: StyleWithIsDeleted;
-    private readonly styleName: string;
+    public readonly styleId: string;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
@@ -184,7 +184,7 @@ export class TileVisualization {
                 options?: Record<string, boolean|number|string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
-        this.styleName = this.style.name();
+        this.styleId = this.style.name();
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlightMode = highlightMode;
@@ -301,7 +301,7 @@ export class TileVisualization {
                 let endTime = performance.now();
 
                 // Add the render time for this style sheet as a statistic to the tile.
-                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingListKey = `render-time-${this.styleId.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
                 let timingList = this.tile.stats.get(timingListKey);
                 if (!timingList) {
                     timingList = [];
@@ -385,7 +385,7 @@ export class TileVisualization {
      * of this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
     private mapViewLayerStyleId(): MapViewLayerStyleRule {
-        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleName, this.highlightMode);
+        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);
     }
 
     public setStyleOption(optionId: string, value: string|number|boolean) {

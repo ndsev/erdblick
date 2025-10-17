@@ -179,5 +179,5 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         }
         const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
         this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
-    }
+        this.stateService.focusedView = mapView.viewIndex;    }
 }

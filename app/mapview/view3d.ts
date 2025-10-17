@@ -40,45 +40,23 @@ export class MapView3D extends MapView {
 
     // TODO: Make sure that we transform the offest according to the heading of the camera
     override moveUp() {
+        super.moveUp();
         this.moveCameraOnSurface(0, this.cameraMoveUnits);
     }
 
     override moveDown() {
+        super.moveDown();
         this.moveCameraOnSurface(0, -this.cameraMoveUnits);
     }
 
     override moveLeft() {
+        super.moveLeft();
         this.moveCameraOnSurface(-this.cameraMoveUnits, 0);
     }
 
     override moveRight() {
+        super.moveRight();
         this.moveCameraOnSurface(this.cameraMoveUnits, 0);
-    }
-
-    override zoomIn() {
-        try {
-            if (!this.isAvailable()) {
-                console.debug('Cannot zoom in: viewer not available or is destroyed');
-                return;
-            }
-
-            this.viewer.camera.zoomIn(this.cameraZoomUnits);
-        } catch (error) {
-            console.error('Error zooming in:', error);
-        }
-    }
-
-    override zoomOut() {
-        try {
-            if (!this.isAvailable()) {
-                console.debug('Cannot zoom out: viewer not available or is destroyed');
-                return;
-            }
-
-            this.viewer.camera.zoomOut(this.cameraZoomUnits);
-        } catch (error) {
-            console.error('Error zooming out:', error);
-        }
     }
 
     protected override updateOnAppStateChange(cameraData: CameraViewState) {
