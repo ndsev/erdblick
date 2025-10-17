@@ -60,9 +60,10 @@ export interface ErdblickStyleGroup extends Record<string, any> {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    styleHashes: Map<string, {sha256: string, isModified: boolean, isUpdated: boolean}> = new Map<string, {sha256: string; isModified: boolean, isUpdated: boolean}>();
+    stylesDialogVisible: boolean = false;
+
+    styleHashes: Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}> = new Map();
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
-    private erdblickBuiltinStyles: string[] = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
     selectedStyleIdForEditing: string = "";
@@ -104,7 +105,6 @@ export class StyleService {
                 if (!styleId) {
                     continue;
                 }
-
                 this.builtinStylesCount++;
                 await this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
             }
@@ -310,14 +310,14 @@ export class StyleService {
         }
     }
 
-    setStyleSource(styleId: string, styleSource: string, modified: boolean = true) {
+    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string {
         if (!this.styles.has(styleId)) {
-            return;
+            return styleId;
         }
         const style = this.styles.get(styleId)!;
         const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported);
         if (!newStyleId) {
-            return;
+            return styleId;
         }
 
         if (style.imported) {
@@ -325,7 +325,8 @@ export class StyleService {
         } else {
             this.saveModifiedBuiltinStyles();
         }
-        this.reapplyStyle(styleId);
+        this.reapplyStyle(newStyleId);
+        return newStyleId;
     }
 
     saveModifiedBuiltinStyles() {
@@ -362,18 +363,22 @@ export class StyleService {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
-                if (this.styles.has(styleId)) {
-                    if (!this.initializeStyle(style.source, style.url, style.id, true, style.imported)) {
-                        continue;
-                    }
-                    const hash = this.styleHashes.get(style.id);
-                    if (hash) {
-                        this.styleHashes.set(style.id, {
-                            sha256: hash.sha256,
-                            isModified: true,
-                            isUpdated: hash.isUpdated
-                        });
-                    }
+                // A modified style will only be applied if there is a matching builtin style by the URL.
+                const matchingBuiltinStyle = this.styles.values().filter(style => style.url === style.url).toArray();
+                if (!matchingBuiltinStyle.length) {
+                    continue;
+                }
+                if (!this.initializeStyle(style.source, style.url, matchingBuiltinStyle[0].id, true, style.imported)) {
+                    continue;
+                }
+                const hash = this.styleHashes.get(style.url);
+                if (hash) {
+                    this.styleHashes.set(style.url, {
+                        id: style.id,
+                        sha256: hash.sha256,
+                        isModified: true,
+                        isUpdated: hash.isUpdated
+                    });
                 }
             }
         }
@@ -522,6 +527,7 @@ export class StyleService {
                     anyVisible = computeGroupVisibility(child as ErdblickStyleGroup) || anyVisible;
                 } else {
                     const styleChild = child as ErdblickStyle;
+                    anyVisible = styleChild.visible || anyVisible;
                 }
             }
             group.visible = anyVisible;
@@ -568,16 +574,17 @@ export class StyleService {
 
     private async compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
         const styleHash = await this.styleSha256(style.source);
-        this.styleHashes.set(style.id, {
+        this.styleHashes.set(style.url, {
+            id: style.id,
             sha256: styleHash,
             isModified: false,
-            isUpdated: styleHash !== styleHashes.get(style.id)
+            isUpdated: styleHash !== styleHashes.get(style.url)
         });
     }
 
     updateStyleHashes() {
         localStorage.removeItem('styleHashes');
-        const pairs = Array.from(this.styleHashes, ([styleId, status]) => [styleId, status.sha256]);
+        const pairs = Array.from(this.styleHashes, ([styleUrl, status]) => [styleUrl, status.sha256]);
         localStorage.setItem('styleHashes', JSON.stringify(pairs));
         this.styleHashes.clear();
     }

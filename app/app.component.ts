@@ -24,6 +24,7 @@ interface Versions {
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
+        <style-panel></style-panel>
         <div id="info">
             <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
                 {{ copyright }}

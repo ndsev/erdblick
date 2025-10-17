@@ -18,97 +18,101 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
 @Component({
     selector: 'style-panel',
     template: `
-        <p-fieldset class="map-tab" legend="Styles" [toggleable]="true" [(collapsed)]="stylesCollapsed">
-            <ng-container *ngIf="styleService.styleGroups | async as styleGroups">
-                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
-                    No styles loaded.
-                </div>
-                <div class="styles-container card">
-                    <p-tree [value]="styleGroups">
-                        <ng-template let-node pTemplate="Group">
-                            <span>
-                                <p-checkbox [ngModel]="node.visible"
-                                            (click)="$event.stopPropagation()"
-                                            (ngModelChange)="toggleStyleGroup(0, node.id)"
-                                            [binary]="true"
-                                            [inputId]="node.id"
-                                            [name]="node.id" tabindex="0"/>
-                                <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
-                                    {{ removeGroupPrefix(node.id) }}
-                                </label>
-                            </span>
-                        </ng-template>
-                        <ng-template let-node pTemplate="Style">
-                            <div class="flex-container">
-                                <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-icons menu-toggler"
-                                          (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
-                                        more_vert
-                                    </span>
-                                    <span>
-                                        <p-checkbox [(ngModel)]="node.visible"
-                                                    (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="applyStyleConfig(node.id)"
-                                                    [binary]="true"
-                                                    [inputId]="node.id"
-                                                    [name]="node.id"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                    </span>
-                                </div>
-                                <div class="layer-controls style-controls">
-                                    <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
-                                              icon="pi pi-trash"
-                                              label="" pTooltip="Remove style"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                    <p-button onEnterClick *ngIf="!node.imported" (click)="resetStyle(node.id)"
-                                              icon="pi pi-refresh"
-                                              label="" pTooltip="Reload style from storage"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                    <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                </div>
-                            </div>
-                        </ng-template>
-                        <ng-template let-node pTemplate="Bool">
-                            <div style="display: flex; align-items: center;">
+        <p-dialog header="Style Sheets" [(visible)]="styleService.stylesDialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="false" #styles>
+            <div class="map-tab">
+                <ng-container *ngIf="styleService.styleGroups | async as styleGroups">
+                    <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
+                        No styles loaded.
+                    </div>
+                    <div class="styles-container card">
+                        <p-tree [value]="styleGroups">
+                            <ng-template let-node pTemplate="Group">
+                        <span>
+                            <p-checkbox [ngModel]="node.visible"
+                                        (click)="$event.stopPropagation()"
+                                        (ngModelChange)="toggleStyleGroup(0, node.id)"
+                                        [binary]="true"
+                                        [inputId]="node.id"
+                                        [name]="node.id" tabindex="0"/>
+                            <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
+                                {{ removeGroupPrefix(node.id) }}
+                            </label>
+                        </span>
+                            </ng-template>
+                            <ng-template let-node pTemplate="Style">
+                                <div class="flex-container">
+                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                 <span onEnterClick class="material-icons menu-toggler"
-                                      (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
-                                      tabindex="0">
+                                      (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                     more_vert
                                 </span>
-                                <span style="font-style: oblique">
-                                    <label [for]="node.styleId + '_' + node.id"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
+                                        <span>
+                                    <p-checkbox [(ngModel)]="node.visible"
+                                                (click)="$event.stopPropagation()"
+                                                (ngModelChange)="applyStyleConfig(node.id)"
+                                                [binary]="true"
+                                                [inputId]="node.id"
+                                                [name]="node.id"/>
+                                    <label [for]="node.id"
+                                           style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                 </span>
-                            </div>
-                        </ng-template>
-                    </p-tree>
+                                    </div>
+                                    <div class="layer-controls style-controls">
+                                        <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
+                                                  icon="pi pi-trash"
+                                                  label="" pTooltip="Remove style"
+                                                  tooltipPosition="bottom" tabindex="0">
+                                        </p-button>
+                                        <p-button onEnterClick *ngIf="!node.imported" (click)="resetStyle(node.id)"
+                                                  icon="pi pi-refresh"
+                                                  label="" pTooltip="Reload style from storage"
+                                                  tooltipPosition="bottom" tabindex="0">
+                                        </p-button>
+                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                  icon="pi pi-file-edit"
+                                                  label="" pTooltip="Edit style"
+                                                  tooltipPosition="bottom" tabindex="0">
+                                        </p-button>
+                                    </div>
+                                </div>
+                            </ng-template>
+                            <ng-template let-node pTemplate="Bool">
+                                <div style="display: flex; align-items: center;">
+                            <span onEnterClick class="material-icons menu-toggler"
+                                  (click)="showOptionsToggleMenu($event, node.styleId, node.id)"
+                                  tabindex="0">
+                                more_vert
+                            </span>
+                                    <span style="font-style: oblique">
+                                <label [for]="node.styleId + '_' + node.id"
+                                       style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
+                            </span>
+                                </div>
+                            </ng-template>
+                        </p-tree>
+                    </div>
+                </ng-container>
+                <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
+                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                         class="flex-container">
+                    <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
+                        {{ message.key }}: {{ message.value }} (see console)
+                    </span>
+                    </div>
                 </div>
-            </ng-container>
-            <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
-                <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                     class="flex-container">
-                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
-                            {{ message.key }}: {{ message.value }} (see console)
-                        </span>
+                <div class="styles-container">
+                    <div class="styles-import">
+                        <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
+                                      accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
+                                      customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                                      class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
+                                      chooseLabel="Import Style" tabindex="0"/>
+                    </div>
                 </div>
+                <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
             </div>
-            <div class="styles-container">
-                <div class="styles-import">
-                    <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
-                                  accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
-                                  customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
-                                  class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
-                                  chooseLabel="Import Style" tabindex="0"/>
-                </div>
-            </div>
-        </p-fieldset>
+        </p-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
@@ -371,7 +375,7 @@ export class StyleComponent {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
-        this.styleService.setStyleSource(styleId, styleData);
+        this.styleService.selectedStyleIdForEditing = this.styleService.setStyleSource(styleId, styleData);
         this.sourceWasModified = false;
     }
 
@@ -461,7 +465,7 @@ export class StyleComponent {
     getUpdatedModifiedStyleIds() {
         return [...this.styleService.styleHashes]
             .filter(([_, state] ) => state.isUpdated && state.isModified)
-            .map(([name, _]) => name);
+            .map(([url, state]) => `${state.id} (${url})`);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

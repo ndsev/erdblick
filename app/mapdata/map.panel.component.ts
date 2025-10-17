@@ -179,7 +179,6 @@ import {Subscription} from "rxjs";
                     </ng-container>
                 </p-fieldset>
             </ng-container>
-            <style-panel></style-panel>
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>

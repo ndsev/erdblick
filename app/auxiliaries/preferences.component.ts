@@ -27,6 +27,10 @@ import {EditorService} from "../shared/editor.service";
                       icon="pi pi-server" label="" pTooltip="Datasources"
                       tooltipPosition="bottom" tabindex="0">
             </p-button>
+            <p-button (click)="openStylesDialog()" class="pref-button"
+                      icon="pi pi-palette" label="" pTooltip="Styles"
+                      tooltipPosition="bottom" tabindex="0">
+            </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">
@@ -229,6 +233,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToVisualizeInput: number = 0;
 
     controlsDialogVisible = false;
+    stylesDialogVisible = false;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -368,6 +373,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     openDatasources() {
         this.editorService.styleEditorVisible = false;
         this.editorService.datasourcesEditorVisible = true;
+    }
+
+    openStylesDialog() {
+        this.styleService.stylesDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
