@@ -351,7 +351,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
-        .function("name", &FeatureLayerStyle::name);
+        .function("name", &FeatureLayerStyle::name)
+        .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
+        .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
@@ -429,7 +431,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)

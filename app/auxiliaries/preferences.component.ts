@@ -1,10 +1,11 @@
-import {Component} from '@angular/core';
+import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {OnDestroy, OnInit} from '@angular/core';
+import {EditorService} from "../shared/editor.service";
 
 @Component({
     selector: 'pref-components',
@@ -21,6 +22,14 @@ import {OnDestroy, OnInit} from '@angular/core';
             <p-button (click)="showStatsDialog()" label="" class="pref-button"
                       pTooltip="Statistics" tooltipPosition="right">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
+            </p-button>
+            <p-button (click)="openDatasources()" class="pref-button"
+                      icon="pi pi-server" label="" pTooltip="Datasources"
+                      tooltipPosition="bottom" tabindex="0">
+            </p-button>
+            <p-button (click)="openStylesDialog()" class="pref-button"
+                      icon="pi pi-palette" label="" pTooltip="Styles"
+                      tooltipPosition="bottom" tabindex="0">
             </p-button>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
@@ -224,6 +233,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToVisualizeInput: number = 0;
 
     controlsDialogVisible = false;
+    stylesDialogVisible = false;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -239,16 +249,20 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.updateDarkClass(e.matches);
         }
     };
+    private subscriptions: Subscription[] = [];
 
     constructor(private messageService: InfoMessageService,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public styleService: StyleService,
-                public inspectionService: InspectionService,
-                public parametersService: AppStateService) {
-        this.parametersService.parameters.subscribe(parameters => {
-            this.tilesToLoadInput = parameters.tilesLoadLimit;
-            this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
-        });
+                public stateService: AppStateService,
+                public editorService: EditorService,
+                public inspectionService: InspectionService) {
+        this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
+            this.tilesToLoadInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
+            this.tilesToVisualizeInput = limit;
+        }));
     }
 
     ngOnInit() {
@@ -258,6 +272,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     ngOnDestroy() {
+        this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
@@ -267,10 +282,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
-        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.parametersService.parameters.next(parameters);
+        this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
+        this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
@@ -294,7 +307,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     clearURLProperties() {
-        this.parametersService.resetStorage();
+        this.stateService.resetStorage();
     }
 
     clearImportedStyles() {
@@ -355,6 +368,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
             this.mediaQueryList = undefined;
         }
+    }
+
+    openDatasources() {
+        this.editorService.styleEditorVisible = false;
+        this.editorService.datasourcesEditorVisible = true;
+    }
+
+    openStylesDialog() {
+        this.styleService.stylesDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

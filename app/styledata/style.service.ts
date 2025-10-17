@@ -11,7 +11,9 @@ import {
 import {FileUpload} from "primeng/fileupload";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {AppStateService, StyleParameters} from "../shared/appstate.service";
+import {AppStateService} from "../shared/appstate.service";
+import {filter} from "rxjs/operators";
+import {shortId4} from "./hash";
 
 interface StyleConfigEntry {
     id: string,
@@ -24,22 +26,22 @@ export type FeatureStyleOptionWithStringType = {
     type: FeatureStyleOptionType | string,
     defaultValue: any,
     description: string,
-    styleId?: string,
-    key?: string
 };
 
 export interface ErdblickStyle {
     id: string,
     modified: boolean,
     imported: boolean,
-    params: StyleParameters,
     source: string,
-    featureLayerStyle: FeatureLayerStyle | null,
+    featureLayerStyle: FeatureLayerStyle,
     options: Array<FeatureStyleOptionWithStringType>,
+    shortId: string,
     key?: string,
     type?: string,
     children?: Array<FeatureStyleOptionWithStringType>,
-    expanded?: boolean
+    expanded?: boolean,
+    visible: boolean,
+    url: string
 }
 
 export interface ErdblickStyleGroup extends Record<string, any> {
@@ -58,9 +60,10 @@ export interface ErdblickStyleGroup extends Record<string, any> {
 @Injectable({providedIn: 'root'})
 export class StyleService {
 
-    styleHashes: Map<string, {sha256: string, isModified: boolean, isUpdated: boolean}> = new Map<string, {sha256: string; isModified: boolean, isUpdated: boolean}>();
+    stylesDialogVisible: boolean = false;
+
+    styleHashes: Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}> = new Map();
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
-    private erdblickBuiltinStyles: Array<StyleConfigEntry> = [];
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
     selectedStyleIdForEditing: string = "";
@@ -75,18 +78,10 @@ export class StyleService {
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
-    constructor(private httpClient: HttpClient, private parameterService: AppStateService)
-    {
-        this.parameterService.parameters.subscribe(_ => {
-            // This subscription exists specifically to catch the values of the query parameters.
-            if (this.parameterService.initialQueryParamsSet) {
-                return;
-            }
-            for (let [styleId, style] of this.styles) {
-                style.params = this.parameterService.styleConfig(styleId);
-            }
+    constructor(private httpClient: HttpClient, private stateService: AppStateService) {
+        this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
-        })
+        });
     }
 
     async initializeStyles(): Promise<void> {
@@ -105,29 +100,12 @@ export class StyleService {
 
             const styleHashes = this.loadStyleHashes();
             const dataMap = await this.fetchStylesYamlSources(styleUrls);
-            for (const [styleId, styleString] of dataMap) {
-                if (!styleString) {
-                    this.erroredStyleIds.set(styleId, "Wrong URL / No data");
-                    console.error(`Wrong URL or no data available for style: ${styleId}`);
+            for (const [styleUrl, styleString] of dataMap) {
+                const styleId = this.initializeStyle(styleString, styleUrl);
+                if (!styleId) {
                     continue;
                 }
-
-                this.styles.set(styleId, {
-                    id: styleId,
-                    modified: false,
-                    imported: false,
-                    params: this.parameterService.styleConfig(styleId),
-                    source: styleString,
-                    featureLayerStyle: null,
-                    options: [],
-                    key: `${this.styles.size}`,
-                    type: "Style",
-                    children: []
-                });
                 this.builtinStylesCount++;
-                styleUrls.forEach(styleUrl => {
-                    if (styleUrl.id == styleId) this.erdblickBuiltinStyles.push(styleUrl);
-                });
                 await this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
             }
             this.loadModifiedBuiltinStyles();
@@ -135,17 +113,69 @@ export class StyleService {
             console.error(`Error while initializing styles: ${error}`);
         }
         this.loadImportedStyles();
-        this.parameterService.setInitialStyles(this.styles);
+
+        if (this.styles.size) {
+            this.reapplyStyles([...this.styles.keys()]);
+        }
+    }
+
+    private initializeStyle(styleString: string, styleUrl: string, knownStyleId?: string, modified: boolean = false, imported: boolean = false) {
+        if (!styleString) {
+            // TODO: This should be caught when we fetch the sources from the file,
+            //  and the error should contain the file name.
+            this.erroredStyleIds.set("missing-style-url", "Wrong URL / No data");
+            console.error(`Wrong URL or no data available for style.`);
+            return undefined;
+        }
+
+        const parsedStyleAndOptions = this.parseWasmStyle(styleString);
+        if (!parsedStyleAndOptions) {
+            return undefined;
+        }
+
+        const [wasmStyle, options] = parsedStyleAndOptions;
+        const styleId = wasmStyle.name();
+        const existingStyle = this.styles.get(styleId);
+        if (existingStyle) {
+            if (knownStyleId && styleId !== knownStyleId) {
+                this.erroredStyleIds.set(knownStyleId, `Attempted to override another style ${styleId}`);
+            }
+            this.deleteStyle(existingStyle.id);
+        }
+        if (knownStyleId && knownStyleId !== styleId && this.styles.has(knownStyleId)) {
+            this.deleteStyle(knownStyleId);
+        }
+
+        const isVisible = this.stateService.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
+        this.styles.set(styleId, {
+            id: styleId,
+            modified: modified,
+            imported: imported,
+            source: styleString,
+            featureLayerStyle: wasmStyle,
+            options: options,
+            shortId: shortId4(styleId),
+            key: `${this.styles.size}`,
+            type: "Style",
+            children: [],
+            visible: isVisible,
+            url: styleUrl
+        });
+
+        // Ensure that if the style was renamed, its visibility is retained.
+        this.stateService.setStyleVisibility(styleId, isVisible);
+
+        return styleId;
     }
 
     async fetchStylesYamlSources(styles: Array<StyleConfigEntry>) {
         const requests = styles.map((style, index) =>
             this.httpClient.get(style.url, { responseType: 'text' }).pipe(
-                map(data => ({ index, data, styleId: style.id })),
+                map(data => ({ index, data, styleUrl: style.url })),
                 catchError(error => {
-                    console.error('Error fetching style', style.id, error);
+                    console.error('Error fetching style', style.url, error);
                     // Return an observable that emits a value, preserving the index and ID, with an empty data string on error.
-                    return of({ index, data: "", styleId: style.id });
+                    return of({ index, data: "", styleUrl: style.url });
                 })
             )
         );
@@ -157,42 +187,35 @@ export class StyleService {
         results.sort((a, b) => a.index - b.index);
         // Initialize an ordered map to hold the results.
         const orderedMap = new Map<string, string>();
-        results.forEach(({ data, styleId }) => {
-            orderedMap.set(styleId, data);
+        results.forEach(({ data, styleUrl }) => {
+            orderedMap.set(styleUrl, data);
         });
         // Return the map with the fetched styles in their original order.
         return orderedMap;
     }
 
     async syncStyleYamlData(styleId: string) {
-        for (const erdblickStyle of this.erdblickBuiltinStyles) {
-            if (erdblickStyle.id == styleId) {
-                try {
-                    const result= await this.fetchStylesYamlSources([erdblickStyle]);
-                    if (result !== undefined && result.get(styleId) !== undefined) {
-                        const styleString = result.get(styleId)!;
-                        if (this.styles.has(styleId)) {
-                            this.styles.get(styleId)!.featureLayerStyle?.delete();
-                        }
-                        this.styles.set(styleId, {
-                            id: styleId,
-                            modified: false,
-                            imported: false,
-                            params: this.parameterService.styleConfig(styleId),
-                            source: styleString,
-                            featureLayerStyle: null,
-                            options: [],
-                            key: `${this.styles.size}`,
-                            type: "Style",
-                            children: []
-                        });
-                        this.saveModifiedBuiltinStyles();
-                        this.reapplyStyle(styleId);
-                    }
-                } catch (error) {
-                    console.error('Style retrieval failed:', error);
-                }
+        if (!this.styles.has(styleId)) {
+           return;
+        }
+        const style = this.styles.get(styleId)!;
+        if (!style.url) {
+            return;
+        }
+
+        try {
+            const result= await this.fetchStylesYamlSources([{id: style.id, url: style.url}]);
+            if (!result.has(styleId)) {
+                return;
             }
+            const styleString = result.get(styleId)!;
+            const newStyleId = this.initializeStyle(styleString, style.url, styleId);
+            if (!newStyleId) {
+                return;
+            }
+            this.reapplyStyle(newStyleId);
+        } catch (error) {
+            console.error('Style retrieval failed:', error);
         }
     }
 
@@ -205,7 +228,7 @@ export class StyleService {
 
         try {
             // Ensure content.source is a string or convert to string if needed
-            const blobContent = typeof content.source === 'string' ? content.source : JSON.stringify(content.source);
+            const blobContent = content.source;
             // Create a blob from the content
             const blob = new Blob([blobContent], { type: 'application/x-yaml;charset=utf-8' });
             // Create a URL for the blob
@@ -236,7 +259,7 @@ export class StyleService {
         return true;
     }
 
-    async importStyleYamlFile(event: any, file: File, styleId: string, fileUploader: FileUpload | undefined): Promise<boolean> {
+    async importStyleYamlFile(event: any, file: File, fileUploader: FileUpload | undefined): Promise<boolean> {
         // Prevent the default upload behavior Dummy XHR, as we handle the file ourselves
         event.xhr = new XMLHttpRequest();
         const fileReader = new FileReader();
@@ -262,23 +285,10 @@ export class StyleService {
             styleData = uploadedContent as string; // Casting as string since it's either string or ArrayBuffer
         }
 
-        this.deleteStyle(styleId);
-        this.styles.set(styleId, {
-            id: styleId,
-            modified: false,
-            imported: true,
-            params: {
-                visible: true,
-                options: {}
-            },
-            source: styleData,
-            featureLayerStyle: null,
-            options: [],
-            key: `${this.styles.size}`,
-            type: "Style",
-            children: []
-        });
-
+        const styleId = this.initializeStyle(styleData, "", "", false, true);
+        if (!styleId) {
+            return false;
+        }
         ++this.importedStylesCount;
         this.saveImportedStyles();
         this.reapplyStyle(styleId);
@@ -290,31 +300,37 @@ export class StyleService {
         // NOTE: Should implement dirty checking to detect unsaved changes and prompt user
         // with export option before deletion to prevent accidental loss of work.
         let style = this.styles.get(styleId);
-        if (!style)
+        if (!style) {
             return;
+        }
         style.featureLayerStyle?.delete();
         this.styleRemovedForId.next(styleId);
         this.styles.delete(styleId);
         if (style.imported) {
             this.importedStylesCount--;
             this.saveImportedStyles();
-        }
-        else
+        } else {
             this.saveModifiedBuiltinStyles();
+        }
     }
 
-    setStyleSource(styleId: string, styleSource: string) {
-        if (!this.styles.has(styleId))
-            return;
+    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string {
+        if (!this.styles.has(styleId)) {
+            return styleId;
+        }
         const style = this.styles.get(styleId)!;
-        style.source = styleSource;
-        style.modified = true;
+        const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported);
+        if (!newStyleId) {
+            return styleId;
+        }
+
         if (style.imported) {
             this.saveImportedStyles();
         } else {
             this.saveModifiedBuiltinStyles();
         }
-        this.reapplyStyle(styleId);
+        this.reapplyStyle(newStyleId);
+        return newStyleId;
     }
 
     saveModifiedBuiltinStyles() {
@@ -338,9 +354,10 @@ export class StyleService {
     loadImportedStyles() {
         const importedStyleData = localStorage.getItem('importedStyleData');
         if (importedStyleData) {
-            for (let [styleId, style] of JSON.parse(importedStyleData)) {
-                style.featureLayerStyle = null;
-                this.styles.set(styleId, style);
+            for (let [_, style] of JSON.parse(importedStyleData)) {
+                if (!this.initializeStyle(style.source, "", style.id, false, true)) {
+                    continue;
+                }
                 this.importedStylesCount++;
             }
         }
@@ -350,18 +367,22 @@ export class StyleService {
         const modifiedBuiltinStyleData = localStorage.getItem('builtinStyleData');
         if (modifiedBuiltinStyleData) {
             for (let [styleId, style] of JSON.parse(modifiedBuiltinStyleData)) {
-                if (this.styles.has(styleId)) {
-                    style.featureLayerStyle = null;
-                    style.params = this.parameterService.styleConfig(styleId);
-                    this.styles.set(styleId, style);
-                    const hash = this.styleHashes.get(styleId);
-                    if (hash) {
-                        this.styleHashes.set(styleId, {
-                            sha256: hash.sha256,
-                            isModified: true,
-                            isUpdated: hash.isUpdated
-                        });
-                    }
+                // A modified style will only be applied if there is a matching builtin style by the URL.
+                const matchingBuiltinStyle = this.styles.values().filter(style => style.url === style.url).toArray();
+                if (!matchingBuiltinStyle.length) {
+                    continue;
+                }
+                if (!this.initializeStyle(style.source, style.url, matchingBuiltinStyle[0].id, true, style.imported)) {
+                    continue;
+                }
+                const hash = this.styleHashes.get(style.url);
+                if (hash) {
+                    this.styleHashes.set(style.url, {
+                        id: style.id,
+                        sha256: hash.sha256,
+                        isModified: true,
+                        isUpdated: hash.isUpdated
+                    });
                 }
             }
         }
@@ -375,47 +396,41 @@ export class StyleService {
         localStorage.removeItem('builtinStyleData');
     }
 
-    initializeWasmStyle(styleId: string) {
-        const style = this.styles.get(styleId);
-        if (!style)
-            return;
-        const styleUint8Array = this.textEncoder.encode(style.source);
+    parseWasmStyle(styleString: string) {
+        const styleUint8Array = this.textEncoder.encode(styleString);
+        const yamlStyleNameRegex = /^\s*name\s*:\s*(?:(["'])(.*?)\1|([^\r\n#]+))/m;
+        const yamlStyleNameMatch = styleString.match(yamlStyleNameRegex);
+        const yamlStyleName = yamlStyleNameMatch ? (yamlStyleNameMatch[2] ?? yamlStyleNameMatch[3]).trim() : "failed-to-parse-name-from-yaml";
+
         const result = uint8ArrayToWasm(
             (wasmBuffer: any) => {
                 const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                 if (featureLayerStyle) {
-                    style.featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                    style.options = [];
                     // Transport FeatureStyleOptions from WASM array to JS.
-                    let options = style.featureLayerStyle.options();
-                    for (let i = 0; i < options.size(); ++i) {
-                        const option = options.get(i)! as FeatureStyleOptionWithStringType;
-                        style.options.push(option);
-
-                        // Apply the default value for the option, if no value is stored yet.
-                        if (!style.params.options.hasOwnProperty(option.id)) {
-                            style.params.options[option.id] = option.defaultValue;
-                        }
-
-                        // From the pre-initialized option value, ensure that it complies
-                        // with the expected data type. Also, we need to convert the value
-                        // type to a string, so it is understood by prime-ng p-tree.
-                        const currentValue = style.params.options[option.id];
+                    const options: FeatureStyleOptionWithStringType[] = [];
+                    const wasmOptions = featureLayerStyle.options();
+                    for (let i = 0; i < wasmOptions.size(); ++i) {
+                        const option = wasmOptions.get(i) as FeatureStyleOptionWithStringType;
+                        // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
                         if (option.type === coreLib.FeatureStyleOptionType.Bool) {
                             option.type = "Bool";
-                            style.params.options[option.id] = !!currentValue;
                         }
+                        options.push(option);
                     }
-                    options.delete();
-                    return true;
+                    wasmOptions.delete();
+                    return [featureLayerStyle, options];
                 }
-                return false;
+                return undefined;
             },
             styleUint8Array);
-        if (result === undefined || !result) {
-            console.error(`Encountered Uint8Array parsing issue in style "${styleId}" for the following YAML data:\n${style.source}`)
-            this.erroredStyleIds.set(styleId, "YAML Parse Error");
+
+        if (result) {
+            return result as [FeatureLayerStyle, FeatureStyleOptionWithStringType[]]
         }
+
+        console.error(`Encountered Uint8Array parsing issue in style "${yamlStyleName}" for the following YAML data:\n${styleString}`)
+        this.erroredStyleIds.set(yamlStyleName, "YAML Parse Error");
+        return undefined;
     }
 
     reloadStyle(styleId: string) {
@@ -428,11 +443,10 @@ export class StyleService {
         if (!this.styles.has(styleId)) {
             return;
         }
-        let style = this.styles.get(styleId)!;
-        this.initializeWasmStyle(styleId);
+        const style = this.styles.get(styleId)!;
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
-        if (style.params.visible) {
+        if (style.visible) {
             this.styleAddedForId.next(styleId);
         }
     }
@@ -443,8 +457,6 @@ export class StyleService {
         style.expanded = true;
         style.type = "Style";
         for (let option of style.options) {
-            option.key = `${style.id}/${option.id}`;
-            option.styleId = style.id;
             style.children.push(option);
         }
         return style;
@@ -519,7 +531,7 @@ export class StyleService {
                     anyVisible = computeGroupVisibility(child as ErdblickStyleGroup) || anyVisible;
                 } else {
                     const styleChild = child as ErdblickStyle;
-                    anyVisible = (styleChild.params.visible || anyVisible);
+                    anyVisible = styleChild.visible || anyVisible;
                 }
             }
             group.visible = anyVisible;
@@ -546,16 +558,11 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.params.visible = enabled !== undefined ? enabled : !style.params.visible;
+        style.visible = enabled !== undefined ? enabled : !style.visible;
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
-        this.parameterService.setStyleConfig(styleId, style.params);
-    }
-
-    toggleOption(styleId: string, optionId: string, enabled: boolean) {
-        const style = this.styles.get(styleId)!;
-        style.params.options[optionId] = enabled;
+        this.stateService.setStyleVisibility(styleId, style.visible);
     }
 
     private loadStyleHashes(): Map<string, string> {
@@ -571,21 +578,23 @@ export class StyleService {
 
     private async compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
         const styleHash = await this.styleSha256(style.source);
-        this.styleHashes.set(style.id, {
+        this.styleHashes.set(style.url, {
+            id: style.id,
             sha256: styleHash,
             isModified: false,
-            isUpdated: styleHash !== styleHashes.get(style.id)
+            isUpdated: styleHash !== styleHashes.get(style.url)
         });
     }
 
     updateStyleHashes() {
         localStorage.removeItem('styleHashes');
-        const pairs = Array.from(this.styleHashes, ([styleId, status]) => [styleId, status.sha256]);
+        const pairs = Array.from(this.styleHashes, ([styleUrl, status]) => [styleUrl, status.sha256]);
         localStorage.setItem('styleHashes', JSON.stringify(pairs));
         this.styleHashes.clear();
     }
 
     private async styleSha256(input: string): Promise<string> {
+        // TODO: We have our own hash in hash.ts that we can use.
         if (globalThis.isSecureContext && globalThis.crypto?.subtle) {
             const data = new TextEncoder().encode(input);
             const buffer = await crypto.subtle.digest('SHA-256', data);

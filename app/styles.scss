@@ -66,22 +66,65 @@ body {
   }
 }
 
-.mapviewer-renderlayer {
-  width: 100%;
+map-view {
+  display: block;
   height: 100%;
-  position: fixed;
-  left: 0;
-  top: 0;
-  overflow: hidden;
-  user-select: none;
-  -moz-user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  -o-user-select: none;
-}
+  width: 100%;
+  position: relative;
 
-#mapViewContainer .cesium-widget-credits {
-  display: none !important;
+  .viewsync-select {
+    position: absolute;
+    left: 0.5em;
+    top: 0.5em;
+    z-index: 110;
+    opacity: 0.75;
+  }
+
+  .viewsync-select:hover {
+    opacity: 1;
+  }
+
+  .p-multiselect {
+    box-shadow: none;
+    border: none;
+  }
+
+  .p-multiselect-dropdown-icon {
+    margin-left: -0.5em;
+  }
+
+  .p-multiselect-label {
+    display: none;
+  }
+
+  .p-multiselect-header {
+    display: none;
+  }
+
+  .p-multiselect {
+    width: 2em;
+    height: 2em;
+  }
+
+  .mapviewer-renderlayer {
+    position: relative;
+    height: 100vh;
+    inset: 0;
+    overflow: hidden;
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+
+    &.outlined {
+      border: 0.1em solid var(--p-focus-ring-color);
+    }
+  }
+
+  [id^="mapViewContainer"] .cesium-widget-credits {
+    display: none !important;
+  }
 }
 
 /* Shared styles for both panels */
@@ -116,13 +159,11 @@ body {
 
 .compass-circle {
   position: absolute;
-  top: 2em;
-  right: 0.5em;
+  bottom: 0.5em;
+  right: 0.7em;
   width: 4em;
   height: 4em;
-  border: 0.15em solid var(--p-button-secondary-border-color);
   border-radius: 50%;
-  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -130,24 +171,26 @@ body {
   color: var(--p-button-secondary-border-color);
   z-index: 110;
   background-color: rgba(255, 255, 255, 0.25);
-}
+  cursor: pointer;
 
-.compass-label {
-  position: absolute;
-  font-size: 0.75em;
-  font-weight: bolder;
-}
-.compass-label.north { top: 0.2em; }
-.compass-label.east  { right: 0.2em; }
-.compass-label.south { bottom: 0.2em; }
-.compass-label.west  { left: 0.2em; }
+  .compass-label {
+    position: absolute;
+    font-size: 0.75em;
+    font-weight: bolder;
+  }
+  .compass-label.north { top: 0.2em; }
+  .compass-label.east  { right: 0.2em; }
+  .compass-label.south { bottom: 0.2em; }
+  .compass-label.west  { left: 0.2em; }
 
-.compass-needle {
-  width: 0.75em;
-  height: 1.5em;
-  background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
-  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-  transform-origin: 50% 50%;
+  .compass-needle {
+    width: 0.75em;
+    height: 1.5em;
+    background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    transform-origin: 50% 50%;
+    cursor: pointer;
+  }
 }
 
 .controls-button {
