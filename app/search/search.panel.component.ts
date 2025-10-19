@@ -636,13 +636,15 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     onFocus() {
-        setTimeout(() => {
-            this.textarea.nativeElement.setSelectionRange(
-                this.savedSelectionStart, 
-                this.savedSelectionEnd, 
-                this.savedSelectionDirection
-            );
-        }, 0);
+        if (!this.completion.visible) {
+            setTimeout(() => {
+                this.textarea.nativeElement.setSelectionRange(
+                    this.savedSelectionStart,
+                    this.savedSelectionEnd,
+                    this.savedSelectionDirection
+                );
+            }, 0);
+        }
     }
 
     onKeyup(event: KeyboardEvent) {
@@ -668,6 +670,7 @@ export class SearchPanelComponent implements AfterViewInit {
             if (this.completion.visible)
                 event.preventDefault();
             this.completion.visible = false;
+            textarea.focus();
         }
 
         // Prevent defaults if completion is active
@@ -723,7 +726,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.setSearchValue(text);
                 this.textarea.nativeElement.focus();
             } else {
-                this.setSearchValue(this.completionItems[this.completion.selectionIndex].query);
+                let item = this.completionItems[this.completion.selectionIndex];
+                this.setSearchValue(item.query);
+
+                let cursor = item.begin + item.text.length
+                setTimeout(() => {
+                    this.textarea.nativeElement.setSelectionRange(
+                        cursor, cursor, "forward");
+                }, 0);
             }
 
             this.completionItems = [];
