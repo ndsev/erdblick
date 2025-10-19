@@ -138,16 +138,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
             break;
         }
 
-        const auto n = std::min<int>(result->size(), limit - joinedResult.size());
-        if (n > 0) {
-            auto end = result->begin();
-            std::advance(end, n);
-            joinedResult.insert(result->begin(), end);
-        }
-
-        if (limit > 0 && joinedResult.size() >= limit) {
-            break;
-        }
+        joinedResult.insert(result->begin(), result->end());
     }
 
     auto obj = JsValue::List();
