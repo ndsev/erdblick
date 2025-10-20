@@ -215,7 +215,7 @@ export class MapDataService {
 
         await this.reloadDataSources();
 
-        this.stateService.selectedFeaturesState.subscribe(selected => {
+        this.stateService.selectionState.subscribe(selected => {
             this.highlightFeatures(selected).then();
         });
         this.selectionTopic.subscribe(selectedFeatureWrappers => {

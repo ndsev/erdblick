@@ -12,10 +12,28 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
+export const DEF_PANEL_SIZE: [] = [10, 10];
 
 export interface TileFeatureId {
     featureId: string,
     mapTileKey: string,
+}
+
+export interface InspectionPanelModel {
+    selectedFeatures: TileFeatureId[],
+    pinned: boolean,
+    size: [number, number],
+    selectedSourceData?: SelectedSourceData
+}
+
+export interface StyleParameters {
+    visible: boolean,
+    options: Record<string, boolean|number>
+}
+
+export interface StyleURLParameters {
+    v: boolean,
+    o: Record<string, boolean|number>
 }
 
 export interface CameraViewState {
@@ -27,9 +45,9 @@ export interface LayerViewConfig {
     level: number;
     visible: boolean;
     tileBorders: boolean;
-}
 
-export type PanelSizeState = [] | [number, number];
+    // TODO: We need style options here.
+}
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
@@ -96,16 +114,67 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    readonly selectedFeaturesState = this.createState<[number, TileFeatureId][]>({
+    // 0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
+    // 0~sourcedata:map:layer:tile~address~...features...~size
+    // 1~...
+    readonly selectionState = this.createState<InspectionPanelModel[]>({
         name: 'selected',
         defaultValue: [],
-        schema: z.array(z.tuple([
-            z.coerce.number().nonnegative(),
-            z.object({
-                featureId: z.string(),
-                mapTileKey: z.string(),
-            })
-        ])),
+        schema: z.array(z.string()),
+        toStorage: (value: InspectionPanelModel[])=> {
+            const stringifiedStates = value.map(state => {
+                let s = `${state.pinned ? 1 : 0}~`;
+                if (state.selectedSourceData) {
+                    s += `${state.selectedSourceData.mapTileKey}~${state.selectedSourceData.address ?? ''}~`
+                }
+                s += `${state.selectedFeatures.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
+                s += `${state.size[0]}:${state.size[1]}`;
+                return s;
+            });
+            return stringifiedStates;
+        },
+        fromStorage: (payload: any): InspectionPanelModel[] => {
+            const result: InspectionPanelModel[] = []
+            if (!payload || !payload.length) {
+                return result;
+            }
+            for (const panelStateStr of payload) {
+                const parts: string[] = panelStateStr.split('~');
+                if (parts.length < 4) {
+                    continue;
+                }
+                const pinState = parts.shift() === "1";
+                const sizeParts = parts.pop()!.split(':');
+                const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : DEF_PANEL_SIZE;
+
+                const newPanelState: InspectionPanelModel = {
+                    selectedFeatures: [],
+                    pinned: pinState,
+                    size: size as [number, number]
+                };
+
+                // Check if the first MapTileKey is for SourceData.
+                if (parts[0].startsWith("SourceData:")) {
+                    newPanelState.selectedSourceData = {
+                        mapTileKey: parts.shift()!,
+                        address: parts[1].length ? BigInt(parts[1]) : undefined
+                    };
+                    // Shift the address.
+                    parts.shift();
+                }
+
+                // The remaining strings are MapTileKey-FeatureId-pairs.
+                while (parts.length >= 2) {
+                    newPanelState.selectedFeatures.push({
+                        mapTileKey: parts.shift()!,
+                        featureId: parts.shift()!
+                    })
+                }
+
+                result.push(newPanelState);
+            }
+            return result;
+        },
         urlParamName: 'sel',
         urlIncludeInVisualizationOnly: false,
     });
@@ -257,22 +326,22 @@ export class AppStateService implements OnDestroy {
                 address,
             };
         },
-        fromStorage: (payload) => {
+        fromStorage: (payload: any) => {
             if (!payload) {
                 return null;
             }
-            const stored = payload as any;
+
             let address: bigint | undefined = undefined;
-            if (stored.address !== undefined && stored.address !== null && stored.address !== "") {
+            if (payload.address !== undefined && payload.address !== null && payload.address !== "") {
                 try {
-                    address = BigInt(stored.address);
+                    address = BigInt(payload.address);
                 } catch (error) {
-                    console.warn('[AppStateService] Failed to parse persisted source data address', stored.address, error);
+                    console.warn('[AppStateService] Failed to parse persisted source data address', payload.address, error);
                     address = undefined;
                 }
             }
             return {
-                ...stored,
+                ...payload,
                 address,
             } as SelectedSourceData;
         },
@@ -282,15 +351,6 @@ export class AppStateService implements OnDestroy {
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
         schema: z.array(z.string()),
-    });
-
-    readonly panelState = this.createState<PanelSizeState>({
-        name: 'panel',
-        defaultValue: [] as PanelSizeState,
-        schema: z.union([
-            z.tuple([]),
-            z.tuple([z.coerce.number(), z.coerce.number()]),
-        ]),
     });
 
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
@@ -466,8 +526,8 @@ export class AppStateService implements OnDestroy {
     set marker(val: boolean) {this.markerState.next(val);};
     get markedPosition() {return this.markedPositionState.getValue();}
     set markedPosition(val: number[]) {this.markedPositionState.next(val);};
-    get selectedFeatures() {return this.selectedFeaturesState.getValue();}
-    set selectedFeatures(val: [number, TileFeatureId][]) {this.selectedFeaturesState.next(val);};
+    get selection() {return this.selectionState.getValue();}
+    set selection(val: InspectionPanelModel[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
     get layerNames() {return this.layerNamesState.getValue();}
@@ -483,8 +543,6 @@ export class AppStateService implements OnDestroy {
     set selectedSourceData(val: SelectedSourceData | null) {this.selectedSourceDataState.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
-    get panel() {return this.panelState.getValue();}
-    set panel(val: PanelSizeState) {this.panelState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
@@ -553,14 +611,14 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    setSelectedFeatures(viewIndex: number, newSelection: TileFeatureId[]) {
+    setSelectedFeatures(newSelection: TileFeatureId[]) {
         const currentSelection = this.selectedFeatures;
         if (newSelection.length === currentSelection.length &&
             newSelection.every((v, i) =>
                 v.featureId === currentSelection[i][1].featureId && v.mapTileKey === currentSelection[i][1].mapTileKey)) {
             return false;
         }
-        this.selectedFeatures = newSelection.map(feature => ([viewIndex, {...feature}]));
+        this.selectedFeatures = newSelection.map(feature => ([{...feature}]));
         this._replaceUrl = false;
         return true;
     }

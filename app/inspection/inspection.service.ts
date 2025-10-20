@@ -26,17 +26,14 @@ interface InspectionModelData {
 }
 
 export interface SelectedSourceData {
-    mapId: string,
-    tileId: number,
-    layerId: string,
-    address?: bigint,
-    featureIds?: string,
+    mapTileKey: string;
+    address?: bigint
 }
 
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
     if (!a || !b)
         return false;
-    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address && a.featureIds === b.featureIds));
+    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address));
 }
 
 export function selectedFeaturesEqualTo(a: FeatureWrapper[] | null, b: FeatureWrapper[] | null) {
