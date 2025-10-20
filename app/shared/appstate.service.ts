@@ -12,15 +12,15 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
-export const DEF_PANEL_SIZE: [] = [10, 10];
+export const DEF_PANEL_SIZE: [number, number] = [10, 10];
 
 export interface TileFeatureId {
     featureId: string,
     mapTileKey: string,
 }
 
-export interface InspectionPanelModel {
-    selectedFeatures: TileFeatureId[],
+export interface InspectionPanelModel<FeatureRepresentation> {
+    selectedFeatures: FeatureRepresentation[],
     pinned: boolean,
     size: [number, number],
     selectedSourceData?: SelectedSourceData
@@ -117,11 +117,11 @@ export class AppStateService implements OnDestroy {
     // 0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 0~sourcedata:map:layer:tile~address~...features...~size
     // 1~...
-    readonly selectionState = this.createState<InspectionPanelModel[]>({
+    readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
         name: 'selected',
         defaultValue: [],
         schema: z.array(z.string()),
-        toStorage: (value: InspectionPanelModel[])=> {
+        toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             const stringifiedStates = value.map(state => {
                 let s = `${state.pinned ? 1 : 0}~`;
                 if (state.selectedSourceData) {
@@ -133,8 +133,8 @@ export class AppStateService implements OnDestroy {
             });
             return stringifiedStates;
         },
-        fromStorage: (payload: any): InspectionPanelModel[] => {
-            const result: InspectionPanelModel[] = []
+        fromStorage: (payload: any): InspectionPanelModel<TileFeatureId>[] => {
+            const result: InspectionPanelModel<TileFeatureId>[] = []
             if (!payload || !payload.length) {
                 return result;
             }
@@ -147,7 +147,7 @@ export class AppStateService implements OnDestroy {
                 const sizeParts = parts.pop()!.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : DEF_PANEL_SIZE;
 
-                const newPanelState: InspectionPanelModel = {
+                const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     selectedFeatures: [],
                     pinned: pinState,
                     size: size as [number, number]
@@ -302,49 +302,6 @@ export class AppStateService implements OnDestroy {
         defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
         schema: z.coerce.number().nonnegative(),
         urlParamName: 'tvl',
-    });
-
-    readonly selectedSourceDataState = this.createState<SelectedSourceData | null>({
-        name: 'selectedSourceData',
-        defaultValue: null,
-        schema: z.union([z.null(), z.object({
-            mapId: z.string(),
-            tileId: z.coerce.number(),
-            layerId: z.string(),
-            address: z.string().optional(),
-            featureIds: z.string().optional(),
-        })]),
-        urlParamName: 'ssd',
-        urlIncludeInVisualizationOnly: false,
-        toStorage: (value) => {
-            if (!value) {
-                return value;
-            }
-            const address = value.address !== undefined ? value.address.toString() : undefined;
-            return {
-                ...value,
-                address,
-            };
-        },
-        fromStorage: (payload: any) => {
-            if (!payload) {
-                return null;
-            }
-
-            let address: bigint | undefined = undefined;
-            if (payload.address !== undefined && payload.address !== null && payload.address !== "") {
-                try {
-                    address = BigInt(payload.address);
-                } catch (error) {
-                    console.warn('[AppStateService] Failed to parse persisted source data address', payload.address, error);
-                    address = undefined;
-                }
-            }
-            return {
-                ...payload,
-                address,
-            } as SelectedSourceData;
-        },
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
@@ -527,7 +484,7 @@ export class AppStateService implements OnDestroy {
     get markedPosition() {return this.markedPositionState.getValue();}
     set markedPosition(val: number[]) {this.markedPositionState.next(val);};
     get selection() {return this.selectionState.getValue();}
-    set selection(val: InspectionPanelModel[]) {this.selectionState.next(val);};
+    set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
     get focusedView() {return this.focusedViewState.getValue();}
     set focusedView(val: number) {this.focusedViewState.next(val);};
     get layerNames() {return this.layerNamesState.getValue();}
@@ -539,8 +496,6 @@ export class AppStateService implements OnDestroy {
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
-    get selectedSourceData() {return this.selectedSourceDataState.getValue();}
-    set selectedSourceData(val: SelectedSourceData | null) {this.selectedSourceDataState.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
@@ -611,16 +566,54 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    setSelectedFeatures(newSelection: TileFeatureId[]) {
-        const currentSelection = this.selectedFeatures;
-        if (newSelection.length === currentSelection.length &&
-            newSelection.every((v, i) =>
-                v.featureId === currentSelection[i][1].featureId && v.mapTileKey === currentSelection[i][1].mapTileKey)) {
-            return false;
-        }
-        this.selectedFeatures = newSelection.map(feature => ([{...feature}]));
+    /*
+    ## Current State
+
+      View Click Event -> MapDataService -> InspectionService -> InspectionPanel
+                                                              -> AppStateService
+
+      (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+                                                                         -> AppStateService
+
+   ## New Goal State
+
+    // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+    //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+    //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
+
+     */
+    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, panelIndex?: number) {
         this._replaceUrl = false;
-        return true;
+        const allPanels = this.selectionState.getValue();
+        const featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
+        // If a panel index was passed, change the SourceData-selection in that panel.
+        if (panelIndex !== undefined && panelIndex < allPanels.length) {
+            allPanels[panelIndex].selectedSourceData = sourceDataSelection;
+            this.selectionState.next(allPanels);
+            return;
+        }
+        // Create a new panel if there is no existing one to change.
+        if (allPanels.every(panel => panel.pinned)) {
+            allPanels.push({
+                selectedFeatures: featureSelection,
+                selectedSourceData: sourceDataSelection,
+                pinned: false,
+                size: DEF_PANEL_SIZE
+            });
+            this.selectionState.next(allPanels);
+            return;
+        }
+        // Find the first unpinned panel and change the selection there.
+        for (let i = 0; i < allPanels.length; i++) {
+            if (allPanels[i].pinned) {
+                continue;
+            }
+            allPanels[i].selectedFeatures = featureSelection;
+            allPanels[i].selectedSourceData = sourceDataSelection;
+            break;
+        }
+        this.selectionState.next(allPanels);
     }
 
     setMarkerState(enabled: boolean) {

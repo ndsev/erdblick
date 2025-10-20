@@ -6,7 +6,7 @@ import {TileVisualization} from "../mapview/visualization.model";
 import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
-import {AppStateService, TileFeatureId} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel, TileFeatureId} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MAX_ZOOM_LEVEL} from "../search/feature.search.service";
@@ -76,8 +76,8 @@ export class MapDataService {
     tileVisualizationDestructionTopic: Subject<TileVisualization>;
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
-    hoverTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
-    selectionTopic: BehaviorSubject<Array<FeatureWrapper>> = new BehaviorSubject<Array<FeatureWrapper>>([]);
+    hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
+    selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
 
     maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
@@ -216,6 +216,7 @@ export class MapDataService {
         await this.reloadDataSources();
 
         this.stateService.selectionState.subscribe(selected => {
+            // TODO: Translate inspection panel states from TileFeatureId to FeatureWrapper
             this.highlightFeatures(selected).then();
         });
         this.selectionTopic.subscribe(selectedFeatureWrappers => {
@@ -713,28 +714,24 @@ export class MapDataService {
         return result;
     }
 
-    async highlightFeatures(tileFeatureIds: [number, (TileFeatureId | null | string)][],
-                            focus: boolean = false, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-        // Load the tiles for the selection.
+    async loadFeatures(tileFeatureIds: (TileFeatureId | null | string)[]): Promise<FeatureWrapper[]> {
+        // Load the tiles.
         const tiles = await this.loadTiles(new Set(tileFeatureIds.filter(s =>
-            s[1] && typeof s[1] !== "string"
+                s && typeof s !== "string"
             ).map(s =>
-                (s[1] as TileFeatureId).mapTileKey
+                (s as TileFeatureId).mapTileKey
             )
         ));
 
         // Ensure that the feature really exists in the tile.
-        let features = new Array<FeatureWrapper>();
-        for (let el of tileFeatureIds) {
-            const id = el[1];
-            if (typeof id == "string") {
+        const features: FeatureWrapper[] = [];
+        for (const id of tileFeatureIds) {
+            if (typeof id === "string") {
                 // When clicking on geometry that represents a highlight,
                 // this is reflected in the feature id. By processing this
                 // info here, a hover highlight can be turned into a selection.
-                if (id == "hover-highlight") {
-                    features = this.hoverTopic.getValue();
-                } else if (id == "selection-highlight") {
-                    features = this.selectionTopic.getValue();
+                if (id === "hover-highlight") {
+                    return this.hoverTopic.getValue();
                 }
                 continue;
             }
@@ -757,7 +754,12 @@ export class MapDataService {
 
             features.push(new FeatureWrapper(id!.featureId, tile));
         }
+        return features;
+    }
 
+    async highlightFeatures(viewIndex: number, tileFeatureIds: (TileFeatureId | null | string)[],
+                            focus: boolean = false, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+        const features = await this.loadFeatures(tileFeatureIds);
         if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
             if (features.length) {
                 if (featureSetsEqual(this.selectionTopic.getValue(), features)) {

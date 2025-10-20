@@ -33,7 +33,7 @@ export interface SelectedSourceData {
 export function selectedSourceDataEqualTo(a: SelectedSourceData | null, b: SelectedSourceData | null) {
     if (!a || !b)
         return false;
-    return (a === b || (a.mapId === b.mapId && a.tileId === b.tileId && a.layerId === b.layerId && a.address === b.address));
+    return (a === b || (a.mapTileKey === b.mapTileKey && a.address === b.address));
 }
 
 export function selectedFeaturesEqualTo(a: FeatureWrapper[] | null, b: FeatureWrapper[] | null) {
@@ -80,7 +80,7 @@ export class InspectionService {
             if (!selectedFeatures?.length) {
                 this.isInspectionPanelVisible = false;
                 this.featureTreeFilterValue = "";
-                this.stateService.setSelectedFeatures(0, []);
+                this.stateService.setSelectedFeatures([]);
                 this.selectedFeatures = [];
                 return;
             }

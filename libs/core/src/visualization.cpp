@@ -351,17 +351,7 @@ void FeatureLayerVisualization::addGeometry(
     // easy link from the geometry back to the feature.
     auto tileFeatureId = JsValue::Undefined();
     if (rule.selectable()) {
-        switch (highlightMode_) {
-        case FeatureStyleRule::NoHighlight:
-            tileFeatureId = makeTileFeatureId(id);
-            break;
-        case FeatureStyleRule::HoverHighlight:
-            tileFeatureId = JsValue("hover-highlight");
-            break;
-        case FeatureStyleRule::SelectionHighlight:
-            tileFeatureId = JsValue("selection-highlight");
-            break;
-        }
+        tileFeatureId = makeTileFeatureId(id);
     }
 
     std::vector<mapget::Point> vertsCartesian;

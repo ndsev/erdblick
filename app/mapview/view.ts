@@ -443,10 +443,7 @@ export class MapView {
                 this.inspectionService.isInspectionPanelVisible = false;
                 this.menuService.tileOutline.next(null);
             }
-            this.mapService.highlightFeatures(
-                Array.isArray(feature?.id) ? [this._viewIndex, feature.id] : [[this._viewIndex, feature?.id]],
-                false,
-                coreLib.HighlightMode.SELECTION_HIGHLIGHT).then();
+            this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
             // Handle position update after highlighting, because otherwise
             // there is a race condition between the parameter updates for
             // feature selection and position update.
