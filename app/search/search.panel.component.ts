@@ -40,9 +40,6 @@ interface ExtendedSearchTarget extends SearchTarget {
                     (mousedown)="onCompletionPopupDown($event)"
                     [style.top.px]="completion.top"
                     [style.left.px]="completion.left">
-                    <p-progress-spinner *ngIf="completion.pending"
-                        aria-label="Loading completion candidates"
-                        [style]="{ height: '1em', width: '1em' }" />
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
@@ -53,6 +50,9 @@ interface ExtendedSearchTarget extends SearchTarget {
                            {{ item.hint }}
                         </div>
                     </div>
+                    <p-progress-spinner *ngIf="completion.pending"
+                        aria-label="Loading completion candidates"
+                        [style]="{ height: '1em', width: '1em' }" />
                 </div>
             </div>
 

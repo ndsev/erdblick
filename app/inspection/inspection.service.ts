@@ -264,46 +264,51 @@ export class InspectionService {
     }
 
     async loadSourceDataLayer(tileId: number, layerId: string, mapId: string) : Promise<TileSourceDataLayer> {
-        const tileParser = new coreLib.TileLayerParser();
-        const newRequestBody = JSON.stringify({
-            requests: [{
-                mapId: mapId,
-                layerId: layerId,
-                tileIds: [tileId]
-            }]
-        });
-
-        let layer: TileSourceDataLayer | undefined;
-        let fetch = new Fetch("tiles")
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody(newRequestBody)
-            .withBufferCallback((message: any, messageType: any) => {
-                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                    uint8ArrayToWasm((wasmBuffer: any) => {
-                        tileParser!.readFieldDictUpdate(wasmBuffer);
-                    }, message);
-                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
-                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                    layer = uint8ArrayToWasm((wasmBlob: any) => {
-                        return tileParser.readTileSourceDataLayer(wasmBlob);
-                    }, blob);
-                } else {
-                    throw new Error(`Unknown message type ${messageType}.`)
-                }
+        let parser : any = null;
+        try {
+            parser = new coreLib.TileLayerParser();
+            const newRequestBody = JSON.stringify({
+                requests: [{
+                    mapId: mapId,
+                    layerId: layerId,
+                    tileIds: [tileId]
+                }]
             });
 
-        return fetch.go()
-            .then(_ => {
-                if (!layer)
-                    throw new Error(`Unknown error while loading layer.`);
-                const error = layer.getError();
-                if (error) {
-                    layer.delete();
-                    throw new Error(`Error while loading layer: ${error}`);
-                }
-                return layer;
-            });
+            let layer: TileSourceDataLayer | undefined;
+            let fetch = new Fetch("tiles")
+                .withChunkProcessing()
+                .withMethod("POST")
+                .withBody(newRequestBody)
+                .withBufferCallback((message: any, messageType: any) => {
+                    if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                        uint8ArrayToWasm((wasmBuffer: any) => {
+                            parser!.readFieldDictUpdate(wasmBuffer);
+                        }, message);
+                    } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                        const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                        layer = uint8ArrayToWasm((wasmBlob: any) => {
+                            return parser.readTileSourceDataLayer(wasmBlob);
+                        }, blob);
+                    } else {
+                        throw new Error(`Unknown message type ${messageType}.`)
+                    }
+                });
+
+            return fetch.go()
+                .then(_ => {
+                    if (!layer)
+                        throw new Error(`Unknown error while loading layer.`);
+                    const error = layer.getError();
+                    if (error) {
+                        layer.delete();
+                        throw new Error(`Error while loading layer: ${error}`);
+                    }
+                    return layer;
+                });
+        } finally {
+            if (parser) parser.delete();
+        }
     }
 
     selectedFeatureGeoJsonCollection() {

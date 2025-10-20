@@ -495,9 +495,9 @@ void FeatureLayerVisualization::addMergedPointGeometry(
         gridPositionHash,
         tile_->tileId().z(),
         mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointFeatureSet.size());
-    evalFun.context_.set(
-        internalStringPoolCopy_->emplace("$mergeCount"),
-        simfil::Value(mergedPointCount));
+
+    auto mergeCountId = internalStringPoolCopy_->emplace("$mergeCount");
+    evalFun.context_.set(mergeCountId.value(), simfil::Value(mergedPointCount));
 
     // Add a MergedPointVisualization to the list.
     if (!mergedPointVisu) {
@@ -739,19 +739,12 @@ void FeatureLayerVisualization::addAttribute(
     addOptionsToSimfilContext(attrEvaluationContext);
 
     // Assemble simfil evaluation context.
-    attrEvaluationContext
-        .set(
-        internalStringPoolCopy_->emplace("$name"),
-        simfil::Value(attr->name()));
-    attrEvaluationContext
-        .set(
-        internalStringPoolCopy_->emplace("$feature"),
-        simfil::Value::field(constFeature));
-    attrEvaluationContext
-        .set(
-        internalStringPoolCopy_->emplace("$layer"),
-        simfil::Value(layer));
-
+    auto nameId = internalStringPoolCopy_->emplace("$name");
+    attrEvaluationContext.set(nameId.value(), simfil::Value(attr->name()));
+    auto featureId = internalStringPoolCopy_->emplace("$feature");
+    attrEvaluationContext.set(featureId.value(), simfil::Value::field(constFeature));
+    auto layerId = internalStringPoolCopy_->emplace("$layer");
+    attrEvaluationContext.set(layerId.value(), simfil::Value(layer));
 
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
@@ -806,7 +799,8 @@ void FeatureLayerVisualization::addAttribute(
 void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& context)
 {
     for (auto const& [key, value] : optionValues_) {
-        context.set(internalStringPoolCopy_->emplace(key), value);
+        auto keyId = internalStringPoolCopy_->emplace(key);
+        context.set(keyId.value(), value);
     }
 }
 
@@ -935,15 +929,14 @@ void RecursiveRelationVisualizationState::render(
     visu_.addOptionsToSimfilContext(relationEvaluationContext);
 
     // Assemble simfil evaluation context.
-    relationEvaluationContext.set(
-        visu_.internalStringPoolCopy_->emplace("$source"),
-        simfil::Value::field(constSource));
-    relationEvaluationContext.set(
-        visu_.internalStringPoolCopy_->emplace("$target"),
-        simfil::Value::field(constTarget));
-    relationEvaluationContext.set(
-        visu_.internalStringPoolCopy_->emplace("$twoway"),
-        simfil::Value(r.twoway_));
+    {
+        auto sourceId = visu_.internalStringPoolCopy_->emplace("$source");
+        relationEvaluationContext.set(sourceId.value(), simfil::Value::field(constSource));
+        auto targetId = visu_.internalStringPoolCopy_->emplace("$target");
+        relationEvaluationContext.set(targetId.value(), simfil::Value::field(constTarget));
+        auto twowayId = visu_.internalStringPoolCopy_->emplace("$twoway");
+        relationEvaluationContext.set(twowayId.value(), simfil::Value(r.twoway_));
+    }
 
     // Function which can evaluate a simfil expression in the relation context.
     auto boundEvalFun = BoundEvalFun{
