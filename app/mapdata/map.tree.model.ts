@@ -1,4 +1,4 @@
-import {AppStateService, LayerViewConfig} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel, LayerViewConfig} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
@@ -170,7 +170,7 @@ export class MapLayerTree {
 
     constructor(
         mapInfo: MapInfoItem[],
-        private selectionTopic: BehaviorSubject<Array<FeatureWrapper>>,
+        private selectionTopic: BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>,
         private stateService: AppStateService,
         private styleService: StyleService) {
         this.initializeMapGroups(mapInfo);
@@ -312,9 +312,9 @@ export class MapLayerTree {
      */
     private clearSelectionForLayer(mapId: string, layerId: string) {
         const current = this.selectionTopic.getValue();
-        const remaining = current.filter(
-            fw => !(fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId)
-        );
+        const remaining = current.filter(panel => {
+            return !panel.selectedFeatures.some(fw => fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId);
+        });
         if (remaining.length !== current.length) {
             this.selectionTopic.next(remaining);
         }

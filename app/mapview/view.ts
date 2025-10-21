@@ -401,7 +401,7 @@ export class MapView {
                 const cartographic = Cartographic.fromCartesian(cartesian);
                 const longitude = CesiumMath.toDegrees(cartographic.longitude);
                 const latitude = CesiumMath.toDegrees(cartographic.latitude);
-                this.menuService.tileIdsForSourceData.next([...Array(16).keys()].map(level => {
+                this.menuService.tileIdsForSourceData.next(Array(16).map((_, level) => {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
                     return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
                 }));
@@ -477,10 +477,8 @@ export class MapView {
                 }
 
                 let feature = this.viewer.scene.pick(position);
-                this.mapService.highlightFeatures(
-                    Array.isArray(feature?.id) ? [this._viewIndex, feature.id] : [[this._viewIndex, feature?.id]],
-                    false,
-                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+                this.mapService.setHoveredFeatures(this._viewIndex,
+                    Array.isArray(feature?.id) ? feature.id : [feature?.id]).then();
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 

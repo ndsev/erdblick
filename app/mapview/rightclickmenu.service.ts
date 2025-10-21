@@ -1,8 +1,9 @@
 import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
-import {InspectionService} from "../inspection/inspection.service";
 import {coreLib} from "../integrations/wasm";
+import {AppStateService} from "../shared/appstate.service";
+import {SelectedSourceData} from "../inspection/inspection.service";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,
@@ -22,7 +23,7 @@ export class RightClickMenuService {
     tileOutline: Subject<object | null> = new Subject<object | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
 
-    constructor(private inspectionService: InspectionService) {
+    constructor(private stateService: AppStateService) {
         this.menuItems.next([{
             label: 'Inspect Source Data for Tile',
             icon: 'pi pi-database',
@@ -59,11 +60,9 @@ export class RightClickMenuService {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.inspectionService.loadSourceDataInspection(
-                    Number(sourceDataParams.tileId),
-                    sourceDataParams.mapId,
-                    sourceDataParams.layerId
-                );
+                this.stateService.setSelection({
+                    mapTileKey: `SourceData:${sourceDataParams.mapId}:${sourceDataParams.layerId}:${Number(sourceDataParams.tileId)}`
+                } as SelectedSourceData);
             }
         };
         const items = this.menuItems.getValue();

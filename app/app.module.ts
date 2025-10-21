@@ -97,6 +97,8 @@ import {StyleComponent} from "./styledata/style.component";
 import {MapViewContainerComponent} from "./mapview/view.container.component";
 import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
+import {InspectionContainerComponent} from "./inspection/inspection.container.component";
+import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -201,7 +203,9 @@ export const initializeServices = () => {
         ErdblickViewUIComponent,
         StyleComponent,
         MapViewContainerComponent,
-        MapViewComponent
+        MapViewComponent,
+        InspectionContainerComponent,
+        InspectionTreeComponent
     ],
     bootstrap: [
         AppComponent

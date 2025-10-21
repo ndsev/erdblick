@@ -8,7 +8,7 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
-import {InspectionService} from "../inspection/inspection.service";
+import {InspectionService, SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
@@ -248,49 +248,13 @@ export class MapPanelComponent {
                             .map(layer => ({
                                 label: layer.name,
                                 command: () => {
-                                    this.inspectionService.loadSourceDataInspectionForService(mapItem.id, layer.id)
+                                    this.stateService.setSelection({
+                                        mapTileKey: `SourceData:${mapItem.id}:${layer.id}:0`
+                                    } as SelectedSourceData);
                                 }
                             }))
                     );
                 }
-                // const collectMaps = (node: any) => {
-                //     if (!node) {
-                //         return;
-                //     }
-                //     if (this.checkIsMapGroup(node)) {
-                //         for (const child of node.children) {
-                //             collectMaps(child);
-                //         }
-                //     } else {
-                //         const mapItem = node;
-                //         this.metadataMenusEntries.set(
-                //             mapItem.mapId,
-                //             this.inspectionService.findLayersForMapId(mapItem.mapId, true)
-                //                 .map(layer => ({
-                //                     label: layer.name,
-                //                     command: () => {
-                //                         this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
-                //                     }
-                //                 }))
-                //         );
-                //     }
-                // };
-
-                // const allLeafMaps: MapInfoItem[] = [];
-                // for (const group of mapGroups.nodes) {
-                //     collectMaps(group);
-                // }
-                // // If all layers were pruned (complete maps config change), reinitialize default maps once
-                // if (allLeafMaps.length > 0 && this.stateService.pruneMapLayerConfig(allLeafMaps)) {
-                //     if (!this._reinitializingAfterPrune) {
-                //         this._reinitializingAfterPrune = true;
-                //         try {
-                //             this.mapService.processMapsUpdate();
-                //         } finally {
-                //             this._reinitializingAfterPrune = false;
-                //         }
-                //     }
-                // }
             })
         );
 
@@ -439,10 +403,6 @@ export class MapPanelComponent {
 
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "") {
         this.mapService.toggleMapLayerVisibility(viewIndex, mapName, layerName);
-    }
-
-    unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
-        return 0;
     }
 
     toggleMap(viewIndex: number, mapId: string) {

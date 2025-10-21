@@ -118,7 +118,7 @@ function splitColonCSV(val: string): string[][] {
         .map(seg => (seg === '' ? [] : splitCSV(seg)));
 }
 
-function deepEquals(a: unknown, b: unknown): boolean {
+export function deepEquals(a: unknown, b: unknown): boolean {
     if (a === b) {
         return true;
     }

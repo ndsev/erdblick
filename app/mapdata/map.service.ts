@@ -14,8 +14,7 @@ import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
 import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
-import {Viewer} from "../integrations/cesium";
-import {style} from "@angular/animations";
+import {Cartesian3, Viewer} from "../integrations/cesium";
 
 const infoUrl = "sources";
 const tileUrl = "tiles";
@@ -76,6 +75,7 @@ export class MapDataService {
     tileVisualizationDestructionTopic: Subject<TileVisualization>;
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
+    originAndNormalForFeatureZoomTopic: Subject<{ targetView: number, origin: Cartesian3, normal: Cartesian3}> = new Subject();
     hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
@@ -215,12 +215,30 @@ export class MapDataService {
 
         await this.reloadDataSources();
 
-        this.stateService.selectionState.subscribe(selected => {
-            // TODO: Translate inspection panel states from TileFeatureId to FeatureWrapper
-            this.highlightFeatures(selected).then();
+        this.stateService.getSelectedFeaturesObservable().subscribe(async selected => {
+            const convertedSelections = [];
+            for (const selection of selected) {
+                const newInspectionPanel: InspectionPanelModel<FeatureWrapper> = {
+                    id: selection.id,
+                    pinned: selection.pinned,
+                    size: selection.size,
+                    selectedFeatures: await this.loadFeatures(selection.selectedFeatures)
+                }
+                convertedSelections.push(newInspectionPanel);
+            }
+            this.selectionTopic.next(convertedSelections);
         });
-        this.selectionTopic.subscribe(selectedFeatureWrappers => {
-            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatureWrappers);
+        this.selectionTopic.subscribe(selectedPanels => {
+            // TODO: Consider only visualizing updated selections/features and not the whole set of the panels
+            const selectedFeatures = selectedPanels.map(panel => panel.selectedFeatures).flat();
+            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatures);
+            // If a hovered feature is selected, eliminate it from the hover highlights.
+            const hoveredFeatures = this.hoverTopic.getValue();
+            if (hoveredFeatures.length) {
+                this.hoverTopic.next(hoveredFeatures.filter(hoveredFeature =>
+                    !selectedFeatures.some(selectedFeature => selectedFeature.equals(hoveredFeature))
+                ));
+            }
         });
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
@@ -339,7 +357,7 @@ export class MapDataService {
         const evictTileLayer = (tileLayer: FeatureTile) => {
             // Is the tile needed to visualize the selection?
             if (tileLayer.preventCulling || this.selectionTopic.getValue().some(v =>
-                v.featureTile.mapTileKey == tileLayer.mapTileKey)) {
+                v.selectedFeatures.some(feature => feature.featureTile.mapTileKey == tileLayer.mapTileKey))) {
                 return false;
             }
             // Is the tile needed for any view?
@@ -757,42 +775,80 @@ export class MapDataService {
         return features;
     }
 
-    async highlightFeatures(viewIndex: number, tileFeatureIds: (TileFeatureId | null | string)[],
-                            focus: boolean = false, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null | string)[]) {
         const features = await this.loadFeatures(tileFeatureIds);
-        if (mode == coreLib.HighlightMode.HOVER_HIGHLIGHT) {
-            if (features.length) {
-                if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
-                    return;
-                }
-            }
-            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
-                return;
-            }
+        if (!features.length) {
             this.hoverTopic.next(features);
-        } else if (mode == coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            if (featureSetsEqual(this.selectionTopic.getValue(), features)) {
-                return;
-            }
-            if (featureSetsEqual(this.hoverTopic.getValue(), features)) {
-                this.hoverTopic.next([]);
-            }
-            this.selectionTopic.next(features);
-        } else {
-            console.error(`Unsupported highlight mode!`);
+            return;
         }
 
-        // TODO: Focus on bounding box of all features?
-        // NOTE: Currently only focuses on the first feature. Should calculate bounding box
-        // of all selected features and focus on that area for better UX when multiple features are selected.
-        if (focus && features.length) {
-            this.focusOnFeature(tileFeatureIds[0][0], features[0]);
+        const selectedFeatures = this.selectionTopic.getValue().map(panel => {
+            return panel.selectedFeatures;
+        }).flat();
+        // TODO: Use a set difference?
+        if (featureSetsEqual(selectedFeatures, features) || featureSetsEqual(this.hoverTopic.getValue(), features)) {
+            return;
         }
+        this.hoverTopic.next(features);
     }
 
     focusOnFeature(viewIndex: number, feature: FeatureWrapper) {
         const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
         this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
+    }
+
+    zoomToFeature(viewIndex: number, featureWrapper: FeatureWrapper) {
+        featureWrapper.peek((feature: Feature) => {
+            const center = feature.center() as Cartesian3;
+            const centerCartesian = Cartesian3.fromDegrees(center.x, center.y, center.z);
+            let radiusPoint = feature.boundingRadiusEndPoint() as Cartesian3;
+            radiusPoint = Cartesian3.fromDegrees(radiusPoint.x, radiusPoint.y, radiusPoint.z);
+            const boundingRadius = Cartesian3.distance(centerCartesian, radiusPoint);
+            const geometryType = feature.getGeometryType() as any;
+
+            if (geometryType === this.GeometryType.Mesh) {
+                // Get the first triangle from the mesh, and calculate the
+                // camera perspective from its normal.
+                // TODO: Use a more efficient WASM function like feature.firstTriangle() to get the first triangle.
+                const inspectionModel = feature.inspectionModel()
+                let triangle: Array<Cartesian3> = [];
+                if (this) {
+                    for (const section of inspectionModel) {
+                        if (section.key == "Geometry") {
+                            for (let i = 0; i < 3; i++) {
+                                const cartographic = section.children[0].children[i].value.map((coordinate: string) => Number(coordinate));
+                                if (cartographic.length == 3) {
+                                    triangle.push(Cartesian3.fromDegrees(cartographic[0], cartographic[1], cartographic[2]));
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                const normal = Cartesian3.cross(
+                    Cartesian3.subtract(triangle[1], triangle[0], new Cartesian3()),
+                    Cartesian3.subtract(triangle[2], triangle[0], new Cartesian3()),
+                    new Cartesian3()
+                );
+                Cartesian3.negate(normal, normal);
+                Cartesian3.normalize(normal, normal);
+                Cartesian3.multiplyByScalar(normal, 3 * boundingRadius, normal);
+                this.originAndNormalForFeatureZoomTopic.next({
+                    targetView: viewIndex,
+                    origin: centerCartesian,
+                    normal: normal
+                });
+            }
+
+            // Fallback for lines/points: Just move the camera to the position.
+            this.moveToWgs84PositionTopic.next({
+                targetView: viewIndex,
+                x: center.x,
+                y: center.y,
+                // TODO: Calculate height using faux Cesium camera with target view rectangle.
+                z: center.z + 3 * boundingRadius
+            });
+        })
     }
 
     setTileLevelForViewport(viewIndex: number) {
@@ -866,31 +922,38 @@ export class MapDataService {
         }
 
         // Apply highlight styles.
-        // TODO: Don't blindly trust that all selected features share the same tile.
-        const featureTile = featureWrappers[0].featureTile;
-        const featureIds = featureWrappers.map(fw => fw.featureId);
-        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-            // TODO: Only run the visualization with style sheets that are relevant for the feature.
-            // Do not render the highlight for any view that doesn't need it.
-            if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
-                continue;
+        const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
+        for (const wrapper of featureWrappers) {
+            if (!featureWrappersForTile.has(wrapper.featureTile)) {
+                featureWrappersForTile.set(wrapper.featureTile, []);
             }
+            featureWrappersForTile.get(wrapper.featureTile)!.push(wrapper);
+        }
 
-            for (let [_, style] of this.styleService.styles) {
-                if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
-                    let visu = new TileVisualization(
-                        viewIndex,
-                        featureTile,
-                        this.pointMergeService,
-                        (tileKey: string) => this.getFeatureTile(tileKey),
-                        style.featureLayerStyle,
-                        true,
-                        mode,
-                        featureIds,
-                        false,
-                        this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id));
-                    this.tileVisualizationTopic.next(visu);
-                    visualizationCollection.push(visu);
+        for (const [featureTile, features] of featureWrappersForTile) {
+            const featureIds = features.map(fw => fw.featureId);
+            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                // Do not render the highlight for any view that doesn't need it.
+                if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
+                    continue;
+                }
+
+                for (let [_, style] of this.styleService.styles) {
+                    if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
+                        let visu = new TileVisualization(
+                            viewIndex,
+                            featureTile,
+                            this.pointMergeService,
+                            (tileKey: string) => this.getFeatureTile(tileKey),
+                            style.featureLayerStyle,
+                            true,
+                            mode,
+                            featureIds,
+                            false,
+                            this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id));
+                        this.tileVisualizationTopic.next(visu);
+                        visualizationCollection.push(visu);
+                    }
                 }
             }
         }
@@ -980,4 +1043,60 @@ export class MapDataService {
         return this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName) &&
             tile.level() === this.maps.getMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
     }
+
+    /**
+     * Returns an internal layerId for a human-readable layer name.
+     *
+     * @param layerName Layer id to get the name for
+     */
+    sourceDataLayerIdForLayerName(layerName: string) {
+        for (const [_, mapInfo] of this.maps.maps.entries()) {
+            for (const [_, layerInfo] of mapInfo.layers.entries()) {
+                if (layerInfo.type == "SourceData") {
+                    if (this.layerNameForSourceDataLayerId(layerInfo.id) == layerName ||
+                        this.layerNameForSourceDataLayerId(layerInfo.id) == layerName.replace('-', '.') ||
+                        layerInfo.id == layerName) {
+                        return layerInfo.id;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    findLayersForMapId(mapId: string, isMetadata: boolean = false) {
+        const map = this.maps.maps.get(mapId);
+        if (map) {
+            const prefix = isMetadata ? "Metadata" : "SourceData";
+            const dataLayers = new Set<string>();
+            for (const layer of map.layers.values()) {
+                if (layer.type === "SourceData" && layer.id.startsWith(prefix)) {
+                    dataLayers.add(layer.id);
+                }
+            }
+            return [...dataLayers].map(layerId => ({
+                id: layerId,
+                name: this.layerNameForSourceDataLayerId(layerId, isMetadata)
+            })).sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return [];
+    }
+
+    /**
+     * Returns a human-readable layer name for a layer id.
+     *
+     * @param layerId Layer id to get the name for
+     * @param isMetadata Matches the metadata SourceDataLayers
+     */
+    layerNameForSourceDataLayerId(layerId: string, isMetadata: boolean = false) {
+        const match = isMetadata ?
+            layerId.match(/^Metadata-(.+)-(.+)/) :
+            layerId.match(/^SourceData-(.+\.)([^.]+)/);
+        if (!match) {
+            return layerId;
+        }
+        return `${match[2]}`.replace('-', '.');
+    }
+
+    protected readonly GeometryType = coreLib.GeomType;
 }

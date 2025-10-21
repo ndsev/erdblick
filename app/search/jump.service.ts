@@ -10,7 +10,7 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 
 export interface SearchTarget {
     icon: string;
@@ -238,11 +238,9 @@ export class JumpTargetService {
                                 if (sourceLayerId) {
                                     sourceLayerId = this.inspectionService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
-                                        this.inspectionService.loadSourceDataInspection(
-                                            Number(tileId),
-                                            mapId,
-                                            sourceLayerId
-                                        )
+                                        this.stateService.setSelection({
+                                            mapTileKey: `SourceData:${mapId}:${sourceLayerId}:${Number(tileId)}`
+                                        } as SelectedSourceData);
                                     } else {
                                         this.menuService.customTileAndMapId.next([String(tileId), mapId]);
                                     }
@@ -346,9 +344,12 @@ export class JumpTargetService {
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
-        await this.mapService.highlightFeatures([[viewIndex, {
+        await this.mapService.setHoveredFeatures([{
             mapTileKey: selectThisFeature.tileId,
             featureId: featureId
-        }]], moveCamera, mode).then();
+        }]).then(_ => {
+            // TODO: Focus on whole feature-set?
+            this.mapService.focusOnFeature(viewIndex, this.mapService.hoverTopic.getValue()[0]);
+        });
     }
 }

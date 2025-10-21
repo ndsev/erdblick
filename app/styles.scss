@@ -116,9 +116,10 @@ map-view {
     -webkit-user-select: none;
     -ms-user-select: none;
     -o-user-select: none;
+    box-sizing: border-box;
 
     &.outlined {
-      border: 0.1em solid var(--p-focus-ring-color);
+      border: 0.2em solid var(--p-focus-ring-color);
     }
   }
 

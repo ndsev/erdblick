@@ -1,10 +1,13 @@
-import {Component} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, Renderer2, ViewChild} from "@angular/core";
 import {InspectionService, SelectedSourceData, selectedSourceDataEqualTo} from "./inspection.service";
-import {distinctUntilChanged} from "rxjs";
+import {distinctUntilChanged, Observable} from "rxjs";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
+import {FeatureWrapper} from "../mapdata/features.model";
+import {toObservable} from "@angular/core/rxjs-interop";
+import {MapView} from "../mapview/view";
 
 interface InspectorTab {
     title: string,
@@ -20,81 +23,96 @@ interface SourceLayerMenuItem {
     command: () => void
 }
 
-export interface InspectionContainerSize {
-    height: number,
-    width: number,
-    type: string
-}
-
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion *ngIf="inspectionService.isInspectionPanelVisible" class="w-full inspect-panel" 
-                     [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" value="0">
+        <p-accordion class="w-full inspect-panel" [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" value="0">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <span class="inspector-title" *ngIf="activeIndex < tabs.length">
                         <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"
                                   *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length"/>
                         
+                        <!--TODO: Replace the icon with a color picker-->
                         <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
 
                         <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems"
-                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)" 
-                                  scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label" 
+                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
+                                  scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
                                   optionDisabled="disabled" appendTo="body"/>
                     </span>
                 </p-accordion-header>
 
                 <p-accordion-content>
-                    <ng-container *ngFor="let tab of tabs; let i = index">
-                        <div [style.display]="i === activeIndex ? 'block' : 'none'">
-                            <ng-container *ngComponentOutlet="tab.component; inputs: tab.inputs"/>
+                    <div class="flex resizable-container" #resizeableContainer
+                         [style.width.px]="panel().size[0]"
+                         [style.height.px]="panel().size[1]"
+                         (mouseup)="onInspectionContainerResize($event, panel())"
+                         [ngClass]="{'resizable-container-expanded': isExpanded}">
+                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
+                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
+                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
                         </div>
-                    </ng-container>
+                        @if (panel()?.selectedSourceData) {
+                            <sourcedata-panel [panel]="panel()"></sourcedata-panel>
+                        } @else {
+                            <feature-panel [panel]="panel()"></feature-panel>
+                        }
+                        <ng-template *ngIf="errorMessage">
+                            <div class="error">
+                                <div>
+                                    <strong>Error</strong><br>{{ errorMessage }}
+                                </div>
+                            </div>
+                        </ng-template>
+                    </div>
                 </p-accordion-content>
             </p-accordion-panel>
         </p-accordion>
-
     `,
-    styles: [
-        `@layer erdblick {
-            .inspector-title {
-                display: flex;
-                gap: 4px;
-                justify-content: center;
-                align-items: center;
+    styles: [`
+        .inspector-title {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+            align-items: center;
 
-                .p-button {
-                    width: 1.75em !important;
-                    height: 1.75em !important;
-                    margin: 0;
-                }
+            .p-button {
+                width: 1.75em !important;
+                height: 1.75em !important;
+                margin: 0;
             }
         }
-        `,
-    ],
+        
+        @media only screen and (max-width: 56em) {
+            .resizable-container-expanded {
+                height: calc(100vh - 3em);
+            }
+        }
+    `],
     standalone: false
 })
-export class InspectionPanelComponent {
+export class InspectionPanelComponent implements AfterViewInit {
     title = "";
-    tabs: InspectorTab[] = [];
     activeIndex = 0;
+    isExpanded: boolean = true;
+    errorMessage: string = "";
 
     layerMenuItems: SourceLayerMenuItem[] = [];
     selectedLayerItem?: SourceLayerMenuItem;
 
+    panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+
+    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
+
     constructor(public inspectionService: InspectionService,
                 public mapService: MapDataService,
-                private stateService: AppStateService) {
-        this.pushFeatureInspector();
-
+                public stateService: AppStateService,
+                private renderer: Renderer2) {
+        // TODO: We need a feature tree per panel
         this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe(_ => {
             this.reset();
 
-            // TODO: Create a new FeaturePanelComponent instance for each unique feature selection.
-            //       Then we can get rid of all the service's View Component logic/functions.
-            //       reset() Would then completely clear the tabs.
             const featureIds = this.inspectionService.selectedFeatures.map(f => f.featureId).join(", ");
             if (this.inspectionService.selectedFeatures.length == 1) {
                 this.tabs[0].title = featureIds;
@@ -123,7 +141,7 @@ export class InspectionPanelComponent {
                         })
                         .map(item => {
                             return {
-                                label: this.inspectionService.layerNameForSourceDataLayerId(
+                                label: layerNameForSourceDataLayerId(
                                     item.id,
                                     item.id.startsWith("Metadata")
                                 ),
@@ -145,67 +163,15 @@ export class InspectionPanelComponent {
         });
     }
 
-    reset() {
-        /* We always keep the first tab, which is a feature inspector. */
-        this.setTab(0);
-        for (let i = 1; i < this.tabs.length - 1; ++i) {
-            let close = this.tabs[this.tabs.length - i]['onClose']
-            if (close)
-                close();
-        }
-        if (this.tabs.length > 0) {
-            this.tabs = [this.tabs[0]!];
-        }
-    }
-
-    pushFeatureInspector() {
-        let tab = {
-            title: "",
-            icon: "pi-sitemap",
-            component: FeaturePanelComponent,
-            onClose: () => {
-                this.inspectionService.featureTree.next("");
-            },
-        }
-
-        this.tabs = [...this.tabs, tab];
-        this.setTab(-1);
-    }
-
-    pushSourceDataInspector(data: SelectedSourceData) {
-        let tab = {
-            title: `${data.tileId}.`,
-            icon: "",
-            component: SourceDataPanelComponent,
-            inputs: {
-                sourceData: data
-            },
-            onClose: () => {
-                this.inspectionService.selectedSourceData.next(null);
-            },
-        }
-
-        this.tabs = [...this.tabs, tab];
-        this.setTab(-1);
-    }
-
-    setTab(index: number) {
-        if (index < 0)
-            index = this.tabs.length - 1;
-        this.inspectionService.inspectionPanelChanged.emit();
-        this.activeIndex = Math.max(0, index)
+    ngAfterViewInit() {
+        this.detectSafari();
     }
 
     onGoBack(event: any) {
+        // The back-button can be used to navigate from a SourceData selection
+        // back to the feature-set from which it was called up.
         event.stopPropagation();
-        if (this.activeIndex > 0) {
-            const onClose = this.tabs[this.activeIndex]['onClose'];
-            if (onClose)
-                onClose();
-            this.setTab(this.activeIndex - 1);
-            if (this.tabs.length > 1)
-                this.tabs.pop();
-        }
+        this.stateService.setSelection(this.panel().selectedFeatures, this.panel().id);
     }
 
     onSelectedLayerItem() {
@@ -216,5 +182,45 @@ export class InspectionPanelComponent {
 
     onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
+    }
+
+    onInspectionContainerResize(event: MouseEvent, panel: InspectionPanelModel<FeatureWrapper> | undefined): void {
+        if (!panel) {
+            return;
+        }
+        const element = event.target as HTMLElement;
+        if (!element.classList.contains("resizable-container")) {
+            return;
+        }
+        if (!element.offsetWidth || !element.offsetHeight) {
+            return;
+        }
+
+        const currentEmWidth = element.offsetWidth / this.stateService.baseFontSize;
+        if (currentEmWidth < 40.0) {
+            panel.size[0] = 40 * this.stateService.baseFontSize;
+        } else {
+            panel.size[0] = element.offsetWidth;
+        }
+        panel.size[1] = element.offsetHeight;
+        this.stateService.setInspectionPanelSize(panel.id, panel.size);
+    }
+
+    /**
+     * Set an error message that gets displayed.
+     * Unsets the tree to an empty array.
+     *
+     * @param message Error message
+     */
+    setError(message: string) {
+        this.errorMessage = message;
+        console.error("Error while processing tree:", this.errorMessage);
+    }
+
+    detectSafari() {
+        const isSafari = /Safari/i.test(navigator.userAgent);
+        if (isSafari) {
+            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
+        }
     }
 }

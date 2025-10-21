@@ -1,39 +1,34 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subscription, take} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, CesiumMath} from "../integrations/cesium";
-import {SelectedSourceData} from "../inspection/inspection.service";
-import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
+import {AppState, AppStateOptions, Boolish, deepEquals, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
+import {FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
-export const DEF_PANEL_SIZE: [number, number] = [10, 10];
 
 export interface TileFeatureId {
-    featureId: string,
-    mapTileKey: string,
+    featureId: string;
+    mapTileKey: string;
+}
+
+export interface SelectedSourceData {
+    mapTileKey: string;
+    address?: bigint;
 }
 
 export interface InspectionPanelModel<FeatureRepresentation> {
-    selectedFeatures: FeatureRepresentation[],
-    pinned: boolean,
-    size: [number, number],
-    selectedSourceData?: SelectedSourceData
-}
-
-export interface StyleParameters {
-    visible: boolean,
-    options: Record<string, boolean|number>
-}
-
-export interface StyleURLParameters {
-    v: boolean,
-    o: Record<string, boolean|number>
+    id: number;
+    selectedFeatures: FeatureRepresentation[];
+    pinned: boolean;
+    size: [number, number];
+    selectedSourceData?: SelectedSourceData;
 }
 
 export interface CameraViewState {
@@ -45,13 +40,20 @@ export interface LayerViewConfig {
     level: number;
     visible: boolean;
     tileBorders: boolean;
-
-    // TODO: We need style options here.
 }
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
+}
+
+export function isInspectionModelSelectionEqual(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]) {
+    if (a.length !== b.length) {
+        return false;
+    }
+    return a.every((panelA, index) => {
+        return deepEquals(panelA.selectedFeatures, b[index].selectedFeatures) && deepEquals(panelA.selectedSourceData, b[index].selectedSourceData);
+    });
 }
 
 @Injectable({providedIn: 'root'})
@@ -73,9 +75,12 @@ export class AppStateService implements OnDestroy {
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
 
     // Base UI metrics
-    baseFontSize: number = 16;
-    inspectionContainerWidth: number = 40;
-    inspectionContainerHeight: number = (window.innerHeight - 10.5 * this.baseFontSize);
+    get baseFontSize(): number {
+        return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+    }
+    get defaultInspectionPanelSize(): [number, number] {
+        return [40 * this.baseFontSize, window.innerHeight - 10.5 * this.baseFontSize];
+    }
 
     readonly numViewsState = this.createState<number>({
         name: "numberOfViews",
@@ -114,16 +119,17 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false,
     });
 
-    // 0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
-    // 0~sourcedata:map:layer:tile~address~...features...~size
-    // 1~...
-    readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
+    // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
+    // 1~0~sourcedata:map:layer:tile~address~...features...~size
+    // 0~1~...
+    // Note: use the public method subscribeToSelectedFeatures to subscribe to this state
+    private readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
         name: 'selected',
         defaultValue: [],
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
-            const stringifiedStates = value.map(state => {
-                let s = `${state.pinned ? 1 : 0}~`;
+            return value.map(state => {
+                let s = `${state.id}~${state.pinned ? 1 : 0}~`;
                 if (state.selectedSourceData) {
                     s += `${state.selectedSourceData.mapTileKey}~${state.selectedSourceData.address ?? ''}~`
                 }
@@ -131,7 +137,6 @@ export class AppStateService implements OnDestroy {
                 s += `${state.size[0]}:${state.size[1]}`;
                 return s;
             });
-            return stringifiedStates;
         },
         fromStorage: (payload: any): InspectionPanelModel<TileFeatureId>[] => {
             const result: InspectionPanelModel<TileFeatureId>[] = []
@@ -140,14 +145,16 @@ export class AppStateService implements OnDestroy {
             }
             for (const panelStateStr of payload) {
                 const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 4) {
+                if (parts.length < 5) {
                     continue;
                 }
+                const id = Number(parts.shift()!);
                 const pinState = parts.shift() === "1";
                 const sizeParts = parts.pop()!.split(':');
-                const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : DEF_PANEL_SIZE;
+                const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
+                    id: id,
                     selectedFeatures: [],
                     pinned: pinState,
                     size: size as [number, number]
@@ -155,8 +162,10 @@ export class AppStateService implements OnDestroy {
 
                 // Check if the first MapTileKey is for SourceData.
                 if (parts[0].startsWith("SourceData:")) {
+                    const mapTileKey = parts.shift()!;
+                    const mapTileKeyParts = mapTileKey.split(":");
                     newPanelState.selectedSourceData = {
-                        mapTileKey: parts.shift()!,
+                        mapTileKey: mapTileKey,
                         address: parts[1].length ? BigInt(parts[1]) : undefined
                     };
                     // Shift the address.
@@ -326,10 +335,6 @@ export class AppStateService implements OnDestroy {
     });
 
     constructor(private readonly router: Router) {
-        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-        this.inspectionContainerWidth = 40 * this.baseFontSize;
-        this.inspectionContainerHeight = window.innerHeight - 10.5 * this.baseFontSize;
-
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
             this.setupStateSubscriptions();
             this.hydrateFromStorage();
@@ -566,6 +571,10 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
+    getSelectedFeaturesObservable() {
+        return this.selectionState.pipe(distinctUntilChanged(isInspectionModelSelectionEqual));
+    }
+
     /*
     ## Current State
 
@@ -582,24 +591,28 @@ export class AppStateService implements OnDestroy {
     //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
 
      */
-    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, panelIndex?: number) {
+    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number) {
         this._replaceUrl = false;
         const allPanels = this.selectionState.getValue();
         const featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         // If a panel index was passed, change the SourceData-selection in that panel.
-        if (panelIndex !== undefined && panelIndex < allPanels.length) {
-            allPanels[panelIndex].selectedSourceData = sourceDataSelection;
-            this.selectionState.next(allPanels);
-            return;
+        if (id !== undefined) {
+            const panelIndex = allPanels.findIndex(panel => panel.id === id);
+            if (panelIndex !== -1) {
+                allPanels[panelIndex].selectedSourceData = sourceDataSelection;
+                this.selectionState.next(allPanels);
+                return;
+            }
         }
         // Create a new panel if there is no existing one to change.
         if (allPanels.every(panel => panel.pinned)) {
             allPanels.push({
+                id: 1 + Math.max(-1, ...allPanels.map(panel => panel.id)),
                 selectedFeatures: featureSelection,
                 selectedSourceData: sourceDataSelection,
                 pinned: false,
-                size: DEF_PANEL_SIZE
+                size: this.defaultInspectionPanelSize
             });
             this.selectionState.next(allPanels);
             return;
@@ -613,6 +626,26 @@ export class AppStateService implements OnDestroy {
             allPanels[i].selectedSourceData = sourceDataSelection;
             break;
         }
+        this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelSize(id: number, size: [number, number]) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index !== -1) {
+            return;
+        }
+        allPanels[index].size = size;
+        this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelPinnedState(id: number, isPinned: boolean) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index !== -1) {
+            return;
+        }
+        allPanels[index].pinned = isPinned;
         this.selectionState.next(allPanels);
     }
 
@@ -821,34 +854,6 @@ export class AppStateService implements OnDestroy {
         window.location.href = origin + pathname;
     }
 
-    // TODO: This is view logic which should be in Inspection Panel component upon
-    //  main View template fully moving there as a first-level citizen: currently
-    //  the View implementation is split across Feature and SourceData components
-    //  which complicates their state management.
-    onInspectionContainerResize(event: MouseEvent): void {
-        const element = event.target as HTMLElement;
-        if (!element.classList.contains("resizable-container")) {
-            return;
-        }
-        if (!element.offsetWidth || !element.offsetHeight) {
-            return;
-        }
-        this.baseFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-        const currentEmWidth = element.offsetWidth / this.baseFontSize;
-        if (currentEmWidth < 40.0) {
-            this.inspectionContainerWidth = 40 * this.baseFontSize;
-        } else {
-            this.inspectionContainerWidth = element.offsetWidth;
-        }
-        this.inspectionContainerHeight = element.offsetHeight;
-
-        const panel: PanelSizeState = [
-            this.inspectionContainerWidth / this.baseFontSize,
-            this.inspectionContainerHeight / this.baseFontSize
-        ];
-        this.panelState.next(panel);
-    }
-
     pruneMapLayerConfig(mapItems: Array<MapTreeNode>): boolean {
         // TODO: Fix, use.
         // TODO: Must also prune style options for the pruned layers.
@@ -880,4 +885,5 @@ export class AppStateService implements OnDestroy {
         // If all layers were pruned, return true.
         return layerNames.length === 0;
     }
+
 }

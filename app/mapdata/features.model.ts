@@ -170,9 +170,13 @@ export class FeatureTile {
  * Using the peek-function, it is possible to access the
  * WASM feature view in a memory-safe way.
  */
-export class FeatureWrapper {
+export class FeatureWrapper implements TileFeatureId {
     public readonly featureId: string;
     public featureTile: FeatureTile;
+
+    get mapTileKey(): string {
+        return this.featureTile.mapTileKey;
+    }
 
     /**
      * Construct a feature wrapper from a featureTile and a feature index
