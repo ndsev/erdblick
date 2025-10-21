@@ -181,6 +181,23 @@ function deepEquals(a: unknown, b: unknown): boolean {
     return false;
 }
 
+function deepCopy<V>(value: V): V {
+    if (value === null || typeof value !== "object") {
+        return value;
+    }
+    if (value instanceof Date) {
+        return new Date(value.getTime()) as unknown as V;
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => deepCopy(item)) as unknown as V;
+    }
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        result[key] = deepCopy(entry);
+    }
+    return result as V;
+}
+
 export class AppState<T> extends BehaviorSubject<T> {
     readonly name: string;
     readonly defaultValue: T;
@@ -407,11 +424,13 @@ export class AppState<T> extends BehaviorSubject<T> {
 
 export class MapViewState<T> {
     public appState: AppState<Array<T>>;
+    private readonly defaultValue: T;
 
     constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
+        this.defaultValue = deepCopy(options.defaultValue);
         this.appState = new AppState(pool, {
             name: options.name,
-            defaultValue: [options.defaultValue],
+            defaultValue: [deepCopy(options.defaultValue)],
             schema: z.array(options.schema),
             toStorage: (array: Array<T>) => {
                 if (options.toStorage === undefined) {
@@ -424,7 +443,8 @@ export class MapViewState<T> {
                     return value as unknown as Array<T>;
                 }
                 return (value as unknown as Array<any>).map((el, i) => {
-                    return options.fromStorage!(el as ZodTypeAny, i < currentValue.length ? currentValue[i] : options.defaultValue);
+                    const current = i < currentValue.length ? currentValue[i] : deepCopy(this.defaultValue);
+                    return options.fromStorage!(el as ZodTypeAny, current);
                 })
             },
             urlParamName: options.urlParamName,
@@ -437,7 +457,7 @@ export class MapViewState<T> {
         const currentValue = [...this.appState.getValue()];
         if (viewIndex >= currentValue.length) {
             for (let i = currentValue.length; i <= viewIndex; ++i) {
-                currentValue.push(this.appState.defaultValue[0]);
+                currentValue.push(deepCopy(this.defaultValue));
             }
         }
         currentValue[viewIndex] = value;
@@ -461,7 +481,10 @@ export class MapViewState<T> {
 
     getValue(viewIndex: number): T {
         const arr = this.appState.getValue();
-        return arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0];
+        if (arr[viewIndex] !== undefined) {
+            return arr[viewIndex];
+        }
+        return deepCopy(this.defaultValue);
     }
 
     length() {
