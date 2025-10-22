@@ -439,8 +439,7 @@ export class MapView {
                 }
             }
             if (!defined(feature)) {
-                // FIXME
-                // this.inspectionService.isInspectionPanelVisible = false;
+                this.stateService.unsetUnpinnedSelections();
                 this.menuService.tileOutline.next(null);
             }
             this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);

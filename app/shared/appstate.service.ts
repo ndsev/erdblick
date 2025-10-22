@@ -6,7 +6,6 @@ import {Cartographic, CesiumMath} from "../integrations/cesium";
 import {AppState, AppStateOptions, Boolish, deepEquals, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
-import {FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -647,6 +646,10 @@ export class AppStateService implements OnDestroy {
         }
         allPanels[index].pinned = isPinned;
         this.selectionState.next(allPanels);
+    }
+
+    unsetUnpinnedSelections() {
+        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.pinned));
     }
 
     getNumSelections(): number {

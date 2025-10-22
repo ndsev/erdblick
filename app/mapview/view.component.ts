@@ -27,7 +27,7 @@ import {filter} from "rxjs/operators";
 @Component({
     selector: 'map-view',
     template: `
-        <div #viewer [ngClass]="{'outlined': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer [ngClass]="{'border': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
         <p-multiSelect *ngIf="showSyncMenu" dropdownIcon="pi pi-link" [options]="syncOptions" [(ngModel)]="selectedOptions"
                        (ngModelChange)="updateSelectedOptions()" optionLabel="name" filter="false" showToggleAll="false"
                        placeholder="" class="viewsync-select"/>
