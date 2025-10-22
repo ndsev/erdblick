@@ -26,17 +26,17 @@ interface SourceLayerMenuItem {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="w-full inspect-panel" [ngClass]="{ 'inspect-panel-small-header': activeIndex > 0 }" value="0">
+        <p-accordion class="w-full inspect-panel" [ngClass]="{ 'inspect-panel-small-header': panel().selectedSourceData }" value="0">
             <p-accordion-panel value="0">
                 <p-accordion-header>
-                    <span class="inspector-title" *ngIf="activeIndex < tabs.length">
-                        <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"
-                                  *ngIf="activeIndex > 0 && inspectionService.selectedFeatures.length"/>
-                        
+                    <span class="inspector-title">
+                        <p-button *ngIf="panel().selectedSourceData" icon="pi pi-chevron-left" (click)="onGoBack($event)" 
+                                  (mousedown)="$event.stopPropagation()" />
                         <!--TODO: Replace the icon with a color picker-->
-                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>{{ tabs[activeIndex].title || '' }}
+<!--                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>-->
+                        {{ title }}
 
-                        <p-select class="source-layer-dropdown" *ngIf="activeIndex > 0" [options]="layerMenuItems"
+                        <p-select *ngIf="panel().selectedSourceData" class="source-layer-dropdown" [options]="layerMenuItems"
                                   [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                   scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
                                   optionDisabled="disabled" appendTo="body"/>
@@ -94,7 +94,6 @@ interface SourceLayerMenuItem {
 })
 export class InspectionPanelComponent implements AfterViewInit {
     title = "";
-    activeIndex = 0;
     isExpanded: boolean = true;
     errorMessage: string = "";
 

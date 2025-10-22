@@ -16,7 +16,9 @@ import {Column} from "./inspection.tree.component";
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
         } @else {
-            <inspection-tree [treeData]="treeData" [filterFields]="filterFields" [columns]="columns" [firstHighlightedItemIndex]="firstHighlightedItemIndex" [panelId]="panel().id"></inspection-tree>
+            <inspection-tree [treeData]="treeData" [columns]="columns" [firstHighlightedItemIndex]="firstHighlightedItemIndex" 
+                             [panelId]="panel().id">
+            </inspection-tree>
         }
     `,
     styles: [``],
@@ -30,15 +32,11 @@ export class SourceDataPanelComponent implements OnInit {
     loading: boolean = true;
 
     treeData: TreeTableNode[] = [];
-    filterFields = [
-        "key",
-        "value"
-    ];
     columns: Column[] = [
-        { key: "key",     header: "Key",     width: '0*',    transform: (v: any) => v },
-        { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
+        { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
+        { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
         { key: "address", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
-        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) },
+        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) }
     ]
 
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
@@ -142,16 +140,17 @@ export class SourceDataPanelComponent implements OnInit {
      * @param schema Zserio schema string
      * @return string HTML
      */
-    schemaTypeURLFormatter(schema?: string) {
-        if (!schema) {
-            return schema;
+    schemaTypeURLFormatter(colKey: string, rowData: any) {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
         }
 
+        const schema = rowData[colKey];
         const prefix = "https://developer.nds.live/schema/";
-
         const match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
-        if (!match || match.length <= 4)
+        if (!match || match.length <= 4) {
             return schema;
+        }
 
         // Sub-namespaces in front of the version get joined by "-". Names past the version get joined by "/"
         const url =
@@ -161,14 +160,18 @@ export class SourceDataPanelComponent implements OnInit {
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    addressFormatter(address?: any): string {
+    addressFormatter(colKey: string, rowData: any): string {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
+        }
+        const address = rowData[colKey];
+        if (!address) {
+            return "";
+        }
         if (typeof address === 'object') {
             return `${address.offset}:${address.size}`
-        } else if (address) {
-            return `${address}`
-        } else {
-            return '';
         }
+        return address;
     }
 
     selectItemWithAddress(address?: bigint) {

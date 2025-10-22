@@ -9,12 +9,15 @@ import {MapDataService} from "../mapdata/map.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {Popover} from "primeng/popover";
+import {JumpTargetService} from "../search/jump.service";
+import {FeatureWrapper} from "../mapdata/features.model";
 
 export interface Column {
     key: string,
     header: string,
     width: string,
-    transform?: (v: any) => any
+    transform: (colKey: string, rowData: any) => any
 }
 
 export class FeatureFilterOptions {
@@ -27,63 +30,111 @@ export class FeatureFilterOptions {
 @Component({
     selector: 'inspection-tree',
     template: `
-        <ng-container>
-            <p-treeTable #tt scrollHeight="flex" filterMode="strict"
-                [value]="treeData()"
-                [autoLayout]="true"
-                [scrollable]="true"
-                [resizableColumns]="true"
-                [virtualScroll]="true"
-                [virtualScrollItemSize]="26"
-                [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
-                [globalFilterFields]="filterFields()">
-                <ng-template pTemplate="caption">
+        <p-treeTable #tt scrollHeight="flex" filterMode="strict"
+            [value]="data"
+            [autoLayout]="true"
+            [scrollable]="true"
+            [resizableColumns]="true"
+            [virtualScroll]="true"
+            [virtualScrollItemSize]="26"
+            [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
+            [globalFilterFields]="filterFields">
+            <ng-template pTemplate="caption">
+                <!-- TODO: transfer the inlined styles to styles.SCSS -->
+                <div class="flex justify-content-end align-items-center"
+                     style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
                     <p-iconfield class="filter-container">
-                        <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter" style="cursor: pointer"/>
+                        @if (filterOptions()) {
+                            <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter" style="cursor: pointer"/>
+                        }
                         <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
                                [(ngModel)]="filterString"
                                (ngModelChange)="filterTree(filterString)"
                                (input)="filterTree($any($event.target).value)"/>
-                        <i *ngIf="filterString" (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                        @if (filterString) {
+                            <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                        }
                     </p-iconfield>
-                </ng-template>
+                    @if (selectedFeatures()) {
+                        <p-button (click)="mapService.focusOnFeature(selectedFeatures()![0], selectedFeatures()![1][0])"
+                                  label="" pTooltip="Focus on feature" tooltipPosition="bottom"
+                                  [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
+                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                        </p-button>
+                    }
+                    @if (geoJson()) {
+                        <p-button (click)="copyToClipboard(geoJson()!)"
+                                  icon="pi pi-fw pi-copy" label=""
+                                  [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                                  pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                        </p-button>
+                    }
+                </div>
+            </ng-template>
 
-                <ng-template pTemplate="colgroup">
-                    <colgroup>
-                        <col *ngFor="let col of columns()" [style.width]="col.width" />
-                    </colgroup>
-                </ng-template>
+            <ng-template pTemplate="colgroup">
+                <colgroup>
+                    @for (col of columns(); track col.key) {
+                        <col [style.width]="col.width" />
+                    }
+                </colgroup>
+            </ng-template>
 
-                <ng-template pTemplate="header">
-                    <tr>
-                        <th *ngFor="let col of columns()" ttResizableColumn>
+            <ng-template pTemplate="header">
+                <tr>
+                    @for (col of columns(); track col.key) {
+                        <th ttResizableColumn>
                             {{ col.header }}
                         </th>
-                    </tr>
-                </ng-template>
+                    }
+                </tr>
+            </ng-template>
 
-                <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                    <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
-                        <td *ngFor="let col of columns(); let i = index" style="white-space: nowrap; text-overflow: ellipsis">
-                            <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
-                            <span *ngIf="filterFields().indexOf(col.key) != -1" [innerHTML]="col?.transform(rowData[col.key]) | highlight: filterString"></span>
-                            <span *ngIf="filterFields().indexOf(col.key) == -1" [innerHTML]="col?.transform(rowData[col.key])"></span>
+            <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
+                <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)" [class]="rowData.styleClass || ''">
+                    @for (col of columns(); track $index) {
+                        <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
+                            [pTooltip]="rowData[col.key].toString()" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
+                            <p-treeTableToggler [rowNode]="rowNode" *ngIf="$index === 0" />
+                            @if (filterFields.indexOf(col.key) != -1) {
+                                <span (click)="onNodeClick($event, rowData, col.key)"
+                                      (mouseover)="onNodeHover($event, rowData)"
+                                      (mouseout)="onNodeHoverExit($event, rowData)"
+                                      style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
+                                </span>
+                            } @else {
+                                <span (click)="onNodeClick($event, rowData, col.key)"
+                                      (mouseover)="onNodeHover($event, rowData)"
+                                      (mouseout)="onNodeHoverExit($event, rowData)"
+                                      style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
+                                </span>
+                            }
                         </td>
-                    </tr>
-                </ng-template>
-            </p-treeTable>
-        </ng-container>
+                    }
+                </tr>
+            </ng-template>
+
+            <ng-template pTemplate="emptymessage">
+                <tr>
+                    <td [attr.colspan]="columns().length">No entries found.</td>
+                </tr>
+            </ng-template>
+        </p-treeTable>
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="9999" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">
             <div class="font-bold white-space-nowrap" style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
-                <p-checkbox [(ngModel)]="filterOptions()!.filterByKeys" (ngModelChange)="filterTree(filterString)" inputId="fbk" [binary]="true"/>
+                <p-checkbox [(ngModel)]="filterOptions()!.filterByKeys" (ngModelChange)="filterTree(filterString)" 
+                            inputId="fbk" [binary]="true"/>
                 <label for="fbk" style="margin-left: 0.5em; cursor: pointer">Filter by Keys</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterByValues" (ngModelChange)="filterTree(filterString)" inputId="fbv" [binary]="true"/>
+                <p-checkbox [(ngModel)]="filterOptions()!.filterByValues" (ngModelChange)="filterTree(filterString)" 
+                            inputId="fbv" [binary]="true"/>
                 <label for="fbv" style="margin-left: 0.5em; cursor: pointer">Filter by Values</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterOnlyFeatureIds" (ngModelChange)="filterTree(filterString)" inputId="fofids" [binary]="true"/>
+                <p-checkbox [(ngModel)]="filterOptions()!.filterOnlyFeatureIds" (ngModelChange)="filterTree(filterString)" 
+                            inputId="fofids" [binary]="true"/>
                 <label for="fofids" style="margin-left: 0.5em; cursor: pointer">Filter only FeatureIDs</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterGeometryEntries" (ngModelChange)="filterTree(filterString)" inputId="ige" [binary]="true"/>
+                <p-checkbox [(ngModel)]="filterOptions()!.filterGeometryEntries" (ngModelChange)="filterTree(filterString)" 
+                            inputId="ige" [binary]="true"/>
                 <label for="ige" style="margin-left: 0.5em; cursor: pointer">Include Geometry Entries</label>
             </div>
         </p-popover>
@@ -111,27 +162,41 @@ export class FeatureFilterOptions {
 export class InspectionTreeComponent implements OnInit, OnDestroy {
 
     @ViewChild('tt') table!: TreeTable;
+    @ViewChild('filterPanel') filterPanel!: Popover;
 
+    data: TreeTableNode[];
     treeData = input.required<TreeTableNode[]>();
-    filterFields = input.required<string[]>();
     columns = input.required<Column[]>();
     panelId = input.required<number>();
     firstHighlightedItemIndex = input<number>();
     firstHighlightedItemIndex$ = toObservable(this.firstHighlightedItemIndex);
     subscriptions: Subscription[] = [];
     filterOptions = input<FeatureFilterOptions>();
+    geoJson = input<string>();
+    selectedFeatures = input<[number, FeatureWrapper[]]>();
 
+    filterFields: string[] = [
+        "key",
+        "value"
+    ];
+    tooltipOptions = {
+        showDelay: 1000,
+        autoHide: false
+    };
     filterString = "";
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
 
     constructor(private clipboardService: ClipboardService,
-                private mapService: MapDataService,
+                public mapService: MapDataService,
+                private jumpService: JumpTargetService,
                 private stateService: AppStateService,
-                private messageService: InfoMessageService) {}
+                private messageService: InfoMessageService) {
+        this.data = this.treeData();
+    }
 
     ngOnInit() {
-        // We have to force recalculate the tables number of visible items
+        // FIXME We have to force recalculate the tables number of visible items?
         // setTimeout(() => {
         //     let scroller = (<any>this.table.scrollableViewChild)?.scroller;
         //     if (scroller) {
@@ -165,7 +230,21 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
     onRowClick(rowNode: any) {
         const node: TreeNode = rowNode.node;
         node.expanded = !node.expanded;
-        this.filteredTree = [...this.filteredTree];
+        this.data = [...this.data];
+    }
+
+    onNodeClick(event: MouseEvent, rowData: any, colKey: string) {
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+            event.stopPropagation();
+            return;
+        }
+
+        if (colKey === "key") {
+            this.onKeyClick(event, rowData);
+        } else if (colKey === "value") {
+            this.onValueClick(event, rowData);
+        }
     }
 
     onKeyClick(event: MouseEvent, rowData: any) {
@@ -200,11 +279,6 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
 
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
-        const selection = window.getSelection();
-        if (selection && selection.toString().length > 0) {
-            return;
-        }
-
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
                 0,
@@ -213,31 +287,25 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
         }
     }
 
-    onValueHover(event: any, rowData: any) {
+    onNodeHover(event: any, rowData: any) {
         event.stopPropagation();
         this.highlightHoveredEntry(rowData);
     }
 
-    onValueHoverExit(event: any, rowData: any) {
+    onNodeHoverExit(event: any, rowData: any) {
         event.stopPropagation();
-        if (rowData["type"] === this.InspectionValueType.FEATUREID.value) {
-            this.mapService.setHoveredFeatures([]).then();
+        if (!rowData.hasOwnProperty("type")) {
+            return;
         }
-    }
-
-    onKeyHover(event: any, rowData: any) {
-        event.stopPropagation();
-        this.highlightHoveredEntry(rowData);
-    }
-
-    onKeyHoverExit(event: any, rowData: any) {
-        event.stopPropagation();
         if (rowData["type"] === this.InspectionValueType.FEATUREID.value) {
             this.mapService.setHoveredFeatures([]).then();
         }
     }
 
     private highlightHoveredEntry(rowData: any) {
+        if (!rowData.hasOwnProperty("type") && !rowData.hasOwnProperty("hoverId")) {
+            return;
+        }
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
             this.jumpService.highlightByJumpTargetFilter(
                 0,
@@ -265,8 +333,11 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
         }
     }
 
-    getStyleClassByType(valueType: number): string {
-        switch (valueType) {
+    getStyleClassByType(rowData: any): string {
+        if (!rowData || !rowData.hasOwnProperty("type")) {
+            return "standard-style";
+        }
+        switch (rowData["type"]) {
             case this.InspectionValueType.SECTION.value:
                 return "section-style";
             case this.InspectionValueType.FEATUREID.value:
@@ -335,7 +406,7 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
             }, []);
         };
 
-        this.filteredTree = filterNodes(JSON.parse(this.jsonTree));
+        this.data = filterNodes(this.treeData());
     }
 
     expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {

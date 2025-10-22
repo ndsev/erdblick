@@ -141,19 +141,11 @@ export class FeaturePanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
 
-    filteredTree: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",   header: "Key",   width: '0*' },
-        { key: "value", header: "Value", width: '0*' },
+        { key: "key",   header: "Key",   width: '0*', transform: this.formatWithSourceDataButtons.bind(this) },
+        { key: "value", header: "Value", width: '0*', transform: this.formatWithInfoButton.bind(this) }
     ];
-    isExpanded: boolean = false;
-    tooltipOptions = {
-        showDelay: 1000,
-        autoHide: false
-    };
-    jsonTree = "";
-
-    @ViewChild('tt') table!: TreeTable;
+    treeData = "";
 
     constructor(private clipboardService: ClipboardService,
                 public inspectionService: InspectionService,
@@ -310,5 +302,47 @@ export class FeaturePanelComponent {
         } else {
             this.featureTree.next('[]');
         }
+    }
+
+    formatWithSourceDataButtons(colKey: string, rowData: any) {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
+        }
+
+        const keyHtml = `<span>${rowData[colKey]}</span>`;
+        if (!rowData.hasOwnProperty("sourceDataReferences")) {
+            return keyHtml;
+        }
+        // FIXME: Pretty sure this won't work correctly
+        const buttonGroup = `
+            <p-buttonGroup class="source-data-ref-container">
+                @for (item of rowData.sourceDataReferences) {
+                    <p-button class="source-data-button"
+                              (click)="showSourceData($event, item)"
+                              severity="secondary"
+                              label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                              pTooltip="Go to {{ item.qualifier }} Source Data"
+                              tooltipPosition="bottom" />
+                }
+            </p-buttonGroup>
+        `;
+        return `${keyHtml}${buttonGroup}`;
+    }
+
+    formatWithInfoButton(colKey: string, rowData: any) {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
+        }
+
+        const valueHtml = `<span>${rowData[colKey]}</span>`;
+        if (!rowData.hasOwnProperty("info")) {
+            return valueHtml;
+        }
+        const infoCircle = `
+            <span>
+                <i class="pi pi-info-circle" [pTooltip]="rowData['info'].toString()" tooltipPosition="left"></i>
+            </span>
+        `;
+        return `${valueHtml}${infoCircle}`;
     }
 }
