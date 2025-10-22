@@ -45,6 +45,11 @@ class ViewVisualizationState {
     visualizationQueue: TileVisualization[] = [];
 }
 
+export interface SelectedFeatures {
+    viewIndex: number;
+    features: FeatureWrapper[];
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:

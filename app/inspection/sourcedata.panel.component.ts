@@ -16,8 +16,8 @@ import {Column} from "./inspection.tree.component";
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
         } @else {
-            <inspection-tree [treeData]="treeData" [columns]="columns" [firstHighlightedItemIndex]="firstHighlightedItemIndex" 
-                             [panelId]="panel().id">
+            <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
     `,
@@ -27,7 +27,7 @@ import {Column} from "./inspection.tree.component";
 export class SourceDataPanelComponent implements OnInit {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
-    error = output<string>();
+    error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;
 
@@ -129,8 +129,6 @@ export class SourceDataPanelComponent implements OnInit {
         this.loading = false;
         this.treeData = [];
         this.error.emit(message);
-
-        console.error("Error while processing SourceData tree:", message);
     }
 
     /**

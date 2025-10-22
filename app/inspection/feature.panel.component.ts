@@ -1,23 +1,12 @@
-import {
-    AfterViewInit,
-    Component, ElementRef, input,
-    OnDestroy,
-    OnInit, Renderer2,
-    ViewChild
-} from "@angular/core";
-import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
-import {InspectionService} from "./inspection.service";
-import {JumpTargetService} from "../search/jump.service";
-import {Menu} from "primeng/menu";
-import {MapDataService} from "../mapdata/map.service";
-import {distinctUntilChanged, Subscription} from "rxjs";
+import {Component, input} from "@angular/core";
+import {TreeTableNode} from "primeng/api";
+import {MapDataService, SelectedFeatures} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
-import {ClipboardService} from "../shared/clipboard.service";
-import {TreeTable} from "primeng/treetable";
-import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
-import {InfoMessageService} from "../shared/info.service";
+import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
-import {Column} from "./inspection.tree.component";
+import {Column, FeatureFilterOptions} from "./inspection.tree.component";
+import {KeyboardService} from "../shared/keyboard.service";
+import {Feature} from '../../build/libs/core/erdblick-core';
 
 interface InspectionModelData {
     key: string;
@@ -34,105 +23,9 @@ interface InspectionModelData {
 @Component({
     selector: 'feature-panel',
     template: `
-        <div class="flex justify-content-end align-items-center"
-             style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
-            <p-iconfield class="filter-container">
-                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter" style="cursor: pointer" />
-                <input class="filter-input" type="text" pInputText placeholder="Filter data for selected feature"
-                       [(ngModel)]="inspectionService.featureTreeFilterValue" (ngModelChange)="filterTree()"
-                       (keydown)="onKeydown($event)"
-                />
-                <i *ngIf="inspectionService.featureTreeFilterValue" (click)="clearFilter()"
-                   class="pi pi-times clear-icon" style="cursor: pointer"></i>
-            </p-iconfield>
-            <div>
-                <p-button (click)="mapService.focusOnFeature(0, inspectionService.selectedFeatures[0])"
-                          label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                          [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
-                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
-                </p-button>
-            </div>
-            <div>
-                <p-button (click)="copyToClipboard(inspectionService.selectedFeatureGeoJsonCollection())"
-                          icon="pi pi-fw pi-copy" label=""
-                          [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                          pTooltip="Copy GeoJSON" tooltipPosition="bottom">
-                </p-button>
-            </div>
-        </div>
-        <div class="flex resizable-container" #resizeableContainer
-             [style.width.px]="inspectionContainerWidth"
-             [style.height.px]="inspectionContainerHeight"
-             (mouseup)="stateService.onInspectionContainerResize($event)"
-             [ngClass]="{'resizable-container-expanded': isExpanded}">
-<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
-<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
-<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
-<!--            </div>-->
-            <p-treeTable #tt filterMode="strict" scrollHeight="flex"
-                         [value]="filteredTree"
-                         [columns]="cols"
-                         [scrollable]="true"
-                         [virtualScroll]="true"
-                         [virtualScrollItemSize]="26"
-                         [tableStyle]="{'min-width': '1px', 'min-height': '1px'}"
-            >
-                <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                    <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)">
-                        <td [ngClass]="{'section-style': rowData['type']==InspectionValueType.SECTION.value}">
-                            <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                 [pTooltip]="rowData['key'].toString()" tooltipPosition="left"
-                                 [tooltipOptions]="tooltipOptions">
-                                <div style="display: flex; flex-direction: row; gap: 0.25em">
-                                    <p-treeTableToggler [rowNode]="rowNode" (click)="$event.stopPropagation()">
-                                    </p-treeTableToggler>
-                                    <span (click)="onKeyClick($event, rowData)"
-                                          (mouseover)="onKeyHover($event, rowData)"
-                                          (mouseout)="onKeyHoverExit($event, rowData)"
-                                          style="cursor: pointer">
-                                        {{ rowData['key'] }}
-                                    </span>
-                                    <p-buttonGroup *ngIf="rowData['sourceDataReferences']"
-                                                   class="source-data-ref-container">
-                                        <ng-template ngFor let-item [ngForOf]="rowData.sourceDataReferences">
-                                            <p-button class="source-data-button"
-                                                      (click)="showSourceData($event, item)"
-                                                      severity="secondary"
-                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
-                                                      tooltipPosition="bottom" />
-                                        </ng-template>
-                                    </p-buttonGroup>
-                                </div>
-                            </div>
-                        </td>
-                        <td [class]="getStyleClassByType(rowData['type'])">
-                            <div style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                                 [pTooltip]="rowData['value'].toString()" tooltipPosition="left"
-                                 [tooltipOptions]="tooltipOptions">
-                                <div (click)="onValueClick($event, rowData)"
-                                     (mouseover)="onValueHover($event, rowData)"
-                                     (mouseout)="onValueHoverExit($event, rowData)">
-                                    {{ rowData['value'] }}
-                                    <span *ngIf="rowData.hasOwnProperty('info')">
-                                        <i class="pi pi-info-circle"
-                                           [pTooltip]="rowData['info'].toString()"
-                                           tooltipPosition="left">
-                                        </i>
-                                    </span>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                </ng-template>
-                <ng-template pTemplate="emptymessage">
-                    <tr>
-                        <td [attr.colspan]="cols.length">No entries found.</td>
-                    </tr>
-                </ng-template>
-            </p-treeTable>
-        </div>
-        
+        <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                         [filterOptions]="filterOptions" [geoJson]="geoJson" [selectedFeatures]="selectedFeatures">
+        </inspection-tree>
     `,
     styles: [``],
     standalone: false
@@ -141,80 +34,41 @@ export class FeaturePanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
 
+    treeData: TreeTableNode[] = [];
     columns: Column[] = [
         { key: "key",   header: "Key",   width: '0*', transform: this.formatWithSourceDataButtons.bind(this) },
         { key: "value", header: "Value", width: '0*', transform: this.formatWithInfoButton.bind(this) }
     ];
-    treeData = "";
+    filterOptions = new FeatureFilterOptions();
+    geoJson: string = "";
+    selectedFeatures?: SelectedFeatures;
 
-    constructor(private clipboardService: ClipboardService,
-                public inspectionService: InspectionService,
-                public jumpService: JumpTargetService,
-                public stateService: AppStateService,
-                private messageService: InfoMessageService,
-                public mapService: MapDataService) {
-        this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe((tree: string) => {
-            this.jsonTree = tree;
-            this.filteredTree = tree ? JSON.parse(tree) : [];
-            this.expandTreeNodes(this.filteredTree);
-            if (this.inspectionService.featureTreeFilterValue) {
-                this.filterTree();
-            }
-        });
-    }
-
-    featureTree: BehaviorSubject<string> = new BehaviorSubject<string>("");
-    featureTreeFilterValue: string = "";
-    isInspectionPanelVisible: boolean = false;
-    selectedFeatureGeoJsonTexts: string[] = [];
     selectedFeatureInspectionModel: InspectionModelData[] = [];
-    selectedFeatures: FeatureWrapper[] = [];
 
     constructor(private mapService: MapDataService,
-                private keyboardService: KeyboardService,
-                public stateService: AppStateService) {
-
+                private keyboardService: KeyboardService) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
 
-        this.mapService.selectionTopic.pipe(/*distinctUntilChanged(selectedFeaturesEqualTo)*/).subscribe(selectedPanels => {
-            if (!selectedPanels?.length) {
-                this.isInspectionPanelVisible = false;
-                this.featureTreeFilterValue = "";
-                // this.stateService.setSelection().setSelectedFeatures([]);
-                this.selectedFeatures = [];
-                return;
-            }
-            this.selectedFeatureInspectionModel = [];
-            this.selectedFeatureGeoJsonTexts = [];
-            const selectedFeatures = selectedPanels.map(panel => panel.selectedFeatures).flat();
-            this.selectedFeatures = selectedFeatures;
+        this.selectedFeatures = {
+            viewIndex: 0,
+            features: this.panel().selectedFeatures
+        };
 
-            // Currently only takes the first element for Jump to Feature functionality.
-            // TODO: Allow to use the whole set for Jump to Feature.
-            if (selectedFeatures.length) {
-                selectedFeatures[0].peek((feature: Feature) => {
-                    this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
-                    this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-                    this.isInspectionPanelVisible = true;
-                });
-            }
-            if (selectedFeatures.length > 1) {
-                selectedFeatures.slice(1).forEach(selectedFeature => {
-                    selectedFeature.peek((feature: Feature) => {
-                        this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
-                        this.selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-                        this.isInspectionPanelVisible = true;
-                    });
-                });
-            }
-            this.loadFeatureData();
+        this.selectedFeatureInspectionModel = [];
+        const selectedFeatureGeoJsonTexts: string[] = [];
 
-            // this.stateService.setSelectedFeatures(0, this.selectedFeatures.map(f => f.key()));
+        this.selectedFeatures.features.forEach(featureWrapper => {
+            featureWrapper.peek((feature: Feature) => {
+                this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+            });
         });
+        this.geoJson = this.selectedFeaturesGeoJson(selectedFeatureGeoJsonTexts);
+        this.treeData = this.loadFeatureData();
     }
 
-    selectedFeatureGeoJsonCollection() {
-        return `{"type": "FeatureCollection", "features": [${this.selectedFeatureGeoJsonTexts.join(", ")}]}`;
+    selectedFeaturesGeoJson(collection: string[]) {
+        return `{"type": "FeatureCollection", "features": [${collection.join(", ")}]}`;
     }
 
     getFeatureTreeDataFromModel() {
@@ -289,19 +143,10 @@ export class FeaturePanelComponent {
     }
 
     loadFeatureData() {
-        if (this.selectedFeatureInspectionModel) {
-            this.featureTree.next(JSON.stringify(this.getFeatureTreeDataFromModel(), (_, value) => {
-                if (typeof value === 'bigint') {
-                    return value.toString();
-                } else if (value == null) {
-                    return "";
-                } else {
-                    return value;
-                }
-            }));
-        } else {
-            this.featureTree.next('[]');
+        if (!this.selectedFeatureInspectionModel) {
+            return [];
         }
+        return this.getFeatureTreeDataFromModel();
     }
 
     formatWithSourceDataButtons(colKey: string, rowData: any) {
@@ -344,5 +189,14 @@ export class FeaturePanelComponent {
             </span>
         `;
         return `${valueHtml}${infoCircle}`;
+    }
+
+    zoomToFeature() {
+        // Currently only takes the first element for Jump to Feature functionality.
+        // TODO: Allow to use the whole set for Jump to Feature.
+        if (!this.selectedFeatures) {
+            return;
+        }
+        this.mapService.zoomToFeature(this.selectedFeatures.viewIndex, this.selectedFeatures.features[0]);
     }
 }

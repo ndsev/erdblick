@@ -1,21 +1,8 @@
 import {AfterViewInit, Component, ElementRef, input, Renderer2, ViewChild} from "@angular/core";
-import {InspectionService, SelectedSourceData, selectedSourceDataEqualTo} from "./inspection.service";
-import {distinctUntilChanged, Observable} from "rxjs";
-import {FeaturePanelComponent} from "./feature.panel.component";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
-import {toObservable} from "@angular/core/rxjs-interop";
-import {MapView} from "../mapview/view";
-
-interface InspectorTab {
-    title: string,
-    icon: string,
-    component: any,
-    inputs?: Record<string, any>,
-    onClose?: any,
-}
+import {coreLib} from "../integrations/wasm";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -30,16 +17,20 @@ interface SourceLayerMenuItem {
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <span class="inspector-title">
-                        <p-button *ngIf="panel().selectedSourceData" icon="pi pi-chevron-left" (click)="onGoBack($event)" 
-                                  (mousedown)="$event.stopPropagation()" />
+                        @if (panel().selectedSourceData) {
+                            <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"/>
+                        }
+                        
                         <!--TODO: Replace the icon with a color picker-->
 <!--                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>-->
                         {{ title }}
 
-                        <p-select *ngIf="panel().selectedSourceData" class="source-layer-dropdown" [options]="layerMenuItems"
-                                  [(ngModel)]="selectedLayerItem" (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
-                                  scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
-                                  optionDisabled="disabled" appendTo="body"/>
+                        @if (panel().selectedSourceData) {
+                            <p-select class="source-layer-dropdown" [options]="layerMenuItems" [(ngModel)]="selectedLayerItem" 
+                                      (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
+                                      scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
+                                      optionDisabled="disabled" appendTo="body"/>
+                        }
                     </span>
                 </p-accordion-header>
 
@@ -54,17 +45,15 @@ interface SourceLayerMenuItem {
                             <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
                         </div>
                         @if (panel()?.selectedSourceData) {
-                            <sourcedata-panel [panel]="panel()"></sourcedata-panel>
+                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
                         } @else {
                             <feature-panel [panel]="panel()"></feature-panel>
                         }
-                        <ng-template *ngIf="errorMessage">
-                            <div class="error">
-                                <div>
-                                    <strong>Error</strong><br>{{ errorMessage }}
-                                </div>
+                        @if (errorMessage) {
+                            <div>
+                                <strong>Error</strong><br>{{ errorMessage }}
                             </div>
-                        </ng-template>
+                        }
                     </div>
                 </p-accordion-content>
             </p-accordion-panel>
@@ -104,62 +93,42 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
 
-    constructor(public inspectionService: InspectionService,
-                public mapService: MapDataService,
-                public stateService: AppStateService,
+    constructor(private mapService: MapDataService,
+                private stateService: AppStateService,
                 private renderer: Renderer2) {
-        // TODO: We need a feature tree per panel
-        this.inspectionService.featureTree.pipe(distinctUntilChanged()).subscribe(_ => {
-            this.reset();
-
-            const featureIds = this.inspectionService.selectedFeatures.map(f => f.featureId).join(", ");
-            if (this.inspectionService.selectedFeatures.length == 1) {
-                this.tabs[0].title = featureIds;
+        if (this.panel().selectedSourceData) {
+            const selection = this.panel().selectedSourceData!;
+            const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(selection.mapTileKey);
+            const map = this.mapService.maps.maps.get(mapId);
+            if (map) {
+                // TODO: Fix missing entries for the metadata on tile 0
+                this.layerMenuItems = Array.from(map.layers.values())
+                    .filter(item => item.type === "SourceData")
+                    .filter(item => {
+                        return item.id.startsWith("SourceData") ||
+                            (item.id.startsWith("Metadata") && tileId === 0);
+                    })
+                    .map(item => {
+                        return {
+                            label: this.mapService.layerNameForSourceDataLayerId(
+                                item.id,
+                                item.id.startsWith("Metadata")
+                            ),
+                            disabled: item.id === layerId,
+                            command: () => {
+                                let sourceData = {...selection};
+                                sourceData.mapTileKey = `SourceData:${mapId}:${layerId}:${tileId}`;
+                                sourceData.address = BigInt(0);
+                                // FIXME
+                                // this.inspectionService.selectedSourceData.next(sourceData);
+                            },
+                        };
+                    }).sort((a, b) => a.label.localeCompare(b.label));
+                this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
             } else {
-                this.tabs[0].title = `Selected ${this.inspectionService.selectedFeatures.length} Features`;
+                this.layerMenuItems = [];
             }
-
-            const selectedSourceData = this.stateService.selectedSourceData
-            if (selectedSourceData?.featureIds === featureIds)
-                this.inspectionService.selectedSourceData.next(selectedSourceData);
-            else
-                this.inspectionService.selectedSourceData.next(null);
-        });
-
-        this.inspectionService.selectedSourceData.pipe(distinctUntilChanged(selectedSourceDataEqualTo)).subscribe(selection => {
-            if (selection) {
-                this.reset();
-                const map = this.mapService.maps.maps.get(selection.mapId);
-                if (map) {
-                    // TODO: Fix missing entries for the metadata on tile 0
-                    this.layerMenuItems = Array.from(map.layers.values())
-                        .filter(item => item.type == "SourceData")
-                        .filter(item => {
-                            return item.id.startsWith("SourceData") ||
-                                (item.id.startsWith("Metadata") && selection.tileId === 0);
-                        })
-                        .map(item => {
-                            return {
-                                label: layerNameForSourceDataLayerId(
-                                    item.id,
-                                    item.id.startsWith("Metadata")
-                                ),
-                                disabled: item.id === selection.layerId,
-                                command: () => {
-                                    let sourceData = {...selection};
-                                    sourceData.layerId = item.id;
-                                    sourceData.address = BigInt(0);
-                                    this.inspectionService.selectedSourceData.next(sourceData);
-                                },
-                            };
-                        }).sort((a, b) => a.label.localeCompare(b.label));
-                    this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
-                } else {
-                    this.layerMenuItems = [];
-                }
-                this.pushSourceDataInspector(selection);
-            }
-        });
+        }
     }
 
     ngAfterViewInit() {
@@ -205,21 +174,15 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.stateService.setInspectionPanelSize(panel.id, panel.size);
     }
 
-    /**
-     * Set an error message that gets displayed.
-     * Unsets the tree to an empty array.
-     *
-     * @param message Error message
-     */
-    setError(message: string) {
-        this.errorMessage = message;
-        console.error("Error while processing tree:", this.errorMessage);
-    }
-
     detectSafari() {
         const isSafari = /Safari/i.test(navigator.userAgent);
         if (isSafari) {
             this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
         }
+    }
+
+    onSourceDataError(errorMessage: string) {
+        this.errorMessage = errorMessage;
+        console.error("Error while processing SourceData tree:", errorMessage);
     }
 }
