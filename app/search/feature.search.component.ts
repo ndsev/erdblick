@@ -1,7 +1,6 @@
 import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {MapDataService} from "../mapdata/map.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {Listbox} from "primeng/listbox";
@@ -144,7 +143,6 @@ export class FeatureSearchComponent {
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
-                public inspectionService: InspectionService,
                 public sidePanelService: SidePanelService,
                 public keyboardService: KeyboardService,
                 private infoMessageService: InfoMessageService) {
@@ -197,10 +195,11 @@ export class FeatureSearchComponent {
 
     selectResult(event: any) {
         if (event.value && event.value.mapId && event.value.featureId) {
+            // FIXME inspection viewIndex
             this.jumpService.highlightByJumpTargetFilter(0, event.value.mapId, event.value.featureId).then(() => {
-                if (this.inspectionService.selectedFeatures.length) {
-                    this.mapService.focusOnFeature(0, this.inspectionService.selectedFeatures[0]);
-                }
+                // if (this.inspectionService.selectedFeatures.length) {
+                //     this.mapService.focusOnFeature(0, this.inspectionService.selectedFeatures[0]);
+                // }
             });
         }
     }

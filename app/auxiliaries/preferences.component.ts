@@ -3,14 +3,13 @@ import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
 import {EditorService} from "../shared/editor.service";
 
 @Component({
     selector: 'pref-components',
     template: `
-        <div class="bttn-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
+        <div class="bttn-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
             <p-button (click)="openHelp()" icon="pi pi-question" label="" class="pref-button" pTooltip="Help"
                       tooltipPosition="right"></p-button>
             <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
@@ -255,8 +254,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService,
-                public inspectionService: InspectionService) {
+                public editorService: EditorService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));

@@ -649,6 +649,10 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    getNumSelections(): number {
+        return this.selectionState.getValue().length;
+    }
+
     setMarkerState(enabled: boolean) {
         this.markerState.next(enabled);
         if (!enabled) {

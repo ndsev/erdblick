@@ -33,7 +33,6 @@ import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
 import {SourceDataPanelComponent} from "./inspection/sourcedata.panel.component";
-import {InspectionService} from "./inspection/inspection.service";
 import {AppStateService} from "./shared/appstate.service";
 import {PreferencesComponent} from "./auxiliaries/preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
@@ -291,7 +290,6 @@ export const initializeServices = () => {
         MessageService,
         InfoMessageService,
         JumpTargetService,
-        InspectionService,
         AppStateService,
         SidePanelService,
         FeatureSearchService,

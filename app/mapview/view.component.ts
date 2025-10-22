@@ -14,7 +14,6 @@ import {MapDataService} from "../mapdata/map.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
@@ -83,7 +82,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
                 public featureSearchService: FeatureSearchService,
                 public stateService: AppStateService,
                 public jumpService: JumpTargetService,
-                public inspectionService: InspectionService,
                 public keyboardService: KeyboardService,
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
@@ -132,10 +130,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         const mapView = is2D
             ? new MapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService)
+                this.jumpService, this.menuService, this.coordinatesService, this.stateService)
             : new MapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.inspectionService, this.menuService, this.coordinatesService, this.stateService);
+                this.jumpService, this.menuService, this.coordinatesService, this.stateService);
         await mapView.setup();
         this.mapView = mapView;
     }

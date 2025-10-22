@@ -2,8 +2,7 @@ import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService} from "../shared/appstate.service";
-import {SelectedSourceData} from "../inspection/inspection.service";
+import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,

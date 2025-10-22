@@ -44,7 +44,7 @@ interface SourceLayerMenuItem {
                             <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
                             <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
                         </div>
-                        @if (panel()?.selectedSourceData) {
+                        @if (panel().selectedSourceData) {
                             <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
                         } @else {
                             <feature-panel [panel]="panel()"></feature-panel>

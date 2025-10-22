@@ -18,7 +18,7 @@ import {
     Billboard,
     HeightReference, Camera
 } from "../integrations/cesium";
-import {AppStateService, CameraViewState, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
+import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TileVisualization} from "./visualization.model";
 import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
@@ -26,7 +26,6 @@ import {FeatureSearchService, SearchResultPrimitiveId} from "../search/feature.s
 import {coreLib} from "../integrations/wasm";
 import {environment} from "../environments/environment";
 import {JumpTargetService} from "../search/jump.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {SearchResultPosition} from "../search/search.worker";
@@ -135,7 +134,6 @@ export class MapView {
                 protected mapService: MapDataService,
                 protected featureSearchService: FeatureSearchService,
                 protected jumpService: JumpTargetService,
-                protected inspectionService: InspectionService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
                 protected stateService: AppStateService) {
@@ -423,9 +421,10 @@ export class MapView {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
                         this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId, featureInfo.featureId).then(() => {
-                            if (this.inspectionService.selectedFeatures) {
-                                this.inspectionService.zoomToFeature();
-                            }
+                            // FIXME inspection
+                            // if (this.inspectionService.selectedFeatures) {
+                            //     this.inspectionService.zoomToFeature();
+                            // }
                         });
                     }
                 } else {
@@ -440,7 +439,8 @@ export class MapView {
                 }
             }
             if (!defined(feature)) {
-                this.inspectionService.isInspectionPanelVisible = false;
+                // FIXME
+                // this.inspectionService.isInspectionPanelVisible = false;
                 this.menuService.tileOutline.next(null);
             }
             this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
@@ -477,8 +477,7 @@ export class MapView {
                 }
 
                 let feature = this.viewer.scene.pick(position);
-                this.mapService.setHoveredFeatures(this._viewIndex,
-                    Array.isArray(feature?.id) ? feature.id : [feature?.id]).then();
+                this.mapService.setHoveredFeatures(Array.isArray(feature?.id) ? feature.id : [feature?.id]).then();
             }
         }, ScreenSpaceEventType.MOUSE_MOVE);
 
@@ -525,15 +524,17 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            this.inspectionService.originAndNormalForFeatureZoom.subscribe(values => {
+            this.mapService.originAndNormalForFeatureZoomTopic.subscribe(value => {
                 // Add safety check before accessing viewer
                 if (!this.isAvailable()) {
                     return;
                 }
+                if (this._viewIndex !== value.targetView) {
+                    return;
+                }
 
-                const [origin, normal] = values;
-                const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
-                const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
+                const direction = Cartesian3.subtract(value.normal, new Cartesian3(), new Cartesian3());
+                const endPoint = Cartesian3.add(value.origin, direction, new Cartesian3());
                 Cartesian3.normalize(direction, direction);
                 Cartesian3.negate(direction, direction);
                 const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(

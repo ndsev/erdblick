@@ -1,5 +1,5 @@
 import {
-    BoundingSphere, Camera,
+    Camera,
     Cartesian2,
     Cartesian3,
     Cartographic,
@@ -14,7 +14,6 @@ import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 
@@ -25,12 +24,11 @@ export class MapView2D extends MapView {
                 mapService: MapDataService,
                 featureSearchService: FeatureSearchService,
                 jumpService: JumpTargetService,
-                inspectionService: InspectionService,
                 menuService: RightClickMenuService,
                 coordinatesService: CoordinatesService,
                 stateService: AppStateService) {
-        super(id, canvasId, SceneMode.SCENE2D, mapService, featureSearchService, jumpService,
-            inspectionService, menuService, coordinatesService, stateService);
+        super(id, canvasId, SceneMode.SCENE2D, mapService, featureSearchService,
+              jumpService, menuService, coordinatesService, stateService);
     }
 
     protected override setupScreenSpaceConstraints() {

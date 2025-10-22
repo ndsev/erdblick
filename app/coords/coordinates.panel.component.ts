@@ -5,7 +5,6 @@ import {AppStateService} from "../shared/appstate.service";
 import {CesiumMath} from "../integrations/cesium";
 import {ClipboardService} from "../shared/clipboard.service";
 import {coreLib} from "../integrations/wasm";
-import {InspectionService} from "../inspection/inspection.service";
 import {KeyValue} from "@angular/common";
 import {combineLatest, Subscription} from "rxjs";
 
@@ -17,7 +16,7 @@ interface PanelOption {
 @Component({
     selector: "coordinates-panel",
     template: `
-        <div class="coordinates-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
+        <div class="coordinates-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
             <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
                       [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
@@ -92,7 +91,6 @@ export class CoordinatesPanelComponent implements OnDestroy {
     constructor(public mapService: MapDataService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
-                public inspectionService: InspectionService,
                 public stateService: AppStateService) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});

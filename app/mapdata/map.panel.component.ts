@@ -137,7 +137,7 @@ import {Subscription} from "rxjs";
                                                   style="font-size: 1.2em; margin: 0 auto;">loupe</span>
                                             </p-button>
                                             <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
-                                                           (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.id)"
+                                                           (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
                                                            [showButtons]="true" [min]="0" [max]="15"
                                                            buttonLayout="horizontal" spinnerMode="horizontal"
                                                            inputId="horizontal"
@@ -380,8 +380,8 @@ export class MapPanelComponent {
         }
     }
 
-    onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
-        this.mapService.setMapLayerLevel(0, mapName, layerName, Number(event.toString()));
+    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
+        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
     }
 
     toggleOSMOverlay(viewIndex: number) {

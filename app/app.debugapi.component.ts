@@ -32,10 +32,17 @@ export class ErdblickDebugApi {
      *
      * @param cameraInfoStr A JSON-formatted string containing camera information.
      */
-    setCamera(cameraInfoStr: string) {
+    setCamera(viewIndex: number, cameraInfoStr: string) {
+        if (viewIndex >= this.stateService.numViews) {
+            console.error(`Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`);
+            return;
+        }
+        if (!cameraInfoStr) {
+            console.error(`Expected cameraInfoStr, got empty or undefined!`);
+            return;
+        }
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.stateService.setView(
-            0,
+        this.stateService.setView(viewIndex,
             cameraInfo.position,
             {
                 heading: cameraInfo.orientation.heading,
@@ -50,14 +57,18 @@ export class ErdblickDebugApi {
      *
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
-    getCamera() {
-        const destination = this.stateService.getCameraPosition(0);
+    getCamera(viewIndex: number) {
+        if (viewIndex >= this.stateService.numViews) {
+            console.error(`Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`);
+            return;
+        }
+        const destination = this.stateService.getCameraPosition(viewIndex);
         const position = [
             destination.longitude,
             destination.latitude,
             destination.height,
         ];
-        const orientation = this.stateService.getCameraOrientation(0);
+        const orientation = this.stateService.getCameraOrientation(viewIndex);
         return JSON.stringify({position, orientation});
     }
 

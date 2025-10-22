@@ -1,10 +1,7 @@
 import {Component} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
 import {MapDataService} from "../mapdata/map.service";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {InspectionService} from "./inspection.service";
-import {CallbackProperty, Color, HeightReference, Rectangle} from "../integrations/cesium";
+import {Color, HeightReference, Rectangle} from "../integrations/cesium";
 import {coreLib} from "../integrations/wasm";
 
 @Component({
@@ -82,7 +79,6 @@ export class SourceDataLayerSelectionDialogComponent {
     showCustomTileIdInput: boolean = false;
 
     constructor(private mapService: MapDataService,
-                private inspectionService: InspectionService,
                 public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
             this.tileIds = data;
@@ -227,7 +223,7 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {
                 const id = this.mapIds[i].id as string;
-                const layers = this.inspectionService.findLayersForMapId(id);
+                const layers = this.mapService.findLayersForMapId(id);
                 this.mapIds[i]["disabled"] = !layers.length;
                 this.sourceDataLayersPerMapId.set(id, layers);
             }

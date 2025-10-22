@@ -20,7 +20,7 @@ interface Versions {
         <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
         <p-toast position="top-center" key="tc"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
-        <inspection-panel *ngIf="!appModeService.isVisualizationOnly"></inspection-panel>
+        <inspection-container *ngIf="!appModeService.isVisualizationOnly"></inspection-container>
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
