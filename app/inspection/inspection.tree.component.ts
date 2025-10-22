@@ -94,7 +94,7 @@ export class FeatureFilterOptions {
                     @for (col of columns(); track $index) {
                         <td [class]="getStyleClassByType(rowData)"
                             style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                            [pTooltip]="rowData[col.key].toString()" tooltipPosition="left"
+                            [pTooltip]="rowData[col.key]" tooltipPosition="left"
                             [tooltipOptions]="tooltipOptions">
                             <p-treeTableToggler [rowNode]="rowNode" *ngIf="$index === 0"/>
                             @if (filterFields.indexOf(col.key) != -1) {
@@ -104,12 +104,36 @@ export class FeatureFilterOptions {
                                       style="cursor: pointer"
                                       [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
                                 </span>
+                                @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                    <p-buttonGroup class="source-data-ref-container">
+                                        @for (item of rowData["sourceDataReferences"]; track $index) {
+                                            <p-button class="source-data-button"
+                                                      (click)="showSourceData($event, item)"
+                                                      severity="secondary"
+                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                      tooltipPosition="bottom" />
+                                        }
+                                    </p-buttonGroup>
+                                }
                             } @else {
                                 <span (click)="onNodeClick($event, rowData, col.key)"
                                       (mouseover)="onNodeHover($event, rowData)"
                                       (mouseout)="onNodeHoverExit($event, rowData)"
                                       style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
                                 </span>
+                                @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                    <p-buttonGroup class="source-data-ref-container">
+                                        @for (item of rowData["sourceDataReferences"]; track $index) {
+                                            <p-button class="source-data-button"
+                                                      (click)="showSourceData($event, item)"
+                                                      severity="secondary"
+                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                      tooltipPosition="bottom" />
+                                        }
+                                    </p-buttonGroup>
+                                }
                             }
                         </td>
                     }
@@ -169,7 +193,7 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
 
-    data: TreeTableNode[];
+    data: TreeTableNode[] = [];
     treeData = input.required<TreeTableNode[]>();
     columns = input.required<Column[]>();
     panelId = input.required<number>();
@@ -197,11 +221,11 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
                 public mapService: MapDataService,
                 private jumpService: JumpTargetService,
                 private stateService: AppStateService,
-                private messageService: InfoMessageService) {
-        this.data = this.treeData();
-    }
+                private messageService: InfoMessageService) {}
 
     ngOnInit() {
+        this.data = this.treeData();
+
         // FIXME We have to force recalculate the tables number of visible items?
         // setTimeout(() => {
         //     let scroller = (<any>this.table.scrollableViewChild)?.scroller;
@@ -223,6 +247,7 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
     clearFilter() {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains')
+        this.data = this.treeData();
     }
 
     onKeydown(event: any) {

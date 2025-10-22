@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, input, Renderer2, ViewChild} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, OnInit, Renderer2, ViewChild} from "@angular/core";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -17,7 +17,7 @@ interface SourceLayerMenuItem {
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <span class="inspector-title">
-                        @if (panel().selectedSourceData) {
+                        @if (panel().selectedSourceData !== undefined) {
                             <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"/>
                         }
                         
@@ -25,7 +25,7 @@ interface SourceLayerMenuItem {
 <!--                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>-->
                         {{ title }}
 
-                        @if (panel().selectedSourceData) {
+                        @if (panel().selectedSourceData !== undefined) {
                             <p-select class="source-layer-dropdown" [options]="layerMenuItems" [(ngModel)]="selectedLayerItem" 
                                       (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
@@ -40,14 +40,14 @@ interface SourceLayerMenuItem {
                          [style.height.px]="panel().size[1]"
                          (mouseup)="onInspectionContainerResize($event, panel())"
                          [ngClass]="{'resizable-container-expanded': isExpanded}">
-                        <div class="resize-handle" (click)="isExpanded = !isExpanded">
-                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>
-                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>
-                        </div>
+<!--                        <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+<!--                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+<!--                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+<!--                        </div>-->
                         @if (panel().selectedSourceData) {
-<!--                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>-->
+                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
                         } @else {
-<!--                            <feature-panel [panel]="panel()"></feature-panel>-->
+                            <feature-panel [panel]="panel()"></feature-panel>
                         }
                         @if (errorMessage) {
                             <div>
@@ -81,7 +81,7 @@ interface SourceLayerMenuItem {
     `],
     standalone: false
 })
-export class InspectionPanelComponent implements AfterViewInit {
+export class InspectionPanelComponent implements AfterViewInit, OnInit {
     title = "";
     isExpanded: boolean = true;
     errorMessage: string = "";
@@ -96,9 +96,14 @@ export class InspectionPanelComponent implements AfterViewInit {
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService,
                 private renderer: Renderer2) {
-        if (this.panel().selectedSourceData) {
-            const selection = this.panel().selectedSourceData!;
+    }
+
+    ngOnInit(): void {
+        const panel = this.panel();
+        if (panel.selectedSourceData !== undefined) {
+            const selection = panel.selectedSourceData!;
             const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(selection.mapTileKey);
+            this.title = `${tileId}.`;
             const map = this.mapService.maps.maps.get(mapId);
             if (map) {
                 // TODO: Fix missing entries for the metadata on tile 0
@@ -128,6 +133,8 @@ export class InspectionPanelComponent implements AfterViewInit {
             } else {
                 this.layerMenuItems = [];
             }
+        } else {
+            this.title = panel.selectedFeatures.map(feature => feature.featureId).join('|');
         }
     }
 

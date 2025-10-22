@@ -1,4 +1,4 @@
-import {Component, input} from "@angular/core";
+import {Component, input, OnInit} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService, SelectedFeatures} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
@@ -30,7 +30,7 @@ interface InspectionModelData {
     styles: [``],
     standalone: false
 })
-export class FeaturePanelComponent {
+export class FeaturePanelComponent implements OnInit {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
 
@@ -43,35 +43,31 @@ export class FeaturePanelComponent {
     geoJson: string = "";
     selectedFeatures?: SelectedFeatures;
 
-    selectedFeatureInspectionModel: InspectionModelData[] = [];
-
     constructor(private mapService: MapDataService,
                 private keyboardService: KeyboardService) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
+    }
 
+    ngOnInit(): void {
         this.selectedFeatures = {
             viewIndex: 0,
             features: this.panel().selectedFeatures
         };
 
-        this.selectedFeatureInspectionModel = [];
+        const selectedFeatureInspectionModel: InspectionModelData[] = [];
         const selectedFeatureGeoJsonTexts: string[] = [];
 
         this.selectedFeatures.features.forEach(featureWrapper => {
             featureWrapper.peek((feature: Feature) => {
-                this.selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                selectedFeatureInspectionModel.push(...feature.inspectionModel());
                 selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
             });
         });
-        this.geoJson = this.selectedFeaturesGeoJson(selectedFeatureGeoJsonTexts);
-        this.treeData = this.loadFeatureData();
+        this.geoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
+        this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModel);
     }
 
-    selectedFeaturesGeoJson(collection: string[]) {
-        return `{"type": "FeatureCollection", "features": [${collection.join(", ")}]}`;
-    }
-
-    getFeatureTreeDataFromModel() {
+    getFeatureTreeDataFromModel(inspectionModels: InspectionModelData[]) {
         let convertToTreeTableNodes = (dataNodes: Array<InspectionModelData>, featureIndex: number): TreeTableNode[] => {
             let treeNodes: Array<TreeTableNode> = [];
             for (const data of dataNodes) {
@@ -124,9 +120,9 @@ export class FeaturePanelComponent {
         }
 
         let treeNodes: Array<TreeTableNode> = [];
-        if (this.selectedFeatureInspectionModel) {
-            for (let i = 0; i < this.selectedFeatureInspectionModel.length; i++) {
-                const section = this.selectedFeatureInspectionModel[i];
+        if (inspectionModels) {
+            for (let i = 0; i < inspectionModels.length; i++) {
+                const section = inspectionModels[i];
                 const node: TreeTableNode = {};
                 node.data = {key: section.key, value: section.value, type: section.type};
                 if (section.hasOwnProperty("info")) {
@@ -142,36 +138,15 @@ export class FeaturePanelComponent {
         return treeNodes;
     }
 
-    loadFeatureData() {
-        if (!this.selectedFeatureInspectionModel) {
-            return [];
-        }
-        return this.getFeatureTreeDataFromModel();
-    }
-
     formatWithSourceDataButtons(colKey: string, rowData: any) {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
         }
-
         const keyHtml = `<span>${rowData[colKey]}</span>`;
-        if (!rowData.hasOwnProperty("sourceDataReferences")) {
+        if (!rowData.hasOwnProperty("sourceDataReferences") || !rowData["sourceDataReferences"].length) {
             return keyHtml;
         }
-        // FIXME: Pretty sure this won't work correctly
-        const buttonGroup = `
-            <p-buttonGroup class="source-data-ref-container">
-                @for (item of rowData.sourceDataReferences) {
-                    <p-button class="source-data-button"
-                              (click)="showSourceData($event, item)"
-                              severity="secondary"
-                              label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                              pTooltip="Go to {{ item.qualifier }} Source Data"
-                              tooltipPosition="bottom" />
-                }
-            </p-buttonGroup>
-        `;
-        return `${keyHtml}${buttonGroup}`;
+        return keyHtml;
     }
 
     formatWithInfoButton(colKey: string, rowData: any) {

@@ -123,7 +123,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         });
     }
 
-    return root_.childrenToJsValue();
+    return root_.childrenToJsValue(tile_->mapId());
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
@@ -454,7 +454,7 @@ JsValue InspectionConverter::convertString(const char* s)
     return convertString(std::string_view(s));
 }
 
-JsValue InspectionConverter::InspectionNode::toJsValue() const
+JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& mapId) const
 {
     auto newDict = JsValue::Dict({
         {"key", key_},
@@ -466,7 +466,7 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
     if (!info_.empty())
         newDict.set("info", JsValue(info_));
     if (!children_.empty())
-        newDict.set("children", childrenToJsValue());
+        newDict.set("children", childrenToJsValue(mapId));
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
     if (mapId_)
@@ -475,9 +475,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
         auto list = JsValue::List();
         for (const auto& ref : sourceDataRefs_) {
             list.push(JsValue::Dict({
-                {"tileId", JsValue(ref.tileId_)},
+                {"mapTileKey", , JsValue(fmt::format("SourceData:{}:{}:{}", mapId, ref.layerId_, ref.tileId_))},
                 {"address", JsValue(ref.address_)},
-                {"layerId", JsValue(ref.layerId_)},
                 {"qualifier", JsValue(ref.qualifier_)},
             }));
         }
@@ -488,11 +487,11 @@ JsValue InspectionConverter::InspectionNode::toJsValue() const
     return newDict;
 }
 
-JsValue InspectionConverter::InspectionNode::childrenToJsValue() const
+JsValue InspectionConverter::InspectionNode::childrenToJsValue(std::string_view const& mapId) const
 {
     auto result = JsValue::List();
     for (auto const& child : children_)
-        result.push(child.toJsValue());
+        result.push(child.toJsValue(mapId));
     return result;
 }
 

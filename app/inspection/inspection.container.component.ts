@@ -1,4 +1,4 @@
-import {Component} from "@angular/core";
+import {Component, OnInit} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {InspectionPanelModel} from "../shared/appstate.service";
@@ -15,10 +15,12 @@ import {InspectionPanelModel} from "../shared/appstate.service";
     styles: [``],
     standalone: false
 })
-export class InspectionContainerComponent {
+export class InspectionContainerComponent implements OnInit {
     panels: InspectionPanelModel<FeatureWrapper>[] = [];
 
-    constructor(public mapService: MapDataService) {
+    constructor(public mapService: MapDataService) {}
+
+    ngOnInit(): void {
         this.mapService.selectionTopic.subscribe(panels => {
             this.panels = panels;
         });
