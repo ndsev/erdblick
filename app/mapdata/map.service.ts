@@ -74,6 +74,7 @@ export class MapDataService {
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
+    private GeometryType?: typeof coreLib.GeomType;
 
     tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<TileVisualization>;
@@ -155,6 +156,8 @@ export class MapDataService {
     }
 
     public async initialize() {
+        this.GeometryType = coreLib.GeomType;
+
         // Instantiate the TileLayerParser.
         this.tileParser = new coreLib.TileLayerParser();
 
@@ -811,7 +814,7 @@ export class MapDataService {
             const boundingRadius = Cartesian3.distance(centerCartesian, radiusPoint);
             const geometryType = feature.getGeometryType() as any;
 
-            if (geometryType === this.GeometryType.Mesh) {
+            if (geometryType === this.GeometryType?.Mesh) {
                 // Get the first triangle from the mesh, and calculate the
                 // camera perspective from its normal.
                 // TODO: Use a more efficient WASM function like feature.firstTriangle() to get the first triangle.
@@ -1102,6 +1105,4 @@ export class MapDataService {
         }
         return `${match[2]}`.replace('-', '.');
     }
-
-    protected readonly GeometryType = coreLib.GeomType;
 }
