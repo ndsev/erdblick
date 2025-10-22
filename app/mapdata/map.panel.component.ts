@@ -1,14 +1,12 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapDataService} from "./map.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
-import {KeyValue} from "@angular/common";
 import {coreLib} from "../integrations/wasm";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
-import {InspectionService, SelectedSourceData} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
@@ -233,7 +231,6 @@ export class MapPanelComponent {
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
-                private inspectionService: InspectionService,
                 private sidePanelService: SidePanelService) {
         this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
 
@@ -244,7 +241,7 @@ export class MapPanelComponent {
                 for (const [_, mapItem] of mapTree.maps) {
                     this.metadataMenusEntries.set(
                         mapItem.id,
-                        this.inspectionService.findLayersForMapId(mapItem.id, true)
+                        this.mapService.findLayersForMapId(mapItem.id, true)
                             .map(layer => ({
                                 label: layer.name,
                                 command: () => {

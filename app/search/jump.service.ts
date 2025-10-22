@@ -8,7 +8,6 @@ import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
-import {InspectionService} from "../inspection/inspection.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 
@@ -49,7 +48,6 @@ export class JumpTargetService {
                 private mapService: MapDataService,
                 private messageService: InfoMessageService,
                 private sidePanelService: SidePanelService,
-                private inspectionService: InspectionService,
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
                 private searchService: FeatureSearchService) {
@@ -210,7 +208,7 @@ export class JumpTargetService {
             }
 
             if (matches.length == 3 && matches[2]) {
-                if (!this.inspectionService.sourceDataLayerIdForLayerName(matches[2])) {
+                if (!this.mapService.sourceDataLayerIdForLayerName(matches[2])) {
                     label += `<br><span class="search-option-warning">SourceData layer ID not found.</span>`;
                     valid = false;
                 }
@@ -236,7 +234,7 @@ export class JumpTargetService {
                         if (tileId) {
                             if (mapId) {
                                 if (sourceLayerId) {
-                                    sourceLayerId = this.inspectionService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
+                                    sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
                                         this.stateService.setSelection({
                                             mapTileKey: `SourceData:${mapId}:${sourceLayerId}:${Number(tileId)}`
