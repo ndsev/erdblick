@@ -46,15 +46,6 @@ function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
-export function isInspectionModelSelectionEqual(previous: InspectionPanelModel<TileFeatureId>[], current: InspectionPanelModel<TileFeatureId>[]) {
-    if (previous.length !== current.length) {
-        return false;
-    }
-    return previous.every((previousPanel, index) => {
-        return deepEquals(previousPanel.selectedFeatures, current[index].selectedFeatures) && deepEquals(previousPanel.selectedSourceData, current[index].selectedSourceData);
-    });
-}
-
 @Injectable({providedIn: 'root'})
 export class AppStateService implements OnDestroy {
 
@@ -121,8 +112,7 @@ export class AppStateService implements OnDestroy {
     // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
-    // Note: use the public method subscribeToSelectedFeatures to subscribe to this state
-    private readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
+    readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
         name: 'selected',
         defaultValue: [],
         schema: z.array(z.string()),
@@ -162,10 +152,9 @@ export class AppStateService implements OnDestroy {
                 // Check if the first MapTileKey is for SourceData.
                 if (parts[0].startsWith("SourceData:")) {
                     const mapTileKey = parts.shift()!;
-                    const mapTileKeyParts = mapTileKey.split(":");
                     newPanelState.selectedSourceData = {
                         mapTileKey: mapTileKey,
-                        address: parts[1].length ? BigInt(parts[1]) : undefined
+                        address: parts[0].length ? BigInt(parts[0]) : undefined
                     };
                     // Shift the address.
                     parts.shift();
@@ -378,7 +367,7 @@ export class AppStateService implements OnDestroy {
         this.subscriptionsSetup = true;
     }
 
-    private onStateChanged(state: AppState<unknown>, force: boolean = false): void {
+    private onStateChanged(state: AppState<any>, force: boolean = false): void {
         if (!force && (this.isHydrating || !this.isReady)) {
             return;
         }
@@ -570,11 +559,6 @@ export class AppStateService implements OnDestroy {
         this.mode2dState.next(viewIndex, is2DMode);
     }
 
-    getSelectedFeaturesObservable() {
-        // return this.selectionState.pipe(distinctUntilChanged(isInspectionModelSelectionEqual));
-        return this.selectionState;
-    }
-
     /*
     ## Current State
 
@@ -636,7 +620,7 @@ export class AppStateService implements OnDestroy {
             return;
         }
         allPanels[index].size = size;
-        this.selectionState.next(allPanels);
+        this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
     setInspectionPanelPinnedState(id: number, isPinned: boolean) {
