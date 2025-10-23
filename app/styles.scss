@@ -2,8 +2,6 @@
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource/inter/index.css";
 
-@layer primeng, erdblick;
-
 /* Translucent surfaces used in UI (light/dark specific) */
 :root {
   --erdblick-card-bg: rgba(255, 255, 255, 0.87);
@@ -408,6 +406,12 @@ map-view {
     .p-treetable-header {
       padding: 0.5em;
       direction: ltr;
+    }
+
+    .p-treetable-thead {
+      th {
+        padding: 0.25em;
+      }
     }
 
     .p-treetable-tbody {

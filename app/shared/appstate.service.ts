@@ -46,12 +46,12 @@ function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
         mapLayerNameOrLayerId.includes('/Metadata-');
 }
 
-export function isInspectionModelSelectionEqual(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]) {
-    if (a.length !== b.length) {
+export function isInspectionModelSelectionEqual(previous: InspectionPanelModel<TileFeatureId>[], current: InspectionPanelModel<TileFeatureId>[]) {
+    if (previous.length !== current.length) {
         return false;
     }
-    return a.every((panelA, index) => {
-        return deepEquals(panelA.selectedFeatures, b[index].selectedFeatures) && deepEquals(panelA.selectedSourceData, b[index].selectedSourceData);
+    return previous.every((previousPanel, index) => {
+        return deepEquals(previousPanel.selectedFeatures, current[index].selectedFeatures) && deepEquals(previousPanel.selectedSourceData, current[index].selectedSourceData);
     });
 }
 
@@ -571,7 +571,8 @@ export class AppStateService implements OnDestroy {
     }
 
     getSelectedFeaturesObservable() {
-        return this.selectionState.pipe(distinctUntilChanged(isInspectionModelSelectionEqual));
+        // return this.selectionState.pipe(distinctUntilChanged(isInspectionModelSelectionEqual));
+        return this.selectionState;
     }
 
     /*

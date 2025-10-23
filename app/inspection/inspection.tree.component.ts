@@ -41,7 +41,7 @@ export class FeatureFilterOptions {
             <ng-template pTemplate="caption">
                 <!-- TODO: transfer the inlined styles to styles.SCSS -->
                 <div class="flex justify-content-end align-items-center"
-                     style="display: flex; align-content: center; justify-content: center; width: 100%; padding: 0.5em;">
+                     style="display: flex; align-content: center; justify-content: center; width: 100%;">
                     <p-iconfield class="filter-container">
                         @if (filterOptions()) {
                             <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
@@ -96,45 +96,47 @@ export class FeatureFilterOptions {
                             style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                             [pTooltip]="rowData[col.key]" tooltipPosition="left"
                             [tooltipOptions]="tooltipOptions">
-                            <p-treeTableToggler [rowNode]="rowNode" *ngIf="$index === 0"/>
-                            @if (filterFields.indexOf(col.key) != -1) {
-                                <span (click)="onNodeClick($event, rowData, col.key)"
-                                      (mouseover)="onNodeHover($event, rowData)"
-                                      (mouseout)="onNodeHoverExit($event, rowData)"
-                                      style="cursor: pointer"
-                                      [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
+                            <div style="display: flex; flex-direction: row; gap: 0.25em; overflow-x: scroll">
+                                <p-treeTableToggler [rowNode]="rowNode" *ngIf="$index === 0"/>
+                                @if (filterFields.indexOf(col.key) !== -1) {
+                                    <span (click)="onNodeClick($event, rowData, col.key)"
+                                          (mouseover)="onNodeHover($event, rowData)"
+                                          (mouseout)="onNodeHoverExit($event, rowData)"
+                                          style="cursor: pointer"
+                                          [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
                                 </span>
-                                @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
-                                    <p-buttonGroup class="source-data-ref-container">
-                                        @for (item of rowData["sourceDataReferences"]; track $index) {
-                                            <p-button class="source-data-button"
-                                                      (click)="showSourceData($event, item)"
-                                                      severity="secondary"
-                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
-                                                      tooltipPosition="bottom" />
-                                        }
-                                    </p-buttonGroup>
-                                }
-                            } @else {
-                                <span (click)="onNodeClick($event, rowData, col.key)"
-                                      (mouseover)="onNodeHover($event, rowData)"
-                                      (mouseout)="onNodeHoverExit($event, rowData)"
-                                      style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
+                                    @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                        <p-buttonGroup class="source-data-ref-container">
+                                            @for (item of rowData["sourceDataReferences"]; track $index) {
+                                                <p-button class="source-data-button"
+                                                          (click)="showSourceData($event, item)"
+                                                          severity="secondary"
+                                                          label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                          pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                          tooltipPosition="bottom" />
+                                            }
+                                        </p-buttonGroup>
+                                    }
+                                } @else {
+                                    <span (click)="onNodeClick($event, rowData, col.key)"
+                                          (mouseover)="onNodeHover($event, rowData)"
+                                          (mouseout)="onNodeHoverExit($event, rowData)"
+                                          style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
                                 </span>
-                                @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
-                                    <p-buttonGroup class="source-data-ref-container">
-                                        @for (item of rowData["sourceDataReferences"]; track $index) {
-                                            <p-button class="source-data-button"
-                                                      (click)="showSourceData($event, item)"
-                                                      severity="secondary"
-                                                      label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                      pTooltip="Go to {{ item.qualifier }} Source Data"
-                                                      tooltipPosition="bottom" />
-                                        }
-                                    </p-buttonGroup>
+                                    @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                        <p-buttonGroup class="source-data-ref-container">
+                                            @for (item of rowData["sourceDataReferences"]; track $index) {
+                                                <p-button class="source-data-button"
+                                                          (click)="showSourceData($event, item)"
+                                                          severity="secondary"
+                                                          label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
+                                                          pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                          tooltipPosition="bottom" />
+                                            }
+                                        </p-buttonGroup>
+                                    }
                                 }
-                            }
+                            </div>
                         </td>
                     }
                 </tr>
@@ -225,15 +227,16 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
 
     ngOnInit() {
         this.data = this.treeData();
+        this.expandTreeNodes(this.data);
 
         // FIXME We have to force recalculate the tables number of visible items?
-        // setTimeout(() => {
-        //     let scroller = (<any>this.table.scrollableViewChild)?.scroller;
-        //     if (scroller) {
-        //         scroller.init();
-        //         scroller.calculateAutoSize();
-        //     }
-        // }, 0);
+        setTimeout(() => {
+            let scroller = (<any>this.table.scrollableViewChild)?.scroller;
+            if (scroller) {
+                scroller.init();
+                scroller.calculateAutoSize();
+            }
+        }, 0);
 
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
