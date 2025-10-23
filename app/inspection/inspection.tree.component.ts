@@ -1,4 +1,4 @@
-import {Component, ViewChild, input, OnInit, OnDestroy} from "@angular/core";
+import {Component, ViewChild, input, OnDestroy, effect} from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {TreeTable} from "primeng/treetable";
 import {toObservable} from "@angular/core/rxjs-interop";
@@ -190,7 +190,7 @@ export class FeatureFilterOptions {
     `],
     standalone: false
 })
-export class InspectionTreeComponent implements OnInit, OnDestroy {
+export class InspectionTreeComponent implements OnDestroy {
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -223,24 +223,24 @@ export class InspectionTreeComponent implements OnInit, OnDestroy {
                 public mapService: MapDataService,
                 private jumpService: JumpTargetService,
                 private stateService: AppStateService,
-                private messageService: InfoMessageService) {}
+                private messageService: InfoMessageService) {
+        effect(() => {
+            this.data = this.treeData();
+            this.expandTreeNodes(this.data);
 
-    ngOnInit() {
-        this.data = this.treeData();
-        this.expandTreeNodes(this.data);
+            // FIXME We have to force recalculate the tables number of visible items?
+            setTimeout(() => {
+                let scroller = (<any>this.table.scrollableViewChild)?.scroller;
+                if (scroller) {
+                    scroller.init();
+                    scroller.calculateAutoSize();
+                }
+            }, 0);
 
-        // FIXME We have to force recalculate the tables number of visible items?
-        setTimeout(() => {
-            let scroller = (<any>this.table.scrollableViewChild)?.scroller;
-            if (scroller) {
-                scroller.init();
-                scroller.calculateAutoSize();
-            }
-        }, 0);
-
-        this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-            setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
-        }));
+            this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
+                setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
+            }));
+        });
     }
 
     ngOnDestroy() {

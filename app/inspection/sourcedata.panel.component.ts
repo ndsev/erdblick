@@ -1,4 +1,4 @@
-import {Component, OnInit, output, input} from "@angular/core";
+import {Component, output, input, effect} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
@@ -24,7 +24,7 @@ import {Column} from "./inspection.tree.component";
     styles: [``],
     standalone: false
 })
-export class SourceDataPanelComponent implements OnInit {
+export class SourceDataPanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     error = output<string>({ alias: 'errorOccurred' });
@@ -42,32 +42,34 @@ export class SourceDataPanelComponent implements OnInit {
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;
 
-    ngOnInit(): void {
-        if (!this.panel().selectedSourceData) {
-            return;
-        }
+    constructor() {
+        effect(() => {
+            if (!this.panel().selectedSourceData) {
+                return;
+            }
 
-        this.loadSourceDataLayer(this.panel().selectedSourceData!.mapTileKey)
-            .then(layer => {
-                const root = layer.toObject();
-                this.addressFormat = layer.addressFormat();
+            this.loadSourceDataLayer(this.panel().selectedSourceData!.mapTileKey)
+                .then(layer => {
+                    const root = layer.toObject();
+                    this.addressFormat = layer.addressFormat();
 
-                layer.delete();
+                    layer.delete();
 
-                if (root) {
-                    this.treeData = root.children ? root.children : [root];
-                    this.selectItemWithAddress(this.panel().selectedSourceData!.address);
-                } else {
-                    this.treeData = [];
-                    this.setError('Empty layer.');
-                }
-            })
-            .catch(error => {
-                this.setError(`${error}`);
-            })
-            .finally(() => {
-                this.loading = false;
-            });
+                    if (root) {
+                        this.treeData = root.children ? root.children : [root];
+                        this.selectItemWithAddress(this.panel().selectedSourceData!.address);
+                    } else {
+                        this.treeData = [];
+                        this.setError('Empty layer.');
+                    }
+                })
+                .catch(error => {
+                    this.setError(`${error}`);
+                })
+                .finally(() => {
+                    this.loading = false;
+                });
+        });
     }
 
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {

@@ -1,4 +1,4 @@
-import {Component, input, OnInit} from "@angular/core";
+import {Component, effect, input} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService, SelectedFeatures} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
@@ -30,7 +30,7 @@ interface InspectionModelData {
     styles: [``],
     standalone: false
 })
-export class FeaturePanelComponent implements OnInit {
+export class FeaturePanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
 
@@ -46,25 +46,24 @@ export class FeaturePanelComponent implements OnInit {
     constructor(private mapService: MapDataService,
                 private keyboardService: KeyboardService) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
-    }
+        effect(() => {
+            this.selectedFeatures = {
+                viewIndex: 0,
+                features: this.panel().selectedFeatures
+            };
 
-    ngOnInit(): void {
-        this.selectedFeatures = {
-            viewIndex: 0,
-            features: this.panel().selectedFeatures
-        };
+            const selectedFeatureInspectionModel: InspectionModelData[] = [];
+            const selectedFeatureGeoJsonTexts: string[] = [];
 
-        const selectedFeatureInspectionModel: InspectionModelData[] = [];
-        const selectedFeatureGeoJsonTexts: string[] = [];
-
-        this.selectedFeatures.features.forEach(featureWrapper => {
-            featureWrapper.peek((feature: Feature) => {
-                selectedFeatureInspectionModel.push(...feature.inspectionModel());
-                selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+            this.selectedFeatures.features.forEach(featureWrapper => {
+                featureWrapper.peek((feature: Feature) => {
+                    selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                    selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+                });
             });
+            this.geoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
+            this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModel);
         });
-        this.geoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
-        this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModel);
     }
 
     getFeatureTreeDataFromModel(inspectionModels: InspectionModelData[]) {

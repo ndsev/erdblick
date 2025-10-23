@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, input, OnInit, Renderer2, ViewChild} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, Renderer2, ViewChild, effect} from "@angular/core";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -13,7 +13,7 @@ interface SourceLayerMenuItem {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="w-full inspect-panel" [ngClass]="{ 'inspect-panel-small-header': panel().selectedSourceData }" value="0">
+        <p-accordion class="w-full inspect-panel inspect-panel-small-header" value="0">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <span class="inspector-title">
@@ -31,6 +31,14 @@ interface SourceLayerMenuItem {
                                       scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
                                       optionDisabled="disabled" appendTo="body"/>
                         }
+
+                        <p-button icon="" (click)="togglePinnedState($event)" (mousedown)="$event.stopPropagation()">
+                            @if (panel().pinned) {
+                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep</span>
+                            } @else {
+                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
+                            }
+                        </p-button>
                     </span>
                 </p-accordion-header>
 
@@ -81,7 +89,7 @@ interface SourceLayerMenuItem {
     `],
     standalone: false
 })
-export class InspectionPanelComponent implements AfterViewInit, OnInit {
+export class InspectionPanelComponent implements AfterViewInit {
     title = "";
     isExpanded: boolean = true;
     errorMessage: string = "";
@@ -96,46 +104,48 @@ export class InspectionPanelComponent implements AfterViewInit, OnInit {
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService,
                 private renderer: Renderer2) {
-    }
-
-    ngOnInit(): void {
-        const panel = this.panel();
-        if (panel.selectedSourceData !== undefined) {
-            const selection = panel.selectedSourceData!;
-            const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(selection.mapTileKey);
-            this.title = `${tileId}.`;
-            const map = this.mapService.maps.maps.get(mapId);
-            if (map) {
-                // TODO: Fix missing entries for the metadata on tile 0
-                this.layerMenuItems = Array.from(map.layers.values())
-                    .filter(item => item.type === "SourceData")
-                    .filter(item => {
-                        return item.id.startsWith("SourceData") ||
-                            (item.id.startsWith("Metadata") && tileId === 0);
-                    })
-                    .map(item => {
-                        return {
-                            label: this.mapService.layerNameForSourceDataLayerId(
-                                item.id,
-                                item.id.startsWith("Metadata")
-                            ),
-                            disabled: item.id === layerId,
-                            command: () => {
-                                let sourceData = {...selection};
-                                sourceData.mapTileKey = `SourceData:${mapId}:${layerId}:${tileId}`;
-                                sourceData.address = BigInt(0);
-                                // FIXME
-                                // this.inspectionService.selectedSourceData.next(sourceData);
-                            },
-                        };
-                    }).sort((a, b) => a.label.localeCompare(b.label));
-                this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
+        effect(() => {
+            const panel = this.panel();
+            if (panel.selectedSourceData !== undefined) {
+                const selection = panel.selectedSourceData!;
+                const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(selection.mapTileKey);
+                this.title = `${tileId}.`;
+                const map = this.mapService.maps.maps.get(mapId);
+                if (map) {
+                    // TODO: Fix missing entries for the metadata on tile 0
+                    this.layerMenuItems = Array.from(map.layers.values())
+                        .filter(item => item.type === "SourceData")
+                        .filter(item => {
+                            return item.id.startsWith("SourceData") ||
+                                (item.id.startsWith("Metadata") && tileId === 0);
+                        })
+                        .map(item => {
+                            return {
+                                label: this.mapService.layerNameForSourceDataLayerId(
+                                    item.id,
+                                    item.id.startsWith("Metadata")
+                                ),
+                                disabled: item.id === layerId,
+                                command: () => {
+                                    let sourceData = {...selection};
+                                    sourceData.mapTileKey = `SourceData:${mapId}:${layerId}:${tileId}`;
+                                    sourceData.address = BigInt(0);
+                                    // FIXME
+                                    // this.inspectionService.selectedSourceData.next(sourceData);
+                                },
+                            } as SourceLayerMenuItem;
+                        }).sort((a, b) => a.label.localeCompare(b.label));
+                    this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
+                } else {
+                    this.layerMenuItems = [];
+                    this.selectedLayerItem = undefined;
+                }
             } else {
+                this.title = panel.selectedFeatures.map(feature => feature.featureId).join('|');
                 this.layerMenuItems = [];
+                this.selectedLayerItem = undefined;
             }
-        } else {
-            this.title = panel.selectedFeatures.map(feature => feature.featureId).join('|');
-        }
+        });
     }
 
     ngAfterViewInit() {
@@ -191,5 +201,10 @@ export class InspectionPanelComponent implements AfterViewInit, OnInit {
     onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
+    }
+
+    togglePinnedState(event: MouseEvent) {
+        event.stopPropagation();
+        this.stateService.setInspectionPanelPinnedState(this.panel().id, !this.panel().pinned);
     }
 }

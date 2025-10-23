@@ -632,7 +632,7 @@ export class AppStateService implements OnDestroy {
     setInspectionPanelSize(id: number, size: [number, number]) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
-        if (index !== -1) {
+        if (index === -1) {
             return;
         }
         allPanels[index].size = size;
@@ -642,7 +642,7 @@ export class AppStateService implements OnDestroy {
     setInspectionPanelPinnedState(id: number, isPinned: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
-        if (index !== -1) {
+        if (index === -1) {
             return;
         }
         allPanels[index].pinned = isPinned;
