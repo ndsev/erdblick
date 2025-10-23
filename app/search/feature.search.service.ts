@@ -590,8 +590,7 @@ export class FeatureSearchService {
         this.completionCandidateList = this.completionCandidateList
             .concat(candidates.candidates)
             .slice(0, this.completionCandidateLimit)
-            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
-            .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index); // Remove duplicates
 
         this.completionCandidates.next(this.completionCandidateList);
     }
