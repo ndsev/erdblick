@@ -52,15 +52,14 @@ interface SourceLayerMenuItem {
 <!--                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
 <!--                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
 <!--                        </div>-->
-                        @if (panel().selectedSourceData) {
-                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
-                        } @else {
-                            <feature-panel [panel]="panel()"></feature-panel>
-                        }
                         @if (errorMessage) {
                             <div>
                                 <strong>Error</strong><br>{{ errorMessage }}
                             </div>
+                        } @else if (panel().selectedSourceData) {
+                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
+                        } @else {
+                            <feature-panel [panel]="panel()"></feature-panel>
                         }
                     </div>
                 </p-accordion-content>
@@ -108,16 +107,16 @@ export class InspectionPanelComponent implements AfterViewInit {
             const panel = this.panel();
             if (panel.selectedSourceData !== undefined) {
                 const selection = panel.selectedSourceData!;
-                const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(selection.mapTileKey);
-                this.title = `${tileId}.`;
+                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
+                this.title = tileId === 0n ? `Metadata for ${mapId}: ` : `${tileId}.`;
                 const map = this.mapService.maps.maps.get(mapId);
                 if (map) {
                     // TODO: Fix missing entries for the metadata on tile 0
                     this.layerMenuItems = Array.from(map.layers.values())
                         .filter(item => item.type === "SourceData")
                         .filter(item => {
-                            return item.id.startsWith("SourceData") ||
-                                (item.id.startsWith("Metadata") && tileId === 0);
+                            return (item.id.startsWith("SourceData") && tileId !== 0n) ||
+                                (item.id.startsWith("Metadata") && tileId === 0n);
                         })
                         .map(item => {
                             return {
@@ -128,10 +127,9 @@ export class InspectionPanelComponent implements AfterViewInit {
                                 disabled: item.id === layerId,
                                 command: () => {
                                     let sourceData = {...selection};
-                                    sourceData.mapTileKey = `SourceData:${mapId}:${layerId}:${tileId}`;
-                                    sourceData.address = BigInt(0);
-                                    // FIXME
-                                    // this.inspectionService.selectedSourceData.next(sourceData);
+                                    sourceData.mapTileKey = coreLib.getSourceDataLayerKey(mapId, layerId, tileId);
+                                    sourceData.address = undefined;
+                                    this.stateService.setSelection(sourceData, this.panel().id);
                                 },
                             } as SourceLayerMenuItem;
                         }).sort((a, b) => a.label.localeCompare(b.label));
@@ -156,6 +154,7 @@ export class InspectionPanelComponent implements AfterViewInit {
         // The back-button can be used to navigate from a SourceData selection
         // back to the feature-set from which it was called up.
         event.stopPropagation();
+        this.errorMessage = "";
         this.stateService.setSelection(this.panel().selectedFeatures, this.panel().id);
     }
 
