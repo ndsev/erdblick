@@ -4,7 +4,7 @@ import {MapDataService} from "../mapdata/map.service";
 @Component({
     selector: 'inspection-container',
     template: `
-        <ng-container *ngIf="mapService.selectionTopic | async as panels">
+        <div class="inspection-container" *ngIf="mapService.selectionTopic | async as panels">
             @if (panels.length > 0) {
                 @for (panel of panels; track panel.id) {
                     @if (panel.selectedFeatures.length > 0 || panel.selectedSourceData !== undefined) {
@@ -12,7 +12,7 @@ import {MapDataService} from "../mapdata/map.service";
                     }
                 }
             }
-        </ng-container>
+        </div>
     `,
     styles: [``],
     standalone: false

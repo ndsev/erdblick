@@ -9,7 +9,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 
 export interface SearchTarget {
     icon: string;
@@ -342,12 +342,21 @@ export class JumpTargetService {
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
-        await this.mapService.setHoveredFeatures([{
-            mapTileKey: selectThisFeature.tileId,
-            featureId: featureId
-        }]).then(_ => {
-            // TODO: Focus on whole feature-set?
-            this.mapService.focusOnFeature(viewIndex, this.mapService.hoverTopic.getValue()[0]);
-        });
+        if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+            this.stateService.setSelection([{
+                mapTileKey: selectThisFeature.tileId,
+                featureId: featureId
+            } as TileFeatureId]);
+        } else {
+            await this.mapService.setHoveredFeatures([{
+                mapTileKey: selectThisFeature.tileId,
+                featureId: featureId
+            }]).then(_ => {
+                // TODO: Focus on whole feature-set?
+                if (moveCamera) {
+                    this.mapService.focusOnFeature(viewIndex, this.mapService.hoverTopic.getValue()[0]);
+                }
+            });
+        }
     }
 }
