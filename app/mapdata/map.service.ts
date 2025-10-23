@@ -224,15 +224,15 @@ export class MapDataService {
         await this.reloadDataSources();
 
         this.stateService.getSelectedFeaturesObservable().subscribe(async selected => {
-            const convertedSelections = [];
+            const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             for (const selection of selected) {
-                const newInspectionPanel: InspectionPanelModel<FeatureWrapper> = {
+                convertedSelections.push({
                     id: selection.id,
                     pinned: selection.pinned,
                     size: selection.size,
-                    selectedFeatures: await this.loadFeatures(selection.selectedFeatures)
-                }
-                convertedSelections.push(newInspectionPanel);
+                    selectedFeatures: await this.loadFeatures(selection.selectedFeatures),
+                    selectedSourceData: selection.selectedSourceData
+                });
             }
             this.selectionTopic.next(convertedSelections);
         });
