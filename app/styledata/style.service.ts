@@ -404,7 +404,7 @@ export class StyleService {
 
         const result = uint8ArrayToWasm(
             (wasmBuffer: any) => {
-                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer); // FIXME: No delete? Why create the object twice?
+                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
                 if (featureLayerStyle) {
                     // Transport FeatureStyleOptions from WASM array to JS.
                     const options: FeatureStyleOptionWithStringType[] = [];
