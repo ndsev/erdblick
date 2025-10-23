@@ -475,7 +475,7 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         auto list = JsValue::List();
         for (const auto& ref : sourceDataRefs_) {
             list.push(JsValue::Dict({
-                {"mapTileKey", , JsValue(fmt::format("SourceData:{}:{}:{}", mapId, ref.layerId_, ref.tileId_))},
+                {"mapTileKey", JsValue(MapTileKey(LayerType::SourceData, std::string(mapId), ref.layerId_, ref.tileId_).toString())},
                 {"address", JsValue(ref.address_)},
                 {"qualifier", JsValue(ref.qualifier_)},
             }));

@@ -60,7 +60,7 @@ export class RightClickMenuService {
             icon: 'pi pi-database',
             command: () => {
                 this.stateService.setSelection({
-                    mapTileKey: `SourceData:${sourceDataParams.mapId}:${sourceDataParams.layerId}:${Number(sourceDataParams.tileId)}`
+                    mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
                 } as SelectedSourceData);
             }
         };

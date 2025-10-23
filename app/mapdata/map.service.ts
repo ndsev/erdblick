@@ -223,7 +223,7 @@ export class MapDataService {
 
         await this.reloadDataSources();
 
-        this.stateService.getSelectedFeaturesObservable().subscribe(async selected => {
+        this.stateService.selectionState.subscribe(async selected => {
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             for (const selection of selected) {
                 convertedSelections.push({
@@ -715,7 +715,7 @@ export class MapDataService {
                 continue;
             }
 
-            let [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(tileKey);
+            let [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
             this.selectionTileRequest = {
                 remoteRequest: {
                     mapId: mapId,
@@ -772,7 +772,7 @@ export class MapDataService {
                 continue;
             }
             if (!tile.has(id?.featureId || "")) {
-                const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(id?.mapTileKey || "");
+                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(id?.mapTileKey || "");
                 this.messageService.showError(
                     `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                 continue;

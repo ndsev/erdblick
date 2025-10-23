@@ -237,7 +237,7 @@ export class JumpTargetService {
                                     sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
                                         this.stateService.setSelection({
-                                            mapTileKey: `SourceData:${mapId}:${sourceLayerId}:${Number(tileId)}`
+                                            mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
                                         } as SelectedSourceData);
                                     } else {
                                         this.menuService.customTileAndMapId.next([String(tileId), mapId]);

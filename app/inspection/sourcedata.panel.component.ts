@@ -73,52 +73,49 @@ export class SourceDataPanelComponent {
     }
 
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
-        let parser : any = null;
-        try {
-            parser = new coreLib.TileLayerParser();
-            const [mapId, layerId, tileId] = coreLib.parseTileFeatureLayerKey(mapTileKey)
-            const newRequestBody = JSON.stringify({
-                requests: [{
-                    mapId: mapId,
-                    layerId: layerId,
-                    tileIds: [tileId]
-                }]
+        const parser = new coreLib.TileLayerParser();
+        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const newRequestBody = JSON.stringify({
+            requests: [{
+                mapId: mapId,
+                layerId: layerId,
+                tileIds: [Number(tileId)]
+            }]
+        });
+
+        let layer: TileSourceDataLayer | undefined;
+        let fetch = new Fetch("tiles")
+            .withChunkProcessing()
+            .withMethod("POST")
+            .withBody(newRequestBody)
+            .withBufferCallback((message: any, messageType: any) => {
+                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        parser.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                    layer = uint8ArrayToWasm((wasmBlob: any) => {
+                        return parser.readTileSourceDataLayer(wasmBlob);
+                    }, blob);
+                } else {
+                    throw new Error(`Unknown message type ${messageType}.`)
+                }
             });
 
-            let layer: TileSourceDataLayer | undefined;
-            let fetch = new Fetch("tiles")
-                .withChunkProcessing()
-                .withMethod("POST")
-                .withBody(newRequestBody)
-                .withBufferCallback((message: any, messageType: any) => {
-                    if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                        uint8ArrayToWasm((wasmBuffer: any) => {
-                            parser!.readFieldDictUpdate(wasmBuffer);
-                        }, message);
-                    } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
-                        const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                        layer = uint8ArrayToWasm((wasmBlob: any) => {
-                            return parser.readTileSourceDataLayer(wasmBlob);
-                        }, blob);
-                    } else {
-                        throw new Error(`Unknown message type ${messageType}.`)
-                    }
-                });
-
-            return fetch.go()
-                .then(_ => {
-                    if (!layer)
-                        throw new Error(`Unknown error while loading layer.`);
-                    const error = layer.getError();
-                    if (error) {
-                        layer.delete();
-                        throw new Error(`Error while loading layer: ${error}`);
-                    }
-                    return layer;
-                });
-        } finally {
-            if (parser) parser.delete();
-        }
+        return fetch.go()
+            .then(_ => {
+                if (!layer)
+                    throw new Error(`Unknown error while loading layer.`);
+                const error = layer.getError();
+                if (error) {
+                    layer.delete();
+                    throw new Error(`Error while loading layer: ${error}`);
+                }
+                return layer;
+            }).finally(() => {
+                parser.delete();
+            });
     }
 
     /**

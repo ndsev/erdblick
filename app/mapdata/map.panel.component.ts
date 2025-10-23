@@ -246,7 +246,7 @@ export class MapPanelComponent {
                                 label: layer.name,
                                 command: () => {
                                     this.stateService.setSelection({
-                                        mapTileKey: `SourceData:${mapItem.id}:${layer.id}:0`
+                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0n)
                                     } as SelectedSourceData);
                                 }
                             }))
