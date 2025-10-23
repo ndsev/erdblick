@@ -1,9 +1,9 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
-import {Cartesian3, CesiumMath} from "./integrations/cesium";
-import {CameraService} from "./mapviewer/camera.service";
-import {ViewStateService} from "./mapviewer/view.state.service";
+import {SceneMode, CesiumMath} from "./integrations/cesium";
+import {MapView} from "./mapview/view";
+import {MapView2D} from "./mapview/view2d";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -23,10 +23,8 @@ export class ErdblickDebugApi {
     /**
      * Initialize a new ErdblickDebugApi instance.
      */
-    constructor(private mapService: MapService,
-                private parametersService: AppStateService,
-                private viewStateService: ViewStateService,
-                private cameraService: CameraService) {
+    constructor(private mapService: MapDataService,
+                private stateService: AppStateService) {
     }
 
     /**
@@ -34,10 +32,18 @@ export class ErdblickDebugApi {
      *
      * @param cameraInfoStr A JSON-formatted string containing camera information.
      */
-    setCamera(cameraInfoStr: string) {
+    setCamera(viewIndex: number, cameraInfoStr: string) {
+        if (viewIndex >= this.stateService.numViews) {
+            console.error(`Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`);
+            return;
+        }
+        if (!cameraInfoStr) {
+            console.error(`Expected cameraInfoStr, got empty or undefined!`);
+            return;
+        }
         const cameraInfo = JSON.parse(cameraInfoStr);
-        this.parametersService.setView(
-            Cartesian3.fromArray(cameraInfo.position),
+        this.stateService.setView(viewIndex,
+            cameraInfo.position,
             {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
@@ -51,14 +57,18 @@ export class ErdblickDebugApi {
      *
      * @return A JSON-formatted string containing the current camera's position and orientation.
      */
-    getCamera() {
-        const destination = this.parametersService.getCameraPosition();
+    getCamera(viewIndex: number) {
+        if (viewIndex >= this.stateService.numViews) {
+            console.error(`Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`);
+            return;
+        }
+        const destination = this.stateService.getCameraPosition(viewIndex);
         const position = [
-            destination.x,
-            destination.y,
-            destination.z,
+            destination.longitude,
+            destination.latitude,
+            destination.height,
         ];
-        const orientation = this.parametersService.getCameraOrientation();
+        const orientation = this.stateService.getCameraOrientation(viewIndex);
         return JSON.stringify({position, orientation});
     }
 
@@ -72,12 +82,14 @@ export class ErdblickDebugApi {
         let style = coreLib.generateTestStyle();
         this.mapService.addTileFeatureLayer(tile, {
             id: "_builtin",
+            shortId: "TEST",
             modified: false,
             imported: false,
-            params: {visible: true, options: {}},
             source: "",
             featureLayerStyle: style,
-            options: []
+            options: [],
+            visible: true,
+            url: ""
         }, "_builtin", true);
     }
 
@@ -97,50 +109,5 @@ export class ErdblickDebugApi {
                 search.delete();
             })
         }
-    }
-
-    /**
-     * Diagnostic method to show WebMercator distortion factors at different latitudes
-     * Useful for debugging altitude compensation issues
-     */
-    showMercatorDistortion() {
-        // Show current camera position distortion first
-        if (this.viewStateService.isAvailable() && this.viewStateService.isNotDestroyed()) {
-            const currentPos = this.viewStateService.viewer.camera.positionCartographic;
-            const currentLatDeg = CesiumMath.toDegrees(currentPos.latitude);
-            const currentFactor = this.cameraService.calculateMercatorDistortionFactor(currentPos.latitude);
-            const currentHeight = currentPos.height;
-
-            console.log('🎯 CURRENT POSITION:');
-            console.log(`  Latitude: ${currentLatDeg.toFixed(3)}°`);
-            console.log(`  Altitude: ${Math.round(currentHeight)}m`);
-            console.log(`  Distortion Factor: ${currentFactor.toFixed(3)}x`);
-            console.log(`  Mode: ${this.viewStateService.is2DMode ? '2D' : '3D'}`);
-
-            if (this.viewStateService.is2DMode) {
-                const equivalent3D = currentHeight / currentFactor;
-                console.log(`  Equivalent 3D altitude: ${Math.round(equivalent3D)}m`);
-            } else {
-                const equivalent2D = currentHeight * currentFactor;
-                console.log(`  Equivalent 2D altitude: ${Math.round(equivalent2D)}m`);
-            }
-        }
-
-        console.log('📊 WebMercator Distortion Factors by Latitude:');
-        const testLatitudes = [0, 30, 45, 60, 70, 80, 85];
-        testLatitudes.forEach(latDeg => {
-            const latRad = CesiumMath.toRadians(latDeg);
-            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
-            console.log(`  ${latDeg}°: ${factor.toFixed(3)}x distortion`);
-        });
-
-        console.log('\n🔄 Altitude Compensation Examples (10km baseline):');
-        testLatitudes.forEach(latDeg => {
-            const latRad = CesiumMath.toRadians(latDeg);
-            const factor = this.cameraService.calculateMercatorDistortionFactor(latRad);
-            const altitude3D = 10000; // 10km
-            const altitude2D = altitude3D * factor;
-            console.log(`  ${latDeg}°: 3D=${altitude3D}m → 2D=${Math.round(altitude2D)}m (${factor.toFixed(3)}x)`);
-        });
     }
 }

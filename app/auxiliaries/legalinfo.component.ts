@@ -1,11 +1,11 @@
 import { Component } from "@angular/core";
-import { MapService } from "../mapdata/map.service";
+import { MapDataService } from "../mapdata/map.service";
 import { AppStateService } from "../shared/appstate.service";
 
 @Component({
     selector: 'legal-dialog',
     template: `
-        <p-dialog header="Copyright and Legal Information" [(visible)]="parametersService.legalInfoDialogVisible" [modal]="false"
+        <p-dialog header="Copyright and Legal Information" [(visible)]="stateService.legalInfoDialogVisible" [modal]="false"
                   [style]="{'min-height': '10em', 'min-width': '40em'}">
             <div class="dialog-content">
                 <table class="stats-table">
@@ -53,8 +53,8 @@ import { AppStateService } from "../shared/appstate.service";
 export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
-    constructor(private mapService: MapService,
-                public parametersService: AppStateService) {
+    constructor(private mapService: MapDataService,
+                public stateService: AppStateService) {
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.aggregatedLegalInfo = [];
             this.mapService.legalInformationPerMap.forEach((entries, mapName) => {
@@ -69,7 +69,7 @@ export class LegalInfoDialogComponent {
     }
 
     close() {
-        this.parametersService.legalInfoDialogVisible = false;
+        this.stateService.legalInfoDialogVisible = false;
     }
 }
 

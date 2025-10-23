@@ -2,13 +2,13 @@ import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild
 import {Cartesian3} from "../integrations/cesium";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
-import {RightClickMenuService} from "../mapviewer/rightclickmenu.service";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
 import {CompletionCandidate} from "./search.worker";
@@ -40,9 +40,6 @@ interface ExtendedSearchTarget extends SearchTarget {
                     (mousedown)="onCompletionPopupDown($event)"
                     [style.top.px]="completion.top"
                     [style.left.px]="completion.left">
-                    <p-progress-spinner *ngIf="completion.pending"
-                        aria-label="Loading completion candidates"
-                        [style]="{ height: '1em', width: '1em' }" />
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
@@ -53,6 +50,9 @@ interface ExtendedSearchTarget extends SearchTarget {
                            {{ item.hint }}
                         </div>
                     </div>
+                    <p-progress-spinner *ngIf="completion.pending"
+                        aria-label="Loading completion candidates"
+                        [style]="{ height: '1em', width: '1em' }" />
                 </div>
             </div>
 
@@ -252,8 +252,8 @@ export class SearchPanelComponent implements AfterViewInit {
 
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapService,
-                public parametersService: AppStateService,
+                public mapService: MapDataService,
+                public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
                 private jumpToTargetService: JumpTargetService,
@@ -287,20 +287,17 @@ export class SearchPanelComponent implements AfterViewInit {
             this.mapSelectionVisible = true;
         });
 
-        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-           if (parameters.search.length) {
-               const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
-               if (lastEntry) {
-                   if (parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
-                       this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-                   }
-               } else {
-                   this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-               }
-           }
+        this.stateService.searchState.subscribe(search => {
+            if (search.length === 2) {
+                const currentEntry: [number, string] = [search[0], search[1]];
+                const lastEntry = this.stateService.lastSearchHistoryEntry;
+                if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
+                    this.stateService.lastSearchHistoryEntry= currentEntry;
+                }
+            }
         });
 
-        this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
+        this.stateService.lastSearchHistoryEntryState.subscribe(entry => {
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
             if (entry) {
                 const query = entry[1]
@@ -326,7 +323,7 @@ export class SearchPanelComponent implements AfterViewInit {
                     // NOTE: Currently relying on string name matching which is fragile. Should use
                     // stable IDs for actions to avoid issues with name changes or localization.
                     if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
-                        this.parametersService.setSearchHistoryState([i, value]);
+                        this.stateService.setSearchHistoryState([i, value]);
                         break;
                     }
                 }
@@ -396,7 +393,7 @@ export class SearchPanelComponent implements AfterViewInit {
         localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
         this.reloadSearchHistory();
         if (index == 0) {
-            this.parametersService.resetSearchHistoryState();
+            this.stateService.search = [];
         }
     }
 
@@ -484,12 +481,15 @@ export class SearchPanelComponent implements AfterViewInit {
         }
         let lat = coordinates[0];
         let lon = coordinates[1];
-        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
+        const targetViewIndex = this.stateService.focusedView;
+        const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
+        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : cameraView.destination.alt;
 
         this.mapService.moveToWgs84PositionTopic.next({
             x: lon,
             y: lat,
-            z: alt
+            z: alt,
+            targetView: targetViewIndex
         });
     }
 
@@ -543,7 +543,7 @@ export class SearchPanelComponent implements AfterViewInit {
     setSearchValue(value: string) {
         this.searchInputValue = value;
         if (!value) {
-            this.parametersService.setSearchHistoryState(null);
+            this.stateService.setSearchHistoryState(null);
             this.jumpToTargetService.targetValueSubject.next(value);
             this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets];
             this.activeSearchItems = [];
@@ -582,7 +582,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     targetToHistory(index: number) {
-        this.parametersService.setSearchHistoryState([index, this.searchInputValue]);
+        this.stateService.setSearchHistoryState([index, this.searchInputValue]);
     }
 
     runTarget(index: number) {
@@ -636,13 +636,15 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     onFocus() {
-        setTimeout(() => {
-            this.textarea.nativeElement.setSelectionRange(
-                this.savedSelectionStart, 
-                this.savedSelectionEnd, 
-                this.savedSelectionDirection
-            );
-        }, 0);
+        if (!this.completion.visible) {
+            setTimeout(() => {
+                this.textarea.nativeElement.setSelectionRange(
+                    this.savedSelectionStart,
+                    this.savedSelectionEnd,
+                    this.savedSelectionDirection
+                );
+            }, 0);
+        }
     }
 
     onKeyup(event: KeyboardEvent) {
@@ -668,6 +670,7 @@ export class SearchPanelComponent implements AfterViewInit {
             if (this.completion.visible)
                 event.preventDefault();
             this.completion.visible = false;
+            textarea.focus();
         }
 
         // Prevent defaults if completion is active
@@ -685,9 +688,9 @@ export class SearchPanelComponent implements AfterViewInit {
                 event.stopPropagation();
             } else {
                 if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                    this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
+                    this.stateService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
                 } else {
-                    this.parametersService.setSearchHistoryState(null);
+                    this.stateService.setSearchHistoryState(null);
                 }
 
                 textarea.blur();
@@ -723,7 +726,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.setSearchValue(text);
                 this.textarea.nativeElement.focus();
             } else {
-                this.setSearchValue(this.completionItems[this.completion.selectionIndex].query);
+                let item = this.completionItems[this.completion.selectionIndex];
+                this.setSearchValue(item.query);
+
+                let cursor = item.begin + item.text.length
+                setTimeout(() => {
+                    this.textarea.nativeElement.setSelectionRange(
+                        cursor, cursor, "forward");
+                }, 0);
             }
 
             this.completionItems = [];
@@ -753,7 +763,7 @@ export class SearchPanelComponent implements AfterViewInit {
     selectHistoryEntry(index: number) {
         const entry = this.searchHistory[index];
         if (entry.index !== undefined && entry.input !== undefined) {
-            this.parametersService.setSearchHistoryState([entry.index, entry.input]);
+            this.stateService.setSearchHistoryState([entry.index, entry.input]);
         }
     }
 

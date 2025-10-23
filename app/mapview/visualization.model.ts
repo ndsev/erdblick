@@ -2,21 +2,17 @@ import {FeatureTile} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
-    Entity,
     PrimitiveCollection,
     Rectangle,
     Viewer,
-    CallbackProperty,
-    HeightReference,
     ColorGeometryInstanceAttribute,
     GeometryInstance,
     PerInstanceColorAppearance,
     Primitive,
-    RectangleGeometry,
     RectangleOutlineGeometry
 } from "../integrations/cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
-import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
@@ -141,23 +137,25 @@ export class TileVisualization {
     isHighDetail: boolean;
     showTileBorder: boolean = false;
     specialBorderColour: Color | undefined;
+    readonly viewIndex: number;
 
-    private readonly style: StyleWithIsDeleted;
-    private readonly styleName: string;
     private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
+    private deleted: boolean = false;
+    private readonly style: StyleWithIsDeleted;
+    public readonly styleId: string;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
-    private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
-    private readonly options: Record<string, boolean|number>;
+    private readonly options: Record<string, boolean|number|string>;
     private readonly pointMergeService: PointMergeService;
 
     /**
      * Create a tile visualization.
+     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
      * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
@@ -174,7 +172,8 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile,
+    constructor(viewIndex: number,
+                tile: FeatureTile,
                 pointMergeService: PointMergeService,
                 auxTileFun: (key: string) => FeatureTile | null,
                 style: FeatureLayerStyle,
@@ -182,10 +181,10 @@ export class TileVisualization {
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 featureIdSubset?: string[],
                 boxGrid?: boolean,
-                options?: Record<string, boolean|number>) {
+                options?: Record<string, boolean|number|string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
-        this.styleName = this.style.name();
+        this.styleId = this.style.name();
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlightMode = highlightMode;
@@ -195,6 +194,7 @@ export class TileVisualization {
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
         this.pointMergeService = pointMergeService;
+        this.viewIndex = viewIndex;
     }
 
     /**
@@ -221,6 +221,7 @@ export class TileVisualization {
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                    this.viewIndex,
                     this.tile.mapTileKey,
                     this.style,
                     this.options,
@@ -300,7 +301,7 @@ export class TileVisualization {
                 let endTime = performance.now();
 
                 // Add the render time for this style sheet as a statistic to the tile.
-                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingListKey = `render-time-${this.styleId.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
                 let timingList = this.tile.stats.get(timingListKey);
                 if (!timingList) {
                     timingList = [];
@@ -340,7 +341,7 @@ export class TileVisualization {
         // Remove point-merge contributions that were made by this map-layer+style visualization combo.
         let removedCornerTiles = this.pointMergeService.remove(
             this.tile.tileId,
-            this.mapLayerStyleId());
+            this.mapViewLayerStyleId());
         for (let removedCornerTile of removedCornerTiles) {
             removedCornerTile.remove(viewer);
         }
@@ -380,10 +381,14 @@ export class TileVisualization {
 
     /**
      * Combination of map name, layer name, style name and highlight mode which
-     * (in combination with the tile id) uniquely identifies that rendered contents
-     * if this TileVisualization as expected by the surrounding MergedPointsTiles.
+     * (in combination with the tile id) uniquely identifies the rendered contents
+     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
-    private mapLayerStyleId() {
-        return `${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
+    private mapViewLayerStyleId(): MapViewLayerStyleRule {
+        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);
+    }
+
+    public setStyleOption(optionId: string, value: string|number|boolean) {
+        this.options[optionId] = value;
     }
 }

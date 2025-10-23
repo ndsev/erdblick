@@ -1,11 +1,12 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
 import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "../integrations/cesium";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager} from "./job-group";
+import {AppStateService} from "../shared/appstate.service";
 
 export const MAX_ZOOM_LEVEL = 15;
 
@@ -263,7 +264,8 @@ export class FeatureSearchService {
         return `data:image/svg+xml;base64,${btoa(svg)}`;
     };
 
-    constructor(private mapService: MapService) {
+    constructor(private mapService: MapDataService,
+                private stateService: AppStateService) {
         // Instantiate pin graphics
         this.makeClusterPins();
 
@@ -393,7 +395,12 @@ export class FeatureSearchService {
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
         if (!this.cachedWorkQueue.length) {
-            let tasks = this.mapService.getPrioritisedTiles().map(makeTask);
+            let tasks: SearchWorkerTask[] = [];
+            for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+                this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                    tasks.push(makeTask(tile));
+                })
+            }
 
             this.workQueue = this.workQueue.concat(tasks);
             this.totalTiles += tasks.length;
@@ -502,7 +509,12 @@ export class FeatureSearchService {
             return task;
         };
 
-        const diagTasks = this.mapService.getPrioritisedTiles().map(makeDiagnosticsTask);
+        let diagTasks: DiagnosticsWorkerTask[] = [];
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                diagTasks.push(makeDiagnosticsTask(tile));
+            });
+        }
         this.workQueue = this.workQueue.concat(diagTasks);
         this.runWorkers();
     }
@@ -563,7 +575,11 @@ export class FeatureSearchService {
         this.completionPending.next(true);
         this.completionCandidates.next([]);
 
-        this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                this.workQueue.push(makeTask(tile));
+            });
+        }
         this.runWorkers();
     }
 
@@ -574,8 +590,7 @@ export class FeatureSearchService {
         this.completionCandidateList = this.completionCandidateList
             .concat(candidates.candidates)
             .slice(0, this.completionCandidateLimit)
-            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
-            .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index); // Remove duplicates
 
         this.completionCandidates.next(this.completionCandidateList);
     }

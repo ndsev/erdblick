@@ -1,15 +1,15 @@
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
-import {MapService} from "../mapdata/map.service";
-import {LocateResponse} from "../mapviewer/visualization.model";
+import {MapDataService} from "../mapdata/map.service";
+import {LocateResponse} from "../mapview/visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
-import {InspectionService} from "../inspection/inspection.service";
-import {RightClickMenuService} from "../mapviewer/rightclickmenu.service";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
+import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
 
 export interface SearchTarget {
     icon: string;
@@ -45,11 +45,11 @@ export class JumpTargetService {
     setSelectedMap: ((choice: string|null)=>void)|null = null;
 
     constructor(private httpClient: HttpClient,
-                private mapService: MapService,
+                private mapService: MapDataService,
                 private messageService: InfoMessageService,
                 private sidePanelService: SidePanelService,
-                private inspectionService: InspectionService,
                 private menuService: RightClickMenuService,
+                private stateService: AppStateService,
                 private searchService: FeatureSearchService) {
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
@@ -201,14 +201,14 @@ export class JumpTargetService {
             }
 
             if (matches.length > 1 && matches[1]) {
-                if (!this.mapService.maps.getValue().has(matches[1])) {
+                if (!this.mapService.maps.maps.has(matches[1])) {
                     label += `<br><span class="search-option-warning">Map ID not found.</span>`;
                     valid = false;
                 }
             }
 
             if (matches.length == 3 && matches[2]) {
-                if (!this.inspectionService.sourceDataLayerIdForLayerName(matches[2])) {
+                if (!this.mapService.sourceDataLayerIdForLayerName(matches[2])) {
                     label += `<br><span class="search-option-warning">SourceData layer ID not found.</span>`;
                     valid = false;
                 }
@@ -234,13 +234,11 @@ export class JumpTargetService {
                         if (tileId) {
                             if (mapId) {
                                 if (sourceLayerId) {
-                                    sourceLayerId = this.inspectionService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
+                                    sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
-                                        this.inspectionService.loadSourceDataInspection(
-                                            Number(tileId),
-                                            mapId,
-                                            sourceLayerId
-                                        )
+                                        this.stateService.setSelection({
+                                            mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
+                                        } as SelectedSourceData);
                                     } else {
                                         this.menuService.customTileAndMapId.next([String(tileId), mapId]);
                                     }
@@ -278,7 +276,7 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        this.highlightByJumpTarget(fjt).then();
+                        this.highlightByJumpTarget(this.stateService.focusedView, fjt).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }
@@ -293,17 +291,18 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTargetFilter(viewIndex: number, mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.highlightByJumpTarget(featureJumpTargets[validIndex], false, mapId, mode);
+        await this.highlightByJumpTarget(viewIndex, featureJumpTargets[validIndex], false, mapId, mode);
     }
 
-    async highlightByJumpTarget(action: FeatureJumpAction, moveCamera: boolean=true, mapId?:string|null, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTarget(viewIndex: number, action: FeatureJumpAction, moveCamera: boolean = true,
+                                mapId?: string | null, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -343,9 +342,21 @@ export class JumpTargetService {
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
-        await this.mapService.highlightFeatures([{
-            mapTileKey: selectThisFeature.tileId,
-            featureId: featureId
-        }], moveCamera, mode).then();
+        if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+            this.stateService.setSelection([{
+                mapTileKey: selectThisFeature.tileId,
+                featureId: featureId
+            } as TileFeatureId]);
+        } else {
+            await this.mapService.setHoveredFeatures([{
+                mapTileKey: selectThisFeature.tileId,
+                featureId: featureId
+            }]).then(_ => {
+                // TODO: Focus on whole feature-set?
+                if (moveCamera) {
+                    this.mapService.focusOnFeature(viewIndex, this.mapService.hoverTopic.getValue()[0]);
+                }
+            });
+        }
     }
 }
