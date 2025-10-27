@@ -120,6 +120,10 @@ export class MapTreeNode {
             console.assert(child.viewConfig.length === numViews);
             this.visible = this.visible.map((v, i) => v || child.viewConfig[i].visible);
         }
+        // Collapse the node automatically if it does not contain active children
+        if (this.expanded) {
+            this.expanded = this.visible.some(v => v);
+        }
     }
 
     *allFeatureLayers() {
