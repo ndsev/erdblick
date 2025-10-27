@@ -361,7 +361,6 @@ export class StyleComponent {
 
     applyEditedStyle() {
         const styleId = this.styleService.selectedStyleIdForEditing;
-        this.editorService.editableData = this.editorService.editedStateData.getValue();
         const styleData = this.editorService.editedStateData.getValue().replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
@@ -375,8 +374,13 @@ export class StyleComponent {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return;
         }
-        this.styleService.selectedStyleIdForEditing = this.styleService.setStyleSource(styleId, styleData);
-        this.sourceWasModified = false;
+        const newStyleId = this.styleService.setStyleSource(styleId, styleData);
+        // If there is no style ID returned, then setStyleSource failed.
+        if (newStyleId) {
+            this.styleService.selectedStyleIdForEditing = newStyleId;
+            this.sourceWasModified = false;
+            this.editorService.editableData = this.editorService.editedStateData.getValue();
+        }
     }
 
     closeEditorDialog(event: any) {

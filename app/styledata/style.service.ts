@@ -14,6 +14,7 @@ import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
 import {shortId4} from "./hash";
+import {InfoMessageService} from "../shared/info.service";
 
 interface StyleConfigEntry {
     id: string,
@@ -78,7 +79,11 @@ export class StyleService {
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
-    constructor(private httpClient: HttpClient, private stateService: AppStateService) {
+    constructor(
+        private httpClient: HttpClient,
+        private stateService: AppStateService,
+        private infoMessageService: InfoMessageService
+    ) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -121,10 +126,9 @@ export class StyleService {
 
     private initializeStyle(styleString: string, styleUrl: string, knownStyleId?: string, modified: boolean = false, imported: boolean = false) {
         if (!styleString) {
-            // TODO: This should be caught when we fetch the sources from the file,
-            //  and the error should contain the file name.
-            this.erroredStyleIds.set("missing-style-url", "Wrong URL / No data");
-            console.error(`Wrong URL or no data available for style.`);
+            this.erroredStyleIds.set(
+                knownStyleId ?? "mising-style-id",
+                `Got empty style source for ${styleUrl.length ? styleUrl : (knownStyleId ?? 'missing-style-identifier')}.`);
             return undefined;
         }
 
@@ -136,13 +140,21 @@ export class StyleService {
         const [wasmStyle, options] = parsedStyleAndOptions;
         const styleId = wasmStyle.name();
         const existingStyle = this.styles.get(styleId);
+
+        // Delete any existing style stored under the style's (potentially new) name.
+        // This is an error in case we are renaming through the style editor,
+        // in this case knownStyleId is set.
         if (existingStyle) {
             if (knownStyleId && styleId !== knownStyleId) {
-                this.erroredStyleIds.set(knownStyleId, `Attempted to override another style ${styleId}`);
+                this.infoMessageService.showError(`Illegal attempt to rename ${knownStyleId} to ${styleId}, which already exists.`)
+                return undefined;
             }
             this.deleteStyle(existingStyle.id);
         }
-        if (knownStyleId && knownStyleId !== styleId && this.styles.has(knownStyleId)) {
+
+        // Delete the previous version of the style, regardless of whether it was renamed or not,
+        // as it will be re-created below.
+        if (knownStyleId && this.styles.has(knownStyleId)) {
             this.deleteStyle(knownStyleId);
         }
 
@@ -314,14 +326,14 @@ export class StyleService {
         }
     }
 
-    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string {
+    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string|undefined {
         if (!this.styles.has(styleId)) {
             return styleId;
         }
         const style = this.styles.get(styleId)!;
         const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported);
         if (!newStyleId) {
-            return styleId;
+            return undefined;
         }
 
         if (style.imported) {
@@ -454,7 +466,7 @@ export class StyleService {
     private setStylesIdChildren(style: ErdblickStyle) {
         style.key = style.id;
         style.children = [];
-        style.expanded = true;
+        style.expanded = false;
         style.type = "Style";
         for (let option of style.options) {
             style.children.push(option);
