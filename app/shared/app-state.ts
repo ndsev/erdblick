@@ -594,7 +594,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             const byLayer = byOption.get(optionId)!;
 
             if (values.length < numViews) {
-                throw new Error(`Styles serialization error: Expected length: ${numViews}, got: ${values.length}!`);
+                console.warn(`[StyleState.serialize]: Omitting option ${fullKey}: Expected ${numViews} values, got: ${values.length}!`);
             } else if (values.length > numViews) {
                 byLayer.set(mapLayerId, values.slice(0, numViews));
             } else {

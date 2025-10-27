@@ -283,7 +283,7 @@ export class AppStateService implements OnDestroy {
 
     readonly styleVisibilityState = this.createState<Record<string, boolean>>({
         name: 'styleVisiblity',
-        schema: z.record(z.string(), z.boolean()),
+        schema: z.record(z.string(), z.coerce.boolean()),
         defaultValue: {}
     });
 
