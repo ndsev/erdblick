@@ -104,7 +104,7 @@ export class FeatureFilterOptions {
                                           (mouseout)="onNodeHoverExit($event, rowData)"
                                           style="cursor: pointer"
                                           [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
-                                </span>
+                                    </span>
                                     @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
                                         <p-buttonGroup class="source-data-ref-container">
                                             @for (item of rowData["sourceDataReferences"]; track $index) {

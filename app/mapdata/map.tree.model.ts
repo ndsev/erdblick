@@ -439,4 +439,10 @@ export class MapLayerTree {
             layer.children.filter(option => option.styleId === styleId).map(option => [option.id, option.value[viewIndex]])
         ) as Record<string, boolean|number|string>;
     }
+
+    *allFeatureLayers(): IterableIterator<LayerTreeNode> {
+        for (const child of this.nodes) {
+            yield* child.allFeatureLayers();
+        }
+    }
 }

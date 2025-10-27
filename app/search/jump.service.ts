@@ -10,6 +10,7 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
+import {Cartographic} from "../integrations/cesium";
 
 export interface SearchTarget {
     icon: string;
@@ -82,6 +83,14 @@ export class JumpTargetService {
         this.targetValueSubject.subscribe(_ => {
             this.update();
         })
+
+        // Forward marked cartesian position to AppStateService.
+        this.markedPosition.subscribe(position => {
+            if (position.length >= 2) {
+                this.stateService.setMarkerState(true);
+                this.stateService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
+            }
+        });
     }
 
     getFeatureMatchTarget(): SearchTarget {
@@ -291,14 +300,14 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightByJumpTargetFilter(viewIndex: number, mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTargetFilter(viewIndex: number, mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT, moveCamera: boolean = false) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.highlightByJumpTarget(viewIndex, featureJumpTargets[validIndex], false, mapId, mode);
+        await this.highlightByJumpTarget(viewIndex, featureJumpTargets[validIndex], moveCamera, mapId, mode);
     }
 
     async highlightByJumpTarget(viewIndex: number, action: FeatureJumpAction, moveCamera: boolean = true,

@@ -9,7 +9,6 @@ import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/lib
 import {AppStateService, InspectionPanelModel, TileFeatureId} from "../shared/appstate.service";
 import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {InfoMessageService} from "../shared/info.service";
-import {MAX_ZOOM_LEVEL} from "../search/feature.search.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
@@ -107,7 +106,6 @@ export class MapDataService {
         resolve: null | ((tile: FeatureTile) => void),
         reject: null | ((why: any) => void),
     } | null = null;
-    zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     statsDialogVisible: boolean = false;
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
     clientId: string = "";
@@ -681,7 +679,6 @@ export class MapDataService {
             return;
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;
-        this.setTileLevelForViewport(viewIndex);
         this.update().then();
     }
 
@@ -857,41 +854,6 @@ export class MapDataService {
                 z: center.z + 3 * boundingRadius
             });
         })
-    }
-
-    setTileLevelForViewport(viewIndex: number) {
-        // Validate viewport data
-        if (this.stateService.numViews <= viewIndex || !this.viewVisualizationState[viewIndex].viewport ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.south) ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.west) ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.width) ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.height) ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.camPosLon) ||
-            !isFinite(this.viewVisualizationState[viewIndex].viewport.camPosLat)) {
-            console.error('Invalid viewport data in setTileLevelForViewport:', this.viewVisualizationState);
-            return;
-        }
-
-        try {
-            for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
-                const numTileIds = coreLib.getNumTileIds(this.viewVisualizationState[viewIndex].viewport, level);
-
-                if (!isFinite(numTileIds) || numTileIds < 0) {
-                    console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
-                    continue;
-                }
-
-                if (numTileIds >= 48) {
-                    this.zoomLevel.next(level);
-                    return;
-                }
-            }
-            this.zoomLevel.next(MAX_ZOOM_LEVEL);
-        } catch (error) {
-            console.error('Error in setTileLevelForViewport:', error);
-            // Fallback to a safe zoom level
-            this.zoomLevel.next(10);
-        }
     }
 
     *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {

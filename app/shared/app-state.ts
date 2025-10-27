@@ -467,14 +467,14 @@ export class MapViewState<T> {
     subscribe(viewIndex: number, cb: (value: T) => void) {
         return this.appState.pipe(
             map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            distinctUntilChanged()
+            // distinctUntilChanged()
         ).subscribe(cb);
     }
 
     pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
         const base$ = this.appState.pipe(
             map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            distinctUntilChanged()
+            // distinctUntilChanged()
         );
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
     }

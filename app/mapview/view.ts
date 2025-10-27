@@ -21,8 +21,13 @@ import {
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TileVisualization} from "./visualization.model";
-import {combineLatest, distinctUntilChanged, Subscription} from "rxjs";
-import {FeatureSearchService, SearchResultPrimitiveId} from "../search/feature.search.service";
+import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
+import {
+    FeatureSearchService, MAX_VISIBLE_TILES_PER_LEVEL,
+    MAX_ZOOM_LEVEL,
+    SAFE_ZOOM_LEVEL,
+    SearchResultPrimitiveId
+} from "../search/feature.search.service";
 import {coreLib} from "../integrations/wasm";
 import {environment} from "../environments/environment";
 import {JumpTargetService} from "../search/jump.service";
@@ -30,6 +35,7 @@ import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 import {SearchResultPosition} from "../search/search.worker";
 import {MergedPointsTile} from "./pointmerge.service";
+import {Viewport} from '../../build/libs/core/erdblick-core';
 
 /**
  * Camera constants object to centralize all numerical values for easier maintenance
@@ -120,6 +126,7 @@ export class MapView {
     protected featureSearchVisualization: BillboardCollection | null = null;
     protected markerCollection: BillboardCollection | null = null;
     private ignoreNextCamAppStateUpdate: boolean = false;
+    zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
 
     get viewIndex() {
         return this._viewIndex;
@@ -136,91 +143,11 @@ export class MapView {
                 protected jumpService: JumpTargetService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
-                protected stateService: AppStateService) {
+                protected stateService: AppStateService)
+    {
         this._viewIndex = id;
         this.canvasId = canvasId;
         this.sceneMode = sceneMode;
-
-        this.subscriptions.push(
-            this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
-                // Safety check: ensure viewer exists and is not destroyed
-                if (!this.isAvailable()) {
-                    console.debug('Cannot render tile visualization: viewer not available');
-                    return;
-                }
-
-                // Do not render the tile here if it is not dedicated to this view.
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-
-                tileVis.render(this.viewer).then(wasRendered => {
-                    if (wasRendered && this.isAvailable()) {
-                        this.viewer.scene.requestRender();
-                    }
-                });
-            })
-        );
-
-        this.subscriptions.push(
-            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
-                // Safety check: ensure viewer exists and is not destroyed
-                if (!this.isAvailable()) {
-                    console.debug('Cannot destroy tile visualization: viewer not available');
-                    return;
-                }
-
-                // Do not destroy the tile here if it is not dedicated to this view.
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-
-                tileVis.destroy(this.viewer);
-                if (this.isAvailable()) {
-                    this.viewer.scene.requestRender();
-                }
-            })
-        );
-
-        this.subscriptions.push(
-            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
-                // Safety check: ensure viewer exists and is not destroyed
-                if (!this.isAvailable()) {
-                    console.debug('Cannot destroy merged points tile: viewer not available');
-                    return;
-                }
-
-                // Do not destroy the tile here if it is not dedicated to this view.
-                if (tileVis.viewIndex !== this._viewIndex) {
-                    return;
-                }
-
-                tileVis.remove(this.viewer);
-                if (this.isAvailable()) {
-                    this.viewer.scene.requestRender();
-                }
-            })
-        )
-
-        this.subscriptions.push(
-            this.mapService.moveToWgs84PositionTopic.subscribe((pos: { targetView: number, x: number, y: number, z?: number }) => {
-                // Safety check: ensure viewer exists and is not destroyed
-                if (!this.isAvailable()) {
-                    console.debug('Cannot move to WGS84 position: viewer not available');
-                    return;
-                }
-
-                if (pos.targetView !== this._viewIndex) {
-                    return;
-                }
-                const [destination, orientation] = this.performConversionForMovePosition(pos);
-                if (orientation) {
-                    this.stateService.setView(this._viewIndex, destination, orientation);
-                } else {
-                    this.stateService.setView(this._viewIndex, destination);
-                }
-            })
-        );
     }
 
     protected performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -290,7 +217,7 @@ export class MapView {
 
             // Re-render existing search results if any
             if (this.featureSearchService.searchResults.length > 0) {
-                this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
+                this.renderFeatureSearchResultTree(this.zoomLevel.getValue());
             }
 
             // Set up handlers, listeners and subscriptions
@@ -420,12 +347,8 @@ export class MapView {
                 if (feature.primitive.id) {
                     const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                     if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId, featureInfo.featureId).then(() => {
-                            // FIXME inspection
-                            // if (this.inspectionService.selectedFeatures) {
-                            //     this.inspectionService.zoomToFeature();
-                            // }
-                        });
+                        this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId,
+                            featureInfo.featureId, coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
                     }
                 } else {
                     // Convert Cartesian3 position to WGS84 degrees
@@ -498,27 +421,101 @@ export class MapView {
      */
     private setupServiceSubscriptions() {
         this.subscriptions.push(
-            this.featureSearchService.visualizationChanged.subscribe(_ => {
-                // Add safety check before accessing viewer
+            this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot render tile visualization: viewer not available');
+                    return;
+                }
+
+                // Do not render the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+
+                tileVis.render(this.viewer).then(wasRendered => {
+                    if (wasRendered && this.isAvailable()) {
+                        this.viewer.scene.requestRender();
+                    }
+                });
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot destroy tile visualization: viewer not available');
+                    return;
+                }
+
+                // Do not destroy the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+
+                tileVis.destroy(this.viewer);
                 if (this.isAvailable()) {
-                    this.renderFeatureSearchResultTree(this.mapService.zoomLevel.getValue());
                     this.viewer.scene.requestRender();
                 }
             })
         );
 
         this.subscriptions.push(
-            this.mapService.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
-                this.renderFeatureSearchResultTree(level);
+            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot destroy merged points tile: viewer not available');
+                    return;
+                }
+
+                // Do not destroy the tile here if it is not dedicated to this view.
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+
+                tileVis.remove(this.viewer);
+                if (this.isAvailable()) {
+                    this.viewer.scene.requestRender();
+                }
+            })
+        )
+
+        this.subscriptions.push(
+            this.mapService.moveToWgs84PositionTopic.subscribe((pos: { targetView: number, x: number, y: number, z?: number }) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot move to WGS84 position: viewer not available');
+                    return;
+                }
+
+                if (pos.targetView !== this._viewIndex) {
+                    return;
+                }
+                const [destination, orientation] = this.performConversionForMovePosition(pos);
+                if (orientation) {
+                    this.stateService.setView(this._viewIndex, destination, orientation);
+                } else {
+                    this.stateService.setView(this._viewIndex, destination);
+                }
             })
         );
 
         this.subscriptions.push(
-            this.jumpService.markedPosition.subscribe(position => {
-                if (position.length >= 2) {
-                    this.stateService.setMarkerState(true);
-                    this.stateService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
-                }
+            this.stateService.layerVisibilityState.subscribe(this._viewIndex, _ => {
+                this.renderFeatureSearchResultTree(this.zoomLevel.getValue());
+            })
+        )
+
+        this.subscriptions.push(
+            this.featureSearchService.resultChanged.subscribe(_ => {
+                this.renderFeatureSearchResultTree(this.zoomLevel.getValue());
+            })
+        );
+
+        this.subscriptions.push(
+            this.zoomLevel.pipe(distinctUntilChanged()).subscribe(level => {
+                this.renderFeatureSearchResultTree(level);
             })
         );
 
@@ -613,9 +610,6 @@ export class MapView {
             this.featureSearchVisualization = null;
             this.tileOutlineEntity = null;
             this.openStreetMapLayer = null;
-            if (this.featureSearchService.visualization && !this.featureSearchService.visualization.isDestroyed()) {
-                this.featureSearchService.visualization.destroy();
-            }
             // CRITICAL: Clean up all tiles and visualizations bound to the old viewer
             // This ensures they can be recreated for the new viewer
             if (this.isAvailable()) {
@@ -852,6 +846,7 @@ export class MapView {
             };
 
             this.mapService.setViewport(this._viewIndex, viewportData);
+            this.setTileLevelForViewport(viewportData);
         } catch (error) {
             console.error('Error updating viewport:', error);
             console.error('Error stack:', (error as Error)?.stack || 'No stack trace available');
@@ -949,84 +944,117 @@ export class MapView {
     }
 
     renderFeatureSearchResultTree(level: number) {
-        try {
-            if (!this.featureSearchVisualization || !this.isAvailable()) {
-                console.debug('Cannot render feature search results: FeatureSearchVisualization or viewer not initialized or is destroyed');
-                return;
+        if (!this.featureSearchVisualization || !this.isAvailable() || this.featureSearchVisualization.isDestroyed()) {
+            console.debug('Cannot render feature search results: FeatureSearchVisualization or viewer not initialized or is destroyed');
+            return;
+        }
+
+        this.featureSearchVisualization.removeAll();
+        const color = Color.fromCssColorString(this.featureSearchService.pointColor);
+        let markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
+
+        // Use the level parameter directly - backend now receives correct viewport coordinates
+        const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+
+        // Assemble visible mapLayerIds into a set.
+        const visibleMapLayers = [...this.mapService.maps.allFeatureLayers()]
+            .reduce((mapLayerSet, node) => {
+                if (node.viewConfig[this._viewIndex]?.visible) {
+                    mapLayerSet.add(`${node.mapId}/${node.id}`);
+                }
+                return mapLayerSet;
+            }, new Set<string>());
+
+        for (const node of nodes) {
+            if (node.markers.length) {
+                markers.push(...node.markers.filter(marker => visibleMapLayers.has(marker[2])));
+                continue;
             }
+            // Assemble the visible count for the node based on the map layers that are visible in this view.
+            const count = node.countPerLayer.entries().reduce((total, [mapLayerId, mapLayerCount]) => {
+                return total + (visibleMapLayers.has(mapLayerId) ? mapLayerCount : 0);
+            }, 0)
 
-            this.featureSearchVisualization.removeAll();
-            const color = Color.fromCssColorString(this.featureSearchService.pointColor);
-            let markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
+            if (count > 0 && node.center) {
+                // For cluster centers, always use the center position directly
+                // The backend coordinates are now correctly aligned with the projection
+                const params: MarkerParams = {
+                    position: node.center,
+                    image: this.featureSearchService.getPinGraphics(count),
+                    width: 64,
+                    height: 64
+                };
+                if (this.sceneMode.valueOf() === SceneMode.SCENE2D) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
+                }
+                this.featureSearchVisualization.add(params);
+            }
+        }
 
-            // Use the level parameter directly - backend now receives correct viewport coordinates
-            const nodes = this.featureSearchService.resultTree.getNodesAtLevel(level);
+        if (markers.length) {
+            markers.forEach(marker => {
+                // Always use cartographicRad if available, otherwise fall back to cartesian
+                // This ensures consistent positioning across projections
+                let markerPosition: Cartesian3;
+                if (marker[1].cartographicRad) {
+                    markerPosition = Cartesian3.fromRadians(
+                        marker[1].cartographicRad.longitude,
+                        marker[1].cartographicRad.latitude,
+                        marker[1].cartographicRad.height
+                    );
+                } else {
+                    markerPosition = marker[1].cartesian as Cartesian3;
+                }
 
-            for (const node of nodes) {
-                if (node.markers.length) {
-                    markers.push(...node.markers);
-                } else if (node.count > 0 && node.center) {
-                    // For cluster centers, always use the center position directly
-                    // The backend coordinates are now correctly aligned with the projection
-                    const params: MarkerParams = {
-                        position: node.center,
-                        image: this.featureSearchService.getPinGraphics(node.count),
-                        width: 64,
-                        height: 64
-                    };
-                    if (this.sceneMode.valueOf() === SceneMode.SCENE2D) {
-                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                    } else {
-                        params.eyeOffset = new Cartesian3(0, 0, -50);
-                    }
+                const params: MarkerParams = {
+                    id: marker[0],
+                    position: markerPosition,
+                    image: this.featureSearchService.markerGraphics(),
+                    width: 32,
+                    height: 32,
+                    color: color
+                };
+                if (this.sceneMode.valueOf() === SceneMode.SCENE2D) {
+                    params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                } else {
+                    params.pixelOffset = new Cartesian2(0, -10);
+                    params.eyeOffset = new Cartesian3(0, 0, -50);
+                }
+                if (this.featureSearchVisualization) {
                     this.featureSearchVisualization.add(params);
                 }
-            }
+            });
+        }
 
-            if (markers.length) {
-                markers.forEach(marker => {
-                    // Always use cartographicRad if available, otherwise fall back to cartesian
-                    // This ensures consistent positioning across projections
-                    let markerPosition: Cartesian3;
-                    if (marker[1].cartographicRad) {
-                        markerPosition = Cartesian3.fromRadians(
-                            marker[1].cartographicRad.longitude,
-                            marker[1].cartographicRad.latitude,
-                            marker[1].cartographicRad.height
-                        );
-                    } else {
-                        markerPosition = marker[1].cartesian as Cartesian3;
-                    }
-
-                    const params: MarkerParams = {
-                        id: marker[0],
-                        position: markerPosition,
-                        image: this.featureSearchService.markerGraphics(),
-                        width: 32,
-                        height: 32,
-                        color: color
-                    };
-                    if (this.sceneMode.valueOf() === SceneMode.SCENE2D) {
-                        params.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-                    } else {
-                        params.pixelOffset = new Cartesian2(0, -10);
-                        params.eyeOffset = new Cartesian3(0, 0, -50);
-                    }
-                    if (this.featureSearchVisualization) {
-                        this.featureSearchVisualization.add(params);
-                    }
-                });
-            }
-
-            if (this.isAvailable() && this.viewer.scene.primitives) {
-                this.viewer.scene.primitives.raiseToTop(this.featureSearchVisualization);
-            }
-        } catch (error) {
-            console.error('Error rendering feature search result tree:', error);
+        if (this.isAvailable() && this.viewer.scene.primitives) {
+            this.viewer.scene.primitives.raiseToTop(this.featureSearchVisualization);
         }
     }
 
     protected computeViewRectangle(): Rectangle | undefined {
         throw Error("Not implemented");
+    }
+
+    setTileLevelForViewport(viewport: Viewport) {
+        try {
+            for (const level of [...Array(MAX_ZOOM_LEVEL + 1).keys()]) {
+                const numTileIds = coreLib.getNumTileIds(viewport, level);
+                if (!isFinite(numTileIds) || numTileIds < 0) {
+                    console.warn(`Invalid numTileIds for level ${level}: ${numTileIds}`);
+                    continue;
+                }
+                if (numTileIds >= MAX_VISIBLE_TILES_PER_LEVEL) {
+                    this.zoomLevel.next(level);
+                    return;
+                }
+            }
+            this.zoomLevel.next(MAX_ZOOM_LEVEL);
+        } catch (error) {
+            console.error('Error in setTileLevelForViewport:', error);
+            // Fallback to a safe zoom level
+            this.zoomLevel.next(SAFE_ZOOM_LEVEL);
+        }
     }
 }
