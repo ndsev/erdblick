@@ -271,8 +271,8 @@ export class MapLayerTree {
 
     configureTreeParameters() {
         let defaultVisibility = true;
-        for (const child of this.nodes) {
-            for (const featureLayer of child.allFeatureLayers()) {
+        for (const mapOrGroupItem of this.nodes) {
+            for (const featureLayer of mapOrGroupItem.allFeatureLayers()) {
                 featureLayer.viewConfig = this.stateService.mapLayerConfig(
                     featureLayer.mapId,
                     featureLayer.info.layerId,
@@ -288,7 +288,7 @@ export class MapLayerTree {
                     );
                 }
             }
-            child.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());
+            mapOrGroupItem.updateVisibilityFromChildren(this.stateService.numViewsState.getValue());
             defaultVisibility = false;
         }
     }
@@ -324,48 +324,22 @@ export class MapLayerTree {
         }
     }
 
-    toggleMapLayerVisibility(viewIndex: number, mapId: string, layerId: string = "", state: boolean | undefined = undefined, deferUpdate: boolean = false) {
-        const mapItem = this.maps.get(mapId);
-        if (mapItem === undefined) {
+    setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
+        const mapOrGroupItem = this.findChildById(mapOrGroupId);
+        if (mapOrGroupItem === undefined) {
             return;
         }
-        if (layerId) {
-            const layer = mapItem.layers.get(layerId);
-            if (layer === undefined || layer.type == "SourceData" ||
-                viewIndex >= layer.viewConfig.length || viewIndex >= mapItem.visible.length) {
-                return;
+        for (const layer of mapOrGroupItem.allFeatureLayers()) {
+            if (viewIndex >= layer.viewConfig.length) {
+                continue;
             }
-            if (state !== undefined) {
+            if (!layerId || layer.id === layerId) {
                 layer.viewConfig[viewIndex].visible = state;
-            }
-            this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
-            if (!layer.viewConfig[viewIndex].visible) {
-                this.clearSelectionForLayer(mapId, layerId);
-            }
-            // Recalculate map visibility based on non-SourceData layers
-            mapItem.visible[viewIndex] = mapItem.children.map(layer => {
-                return [layer.type, layer.viewConfig[viewIndex].visible];
-            }).some(result => result[1]);
-        } else {
-            if (viewIndex >= mapItem.visible.length) {
-                return;
-            }
-            if (state !== undefined) {
-                mapItem.visible[viewIndex] = state;
-            }
-            for (const [_, layer] of mapItem.layers) {
-                if (layer.type !== "SourceData") {
-                    layer.viewConfig[viewIndex].visible = mapItem.visible[viewIndex];
-                    if (!layer.viewConfig[viewIndex].visible) {
-                        this.clearSelectionForLayer(mapId, layer.id);
-                    }
-                }
-                this.stateService.setMapLayerConfig(mapItem.id, layer.id, layer.viewConfig);
+                this.stateService.setMapLayerConfig(layer.mapId, layer.id, layer.viewConfig);
             }
         }
-        if (!deferUpdate) {
-            this.configureTreeParameters();
-        }
+        // Set visibility of map/group items from their children.
+        this.configureTreeParameters();
     }
 
     toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
@@ -448,5 +422,25 @@ export class MapLayerTree {
         for (const child of this.nodes) {
             yield* child.allFeatureLayers();
         }
+    }
+
+    private checkIsMapGroup (e: any): e is GroupTreeNode {
+        return e.type === "Group";
+    }
+
+    private findChildById(id: string, elements: (GroupTreeNode | MapTreeNode)[]|undefined = undefined): GroupTreeNode | MapTreeNode | undefined {
+        if (!elements) {
+            elements = this.nodes;
+        }
+        for (const elem of elements) {
+            if (elem.id === id) {
+                return elem;
+            }
+            if (this.checkIsMapGroup(elem)) {
+                const found = this.findChildById(id, elem.children);
+                if (found) return found;
+            }
+        }
+        return undefined;
     }
 }

@@ -56,46 +56,55 @@ import {Subscription} from "rxjs";
                         <div *ngIf="mapGroups.size" class="maps-container">
                             <p-tree [value]="mapGroups.nodes">
                                 <ng-template let-node pTemplate="Group">
-                                <span>
-                                    <p-checkbox [ngModel]="node.visible[index]"
-                                                (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleGroup(index, node.id)"
-                                                [binary]="true"
-                                                [inputId]="node.id"
-                                                [name]="node.id" tabindex="0"/>
-                                    <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">
-                                        {{ removeGroupPrefix(node.id) }}
-                                    </label>
-                                </span>
+                                <div class="font-bold white-space-nowrap"
+                                     style="display: flex; align-items: center;">
+                                    <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                          (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
+                                        more_vert
+                                    </span>
+                                    <span>
+                                        <p-checkbox [ngModel]="node.visible[index]"
+                                                    (click)="$event.stopPropagation()"
+                                                    (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
+                                                    [binary]="true"
+                                                    [inputId]="node.id"
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                    </span>
+                                </div>
                                 </ng-template>
                                 <ng-template let-node pTemplate="Map">
-                                    <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
-                                            [popup]="true"
-                                            appendTo="body"/>
-                                    <div class="flex-container">
-                                <span>
-                                    <p-checkbox [(ngModel)]="node.visible[index]"
-                                                (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleMap(index, node.id)"
-                                                [binary]="true"
-                                                [inputId]="node.id"
-                                                [name]="node.id" tabindex="0"/>
-                                    <label [for]="node.id"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                </span>
-                                        <div class="map-controls">
-                                            <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                      [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
-                                                      tooltipPosition="bottom"
-                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                      tabindex="0"
-                                                      [disabled]="!metadataMenusEntries.get(node.id)?.length">
-                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
-                                                data_object
-                                            </span>
-                                            </p-button>
-                                        </div>
+                                <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
+                                        [popup]="true"
+                                        appendTo="body"/>
+                                <div class="flex-container">
+                                    <span>
+                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                              (click)="showLayersToggleMenu($event, index, node.id, '')">
+                                                more_vert
+                                        </span>
+                                        <p-checkbox [(ngModel)]="node.visible[index]"
+                                                    (click)="$event.stopPropagation()"
+                                                    (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
+                                                    [binary]="true"
+                                                    [inputId]="node.id"
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id"
+                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                    </span>
+                                    <div class="map-controls">
+                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                  [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
+                                                  tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                  tabindex="0"
+                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                            data_object
+                                        </span>
+                                        </p-button>
                                     </div>
+                                </div>
                                 </ng-template>
                                 <ng-template let-node pTemplate="Features">
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
@@ -108,7 +117,7 @@ import {Subscription} from "rxjs";
                                             <span>
                                         <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
                                                     (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="toggleLayer(index, node.mapId, node.id)"
+                                                    (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
                                                     [binary]="true"
                                                     [inputId]="node.id"
                                                     [name]="node.id" tabindex="0"/>
@@ -305,51 +314,38 @@ export class MapPanelComponent {
         this.updateOSMOverlay(viewIndex);
     }
 
-    // TODO: Refactor these into a generic solution
-    showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapName: string, layerName: string) {
+    showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapId: string, layerId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
-                label: 'Toggle All off but This',
+                label: 'Toggle All Off But This',
                 command: () => {
-                    if (this.mapService.maps.maps.has(mapName)) {
-                        for (const id of this.mapService.maps.maps.get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id == layerName;
-                            this.toggleLayer(viewIndex, mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, layer.mapId.startsWith(mapId) && (!layerId || layer.id === layerId));
                     }
                 }
             },
             {
-                label: 'Toggle All on but This',
+                label: 'Toggle All On But This',
                 command: () => {
-                    if (this.mapService.maps.maps.has(mapName)) {
-                        for (const id of this.mapService.maps.maps.get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = id != layerName;
-                            this.toggleLayer(viewIndex, mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, !layer.mapId.startsWith(mapId) || !!(layerId && layer.id !== layerId));
                     }
                 }
             },
             {
                 label: 'Toggle All Off',
                 command: () => {
-                    if (this.mapService.maps.maps.has(mapName)) {
-                        for (const id of this.mapService.maps.maps.get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = false;
-                            this.toggleLayer(viewIndex, mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
                     }
                 }
             },
             {
                 label: 'Toggle All On',
                 command: () => {
-                    if (this.mapService.maps.maps.has(mapName)) {
-                        for (const id of this.mapService.maps.maps.get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.maps.get(mapName)!.layers.get(id)!.viewConfig[viewIndex].visible = true;
-                            this.toggleLayer(viewIndex, mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
                     }
                 }
             }
@@ -398,65 +394,8 @@ export class MapPanelComponent {
         this.mapService.toggleLayerTileBorderVisibility(viewIndex, mapName, layerName);
     }
 
-    toggleLayer(viewIndex: number, mapName: string, layerName: string = "") {
-        this.mapService.toggleMapLayerVisibility(viewIndex, mapName, layerName);
-    }
-
-    toggleMap(viewIndex: number, mapId: string) {
-        if (!mapId) {
-            return;
-        }
-        this.mapService.toggleMapLayerVisibility(viewIndex, mapId);
-    }
-
-    toggleGroup(viewIndex: number, id: string) {
-        if (!id || id === 'ungrouped') {
-            return;
-        }
-        const rootGroups = this.mapService.maps$.getValue().nodes;
-        const group = this.findGroupById(rootGroups, id);
-        if (!group || !this.checkIsMapGroup(group)) {
-            return;
-        }
-        const target = !group.visible[viewIndex];
-        const mapIds = this.collectMapIds(group);
-        for (const id of mapIds) {
-            this.mapService.toggleMapLayerVisibility(viewIndex, id, "", target, true);
-        }
-        this.mapService.maps$.getValue().configureTreeParameters();
-        this.mapService.update().then();
-    }
-
-    private checkIsMapGroup (e: any): e is GroupTreeNode {
-        return e.type === "Group";
-    }
-
-    private findGroupById(elements: (GroupTreeNode | MapTreeNode)[], id: string): GroupTreeNode | MapTreeNode | undefined {
-        for (const elem of elements) {
-            if (elem.id === id) {
-                return elem;
-            }
-            if (this.checkIsMapGroup(elem)) {
-                const found = this.findGroupById(elem.children, id);
-                if (found) return found;
-            }
-        }
-        return undefined;
-    }
-
-    private collectMapIds(group: GroupTreeNode): string[] {
-        const ids: string[] = [];
-        if (!group || !group.children) {
-            return ids;
-        }
-        for (const child of group.children) {
-            if (this.checkIsMapGroup(child)) {
-                ids.push(...this.collectMapIds(child));
-            } else {
-                ids.push(child.id);
-            }
-        }
-        return ids;
+    toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
+        this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;

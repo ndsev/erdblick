@@ -11,6 +11,9 @@ import {environment} from "../environments/environment";
     template: `
         <ng-container *ngIf="viewModel$ | async as vm">
             @if (vm.panelCount > 0) {
+                <!--
+                  TODO: Get rid of this, think about using https://github.com/angular-split/angular-split.
+                  Unfortunately, the prime-ng splitter seems to be badly maintained (see https://github.com/primefaces/primeng/issues/13300) -->
                 @for (v of [version()]; track v) {
                     <p-splitter [panelSizes]="vm.panelSizes" class="mb-8">
                         @for (idx of vm.viewIndices; track idx) {

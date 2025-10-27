@@ -575,75 +575,56 @@ export class MapView {
     public async destroy() {
         // Early return if viewer is already null or destroyed
         if (!this.isAvailable()) {
-            console.debug('Viewer already null or destroyed, skipping destruction');
             return;
         }
 
         if (this.isDestroyingViewer) {
-            console.debug('Viewer already in destruction process.');
             return;
         }
         this.isDestroyingViewer = true;
 
-        try {
-            // Clean up subscriptions first to prevent race conditions
-            this.subscriptions.forEach(sub => sub.unsubscribe());
-            this.subscriptions = [];
+        // Clean up subscriptions first to prevent race conditions
+        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions = [];
 
-            // Clean up mouse handler
-            if (this.mouseHandler) {
-                if (!this.mouseHandler.isDestroyed()) {
-                    this.mouseHandler.destroy();
-                }
-                this.mouseHandler = null;
+        // Clean up mouse handler
+        if (this.mouseHandler) {
+            if (!this.mouseHandler.isDestroyed()) {
+                this.mouseHandler.destroy();
             }
-
-            // Remove event listeners
-            if (this.viewer.camera) {
-                this.viewer.camera.changed.removeEventListener(this.updateOnCameraChangedHandler);
-                this.viewer.camera.moveStart.removeEventListener(this.cameraMoveStartHandler);
-                this.viewer.camera.moveEnd.removeEventListener(this.cameraMoveEndHandler);
-            }
-
-            // Clean up collections and entities references
-            this.markerCollection = null;
-            this.featureSearchVisualization = null;
-            this.tileOutlineEntity = null;
-            this.openStreetMapLayer = null;
-            // CRITICAL: Clean up all tiles and visualizations bound to the old viewer
-            // This ensures they can be recreated for the new viewer
-            if (this.isAvailable()) {
-                this.mapService.clearAllTileVisualizations(this._viewIndex, this.viewer);
-            }
-            this.mapService.clearAllLoadedTiles();
-
-            // Check if still not destroyed before calling destroy
-            if (!this.viewer.isDestroyed()) {
-                this.viewer.destroy();
-            }
-
-            // Clear viewer reference regardless
-            this.viewer = null as any;
-        } catch (error) {
-            console.error('Error during viewer destruction:', error);
-            // Clear references even on error
-            this.viewer = null as any;
             this.mouseHandler = null;
-            this.openStreetMapLayer = null;
-            this.markerCollection = null;
-            this.featureSearchVisualization = null;
-            this.tileOutlineEntity = null;
-
-            this.isDestroyingViewer = false;
         }
-        console.debug('MapViewComponent: cleaning up resources');
+
+        // Remove event listeners
+        if (this.viewer.camera) {
+            this.viewer.camera.changed.removeEventListener(this.updateOnCameraChangedHandler);
+            this.viewer.camera.moveStart.removeEventListener(this.cameraMoveStartHandler);
+            this.viewer.camera.moveEnd.removeEventListener(this.cameraMoveEndHandler);
+        }
+
+        // Clean up all visualizations bound to the old viewer.
+        if (this.isAvailable()) {
+            this.mapService.clearAllTileVisualizations(this._viewIndex, this.viewer);
+        }
+
+        // Check if still not destroyed before calling destroy
+        if (!this.viewer.isDestroyed()) {
+            try {
+                this.viewer.destroy();
+            } catch (error) {
+                // This will usually throw a Cesium DeveloperError
+                // 'This object was destroyed, i.e., destroy() was called.',
+                // even though we are checking if that is the case... :(
+            }
+        }
 
         // Clear all references
+        this.viewer = null as any;
         this.mouseHandler = null;
+        this.featureSearchVisualization = null;
         this.openStreetMapLayer = null;
         this.markerCollection = null;
         this.tileOutlineEntity = null;
-
         this.isDestroyingViewer = false;
     }
 
