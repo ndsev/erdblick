@@ -939,7 +939,7 @@ export class MapDataService {
     }
 
     /**
-     * Clean up all tile visualizations - used during viewer recreation
+     * Clean up all tile visualizations - used during viewer deletion.
      */
     clearAllTileVisualizations(viewIndex: number, viewer: Viewer): void {
         if (viewIndex >= this.stateService.numViews) {
@@ -958,37 +958,9 @@ export class MapDataService {
         this.viewVisualizationState[viewIndex].visualizationQueue = [];
     }
 
-    /**
-     * Force clear all loaded tiles - used during viewer recreation
-     * This ensures tiles bound to old viewer context are evicted and refetched
-     */
-    clearAllLoadedTiles(): void {
-        // Destroy all loaded tiles since they're bound to old viewer context
-        for (const tileLayer of this.loadedTileLayers.values()) {
-            try {
-                tileLayer.destroy();
-            } catch (error) {
-                console.warn('Error destroying loaded tile:', error);
-            }
-        }
-        this.loadedTileLayers.clear();
-
-        // Abort any ongoing fetch to prevent race conditions
-        if (this.currentFetch) {
-            this.currentFetch.abort();
-            this.currentFetch = null;
-        }
-
-        // Clear tile parsing queue to prevent rendering stale tiles
-        this.tileStreamParsingQueue = [];
-    }
-
-    toggleMapLayerVisibility(viewIndex: number, mapId: string, layerId: string = "",
-                             state: boolean | undefined = undefined, deferUpdate: boolean = false) {
-        this.maps.toggleMapLayerVisibility(viewIndex, mapId, layerId, state, deferUpdate);
-        if (!deferUpdate) {
-            this.update().then();
-        }
+    setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
+        this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
+        this.update().then();
     }
 
     toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
