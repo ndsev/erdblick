@@ -37,7 +37,7 @@ import { ClipboardService } from "../shared/clipboard.service";
                             <td>{{ stat.name }}</td>
                             <td>
                                 {{ stat.peak | number: '1.2-2' }}
-                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(getTileIdWithPeak(stat.name))" [pTooltip]="getTileIdWithPeak(stat.name)" tooltipPosition="top"></i>
+                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(this.peakTileIdPerStat[stat.name][0])" [pTooltip]="this.peakTileIdPerStat[stat.name][0]" tooltipPosition="top"></i>
                             </td>
                             <td>{{ stat.sum | number: '1.2-2' }}</td>
                             <td>{{ stat.average | number: '1.2-2' }}</td>
@@ -80,6 +80,7 @@ export class StatsDialogComponent {
     public considerEmptyTiles: boolean = false;
     public consideredTilesCount: number = 0;
     public needsUpdate: boolean = false;
+    public peakTileIdPerStat: Record<string, [string, number]> = {}
 
     constructor(public mapService: MapDataService, public clipboardService: ClipboardService) {
         this.update();
@@ -121,6 +122,11 @@ export class StatsDialogComponent {
                     statsAccumulator.set(key, []);
                 }
                 statsAccumulator.set(key, statsAccumulator.get(key)!.concat(value));
+
+                // Find peak value per stat
+                if (!this.peakTileIdPerStat.hasOwnProperty(key) || value.some(v => v > this.peakTileIdPerStat[key][1])) {
+                    this.peakTileIdPerStat[key] = [String(tile.tileId), Math.max(...value)];
+                }
             }
         });
 
@@ -133,25 +139,6 @@ export class StatsDialogComponent {
         }).sort((a, b) => a.name.localeCompare(b.name));
 
         this.needsUpdate = false;
-    }
-
-    getTileIdWithPeak(statName: string): string {
-        let peakValue = -Infinity;
-        let peakTileId = '';
-        this.mapService.loadedTileLayers.forEach(tile => {
-            if (!this.considerEmptyTiles && tile.numFeatures <= 0) {
-                return;
-            }
-            if (this.selectedMapLayers.findIndex(entry => entry.label == `${tile.mapName} - ${tile.layerName}`) < 0) {
-                return;
-            }
-            const stats = tile.stats;
-            if (stats.has(statName) && stats.get(statName)?.some(v => v > peakValue)) {
-                peakValue = Math.max(...stats.get(statName)!);
-                peakTileId = String(tile.tileId);
-            }
-        });
-        return peakTileId;
     }
 }
 
