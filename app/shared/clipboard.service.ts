@@ -7,11 +7,11 @@ export class ClipboardService {
 
     constructor(private messageService: InfoMessageService) {}
 
-    copyToClipboard(text: string) {
+    copyToClipboard(text: string, info?: string) {
         try {
             navigator.clipboard.writeText(text).then(
                 () => {
-                    this.messageService.showSuccess("Copied content to clipboard!");
+                    this.messageService.showSuccess(info ?? "Copied content to clipboard!");
                 },
                 () => {
                     this.messageService.showError("Could not copy content to clipboard.");

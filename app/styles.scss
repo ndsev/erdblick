@@ -282,7 +282,6 @@ map-view {
   }
 }
 
-
 .card {
   background-color: var(--p-content-background);
   border-radius: 10px;
@@ -332,6 +331,13 @@ map-view {
         gap: 0.25em;
         justify-content: center;
         align-items: center;
+      }
+
+      .title {
+        max-width: 20em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .p-button {

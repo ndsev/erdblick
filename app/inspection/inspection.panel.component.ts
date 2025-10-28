@@ -24,7 +24,7 @@ interface SourceLayerMenuItem {
 
                         <!--TODO: Replace the icon with a color picker-->
                         <!--                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>-->
-                        <span class="title">
+                        <span class="title" [pTooltip]="title" tooltipPosition="bottom">
                             {{ title }}
                         </span>
 
