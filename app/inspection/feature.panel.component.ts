@@ -24,7 +24,7 @@ interface InspectionModelData {
     selector: 'feature-panel',
     template: `
         <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                         [filterOptions]="filterOptions" [geoJson]="geoJson" [selectedFeatures]="selectedFeatures">
+                         [geoJson]="geoJson" [selectedFeatures]="selectedFeatures">
         </inspection-tree>
     `,
     styles: [``],
@@ -142,7 +142,7 @@ export class FeaturePanelComponent {
             return "";
         }
 
-        return `<span>${rowData[colKey]}</span>`;
+        return rowData[colKey];
     }
 
     zoomToFeature() {

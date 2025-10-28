@@ -47,7 +47,7 @@ export class FeatureFilterOptions {
                             <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
                                          style="cursor: pointer"/>
                         }
-                        <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
+                        <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
                                [(ngModel)]="filterString"
                                (ngModelChange)="filterTree(filterString)"
                                (input)="filterTree($any($event.target).value)"/>
@@ -267,7 +267,7 @@ export class InspectionTreeComponent implements OnDestroy {
 
     clearFilter() {
         this.filterString = "";
-        this.table.filterGlobal("" , 'contains')
+        this.table.filterGlobal("" , 'contains');
         this.data = this.treeData();
     }
 
@@ -414,57 +414,7 @@ export class InspectionTreeComponent implements OnDestroy {
         }
 
         const query = filterString.toLowerCase();
-        if (!this.filterOptions()) {
-            this.table.filterGlobal(query, "contains");
-            return;
-        }
-
-        if (this.filterOptions()!.filterOnlyFeatureIds) {
-            this.filterOptions()!.filterByKeys = false;
-            this.filterOptions()!.filterByValues = false;
-            this.filterOptions()!.filterGeometryEntries = false;
-        }
-
-        const filterNodes = (nodes: TreeTableNode[]): TreeTableNode[] => {
-            return nodes.reduce<TreeTableNode[]>((filtered, node) => {
-                let matches = false;
-                if (!this.filterOptions()!.filterGeometryEntries && node.data.key == "Geometry") {
-                    return filtered;
-                }
-
-                if (this.filterOptions()!.filterOnlyFeatureIds) {
-                    if (node.data.type == this.InspectionValueType.FEATUREID.value) {
-                        matches = String(node.data.value).toLowerCase().includes(query) || String(node.data.hoverId).toLowerCase().includes(query);
-                    }
-                } else {
-                    if (this.filterOptions()!.filterByKeys && this.filterOptions()!.filterByValues) {
-                        matches = String(node.data.key).toLowerCase().includes(query) || String(node.data.value).toLowerCase().includes(query);
-                    } else if (this.filterOptions()!.filterByKeys) {
-                        matches = String(node.data.key).toLowerCase().includes(query);
-                    } else if (this.filterOptions()!.filterByValues) {
-                        matches = String(node.data.value).toLowerCase().includes(query);
-                    }
-                }
-
-                if (node.children) {
-                    let filteredChildren = filterNodes(node.children);
-                    // node.children = filterNodes(node.children);
-                    matches = matches || filteredChildren.length > 0;
-                    if (matches) {
-                        node.expanded = true;
-                    }
-                }
-
-                if (matches) {
-                    filtered.push(node);
-                }
-
-                return filtered;
-            }, []);
-        };
-
-        this.data = filterNodes(this.treeData());
-        this.expandTreeNodes(this.data);
+        this.table.filterGlobal(query, "contains");
     }
 
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
