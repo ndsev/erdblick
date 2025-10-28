@@ -1016,6 +1016,7 @@ export class MapView {
 
         if (this.isAvailable() && this.viewer.scene.primitives) {
             this.viewer.scene.primitives.raiseToTop(this.featureSearchVisualization);
+            this.viewer.scene.requestRender()
         }
     }
 

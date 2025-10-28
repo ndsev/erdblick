@@ -38,15 +38,15 @@ import {AppStateService} from "../shared/appstate.service";
                 <p-tablist>
                     <p-tab value="results">
                         <span>Results</span>
-                        <p-badge [value]="results.length" />
+                        <p-badge [value]="results.length"/>
                     </p-tab>
                     <p-tab value="diagnostics">
                         <span>Diagnostics</span>
-                        <p-badge [value]="diagnostics.length" />
+                        <p-badge [value]="diagnostics.length"/>
                     </p-tab>
                     <p-tab value="traces" *ngIf="traces.length > 0">
                         <span>Traces</span>
-                        <p-badge [value]="traces.length" />
+                        <p-badge [value]="traces.length"/>
                     </p-tab>
                 </p-tablist>
 
@@ -56,10 +56,12 @@ import {AppStateService} from "../shared/appstate.service";
                         <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
                             <span><p-colorPicker [(ngModel)]="searchService.pointColor"
-                                                 (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
+                                                 (ngModelChange)="searchService.updatePointColor()" 
+                                                 appendTo="body"/></span>
                         </div>
                         <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                       [showToggleAll]="false" (ngModelChange)="recalculateResults()" placeholder="Select Grouping" 
+                                       [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
+                                       placeholder="Select Grouping" [maxSelectedLabels]="5"
                                        display="chip" optionLabel="name" class="w-full md:w-80">
                         </p-multiSelect>
 
@@ -94,9 +96,12 @@ import {AppStateService} from "../shared/appstate.service";
                                         <li>
                                             <div>
                                                 <span>{{ message.message }}</span>
-                                                <div><span>Here: </span><code style="width: 100%;" [innerHTML]="message.query | highlightRegion:message.location.offset:message.location.size:25"></code></div>
+                                                <div><span>Here: </span><code style="width: 100%;"
+                                                                              [innerHTML]="message.query | highlightRegion:message.location.offset:message.location.size:25"></code>
+                                                </div>
                                             </div>
-                                            <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
+                                            <p-button size="small" label="Fix" *ngIf="message.fix"
+                                                      (onClick)="onApplyFix(message)"/>
                                         </li>
                                     }
                                 </ul>
@@ -152,7 +157,7 @@ export class FeatureSearchComponent {
     // Active result panel index
     resultPanelIndex: string = "";
 
-    @Input() searchPanelComponent!: SearchPanelComponent;
+    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`!
     @ViewChild('listbox') listbox!: Listbox;
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
 
@@ -204,7 +209,7 @@ export class FeatureSearchComponent {
 
         this.traces = traces
         this.results = results;
-        this.recalculateResults();
+        this.recalculateResultsByGroups();
     }
 
     selectResult(event: any) {
@@ -227,7 +232,7 @@ export class FeatureSearchComponent {
                 this.searchService.pause();
                 this.listbox.options = this.searchService.searchResults;
                 this.results = this.searchService.searchResults;
-                this.recalculateResults();
+                this.recalculateResultsByGroups();
                 this.isSearchPaused = true;
             }
         }
@@ -239,7 +244,7 @@ export class FeatureSearchComponent {
             this.searchService.stop();
             this.canPauseStopSearch = false;
             this.results = this.searchService.searchResults;
-            this.recalculateResults();
+            this.recalculateResultsByGroups();
 
             if (this.searchService.errors.size) {
                 this.infoMessageService.showAlertDialog(
@@ -250,13 +255,20 @@ export class FeatureSearchComponent {
         }
     }
 
-    onHide(event: any) {
+    onHide(_: any) {
+        this.traces = [];
+        this.diagnostics = [];
+        this.percentDone = 0;
+        this.isSearchPaused = false;
+        this.canPauseStopSearch = false;
+        this.results = [];
+        this.groupedResults = [];
         this.searchService.clear();
         this.isPanelVisible = false;
     }
 
-    onShow(event: any) {
-        this.recalculateResults();
+    onShow(_: any) {
+        this.recalculateResultsByGroups();
     }
 
     onApplyFix(message: DiagnosticsMessage) {
@@ -265,7 +277,7 @@ export class FeatureSearchComponent {
         }
     }
 
-    recalculateResults() {
+    recalculateResultsByGroups() {
         const results = this.results.map(result => {
             const featureIdParts = result.featureId.split('.');
             return {
