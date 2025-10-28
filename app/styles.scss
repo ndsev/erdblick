@@ -890,7 +890,38 @@ map-view {
   }
 }
 
-.map-tab, .styles-container {
+.styles-container {
+  .p-tree-node-label {
+    width: 100%;
+  }
+
+  height: calc(100% - 4em);
+  max-height: calc(75vh - 2em);
+  overflow: auto;
+
+  .flex-container {
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .tree-node-controls {
+      display: flex;
+      gap: 0.5em;
+      width: 8em;
+      justify-content: flex-end;
+      transition: opacity 0s, visibility 0s;
+
+      button {
+        width: 2em;
+        height: 2em;
+        box-shadow: none;
+      }
+    }
+  }
+}
+
+.map-tab {
   .grid-controls {
     display: flex;
     align-items: flex-start;
@@ -991,7 +1022,7 @@ map-view {
     align-items: center;
 
     &:hover {
-      .layer-controls {
+      .tree-node-controls {
         visibility: visible;
         opacity: 1;
         transition: opacity 0.25s, visibility 0.25s;
@@ -1012,7 +1043,7 @@ map-view {
       padding: 0;
     }
 
-    .layer-controls {
+    .tree-node-controls {
       display: flex;
       gap: 0.5em;
       width: 8em;
@@ -1062,29 +1093,6 @@ map-view {
         width: 2em;
         height: 2em;
         box-shadow: none;
-      }
-    }
-
-    .style-controls {
-      justify-content: flex-end;
-    }
-  }
-
-  .styles-import {
-    justify-content: center;
-    align-items: center;
-    display: flex;
-    padding: 0.5em;
-
-    .p-fileupload {
-      .p-fileupload-choose {
-        padding: 0.5em 1em 0.5em 1em;
-      }
-
-      .p-button-label {
-        box-shadow: none;
-        min-width: 6.4em;
-        font-size: 0.8em;
       }
     }
   }

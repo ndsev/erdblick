@@ -110,22 +110,22 @@ import {Subscription} from "rxjs";
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
                                              style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
-                                              (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
-                                            more_vert
-                                        </span>
+                                            <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                                  (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
+                                                more_vert
+                                            </span>
                                             <span>
-                                        <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
-                                                    (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
-                                                    [binary]="true"
-                                                    [inputId]="node.id"
-                                                    [name]="node.id" tabindex="0"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
-                                        </span>
+                                                <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
+                                                            [binary]="true"
+                                                            [inputId]="node.id"
+                                                            [name]="node.id" tabindex="0"/>
+                                                <label [for]="node.id"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
+                                            </span>
                                         </div>
-                                        <div class="layer-controls">
+                                        <div class="tree-node-controls">
                                             <p-button onEnterClick
                                                       (click)="toggleTileBorders(index, node.mapId, node.id)"
                                                       label="" pTooltip="Toggle tile borders"
@@ -350,6 +350,65 @@ export class MapPanelComponent {
                 }
             }
         ];
+    }
+
+    showOptionsToggleMenu(event: MouseEvent, node: StyleOptionNode) {
+        this.toggleMenu.toggle(event);
+        /* this.toggleMenuItems = [
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id == optionId);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id != optionId);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, false);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, true);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            }
+        ];
+        */
     }
 
     showLayerDialog() {
