@@ -866,11 +866,16 @@ map-view {
   }
 }
 
-.osm-controls {
+.map-config-controls {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  margin-bottom: 0.25em;
+  gap: 0.5em;
+  padding: 0.5em 0.5em 0 0.5em;
+
+  .p-divider-vertical {
+    margin: 0;
+    padding: 0.5em 0;
+  }
 
   button {
     width: 2em;
@@ -878,15 +883,16 @@ map-view {
     box-shadow: none;
   }
 
-  .slider-input {
-    width: 11em;
-    font-size: 0.9em;
-    padding: 0.5em 0.75em;
-  }
+  .osm-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
 
-  .p-divider-vertical {
-    margin: 0;
-    padding: 0.5em 0;
+    .slider-input {
+      width: 11em;
+      font-size: 0.9em;
+      padding: 0.5em 0.75em;
+    }
   }
 }
 
@@ -985,6 +991,16 @@ map-view {
       font-weight: 700;
       border-radius: 6px;
       font-size: 0.9em;
+
+      .close-view-button {
+        .p-button {
+          width: 1.25em;
+          height: 1.25em;
+          background-color: var(--p-badge-danger-background);
+          border-color: var(--p-badge-danger-background);
+          margin-left: 0.25em;
+        }
+      }
     }
 
     .p-fieldset-content {

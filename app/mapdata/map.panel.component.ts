@@ -21,34 +21,58 @@ import {Subscription} from "rxjs";
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
             <ng-container *ngFor="let index of viewIndices">
-                <div class="osm-controls">
-                    <span style="font-size: 0.9em">OSM Overlay:</span>
-                    <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
-                              icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                              label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <div *ngIf="osmEnabled[index]" style="display: inline-block">
-                        <input type="text" pInputText [(ngModel)]="osmOpacityValue[index]"
-                               (input)="onOsmOpacityInput($event, index)"
-                               (keydown.enter)="updateOSMOverlay(index)"
-                               (blur)="updateOSMOverlay(index)"
-                               class="w-full slider-input" tabindex="0"/>
-                        <p-slider [(ngModel)]="osmOpacityValue[index]" (ngModelChange)="updateOSMOverlay(index)"
-                                  class="w-full" tabindex="-1">
-                        </p-slider>
+                <p-fieldset class="map-tab" legend="" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
+                    <ng-template #header>
+                        <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
+                            @if (stateService.numViews > 1) {
+                                @if (index < 1) {
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                        splitscreen_left
+                                    </span>
+                                    <span class="font-bold">Maps Left View</span>
+                                } @else {
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                        splitscreen_right
+                                    </span>
+                                    <span class="font-bold">Maps Right View</span>
+                                    <p-button onEnterClick (click)="removeView($event, index)" class="close-view-button"
+                                              icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
+                                              tooltipPosition="bottom" tabindex="0">
+                                    </p-button>
+                                }
+                            } @else {
+                                <span class="font-bold">Maps</span>
+                            }
+                        </div>
+                    </ng-template>
+                    <div class="map-config-controls">
+                        <p-button onEnterClick (click)="syncOptionsForView(index)" class="map-controls-button"
+                                  icon="" label="" pTooltip="Sync visualization options in this view"
+                                  tooltipPosition="bottom" tabindex="0">
+                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                {{ syncedOptions[index] ? "sync" : "sync_disabled" }}
+                            </span>
+                        </p-button>
+                        <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                        <div class="osm-controls">
+                            <span style="font-size: 0.9em">OSM Overlay:</span>
+                            <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
+                                      icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                      label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
+                            </p-button>
+                            <div *ngIf="osmEnabled[index]" style="display: inline-block">
+                                <input type="text" pInputText [(ngModel)]="osmOpacityValue[index]"
+                                       (input)="onOsmOpacityInput($event, index)"
+                                       (keydown.enter)="updateOSMOverlay(index)"
+                                       (blur)="updateOSMOverlay(index)"
+                                       class="w-full slider-input" tabindex="0"/>
+                                <p-slider [(ngModel)]="osmOpacityValue[index]" (ngModelChange)="updateOSMOverlay(index)"
+                                          class="w-full" tabindex="-1">
+                                </p-slider>
+                            </div>
+                        </div>
                     </div>
-                    <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
-                    <p-button *ngIf="!index" onEnterClick (click)="addView()" class="osm-button"
-                              [disabled]="stateService.numViews === 2"
-                              icon="pi pi-plus" label="" pTooltip="Add another view for comparison"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                    <p-button *ngIf="index" onEnterClick (click)="removeView(index)" class="osm-button"
-                              icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
-                              tooltipPosition="bottom" tabindex="0">
-                    </p-button>
-                </div>
-                <p-fieldset class="map-tab" legend="Maps and Layers" [toggleable]="true" [(collapsed)]="mapsCollapsed">
+                    
                     <ng-container *ngIf="mapService.maps$ | async as mapGroups">
                         <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
                             No maps loaded.
@@ -165,7 +189,7 @@ import {Subscription} from "rxjs";
                                 <ng-template let-node pTemplate="Bool">
                                     <div style="display: flex; align-items: center;">
                                 <span onEnterClick class="material-icons menu-toggler"
-                                      (click)="alert()"
+                                      (click)="$event.stopPropagation()"
                                       tabindex="0">
                                     more_vert
                                 </span>
@@ -185,6 +209,14 @@ import {Subscription} from "rxjs";
                         </div>
                     </ng-container>
                 </p-fieldset>
+                @if (viewIndices.length < 2) {
+                    <p-button onEnterClick (click)="addView()" icon="" label="Add View" 
+                              pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
+                        <span class="material-symbols-outlined" style="margin: 0 auto;">
+                            add_column_right
+                        </span>
+                    </p-button>
+                }
             </ng-container>
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
@@ -223,10 +255,12 @@ export class MapPanelComponent {
 
     isMainButtonHovered: boolean = false;
     layerDialogVisible: boolean = false;
-    mapsCollapsed: boolean = false;
+    mapsCollapsed: boolean[] = [];
 
     osmEnabled: boolean[] = [true];
     osmOpacityValue: number[] = [30];
+
+    syncedOptions: boolean[] = [];
 
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -281,6 +315,12 @@ export class MapPanelComponent {
                     this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
                     this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
                 });
+                while (this.mapsCollapsed.length < viewIndices.length) {
+                    this.mapsCollapsed.push(false);
+                }
+                while (this.syncedOptions.length < viewIndices.length) {
+                    this.syncedOptions.push(false);
+                }
                 setTimeout(() => {
                     this.viewIndices = viewIndices;
                 }, 150);
@@ -466,7 +506,8 @@ export class MapPanelComponent {
         }
     }
 
-    removeView(index: number) {
+    removeView(event: MouseEvent, index: number) {
+        event.stopPropagation();
         // Right now we just decrement, but for more than 2 views we should consider the actual indices
         // We cannot have fewer views than at least 1
         if (this.stateService.numViews > 1) {
@@ -480,5 +521,14 @@ export class MapPanelComponent {
         this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
     }
 
-    protected readonly alert = alert;
+    syncMapStateAcrossViews(index: number) {
+
+    }
+
+    syncOptionsForView(viewIndex: number) {
+        if (viewIndex >= this.syncedOptions.length) {
+            return;
+        }
+        this.syncedOptions[viewIndex] = !this.syncedOptions[viewIndex];
+    }
 }

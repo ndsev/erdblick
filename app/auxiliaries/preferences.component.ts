@@ -129,6 +129,20 @@ import {EditorService} from "../shared/editor.service";
                         </div>
                         <div class="control-desc">Open Viewport Statistics</div>
                     </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Left <-</span>
+                        </div>
+                        <div class="control-desc">Cycle through Viewers to the left</div>
+                    </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Right -></span>
+                        </div>
+                        <div class="control-desc">Cycle through Viewers to the right</div>
+                    </li>
                 </ul>
             </div>
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
