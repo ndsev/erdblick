@@ -63,7 +63,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
     private modeSubscription?: Subscription;
-    private viewInitialized = false;
 
     /**
      * Construct a Cesium View with a Model.
@@ -158,6 +157,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
             }
             this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
             this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
+            const currentSyncState = new Set(this.stateService.viewSync);
+            this.selectedOptions = this.syncOptions.filter(option => currentSyncState.has(option.value));
             this.cdr.markForCheck();
         });
     }
@@ -168,5 +169,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
 
     updateSelectedOptions() {
         this.stateService.viewSync = this.selectedOptions.map(option => option.value);
+        this.stateService.syncViews();
     }
 }

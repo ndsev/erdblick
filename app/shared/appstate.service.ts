@@ -346,6 +346,20 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    syncViews(): void {
+        if (this.numViews < 2) {
+            return;
+        }
+        if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
+            const camState = this.cameraViewDataState.getValue(this.focusedView);
+            this.setView(this.focusedView,
+                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt));
+        }
+        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
+            this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
+        }
+    }
+
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
     }

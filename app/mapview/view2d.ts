@@ -80,7 +80,7 @@ export class MapView2D extends MapView {
             if (!viewRect) {
                 return;
             }
-            
+
             const tracking3DCam = new Camera(this.viewer.scene);
             tracking3DCam.setView({destination: viewRect, orientation: this.viewer.camera});
             const cameraPosition = tracking3DCam.positionCartographic;
