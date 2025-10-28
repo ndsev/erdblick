@@ -3,6 +3,7 @@ import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {EntityConstructorOptions} from "../integrations/cesium";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,
@@ -19,7 +20,7 @@ export class RightClickMenuService {
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
-    tileOutline: Subject<object | null> = new Subject<object | null>();
+    tileOutline: Subject<EntityConstructorOptions | null> = new Subject<EntityConstructorOptions | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
 
     constructor(private stateService: AppStateService) {

@@ -34,28 +34,42 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  * (style sheet, tile layer) combination.
  */
 class TileBoxVisualization {
-    static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
-    static outlinePrimitive: Primitive|null = null;
+    static tileBoxStatePerView: {
+        visualizations: Map<bigint, TileBoxVisualization>,
+        outlinePrimitive: Primitive | null
+    }[] = [];
 
-    static get(tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
-        if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
-            TileBoxVisualization.visualizations.set(
-                tile.tileId, new TileBoxVisualization(viewer, tile, color));
-            TileBoxVisualization.updatePrimitive(viewer);
+    static getTileBoxState(viewIndex: number) {
+        while (viewIndex >= this.tileBoxStatePerView.length) {
+            this.tileBoxStatePerView.push({
+                visualizations: new Map<bigint, TileBoxVisualization>(),
+                outlinePrimitive: null,
+            });
         }
-        let result = this.visualizations.get(tile.tileId)!;
+        return this.tileBoxStatePerView[viewIndex];
+    }
+
+    static get(viewIndex: number, tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
+        const state = this.getTileBoxState(viewIndex);
+        if (!state.visualizations.has(tile.tileId)) {
+            state.visualizations.set(
+                tile.tileId, new TileBoxVisualization(tile, color));
+            TileBoxVisualization.updatePrimitive(viewIndex, viewer);
+        }
+        let result = state.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
         result.updateOutlineColor();
         return result;
     }
 
-    static updatePrimitive(viewer: Viewer) {
-        if (this.outlinePrimitive) {
-            viewer.scene.primitives.remove(this.outlinePrimitive);
+    static updatePrimitive(viewIndex: number, viewer: Viewer) {
+        const state = this.getTileBoxState(viewIndex);
+        if (state.outlinePrimitive) {
+            viewer.scene.primitives.remove(state.outlinePrimitive);
         }
-        this.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
-            geometryInstances: [...this.visualizations].map(kv => kv[1].instance),
+        state.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
+            geometryInstances: [...state.visualizations].map(kv => kv[1].instance),
             appearance: new PerInstanceColorAppearance({
                 flat: true,
                 renderState: {
@@ -75,7 +89,7 @@ class TileBoxVisualization {
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
     private instance: GeometryInstance;
 
-    constructor(viewer: Viewer, tile: FeatureTile, color?: Color) {
+    constructor(tile: FeatureTile, color?: Color) {
         this.color = color;
         this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(this.getCurrentOutlineColor());
 
@@ -117,14 +131,14 @@ class TileBoxVisualization {
         ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
     }
 
-    delete(viewer: Viewer, featureCount: number) {
+    delete(viewIndex: number, viewer: Viewer, featureCount: number) {
         --this.refCount;
         this.featureCount -= featureCount;
         if (this.refCount <= 0) {
-            TileBoxVisualization.visualizations.delete(this.id);
-            TileBoxVisualization.updatePrimitive(viewer);
-        }
-        else {
+            const state = TileBoxVisualization.getTileBoxState(viewIndex);
+            state.visualizations.delete(this.id);
+            TileBoxVisualization.updatePrimitive(viewIndex, viewer);
+        } else {
             // Update the outline color since featureCount has changed
             this.updateOutlineColor();
         }
@@ -318,7 +332,7 @@ export class TileVisualization {
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
+            this.lowDetailVisu = TileBoxVisualization.get(this.viewIndex, this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
             this.hasTileBorder = true;
         }
 
@@ -353,7 +367,7 @@ export class TileVisualization {
             this.primitiveCollection = null;
         }
         if (this.lowDetailVisu) {
-            this.lowDetailVisu.delete(viewer, this.tile.numFeatures);
+            this.lowDetailVisu.delete(this.viewIndex, viewer, this.tile.numFeatures);
             this.lowDetailVisu = null;
         }
         this.hasHighDetailVisualization = false;

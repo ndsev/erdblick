@@ -232,7 +232,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
     outlineTheTileBox(tileId: bigint, color: Color) {
         const tileBox = coreLib.getTileBox(tileId);
-        const entity = {
+        this.menuService.tileOutline.next({
             rectangle: {
                 coordinates: Rectangle.fromDegrees(...tileBox),
                 height: HeightReference.CLAMP_TO_GROUND,
@@ -241,8 +241,7 @@ export class SourceDataLayerSelectionDialogComponent {
                 outlineWidth: 3.,
                 outlineColor: color
             }
-        }
-        this.menuService.tileOutline.next(entity);
+        });
     }
 
     onMapIdChange(mapId: SourceDataDropdownOption) {

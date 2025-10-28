@@ -72,6 +72,7 @@ export const defined = Cesium.defined;
 export type  PinBuilder = Cesium.PinBuilder;
 export type  Entity = Cesium.Entity;
 export const Entity = Cesium.Entity;
+export type  EntityConstructorOptions = Cesium.Entity.ConstructorOptions;
 export type  Camera = Cesium.Camera;
 export const Camera = Cesium.Camera;
 export type HeadingPitchRange = Cesium.HeadingPitchRange;

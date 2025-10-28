@@ -326,7 +326,7 @@ export class MapView {
                 const cartographic = Cartographic.fromCartesian(cartesian);
                 const longitude = CesiumMath.toDegrees(cartographic.longitude);
                 const latitude = CesiumMath.toDegrees(cartographic.latitude);
-                this.menuService.tileIdsForSourceData.next(Array(16).map((_, level) => {
+                this.menuService.tileIdsForSourceData.next(Array(16).fill(null).map((_, level) => {
                     const tileId = coreLib.getTileIdFromPosition(longitude, latitude, level);
                     return {id: tileId, name: `${tileId} (level ${level})`, tileLevel: level};
                 }));
