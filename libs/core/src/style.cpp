@@ -98,6 +98,12 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
         if (type == "bool") {
             type_ = FeatureStyleOptionType::Bool;
         }
+        else if (type == "color") {
+            type_ = FeatureStyleOptionType::Color;
+        }
+        else if (type == "string") {
+            type_ = FeatureStyleOptionType::String;
+        }
         else {
             // TODO: Eventually we need to throw an exception here.
             std::cout << "Unrecognized option type " << type << std::endl;
@@ -113,6 +119,9 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
     }
     if (auto node = yaml["description"]) {
         description_ = node.as<std::string>();
+    }
+    if (auto node = yaml["internal"]) {
+        internal_ = node.as<bool>();
     }
 }
 

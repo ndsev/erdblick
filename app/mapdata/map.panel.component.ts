@@ -79,6 +79,7 @@ import {Subscription} from "rxjs";
                         </div>
                         <div *ngIf="mapGroups.size" class="maps-container">
                             <p-tree [value]="mapGroups.nodes">
+                                <!-- Template for Group nodes -->
                                 <ng-template let-node pTemplate="Group">
                                 <div class="font-bold white-space-nowrap"
                                      style="display: flex; align-items: center;">
@@ -97,6 +98,7 @@ import {Subscription} from "rxjs";
                                     </span>
                                 </div>
                                 </ng-template>
+                                <!-- Template for Map nodes -->
                                 <ng-template let-node pTemplate="Map">
                                 <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
                                         [popup]="true"
@@ -130,6 +132,7 @@ import {Subscription} from "rxjs";
                                     </div>
                                 </div>
                                 </ng-template>
+                                <!-- Template for Feature Layer nodes -->
                                 <ng-template let-node pTemplate="Features">
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
@@ -186,25 +189,27 @@ import {Subscription} from "rxjs";
                                                [(ngModel)]="node.viewConfig[index].level"/>
                                     </div>
                                 </ng-template>
+                                <!-- Template for boolean style option nodes -->
                                 <ng-template let-node pTemplate="Bool">
                                     <div style="display: flex; align-items: center;">
-                                <span onEnterClick class="material-icons menu-toggler"
-                                      (click)="$event.stopPropagation()"
-                                      tabindex="0">
-                                    more_vert
-                                </span>
+                                        <span onEnterClick class="material-icons menu-toggler"
+                                              (click)="$event.stopPropagation()"
+                                              tabindex="0">
+                                            more_vert
+                                        </span>
                                         <span style="font-style: oblique">
                                             <p-checkbox
-                                                    [(ngModel)]="node.value[index]"
-                                                    (ngModelChange)="updateStyleOption(node, index)"
-                                                    [binary]="true"
-                                                    [inputId]="node.styleId + '_' + node.id"
-                                                    [name]="node.styleId + '_' + node.id"/>
-                                    <label [for]="node.styleId + '_' + node.id"
-                                           style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
-                                </span>
+                                                [(ngModel)]="node.value[index]"
+                                                (ngModelChange)="updateStyleOption(node, index)"
+                                                [binary]="true"
+                                                [inputId]="node.styleId + '_' + node.id"
+                                                [name]="node.styleId + '_' + node.id"/>
+                                            <label [for]="node.styleId + '_' + node.id"
+                                               style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
+                                        </span>
                                     </div>
                                 </ng-template>
+                                <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                             </p-tree>
                         </div>
                     </ng-container>

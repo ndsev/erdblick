@@ -27,6 +27,7 @@ export type FeatureStyleOptionWithStringType = {
     type: FeatureStyleOptionType | string,
     defaultValue: any,
     description: string,
+    internal: boolean
 };
 
 export interface ErdblickStyle {
@@ -426,6 +427,12 @@ export class StyleService {
                         // We need to convert the value type to a string, so it is understood by prime-ng p-tree.
                         if (option.type === coreLib.FeatureStyleOptionType.Bool) {
                             option.type = "Bool";
+                        }
+                        if (option.type === coreLib.FeatureStyleOptionType.Color) {
+                            option.type = "Color";
+                        }
+                        if (option.type === coreLib.FeatureStyleOptionType.String) {
+                            option.type = "String";
                         }
                         options.push(option);
                     }

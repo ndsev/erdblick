@@ -337,7 +337,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureStyleOptionType
     em::enum_<FeatureStyleOptionType>("FeatureStyleOptionType")
-        .value("Bool", FeatureStyleOptionType::Bool);
+        .value("Bool", FeatureStyleOptionType::Bool)
+        .value("Color", FeatureStyleOptionType::Color)
+        .value("String", FeatureStyleOptionType::String);
 
     ////////// FeatureStyleOption
     em::value_object<FeatureStyleOption>("FeatureStyleOption")
@@ -345,7 +347,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("id", &FeatureStyleOption::id_)
         .field("type", &FeatureStyleOption::type_)
         .field("defaultValue", &FeatureStyleOption::defaultValue_) // Ensure correct binding/conversion for YAML::Node
-        .field("description", &FeatureStyleOption::description_);
+        .field("description", &FeatureStyleOption::description_)
+        .field("internal", &FeatureStyleOption::internal_);
 
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");

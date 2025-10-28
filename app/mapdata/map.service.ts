@@ -864,13 +864,10 @@ export class MapDataService {
         }
     }
 
-    private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>) {
+    private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>, panelId?: number) {
         let visualizationCollection = null;
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
-                if (!this.preserveSidePanel && this.sidePanelService.panel != SidePanelState.FEATURESEARCH) {
-                    this.sidePanelService.panel = SidePanelState.NONE;
-                }
                 visualizationCollection = this.selectionVisualizations;
                 break;
             case coreLib.HighlightMode.HOVER_HIGHLIGHT:
@@ -920,7 +917,10 @@ export class MapDataService {
                             mode,
                             featureIds,
                             false,
-                            this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id));
+                            {
+                                ... this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id),
+                                "selectableFeatureHighlightColor": "color me!"
+                            });
                         this.tileVisualizationTopic.next(visu);
                         visualizationCollection.push(visu);
                     }

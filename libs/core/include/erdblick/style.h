@@ -14,6 +14,8 @@ namespace erdblick
 enum class FeatureStyleOptionType
 {
     Bool,
+    Color,
+    String
 };
 
 struct FeatureStyleOption
@@ -26,6 +28,7 @@ struct FeatureStyleOption
     FeatureStyleOptionType type_ = FeatureStyleOptionType::Bool;
     NativeJsValue defaultValue_;
     std::string description_;
+    bool internal_ = false;
 
     template <class LambdaT>
     void convertValue(std::string const& v, LambdaT callback) const {
@@ -35,6 +38,11 @@ struct FeatureStyleOption
                 v,
                 std::string_view("true"),
                 [](char a, char b) { return std::tolower(a) == std::tolower(b); }));
+            break;
+        case FeatureStyleOptionType::String:
+        case FeatureStyleOptionType::Color:
+            callback(v);
+            break;
         }
     }
 };
