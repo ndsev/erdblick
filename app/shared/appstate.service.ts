@@ -517,11 +517,8 @@ export class AppStateService implements OnDestroy {
     }
 
     private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
-        const newOrientation = orientation !== undefined ? orientation : {
-            heading: 0.0,
-            pitch: -90,
-            roll: 0.0
-        }
+        // Fall back to the current orientation if none was passed.
+        orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
             destination: {
                 lon: CesiumMath.toDegrees(destination.longitude),
@@ -529,9 +526,9 @@ export class AppStateService implements OnDestroy {
                 alt: destination.height,
             },
             orientation: {
-                heading: newOrientation.heading,
-                pitch: newOrientation.pitch,
-                roll: newOrientation.roll,
+                heading: orientation.heading,
+                pitch: orientation.pitch,
+                roll: orientation.roll,
             }
         };
         this.cameraViewDataState.next(viewIndex, view);

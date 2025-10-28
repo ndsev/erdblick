@@ -653,20 +653,25 @@ export class MapView {
         this.scalingFactor = Math.pow(altitude / 1000, 1.1) / 2;
     }
 
+    // TODO: Make sure that we transform the offset according to the heading of the camera
     moveUp() {
         this.stateService.focusedView = this._viewIndex;
+        this.moveCameraOnSurface(0, this.cameraMoveUnits);
     }
 
     moveDown() {
         this.stateService.focusedView = this._viewIndex;
+        this.moveCameraOnSurface(0, -this.cameraMoveUnits);
     }
 
     moveLeft() {
         this.stateService.focusedView = this._viewIndex;
+        this.moveCameraOnSurface(-this.cameraMoveUnits, 0);
     }
 
     moveRight() {
         this.stateService.focusedView = this._viewIndex;
+        this.moveCameraOnSurface(this.cameraMoveUnits, 0);
     }
 
     zoomIn() {
@@ -714,27 +719,7 @@ export class MapView {
     }
 
     protected moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
-        try {
-            // Check if the viewer is destroyed
-            if (!this.isAvailable()) {
-                console.debug('Cannot move camera: viewer  not available or is destroyed');
-                return;
-            }
-
-            // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
-            const cameraPosition = this.viewer.camera.positionCartographic;
-            const lon = cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset);
-            const lat = cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset);
-            const alt = cameraPosition.height;
-            const newPosition = new Cartographic(lon, lat, alt);
-            this.performSurfaceMovement(newPosition);
-        } catch (error) {
-            console.error('Error moving camera:', error);
-        }
-    }
-
-    protected performSurfaceMovement(newPosition: Cartographic) {
-        throw new Error("Not Implemented!");
+        throw new Error('Not Implemented');
     }
 
     protected updateOnCameraChange() {

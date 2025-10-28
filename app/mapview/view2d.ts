@@ -68,32 +68,33 @@ export class MapView2D extends MapView {
         }
     }
 
+    protected override moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
+        try {
+            // Check if the viewer is destroyed
+            if (!this.isAvailable()) {
+                console.debug('Cannot move camera: viewer  not available or is destroyed');
+                return;
+            }
+
+            const viewRect = this.computeViewRectangle();
+            if (!viewRect) {
+                return;
+            }
+            
+            const tracking3DCam = new Camera(this.viewer.scene);
+            tracking3DCam.setView({destination: viewRect, orientation: this.viewer.camera});
+            const cameraPosition = tracking3DCam.positionCartographic;
+            this.stateService.setView(this._viewIndex, new Cartographic(
+                cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset),
+                cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset),
+                cameraPosition.height));
+        } catch (error) {
+            console.error('Error moving camera:', error);
+        }
+    }
+
     protected override setupHandlers() {
         super.setupHandlers();
-    }
-
-    override moveUp() {
-        super.moveUp();
-        const distance = this.get2DMovementDistance();
-        this.moveCameraOnSurface(0, distance.latitudeOffset);
-    }
-
-    override moveDown() {
-        super.moveDown();
-        const distance = this.get2DMovementDistance();
-        this.moveCameraOnSurface(0, -distance.latitudeOffset);
-    }
-
-    override moveLeft() {
-        super.moveLeft();
-        const distance = this.get2DMovementDistance();
-        this.moveCameraOnSurface(-distance.longitudeOffset, 0);
-    }
-
-    override moveRight() {
-        super.moveRight();
-        const distance = this.get2DMovementDistance();
-        this.moveCameraOnSurface(distance.longitudeOffset, 0);
     }
 
     protected override updateOnCameraChange() {
@@ -110,7 +111,7 @@ export class MapView2D extends MapView {
 
         const tracking3DCam = new Camera(this.viewer.scene);
         tracking3DCam.setView({destination: viewRect, orientation: camera});
-        this.stateService.setView(this._viewIndex, Cartographic.fromCartesian(tracking3DCam.position), tracking3DCam);
+        this.stateService.setView(this._viewIndex, Cartographic.fromCartesian(tracking3DCam.position));
     };
 
     protected override performConversionForMovePosition(pos: { x: number, y: number, z?: number }):
@@ -163,44 +164,6 @@ export class MapView2D extends MapView {
             const cameraHeight = this.viewer.camera.positionCartographic.height;
             return [Cartographic.fromDegrees(pos.x, pos.y, cameraHeight), undefined];
         }
-    }
-
-    protected override performSurfaceMovement(newPosition: Cartographic) {
-        // In 2D mode, use setView without orientation to maintain the 2D constraints
-        this.stateService.setView(this._viewIndex, newPosition);
-    }
-
-    /**
-     * Get movement distance for 2D mode based on current viewport
-     */
-    private get2DMovementDistance(): { longitudeOffset: number, latitudeOffset: number } {
-        const currentView = this.viewer.camera.computeViewRectangle();
-        if (!currentView) {
-            // Fallback to default movement if view can't be computed
-            return {
-                longitudeOffset: this.cameraMoveUnits,
-                latitudeOffset: this.cameraMoveUnits
-            };
-        }
-
-        const currentWidth = currentView.east - currentView.west;
-        const currentHeight = currentView.north - currentView.south;
-
-        // Calculate movement distances using centralized constant
-        const longitudeOffset = CesiumMath.toDegrees(currentWidth * CAMERA_CONSTANTS.MOVEMENT_PERCENTAGE_2D);
-        const latitudeOffset = CesiumMath.toDegrees(currentHeight * CAMERA_CONSTANTS.MOVEMENT_PERCENTAGE_2D);
-
-        // Clamp movements to reasonable values using centralized constants
-        return {
-            longitudeOffset: Math.max(
-                CAMERA_CONSTANTS.MIN_LONGITUDE_MOVEMENT,
-                Math.min(CAMERA_CONSTANTS.MAX_LONGITUDE_MOVEMENT, longitudeOffset)
-            ),
-            latitudeOffset: Math.max(
-                CAMERA_CONSTANTS.MIN_LATITUDE_MOVEMENT,
-                Math.min(CAMERA_CONSTANTS.MAX_LATITUDE_MOVEMENT, latitudeOffset)
-            )
-        };
     }
 
     protected override computeViewRectangle(): Rectangle | undefined {

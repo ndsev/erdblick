@@ -1,4 +1,4 @@
-import {Cartesian3, Cartographic, CesiumMath, SceneMode, Rectangle, Entity, Color} from "../integrations/cesium";
+import {Cartesian3, Cartographic, CesiumMath, Rectangle, SceneMode} from "../integrations/cesium";
 import {CAMERA_CONSTANTS, MapView} from "./view";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
@@ -34,27 +34,6 @@ export class MapView3D extends MapView {
         // Reset zoom constraints for 3D mode
         scene.screenSpaceCameraController.minimumZoomDistance = 1;
         scene.screenSpaceCameraController.maximumZoomDistance = 50000000;
-    }
-
-    // TODO: Make sure that we transform the offest according to the heading of the camera
-    override moveUp() {
-        super.moveUp();
-        this.moveCameraOnSurface(0, this.cameraMoveUnits);
-    }
-
-    override moveDown() {
-        super.moveDown();
-        this.moveCameraOnSurface(0, -this.cameraMoveUnits);
-    }
-
-    override moveLeft() {
-        super.moveLeft();
-        this.moveCameraOnSurface(-this.cameraMoveUnits, 0);
-    }
-
-    override moveRight() {
-        super.moveRight();
-        this.moveCameraOnSurface(this.cameraMoveUnits, 0);
     }
 
     protected override updateOnAppStateChange(cameraData: CameraViewState) {
@@ -100,13 +79,28 @@ export class MapView3D extends MapView {
         );
     };
 
-    protected override performSurfaceMovement(newPosition: Cartographic) {
-        this.stateService.setView(this._viewIndex, newPosition, this.stateService.getCameraOrientation(this._viewIndex));
-    }
-
     protected override computeViewRectangle(): Rectangle | undefined {
         return this.viewer.camera.computeViewRectangle(
             this.viewer.scene.globe.ellipsoid
         );
+    }
+
+    protected override moveCameraOnSurface(longitudeOffset: number, latitudeOffset: number) {
+        try {
+            // Check if the viewer is destroyed
+            if (!this.isAvailable()) {
+                console.debug('Cannot move camera: viewer not available or is destroyed');
+                return;
+            }
+
+            // Get the current camera position in Cartographic coordinates (longitude, latitude, height)
+            const cameraPosition = this.viewer.camera.positionCartographic;
+            this.stateService.setView(this._viewIndex, new Cartographic(
+                cameraPosition.longitude + CesiumMath.toRadians(longitudeOffset),
+                cameraPosition.latitude + CesiumMath.toRadians(latitudeOffset),
+                cameraPosition.height), this.stateService.getCameraOrientation(this._viewIndex));
+        } catch (error) {
+            console.error('Error moving camera:', error);
+        }
     }
 }

@@ -33,6 +33,7 @@ rules:
     label-font: "12px Helvetica"
     opacity: 1.0
     width: 15.0
+    offset: [0, 0, -0.01]
 
   # Hover/Selection styles
   - geometry: ["mesh", "polygon"]
