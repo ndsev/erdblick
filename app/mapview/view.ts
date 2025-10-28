@@ -286,7 +286,7 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            this.stateService.cameraViewDataState.pipe(this._viewIndex).subscribe(cameraViewData => {
+            this.stateService.cameraViewDataState.pipe(this._viewIndex, distinctUntilChanged()).subscribe(cameraViewData => {
                 if (this.ignoreNextCamAppStateUpdate) {
                     this.ignoreNextCamAppStateUpdate = false;
                     return;

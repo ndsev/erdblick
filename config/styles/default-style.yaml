@@ -17,13 +17,13 @@ rules:
     filter: showMesh
     color: teal
     opacity: 0.8
-    offset: [0, 0, -0.4]
+    offset: [0, 0, -0.04]
   - geometry: ["line"]
     filter: showLine
     color: moccasin
     opacity: 1.0
     width: 5.0
-    offset: [0, 0, -0.2]
+    offset: [0, 0, -0.02]
   - geometry: ["point"]
     point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
     filter: showPoint
@@ -39,33 +39,32 @@ rules:
     color: green
     opacity: 0.8
     mode: hover
-    offset: [0, 0, -0.3]
+    offset: [0, 0, -0.03]
   - geometry: ["line"]
     color: green
     opacity: 0.8
     width: 10.0
     mode: hover
-    offset: [0, 0, -0.1]
+    offset: [0, 0, -0.01]
   - geometry: ["point"]
     color: green
     opacity: 0.8
     width: 20.0
     mode: hover
-    offset: [0, 0, 0.1]
   - geometry: ["mesh", "polygon"]
     color: yellow
     opacity: 0.8
     mode: selection
-    offset: [0, 0, -0.3]
+    offset: [0, 0, -0.03]
   - geometry: ["line"]
     color: yellow
     opacity: 0.8
     width: 10.0
     mode: selection
-    offset: [0, 0, -0.1]
+    offset: [0, 0, -0.01]
   - geometry: ["point"]
+    point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
     color: yellow
     opacity: 0.8
     width: 20.0
     mode: selection
-    offset: [0, 0, 0.1]

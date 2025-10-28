@@ -132,7 +132,9 @@ export class InspectionPanelComponent implements AfterViewInit {
                     this.selectedLayerItem = undefined;
                 }
             } else {
-                this.title = panel.selectedFeatures.map(feature => feature.featureId).join(' | ');
+                this.title = panel.selectedFeatures.length > 1 ?
+                    `Selected ${panel.selectedFeatures.length} features` :
+                    panel.selectedFeatures[0].featureId;
                 this.layerMenuItems = [];
                 this.selectedLayerItem = undefined;
             }
