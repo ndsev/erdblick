@@ -36,8 +36,8 @@ export class FeaturePanelComponent {
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",   header: "Key",   width: '0*', transform: this.formatWithSourceDataButtons.bind(this) },
-        { key: "value", header: "Value", width: '0*', transform: this.formatWithInfoButton.bind(this) }
+        { key: "key",   header: "Key",   width: '0*', transform: this.formatData.bind(this) },
+        { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
     ];
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
@@ -92,7 +92,7 @@ export class FeaturePanelComponent {
 
                 node.data = {
                     key: data.key,
-                    value: value,
+                    value: value ?? "",
                     type: data.type
                 };
                 if (data.hasOwnProperty("info")) {
@@ -137,32 +137,12 @@ export class FeaturePanelComponent {
         return treeNodes;
     }
 
-    formatWithSourceDataButtons(colKey: string, rowData: any) {
-        if (!colKey || !rowData.hasOwnProperty(colKey)) {
-            return "";
-        }
-        const keyHtml = `<span>${rowData[colKey]}</span>`;
-        if (!rowData.hasOwnProperty("sourceDataReferences") || !rowData["sourceDataReferences"].length) {
-            return keyHtml;
-        }
-        return keyHtml;
-    }
-
-    formatWithInfoButton(colKey: string, rowData: any) {
+    formatData(colKey: string, rowData: any) {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
         }
 
-        const valueHtml = `<span>${rowData[colKey]}</span>`;
-        if (!rowData.hasOwnProperty("info")) {
-            return valueHtml;
-        }
-        const infoCircle = `
-            <span>
-                <i class="pi pi-info-circle" [pTooltip]="rowData['info'].toString()" tooltipPosition="left"></i>
-            </span>
-        `;
-        return `${valueHtml}${infoCircle}`;
+        return `<span>${rowData[colKey]}</span>`;
     }
 
     zoomToFeature() {

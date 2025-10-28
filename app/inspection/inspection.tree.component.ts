@@ -96,18 +96,27 @@ export class FeatureFilterOptions {
                             style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
                             [pTooltip]="rowData[col.key]" tooltipPosition="left"
                             [tooltipOptions]="tooltipOptions">
-                            <div style="display: flex; flex-direction: row; gap: 0.25em; overflow-x: scroll">
-                                <p-treeTableToggler [rowNode]="rowNode" *ngIf="$index === 0"/>
+                            <div style="display: flex; flex-direction: row; gap: 0.25em;">
+                                @if ($index === 0) {
+                                    <p-treeTableToggler [rowNode]="rowNode"/>
+                                }
                                 @if (filterFields.indexOf(col.key) !== -1) {
                                     <span (click)="onNodeClick($event, rowData, col.key)"
                                           (mouseover)="onNodeHover($event, rowData)"
                                           (mouseout)="onNodeHoverExit($event, rowData)"
-                                          style="cursor: pointer"
+                                          style="cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis"
                                           [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
                                     </span>
-                                    @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                    @if (rowData.hasOwnProperty("info") && $index !== 0) {
+                                        <span>
+                                            <i class="pi pi-info-circle" [pTooltip]="rowData['info']" tooltipPosition="top"></i>
+                                        </span>
+                                    }
+                                    @if (rowData.hasOwnProperty("sourceDataReferences") && 
+                                         rowData["sourceDataReferences"].length > 0 &&
+                                         $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
-                                            @for (item of rowData["sourceDataReferences"]; track $index) {
+                                            @for (item of rowData["sourceDataReferences"]; track item.mapTileKey) {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
@@ -122,10 +131,17 @@ export class FeatureFilterOptions {
                                           (mouseover)="onNodeHover($event, rowData)"
                                           (mouseout)="onNodeHoverExit($event, rowData)"
                                           style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
-                                </span>
-                                    @if (rowData.hasOwnProperty("sourceDataReferences") && rowData["sourceDataReferences"].length > 0) {
+                                    </span>
+                                    @if (rowData.hasOwnProperty("info") && $index !== 0) {
+                                        <span>
+                                            <i class="pi pi-info-circle" [pTooltip]="rowData['info']" tooltipPosition="top"></i>
+                                        </span>
+                                    }
+                                    @if (rowData.hasOwnProperty("sourceDataReferences") &&
+                                         rowData["sourceDataReferences"].length > 0 &&
+                                         $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
-                                            @for (item of rowData["sourceDataReferences"]; track $index) {
+                                            @for (item of rowData["sourceDataReferences"]; track item.mapTileKey) {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
@@ -226,7 +242,9 @@ export class InspectionTreeComponent implements OnDestroy {
                 private messageService: InfoMessageService) {
         effect(() => {
             this.data = this.treeData();
-            this.expandTreeNodes(this.data);
+            if (this.data[0].data.key === "Feature") {
+                this.expandTreeNodes(this.data);
+            }
 
             // FIXME We have to force recalculate the tables number of visible items?
             setTimeout(() => {
@@ -314,10 +332,12 @@ export class InspectionTreeComponent implements OnDestroy {
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightByJumpTargetFilter(
-                0,
-                rowData["mapId"],
-                rowData["value"]).then();
+            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                this.jumpService.highlightByJumpTargetFilter(
+                    viewIndex,
+                    rowData["mapId"],
+                    rowData["value"]).then();
+            }
         }
     }
 
@@ -341,11 +361,13 @@ export class InspectionTreeComponent implements OnDestroy {
             return;
         }
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            this.jumpService.highlightByJumpTargetFilter(
-                0,
-                rowData["mapId"],
-                rowData["value"],
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                this.jumpService.highlightByJumpTargetFilter(
+                    viewIndex,
+                    rowData["mapId"],
+                    rowData["value"],
+                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            }
         } else if (rowData["hoverId"] && this.selectedFeatures()) {
             this.mapService.setHoveredFeatures([{
                 mapTileKey: this.selectedFeatures()!.features[rowData["featureIndex"]].mapTileKey,
@@ -354,7 +376,7 @@ export class InspectionTreeComponent implements OnDestroy {
         }
     }
 
-    showSourceData(event: any, sourceDataRef: any) {
+    showSourceData(event: Event, sourceDataRef: any) {
         event.stopPropagation();
 
         try {
@@ -387,7 +409,8 @@ export class InspectionTreeComponent implements OnDestroy {
 
     filterTree(filterString: string) {
         if (!filterString) {
-            return;
+            this.data = this.treeData();
+            this.expandTreeNodes(this.data);
         }
 
         const query = filterString.toLowerCase();
@@ -441,9 +464,10 @@ export class InspectionTreeComponent implements OnDestroy {
         };
 
         this.data = filterNodes(this.treeData());
+        this.expandTreeNodes(this.data);
     }
 
-    expandTreeNodes(nodes: TreeTableNode[], parent: any = null): void {
+    expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;

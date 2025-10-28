@@ -343,29 +343,34 @@ export class MapView {
 
             const position = movement.position;
             let feature = this.viewer.scene.pick(position);
-            if (defined(feature) && feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
-                if (feature.primitive.id) {
-                    const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
-                    if (featureInfo.mapId && featureInfo.featureId) {
-                        this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId,
-                            featureInfo.featureId, coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
+            if (defined(feature)) {
+                if (feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
+                    // This is a search result marker, and it selects its found feature.
+                    if (feature.primitive.id) {
+                        const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
+                        if (featureInfo.mapId && featureInfo.featureId) {
+                            this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId,
+                                featureInfo.featureId, coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
+                        }
+                    } else {
+                        // Convert Cartesian3 position to WGS84 degrees.
+                        const cartographic = Cartographic.fromCartesian(feature.primitive.position);
+                        this.mapService.moveToWgs84PositionTopic.next({
+                            targetView: this._viewIndex,
+                            x: CesiumMath.toDegrees(cartographic.longitude),
+                            y: CesiumMath.toDegrees(cartographic.latitude),
+                            z: cartographic.height + 1000
+                        });
                     }
                 } else {
-                    // Convert Cartesian3 position to WGS84 degrees
-                    const cartographic = Cartographic.fromCartesian(feature.primitive.position);
-                    this.mapService.moveToWgs84PositionTopic.next({
-                        targetView: this._viewIndex,
-                        x: CesiumMath.toDegrees(cartographic.longitude),
-                        y: CesiumMath.toDegrees(cartographic.latitude),
-                        z: cartographic.height + 1000
-                    });
+                    // Just select the feature.
+                    this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
                 }
-            }
-            if (!defined(feature)) {
+            } else {
+                // No new feature to select. Unset existing selections.
                 this.stateService.unsetUnpinnedSelections();
                 this.menuService.tileOutline.next(null);
             }
-            this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
             // Handle position update after highlighting, because otherwise
             // there is a race condition between the parameter updates for
             // feature selection and position update.

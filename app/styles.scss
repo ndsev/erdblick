@@ -25,10 +25,12 @@
 }
 
 .source-layer-dropdown {
+  height: 1.6em;
+
   .p-select-label {
     padding: 0.2em;
     min-width: 8em;
-    height: 1.75em;
+    height: 1.6em;
   }
 
   .p-select-dropdown {
@@ -311,28 +313,43 @@ map-view {
   gap: 0.5em;
   z-index: 110;
 
-  .inspect-panel-small-header {
-    .p-accordionheader {
-      /* Match default header height from .inspect-panel .p-accordionheader (0.95em total) */
-      padding-top: 0.6em !important;
-      padding-bottom: 0.6em !important;
-    }
-
-    .resizable-container {
-      height: calc(100vh - 7.5em);
-      max-height: calc(100vh - 7.5em) !important;
-    }
+  inspection-panel {
+    height: fit-content;
   }
 
   .inspect-panel {
     min-width: 30em;
+
+    .inspector-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-right: 0.5em;
+
+      & > * {
+        display: flex;
+        gap: 0.25em;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .p-button {
+        width: 1.75em !important;
+        height: 1.75em !important;
+        margin: 0;
+      }
+    }
 
     .p-accordionpanel {
       border: none;
     }
 
     .p-accordionheader {
-      padding: 0.93em;
+      padding-left: 0.75em;
+      padding-bottom: 0;
+      padding-right: 0.5em;
+      padding-top: 0.5em;
     }
 
     .p-accordioncontent-content {
@@ -361,15 +378,15 @@ map-view {
     }
 
     .resizable-container {
-      width: 40em;
-      height: calc(100vh - 10.5em);
+      width: 30em;
+      height: 40em;
       min-width: 30em;
-      min-height: 18em;
+      min-height: 20em;
       resize: both;
       overflow: auto;
       direction: rtl;
       max-width: calc(100vw - 28em);
-      max-height: calc(100vh - 10.5em);
+      max-height: calc(100vh - 6em);
       padding-bottom: 0.5em;
 
       * {
@@ -451,40 +468,6 @@ map-view {
             background: var(--p-green-100);
           }
         }
-      }
-    }
-  }
-}
-
-
-
-
-.side-menu-dialog {
-  .search-menu {
-    &:first-child {
-      .p-divider {
-        display: none;
-      }
-    }
-
-    .p-divider {
-      margin: 0.9em 0;
-    }
-
-    .search-option {
-      text-align: left;
-      font-size: 0.9em;
-      margin: 0;
-      background: none;
-      border: none;
-      cursor: pointer;
-
-      .search-option-name {
-        font-weight: bold;
-      }
-
-      .search-option-warning {
-        color: burlywood;
       }
     }
   }
@@ -738,7 +721,39 @@ map-view {
   }
 }
 
-.map-layer-dialog, .side-menu-dialog {
+.feature-search-dialog {
+  z-index: 1000 !important;
+
+  .p-dialog-mask {
+    z-index: 1000 !important;
+  }
+
+  .p-dialog {
+    width: 30em;
+    min-width: 25em;
+    min-height: 35em;
+    margin: 0 !important;
+    z-index: 1000 !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em;
+  }
+
+  .p-dialog-header {
+    padding: 0 0 0 0.5em;
+
+    .p-dialog-title {
+      font-size: medium;
+    }
+  }
+
+  .p-multiselect {
+    width: 100%;
+  }
+}
+
+.map-layer-dialog {
   z-index: 1000 !important;
 
   .p-dialog-mask {
@@ -1585,7 +1600,7 @@ map-view {
     }
   }
 
-  .map-layer-dialog, .side-menu-dialog {
+  .map-layer-dialog {
     .p-dialog {
       width: 100vw !important;
       height: calc(100vh - 3em) !important;

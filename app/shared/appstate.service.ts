@@ -11,6 +11,9 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
+export const MAX_NUM_SELECTIONS = 3;
+export const DEFAULT_EM_WIDTH = 30;
+export const DEFAULT_EM_HEIGHT = 40;
 
 export interface TileFeatureId {
     featureId: string;
@@ -69,7 +72,7 @@ export class AppStateService implements OnDestroy {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
     get defaultInspectionPanelSize(): [number, number] {
-        return [40 * this.baseFontSize, window.innerHeight - 10.5 * this.baseFontSize];
+        return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
 
     readonly numViewsState = this.createState<number>({
@@ -87,7 +90,7 @@ export class AppStateService implements OnDestroy {
             z.tuple([z.coerce.number(), z.string()]),
         ]),
         urlParamName: 's',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly markerState = this.createState<boolean>({
@@ -95,7 +98,7 @@ export class AppStateService implements OnDestroy {
         defaultValue: false,
         schema: Boolish,
         urlParamName: 'm',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly markedPositionState = this.createState<number[]>({
@@ -106,7 +109,7 @@ export class AppStateService implements OnDestroy {
             z.tuple([z.coerce.number(), z.coerce.number()]),
         ]),
         urlParamName: 'mp',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     // 2~0~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
@@ -173,7 +176,7 @@ export class AppStateService implements OnDestroy {
             return result;
         },
         urlParamName: 'sel',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly focusedViewState = this.createState<number>({
@@ -181,7 +184,7 @@ export class AppStateService implements OnDestroy {
         defaultValue: 0,
         schema: z.coerce.number().nonnegative(),
         urlParamName: 'f',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly viewSyncState = this.createState<string[]>({
@@ -189,14 +192,14 @@ export class AppStateService implements OnDestroy {
         defaultValue: [],
         schema: z.array(z.union([z.literal(VIEW_SYNC_PROJECTION), z.literal(VIEW_SYNC_POSITION)])),
         urlParamName: 'sync',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly cameraViewDataState = this.createMapViewState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 6.0, pitch: -1.55, roll: 0.25},
+            orientation: {heading: 6.0, pitch: -1.55, roll: 0.25}
         },
         schema: z.object({
             lon: z.coerce.number().optional(),
@@ -212,7 +215,7 @@ export class AppStateService implements OnDestroy {
             alt: value.destination.alt,
             h: value.orientation.heading,
             p: value.orientation.pitch,
-            r: value.orientation.roll,
+            r: value.orientation.roll
         }),
         fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
@@ -224,9 +227,9 @@ export class AppStateService implements OnDestroy {
                 heading: payload.h ?? currentValue.orientation.heading,
                 pitch: payload.p ?? currentValue.orientation.pitch,
                 roll: payload.r ?? currentValue.orientation.roll,
-            },
+            }
         }),
-        urlFormEncode: true,
+        urlFormEncode: true
     });
 
     readonly mode2dState = this.createMapViewState<boolean>({
@@ -234,21 +237,21 @@ export class AppStateService implements OnDestroy {
         defaultValue: false,
         schema: Boolish,
         urlParamName: 'm2d',
-        urlIncludeInVisualizationOnly: false,
+        urlIncludeInVisualizationOnly: false
     });
 
     readonly osmEnabledState = this.createMapViewState<boolean>({
         name: 'osm',
         defaultValue: true,
         schema: Boolish,
-        urlParamName: 'osm',
+        urlParamName: 'osm'
     });
 
     readonly osmOpacityState = this.createMapViewState<number>({
         name: 'osmOpacity',
         defaultValue: 30,
         schema: z.coerce.number().min(0).max(100).refine(value => Number.isInteger(value)),
-        urlParamName: 'osmOp',
+        urlParamName: 'osmOp'
     });
 
     readonly layerNamesState = this.createState<Array<string>>({
@@ -291,26 +294,26 @@ export class AppStateService implements OnDestroy {
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
         schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tll',
+        urlParamName: 'tll'
     });
 
     readonly tilesVisualizeLimitState = this.createState<number>({
         name: 'tilesVisualizeLimit',
         defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
         schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tvl',
+        urlParamName: 'tvl'
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
-        schema: z.array(z.string()),
+        schema: z.array(z.string())
     });
 
     readonly legalInfoDialogVisibleState = this.createState<boolean>({
         name: 'legalInfoDialogVisible',
         defaultValue: false,
-        schema: Boolish,
+        schema: Boolish
     });
 
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
@@ -319,7 +322,13 @@ export class AppStateService implements OnDestroy {
         schema: z.union([
             z.null(),
             z.tuple([z.coerce.number(), z.string()]),
-        ]),
+        ])
+    });
+
+    readonly limitNumSelections = this.createState<boolean>({
+        name: 'limitNumSelections',
+        defaultValue: true,
+        schema: Boolish
     });
 
     constructor(private readonly router: Router) {
@@ -591,6 +600,10 @@ export class AppStateService implements OnDestroy {
         }
         // Create a new panel if there is no existing one to change.
         if (allPanels.every(panel => panel.pinned)) {
+            if (this.limitNumSelections.getValue() && allPanels.length >= MAX_NUM_SELECTIONS) {
+                console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`)
+                return;
+            }
             allPanels.push({
                 id: 1 + Math.max(-1, ...allPanels.map(panel => panel.id)),
                 selectedFeatures: featureSelection,
@@ -629,12 +642,26 @@ export class AppStateService implements OnDestroy {
         if (index === -1) {
             return;
         }
+        if (isPinned && this.limitNumSelections.getValue() &&
+            allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
+            return;
+        }
         allPanels[index].pinned = isPinned;
         this.selectionState.next(allPanels);
     }
 
     unsetUnpinnedSelections() {
         this.selectionState.next(this.selectionState.getValue().filter(panel => panel.pinned));
+    }
+
+    unsetPanel(id: number) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index === -1) {
+            return;
+        }
+        allPanels.splice(index, 1);
+        this.selectionState.next(allPanels);
     }
 
     getNumSelections(): number {

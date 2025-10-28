@@ -13,9 +13,9 @@ import {AppStateService} from "../shared/appstate.service";
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="side-menu-dialog" header="Search Loaded Features"
+        <p-dialog class="feature-search-dialog" header="Search Loaded Features"
                   [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
-                  [position]="'topleft'" [draggable]="true" [resizable]="false"
+                  [position]="'left'" [draggable]="true" [resizable]="true"
                   (onShow)="onShow($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -143,7 +143,9 @@ export class FeatureSearchComponent {
     groupedResults: Array<{ header: string; items: Array<{ label: string; mapId: string; layerId: string; featureId: string }> }> = [];
     grouping: { name: string, value: number }[] = [
         {name: 'Maps', value: 1},
-        {name: 'Layers', value: 2}
+        {name: 'Layers', value: 2},
+        {name: 'Feature', value: 3},
+        {name: 'Tile', value: 4}
     ];
     selectedGroupingOptions: { name: string, value: number }[] = [this.grouping[0]];
 
@@ -264,11 +266,25 @@ export class FeatureSearchComponent {
     }
 
     recalculateResults() {
-        const results = [...this.results];
+        const results = this.results.map(result => {
+            const featureIdParts = result.featureId.split('.');
+            return {
+                label: result.label,
+                mapId: result.mapId,
+                layerId: result.layerId,
+                featureId: result.featureId,
+                featureType: featureIdParts[0] ?? "",
+                tileId: Number(featureIdParts[1] ?? 0)
+            }
+        });
 
+        // Selected grouping options as a set for quick lookup
         const selectedValues = new Set(this.selectedGroupingOptions.map(o => o.value));
-        const byMaps = selectedValues.has(1);
-        const byLayers = selectedValues.has(2);
+
+        // Preserve order as in the "grouping" options for stable grouping
+        const selectedOrder: number[] = this.grouping
+            .filter(opt => selectedValues.has(opt.value))
+            .map(opt => opt.value);
 
         // Helper to group by a key function
         const groupBy = <T, K extends string | number>(items: T[], keyFn: (item: T) => K): Map<K, T[]> => {
@@ -282,32 +298,40 @@ export class FeatureSearchComponent {
             return map;
         };
 
-        const groups: Array<{ header: string; items: Array<{ label: string; mapId: string; layerId: string; featureId: string }> }> = [];
+        // Accessors and labels for headers
+        const accessors: Record<number, { label: string, get: (r: any) => string | number }> = {
+            1: { label: 'Map',         get: (r) => r.mapId },
+            2: { label: 'Layer',       get: (r) => r.layerId },
+            3: { label: 'Feature',     get: (r) => r.featureType },
+            4: { label: 'Tile',        get: (r) => r.tileId },
+        };
 
-        if (byMaps && byLayers) {
-            // First group by map, then by layer; flatten to array of arrays
-            const maps = groupBy(results, r => r.mapId);
-            for (const [mapId, mapGroup] of maps) {
-                const layers = groupBy(mapGroup, r => r.layerId);
-                for (const [layerId, layerGroup] of layers) {
-                    groups.push({ header: `Map: ${mapId} • Layer: ${layerId}`, items: layerGroup });
-                }
-            }
-        } else if (byMaps) {
-            const maps = groupBy(results, r => r.mapId);
-            for (const [mapId, mapGroup] of maps) {
-                groups.push({ header: `Map: ${mapId}`, items: mapGroup });
-            }
-        } else if (byLayers) {
-            const layers = groupBy(results, r => r.layerId);
-            for (const [layerId, layerGroup] of layers) {
-                groups.push({ header: `Layer: ${layerId}`, items: layerGroup });
-            }
-        } else {
-            // No grouping selected; single group with all results
-            groups.push({header: `All Results`, items: results});
-        }
+        const groups: Array<{ header: string; items:
+                { label: string; mapId: string; layerId: string; featureId: string; featureType: string; tileId: number }[]}> = [];
 
+        const buildGroups = (items: typeof results, depth: number, headerParts: string[]) => {
+            if (depth >= selectedOrder.length || selectedOrder.length === 0) {
+                const header = headerParts.length ? headerParts.join(' • ') : 'All Results';
+                groups.push({ header, items });
+                return;
+            }
+
+            const key = selectedOrder[depth];
+            const acc = accessors[key];
+            if (!acc) {
+                // Safety: if an unknown key sneaks in, just finish grouping
+                const header = headerParts.length ? headerParts.join(' • ') : 'All Results';
+                groups.push({ header, items });
+                return;
+            }
+
+            const partitions = groupBy(items, acc.get);
+            for (const [value, part] of partitions) {
+                buildGroups(part, depth + 1, headerParts.concat(`${acc.label}: ${value}`));
+            }
+        };
+
+        buildGroups(results, 0, []);
         this.groupedResults = groups;
     }
 }
