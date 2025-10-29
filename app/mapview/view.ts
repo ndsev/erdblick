@@ -549,12 +549,19 @@ export class MapView {
                     return;
                 }
                 const fauxCamera = new Camera(this.viewer.scene);
-                fauxCamera.setView({destination: target.rectangle, orientation: this.viewer.camera});
+                // Use top-down normalised orientation otherwise need to compensate for different parts of the globe.
+                fauxCamera.setView({
+                    destination: target.rectangle,
+                    orientation: {
+                        heading: 0.0, // East, in radians.
+                        pitch: CesiumMath.toRadians(CAMERA_CONSTANTS.DEFAULT_PITCH_DEGREES), // Directly looking down.
+                        roll: 0 // No rotation.
+                    }});
                 this.stateService.setView(this._viewIndex, fauxCamera.positionCartographic, fauxCamera);
 
                 // Show the tile outline as a rectangle
                 const start = JulianDate.now();
-                const duration = 5.0; // seconds
+                const duration = 3.0; // seconds
                 const entity = this.viewer.entities.add({
                     rectangle: {
                         coordinates: target.rectangle,

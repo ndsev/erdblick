@@ -170,6 +170,8 @@ export class SearchPanelComponent implements AfterViewInit {
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
         const value = this.searchInputValue.trim();
+
+        /////////// Jump to mapget tile id
         let label = "tileId = ?";
         if (this.jumpToTargetService.validateMapgetTileId(value)) {
             label = `tileId = ${value}`;
@@ -185,12 +187,11 @@ export class SearchPanelComponent implements AfterViewInit {
             jump: (value: string) => { return this.parseMapgetTileId(value) },
             validate: (value: string) => { return this.jumpToTargetService.validateMapgetTileId(value) }
         });
+
+        /////////// Jump to lon-lat
         label = "lon = ? | lat = ? | (level = ?)"
         if (this.validateWGS84(value, true)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lon = ${coords[1]} | lat = ${coords[0]}${coords[2] ? ' | level = ' + coords[2] : ''}`;
-            }
+            label = this.parseWgs84Coordinates(value, true)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -200,15 +201,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "WGS84 Lon-Lat Coordinates",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, true) },
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, true)?.target },
             validate: (value: string) => { return this.validateWGS84(value, true) }
         });
+
+        /////////// Jump to lat-lon
         label = "lat = ? | lon = ? | (level = ?)"
         if (this.validateWGS84(value, false)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lat = ${coords[0]} | lon = ${coords[1]}${coords[2] ? ' | level = ' + coords[2] : ''}`;
-            }
+            label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -218,15 +218,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "WGS84 Lat-Lon Coordinates",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, false)?.target },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
+
+        /////////// Jump to Google Maps/OSM
         label = "lat = ? | lon = ?"
         if (this.validateWGS84(value, false)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lat = ${coords[0]} | lon = ${coords[1]}`;
-            }
+            label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -398,7 +397,7 @@ export class SearchPanelComponent implements AfterViewInit {
         }
     }
 
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): number[] | undefined {
+    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): {target: Rectangle | number[], label: string, coords: number[]} | undefined {
         let lon = 0;
         let lat = 0;
         let level = 0;
@@ -466,7 +465,19 @@ export class SearchPanelComponent implements AfterViewInit {
         }
 
         if (isMatched) {
-            return [lat, lon, level];
+            if (level) {
+                const tileId = coreLib.getTileIdFromPosition(lon, lat, level);
+                return {
+                    target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                    label: isLonLat ? `lon = ${lon} | lat = ${lat} | level = ${level}` : `lat = ${lat} | lon = ${lon} | level = ${level}`,
+                    coords: [lat, lon]
+                };
+            }
+            return {
+                target: [lat, lon, 0],
+                label: isLonLat ? `lon = ${lon} | lat = ${lat}` : `lat = ${lat} | lon = ${lon}`,
+                coords: [lat, lon]
+            };
         }
         return undefined;
     }
@@ -516,31 +527,31 @@ export class SearchPanelComponent implements AfterViewInit {
     openInGM(value: string): number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
-            return undefined;
+            return;
         }
-        let result = this.parseWgs84Coordinates(value, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
+        const result = this.parseWgs84Coordinates(value, false)?.coords;
+        if (result) {
+            const lat = result[0];
+            const lon = result[1];
             window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
             return result;
         }
-        return undefined;
+        return;
     }
 
-    openInOSM(value: string): number[] | undefined {
+    openInOSM(value: string): Rectangle | number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
             return;
         }
-        let result = this.parseWgs84Coordinates(value, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
+        const result = this.parseWgs84Coordinates(value, false)?.coords;
+        if (result) {
+            const lat = result[0];
+            const lon = result[1];
             window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
             return result;
         }
-        return undefined;
+        return;
     }
 
     validateMenuItems() {
@@ -550,8 +561,11 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     validateWGS84(value: string, isLonLat: boolean = false) {
-        const coords = this.parseWgs84Coordinates(value, isLonLat);
-        return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
+        const result = this.parseWgs84Coordinates(value, isLonLat);
+        if (result) {
+            return result.coords[0] >= -90 && result.coords[0] <= 90 && result.coords[1] >= -180 && result.coords[1] <= 180;
+        }
+        return false;
     }
 
     showSearchOverlay() {

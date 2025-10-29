@@ -605,7 +605,7 @@ export class AppStateService implements OnDestroy {
       (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
                                                                          -> AppStateService
 
-   ## New Goal State
+    ## New Goal State
 
     // View Click Event -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
     //         (Hydration) AppStateService -> MapDataService -> InspectionService -> InspectionPanel
@@ -633,13 +633,15 @@ export class AppStateService implements OnDestroy {
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length) {
+                this._replaceUrl = true;
                 return;
             }
         }
         // Create a new panel if there is no existing one to change.
         if (allPanels.every(panel => panel.pinned)) {
             if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`)
+                console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`);
+                this._replaceUrl = true;
                 return;
             }
             id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
@@ -749,7 +751,6 @@ export class AppStateService implements OnDestroy {
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
-            // TODO: Ensure that this will not trigger bad things.
             this.layerNamesState.next([...names, mapLayerId]);
         }
         const result = new Array<LayerViewConfig>();
@@ -758,7 +759,6 @@ export class AppStateService implements OnDestroy {
             while (resultForView.length <= layerIndex) {
                 resultForView.push(defaultValue);
             }
-            // TODO: Ensure that this will not trigger bad things.
             state.next(viewIndex, resultForView);
             return resultForView[layerIndex];
         }
@@ -782,7 +782,6 @@ export class AppStateService implements OnDestroy {
         let layerIndex = names.findIndex(ml => ml === mapLayerId);
         if (layerIndex === -1) {
             layerIndex = names.length;
-            // TODO: Ensure that this will not trigger bad things.
             this.layerNamesState.next([...names, mapLayerId]);
         }
 
@@ -792,7 +791,6 @@ export class AppStateService implements OnDestroy {
                 values.push(defaultValue);
             }
             values[layerIndex] = value;
-            // TODO: Ensure that this will not trigger bad things.
             state.next(viewIndex, values);
         };
 
@@ -925,36 +923,26 @@ export class AppStateService implements OnDestroy {
         window.location.href = origin + pathname;
     }
 
-    pruneMapLayerConfig(mapItems: Array<MapTreeNode>): boolean {
-        // TODO: Fix, use.
-        // TODO: Must also prune style options for the pruned layers.
-        const mapLayerIds = new Set<string>();
-        mapItems.forEach(mapItem => {
-            mapItem.layers.keys().forEach(layerId => {
-                mapLayerIds.add(`${mapItem.id}/${layerId}`);
-            });
-        });
-
-        const indicesToRemove = this.layerNamesState.getValue().reduce((acc, l, i) => {
-            if (!mapLayerIds.has(l) || isSourceOrMetaData(l)) {
-                acc.add(i);
-            }
-            return acc;
-        }, new Set<number>());
-
-        const layerNames = this.layerNamesState.getValue().filter((_, i) => !indicesToRemove.has(i));
-        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
-            const visibilities = this.layerVisibilityState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            const levels = this.layerZoomLevelState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            const tileBorders = this.layerTileBordersState.getValue(viewIndex).filter((_, i) => !indicesToRemove.has(i));
-            this.layerVisibilityState.next(viewIndex, visibilities);
-            this.layerZoomLevelState.next(viewIndex, levels);
-            this.layerTileBordersState.next(viewIndex, tileBorders);
-        }
-        this.layerNamesState.next(layerNames);
-
-        // If all layers were pruned, return true.
-        return layerNames.length === 0;
+    pruneUrlOnLayerChange() {
+        // TODO:
+        //  1. Must prune layers that aren't present anymore.
+        //  2. Must prune visibility, tile borders and zoom levels for layers that aren't present anymore.
+        //  3. Must prune style options for the pruned layers.
     }
 
+    pruneUrlOnStyleChange() {
+        // TODO:
+        //  1. Must prune styles that aren't present anymore.
+        //  2. Must prune style options for the present layers.
+    }
+
+    pruneUrlOnNumViewsChange() {
+        // TODO:
+        //  1. Must prune all present values for the pruned view.
+    }
+
+    pruneUrlOnSelectionChange() {
+        // TODO:
+        //  1. Must prune selections for which their respective maps aren't present anymore.
+    }
 }

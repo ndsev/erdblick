@@ -22,7 +22,7 @@ interface SourceLayerMenuItem {
                                 <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
                                           (mousedown)="$event.stopPropagation()"/>
                             } @else {
-                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
+                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)"/>
                             }
                             <span class="title" [pTooltip]="title" tooltipPosition="bottom">

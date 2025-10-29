@@ -10,6 +10,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
+import {Rectangle} from "../integrations/cesium";
 
 
 @Component({
@@ -165,7 +166,7 @@ import {Subscription} from "rxjs";
                                             </span>
                                             </p-button>
                                             <p-button onEnterClick *ngIf="node.info.coverage.length"
-                                                      (click)="focus($event, index, node.info.coverage[0])"
+                                                      (click)="focus($event, index, node.info.coverage)"
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
@@ -463,21 +464,23 @@ export class MapPanelComponent {
         }
     }
 
-    focus(event: any, viewIndex: number, coverage: number | CoverageRectItem) {
+    focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
-        if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
-            let coverageStruct = coverage as CoverageRectItem;
-            let minPos = coreLib.getTilePosition(BigInt(coverageStruct.min));
-            let maxPos = coreLib.getTilePosition(BigInt(coverageStruct.max));
-            this.mapService.moveToWgs84PositionTopic.next(
-                {targetView: viewIndex, x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
-            );
-        } else {
-            const position = coreLib.getTilePosition(BigInt(coverage as number));
-            this.mapService.moveToWgs84PositionTopic.next(
-                {targetView: viewIndex, x: position.x, y: position.y}
-            );
+        let tileIds = coverages.map(coverage => coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max") ?
+            [BigInt((coverage as CoverageRectItem).min), BigInt((coverage as CoverageRectItem).max)] :
+            [BigInt(coverage as number)]).flat();
+        let targetRect: Rectangle | null = null;
+        for (const tileId of tileIds) {
+            const tileIdRect = Rectangle.fromDegrees(...coreLib.getTileBox(tileId));
+            if (targetRect) {
+                Rectangle.union(tileIdRect, targetRect, targetRect);
+            } else {
+                targetRect = tileIdRect;
+            }
         }
+        this.mapService.moveToRectangleTopic.next(
+            {targetView: viewIndex, rectangle: targetRect!}
+        );
     }
 
     onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
