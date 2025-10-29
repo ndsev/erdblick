@@ -18,30 +18,34 @@ interface SourceLayerMenuItem {
                 <p-accordion-header>
                     <div class="inspector-title">
                         <span>
-                        @if (panel().selectedSourceData !== undefined) {
-                            <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)" (mousedown)="$event.stopPropagation()"/>
-                        }
-
-                        <!--TODO: Replace the icon with a color picker-->
-                        <!--                        <i class="pi {{ tabs[activeIndex].icon || '' }}"></i>-->
-                        <span class="title" [pTooltip]="title" tooltipPosition="bottom">
-                            {{ title }}
-                        </span>
-
-                        @if (panel().selectedSourceData !== undefined) {
-                            <p-select class="source-layer-dropdown" [options]="layerMenuItems" [(ngModel)]="selectedLayerItem"
-                                      (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
-                                      scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()" optionLabel="label"
-                                      optionDisabled="disabled" appendTo="body"/>
-                        }
+                            @if (panel().sourceData !== undefined) {
+                                <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
+                                          (mousedown)="$event.stopPropagation()"/>
+                            } @else {
+                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
+                                               (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)"/>
+                            }
+                            <span class="title" [pTooltip]="title" tooltipPosition="bottom">
+                                {{ title }}
+                            </span>
+                            @if (panel().sourceData !== undefined) {
+                                <p-select class="source-layer-dropdown" [options]="layerMenuItems"
+                                          [(ngModel)]="selectedLayerItem"
+                                          (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
+                                          scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                          optionLabel="label"
+                                          optionDisabled="disabled" appendTo="body"/>
+                            }
                         </span>
                         <span>
-                            <p-button icon="" (click)="togglePinnedState($event)" (mousedown)="$event.stopPropagation()">
-                            @if (panel().pinned) {
-                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep</span>
-                            } @else {
-                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
-                            }
+                            <p-button icon="" (click)="togglePinnedState($event)"
+                                      (mousedown)="$event.stopPropagation()">
+                                @if (panel().pinned) {
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">keep</span>
+                                } @else {
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
+                                }
                             </p-button>
                             <p-button icon="pi pi-times" (click)="unsetPanel()" (mousedown)="$event.stopPropagation()"/>
                         </span>
@@ -54,19 +58,20 @@ interface SourceLayerMenuItem {
                          [style.height.em]="panel().size[1]"
                          (mouseup)="onInspectionContainerResize($event, panel())"
                          [ngClass]="{'resizable-container-expanded': isExpanded}">
-<!--                        <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
-<!--                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
-<!--                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
-<!--                        </div>-->
-                    @if (errorMessage) {
-                        <div>
-                            <strong>Error</strong><br>{{ errorMessage }}
-                        </div>
-                    } @else if (panel().selectedSourceData) {
-                        <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
-                    } @else {
-                        <feature-panel [panel]="panel()"></feature-panel>
-                    }
+                        <!--                        <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
+                        <!--                            <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
+                        <!--                            <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
+                        <!--                        </div>-->
+                        @if (errorMessage) {
+                            <div>
+                                <strong>Error</strong><br>{{ errorMessage }}
+                            </div>
+                        } @else if (panel().sourceData) {
+                            <sourcedata-panel [panel]="panel()"
+                                              (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
+                        } @else {
+                            <feature-panel [panel]="panel()"></feature-panel>
+                        }
                     </div>
                 </p-accordion-content>
             </p-accordion-panel>
@@ -98,8 +103,8 @@ export class InspectionPanelComponent implements AfterViewInit {
                 private renderer: Renderer2) {
         effect(() => {
             const panel = this.panel();
-            if (panel.selectedSourceData !== undefined) {
-                const selection = panel.selectedSourceData!;
+            if (panel.sourceData !== undefined) {
+                const selection = panel.sourceData!;
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
                 this.title = tileId === 0n ? `Metadata for ${mapId}: ` : `${tileId}.`;
                 const map = this.mapService.maps.maps.get(mapId);
@@ -132,9 +137,9 @@ export class InspectionPanelComponent implements AfterViewInit {
                     this.selectedLayerItem = undefined;
                 }
             } else {
-                this.title = panel.selectedFeatures.length > 1 ?
-                    `Selected ${panel.selectedFeatures.length} features` :
-                    panel.selectedFeatures[0].featureId;
+                this.title = panel.features.length > 1 ?
+                    `Selected ${panel.features.length} features` :
+                    panel.features[0].featureId;
                 this.layerMenuItems = [];
                 this.selectedLayerItem = undefined;
             }
@@ -150,7 +155,7 @@ export class InspectionPanelComponent implements AfterViewInit {
         // back to the feature-set from which it was called up.
         event.stopPropagation();
         this.errorMessage = "";
-        this.stateService.setSelection(this.panel().selectedFeatures, this.panel().id);
+        this.stateService.setSelection(this.panel().features, this.panel().id);
     }
 
     onSelectedLayerItem() {

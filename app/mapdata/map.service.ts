@@ -228,26 +228,27 @@ export class MapDataService {
                     id: selection.id,
                     pinned: selection.pinned,
                     size: selection.size,
-                    selectedFeatures: await this.loadFeatures(selection.selectedFeatures),
-                    selectedSourceData: selection.selectedSourceData
+                    features: await this.loadFeatures(selection.features),
+                    sourceData: selection.sourceData,
+                    color: selection.color
                 });
             }
             this.selectionTopic.next(convertedSelections);
         });
         this.selectionTopic.subscribe(selectedPanels => {
             // TODO: Consider only visualizing updated selections/features and not the whole set of the panels
-            const selectedFeatures = selectedPanels.map(panel => panel.selectedFeatures).flat();
-            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedFeatures);
+            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedPanels);
             // If a hovered feature is selected, eliminate it from the hover highlights.
             const hoveredFeatures = this.hoverTopic.getValue();
             if (hoveredFeatures.length) {
                 this.hoverTopic.next(hoveredFeatures.filter(hoveredFeature =>
-                    !selectedFeatures.some(selectedFeature => selectedFeature.equals(hoveredFeature))
-                ));
+                    !selectedPanels.some(panel =>
+                        panel.features.some(feature => feature.equals(hoveredFeature)))));
             }
         });
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
-            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, hoveredFeatureWrappers);
+            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
+                features: hoveredFeatureWrappers}]);
         });
 
         this.keyboardService.registerShortcut("Ctrl+x", () => {
@@ -363,7 +364,7 @@ export class MapDataService {
         const evictTileLayer = (tileLayer: FeatureTile) => {
             // Is the tile needed to visualize the selection?
             if (tileLayer.preventCulling || this.selectionTopic.getValue().some(v =>
-                v.selectedFeatures.some(feature => feature.featureTile.mapTileKey == tileLayer.mapTileKey))) {
+                v.features.some(feature => feature.featureTile.mapTileKey == tileLayer.mapTileKey))) {
                 return false;
             }
             // Is the tile needed for any view?
@@ -788,7 +789,7 @@ export class MapDataService {
         }
 
         const selectedFeatures = this.selectionTopic.getValue().map(panel => {
-            return panel.selectedFeatures;
+            return panel.features;
         }).flat();
         // TODO: Use a set difference?
         if (featureSetsEqual(selectedFeatures, features) || featureSetsEqual(this.hoverTopic.getValue(), features)) {
@@ -864,7 +865,7 @@ export class MapDataService {
         }
     }
 
-    private visualizeHighlights(mode: HighlightMode, featureWrappers: Array<FeatureWrapper>, panelId?: number) {
+    private visualizeHighlights(mode: HighlightMode, groups: {features: FeatureWrapper[], color?: string, id?: number}[]) {
         let visualizationCollection = null;
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
@@ -884,45 +885,45 @@ export class MapDataService {
                 this.tileVisualizationDestructionTopic.next(visualization);
             }
         }
-        if (!featureWrappers.length) {
-            return;
-        }
 
         // Apply highlight styles.
-        const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
-        for (const wrapper of featureWrappers) {
-            if (!featureWrappersForTile.has(wrapper.featureTile)) {
-                featureWrappersForTile.set(wrapper.featureTile, []);
-            }
-            featureWrappersForTile.get(wrapper.featureTile)!.push(wrapper);
-        }
-
-        for (const [featureTile, features] of featureWrappersForTile) {
-            const featureIds = features.map(fw => fw.featureId);
-            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                // Do not render the highlight for any view that doesn't need it.
-                if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
-                    continue;
+        for (const group of groups) {
+            const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
+            for (const wrapper of group.features) {
+                if (!featureWrappersForTile.has(wrapper.featureTile)) {
+                    featureWrappersForTile.set(wrapper.featureTile, []);
                 }
+                featureWrappersForTile.get(wrapper.featureTile)!.push(wrapper);
+            }
 
-                for (let [_, style] of this.styleService.styles) {
-                    if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
-                        let visu = new TileVisualization(
-                            viewIndex,
-                            featureTile,
-                            this.pointMergeService,
-                            (tileKey: string) => this.getFeatureTile(tileKey),
-                            style.featureLayerStyle,
-                            true,
-                            mode,
-                            featureIds,
-                            false,
-                            {
-                                ... this.maps.getLayerStyleOptions(viewIndex, featureTile.mapName, featureTile.layerName, style.id),
-                                "selectableFeatureHighlightColor": "color me!"
-                            });
-                        this.tileVisualizationTopic.next(visu);
-                        visualizationCollection.push(visu);
+            for (const [featureTile, features] of featureWrappersForTile) {
+                const featureIds = features.map(fw => fw.featureId);
+                for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                    // Do not render the highlight for any view that doesn't need it.
+                    if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
+                        continue;
+                    }
+                    for (let [_, style] of this.styleService.styles) {
+                        if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
+                            const styleOptions = this.maps.getLayerStyleOptions(
+                                viewIndex, featureTile.mapName, featureTile.layerName, style.id) ?? {};
+                            if (group.color) {
+                                styleOptions["selectableFeatureHighlightColor"] = group.color;
+                            }
+                            let visualization = new TileVisualization(
+                                viewIndex,
+                                featureTile,
+                                this.pointMergeService,
+                                (tileKey: string) => this.getFeatureTile(tileKey),
+                                style.featureLayerStyle,
+                                true,
+                                mode,
+                                featureIds,
+                                false,
+                                styleOptions);
+                            this.tileVisualizationTopic.next(visualization);
+                            visualizationCollection.push(visualization);
+                        }
                     }
                 }
             }

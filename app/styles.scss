@@ -364,10 +364,17 @@ map-view {
     }
 
     .p-accordionheader {
-      padding-left: 0.75em;
-      padding-bottom: 0;
-      padding-right: 0.5em;
-      padding-top: 0.5em;
+      padding: 0.5em 0.5em 0.5em 0.75em;
+      overflow: visible;
+
+      .p-colorpicker-panel {
+        z-index: 9999;
+      }
+
+      .p-colorpicker input {
+        height: 1.5em;
+        width: 1.5em;
+      }
     }
 
     .p-accordioncontent-content {

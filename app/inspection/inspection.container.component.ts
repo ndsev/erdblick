@@ -7,7 +7,7 @@ import {MapDataService} from "../mapdata/map.service";
         <div class="inspection-container" *ngIf="mapService.selectionTopic | async as panels">
             @if (panels.length > 0) {
                 @for (panel of panels; track panel.id) {
-                    @if (panel.selectedFeatures.length > 0 || panel.selectedSourceData !== undefined) {
+                    @if (panel.features.length > 0 || panel.sourceData !== undefined) {
                         <inspection-panel [panel]="panel"></inspection-panel>
                     }
                 }

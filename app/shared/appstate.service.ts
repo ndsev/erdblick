@@ -14,6 +14,18 @@ export const VIEW_SYNC_POSITION = "pos";
 export const MAX_NUM_SELECTIONS = 3;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
+export const DEFAULT_HIGHLIGHT_COLORS = [
+    "#fff314",
+    "#4ad6d6",
+    "#8f52ff",
+    "#ff1212",
+    "#3474ff",
+    "#ff04d6",
+    "#ffa600",
+    "#b3ff99",
+    "#ccefff",
+    "#58cf08"
+]
 
 export interface TileFeatureId {
     featureId: string;
@@ -27,10 +39,11 @@ export interface SelectedSourceData {
 
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
-    selectedFeatures: FeatureRepresentation[];
+    features: FeatureRepresentation[];
     pinned: boolean;
     size: [number, number];
-    selectedSourceData?: SelectedSourceData;
+    sourceData?: SelectedSourceData;
+    color: string;
 }
 
 export interface CameraViewState {
@@ -122,11 +135,11 @@ export class AppStateService implements OnDestroy {
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
                 let s = `${state.id}~${state.pinned ? 1 : 0}~`;
-                if (state.selectedSourceData) {
-                    s += `${state.selectedSourceData.mapTileKey}~${state.selectedSourceData.address ?? ''}~`
+                if (state.sourceData) {
+                    s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
-                s += `${state.selectedFeatures.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                s += `${state.size[0]}:${state.size[1]}`;
+                s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
+                s += `${state.size[0]}:${state.size[1]}~${state.color}`;
                 return s;
             });
         },
@@ -137,25 +150,27 @@ export class AppStateService implements OnDestroy {
             }
             for (const panelStateStr of payload) {
                 const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 5) {
+                if (parts.length < 6) {
                     continue;
                 }
                 const id = Number(parts.shift()!);
                 const pinState = parts.shift() === "1";
+                const color = parts.pop()!;
                 const sizeParts = parts.pop()!.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
-                    selectedFeatures: [],
+                    features: [],
                     pinned: pinState,
-                    size: size as [number, number]
+                    size: size as [number, number],
+                    color: color
                 };
 
                 // Check if the first MapTileKey is for SourceData.
                 if (parts[0].startsWith("SourceData:")) {
                     const mapTileKey = parts.shift()!;
-                    newPanelState.selectedSourceData = {
+                    newPanelState.sourceData = {
                         mapTileKey: mapTileKey,
                         address: parts[0].length ? BigInt(parts[0]) : undefined
                     };
@@ -165,7 +180,7 @@ export class AppStateService implements OnDestroy {
 
                 // The remaining strings are MapTileKey-FeatureId-pairs.
                 while (parts.length >= 2) {
-                    newPanelState.selectedFeatures.push({
+                    newPanelState.features.push({
                         mapTileKey: parts.shift()!,
                         featureId: parts.shift()!
                     })
@@ -600,30 +615,41 @@ export class AppStateService implements OnDestroy {
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number) {
         this._replaceUrl = false;
         const allPanels = this.selectionState.getValue();
-        const featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
+        let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
         // If a panel index was passed, change the SourceData-selection in that panel.
         if (id !== undefined) {
             const panelIndex = allPanels.findIndex(panel => panel.id === id);
             if (panelIndex !== -1) {
-                allPanels[panelIndex].selectedSourceData = sourceDataSelection;
+                allPanels[panelIndex].sourceData = sourceDataSelection;
                 this.selectionState.next(allPanels);
                 return id;
+            }
+        }
+        // Filter out features which are already selected. If there are none left, we don't need to do anything.
+        if (featureSelection.length) {
+            featureSelection = featureSelection.filter(feature =>
+                !allPanels.some(panel =>
+                    panel.features.some(otherFeature =>
+                        feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
+            if (!featureSelection.length) {
+                return;
             }
         }
         // Create a new panel if there is no existing one to change.
         if (allPanels.every(panel => panel.pinned)) {
             if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
                 console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`)
-                return undefined;
+                return;
             }
             id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
                 id: id,
-                selectedFeatures: featureSelection,
-                selectedSourceData: sourceDataSelection,
+                features: featureSelection,
+                sourceData: sourceDataSelection,
                 pinned: false,
-                size: this.defaultInspectionPanelSize
+                size: this.defaultInspectionPanelSize,
+                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length]
             });
             this.selectionState.next(allPanels);
             return id;
@@ -634,8 +660,8 @@ export class AppStateService implements OnDestroy {
                 continue;
             }
             id = allPanels[i].id;
-            allPanels[i].selectedFeatures = featureSelection;
-            allPanels[i].selectedSourceData = sourceDataSelection;
+            allPanels[i].features = featureSelection;
+            allPanels[i].sourceData = sourceDataSelection;
             break;
         }
         this.selectionState.next(allPanels);
@@ -663,6 +689,16 @@ export class AppStateService implements OnDestroy {
             return;
         }
         allPanels[index].pinned = isPinned;
+        this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelColor(id: number, color: string) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index === -1) {
+            return;
+        }
+        allPanels[index].color = color;
         this.selectionState.next(allPanels);
     }
 

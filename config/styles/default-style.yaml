@@ -10,6 +10,12 @@ options:
   - label: Show Lines
     id: showLine
     default: true
+  - label: Inspection Panel Selection Color
+    internal: true
+    id: selectableFeatureHighlightColor
+    type: string
+    default: black
+    description: selection color which can be set through the attribute panel
 
 rules:
   # Normal styles
@@ -53,19 +59,19 @@ rules:
     width: 20.0
     mode: hover
   - geometry: ["mesh", "polygon"]
-    color: yellow
+    color-expression: selectableFeatureHighlightColor
     opacity: 0.8
     mode: selection
     offset: [0, 0, -0.03]
   - geometry: ["line"]
-    color: yellow
+    color-expression: selectableFeatureHighlightColor
     opacity: 0.8
     width: 10.0
     mode: selection
     offset: [0, 0, -0.01]
   - geometry: ["point"]
     point-merge-grid-cell: [0.000000084, 0.000000084, 0.01]
-    color: yellow
+    color-expression: selectableFeatureHighlightColor
     opacity: 0.8
     width: 20.0
     mode: selection

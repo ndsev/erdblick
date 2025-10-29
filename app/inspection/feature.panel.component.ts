@@ -49,7 +49,7 @@ export class FeaturePanelComponent {
         effect(() => {
             this.selectedFeatures = {
                 viewIndex: 0,
-                features: this.panel().selectedFeatures
+                features: this.panel().features
             };
 
             const selectedFeatureInspectionModel: InspectionModelData[] = [];

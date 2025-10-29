@@ -317,7 +317,7 @@ export class MapLayerTree {
     private clearSelectionForLayer(mapId: string, layerId: string) {
         const current = this.selectionTopic.getValue();
         const remaining = current.filter(panel => {
-            return !panel.selectedFeatures.some(fw => fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId);
+            return !panel.features.some(fw => fw.featureTile.mapName === mapId && fw.featureTile.layerName === layerId);
         });
         if (remaining.length !== current.length) {
             this.selectionTopic.next(remaining);

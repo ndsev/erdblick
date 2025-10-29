@@ -44,11 +44,11 @@ export class SourceDataPanelComponent {
 
     constructor() {
         effect(() => {
-            if (!this.panel().selectedSourceData) {
+            if (!this.panel().sourceData) {
                 return;
             }
 
-            this.loadSourceDataLayer(this.panel().selectedSourceData!.mapTileKey)
+            this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
                 .then(layer => {
                     const root = layer.toObject();
                     this.addressFormat = layer.addressFormat();
@@ -57,7 +57,7 @@ export class SourceDataPanelComponent {
 
                     if (root) {
                         this.treeData = root.children ? root.children : [root];
-                        this.selectItemWithAddress(this.panel().selectedSourceData!.address);
+                        this.selectItemWithAddress(this.panel().sourceData!.address);
                     } else {
                         this.treeData = [];
                         this.setError('Empty layer.');
