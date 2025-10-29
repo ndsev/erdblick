@@ -133,6 +133,11 @@ export class MapView {
     private ignoreNextCamAppStateUpdate: boolean = false;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
 
+    // While there are ongoing animation requests, enable the cesium
+    // animation clock explicitly. Afterward we reset it to the saved state.
+    private ongoingAnimationRequests = 0;
+    private savedClockAnimationState: { shouldAnimate: boolean; canAnimate: boolean } | null = null;
+
     get viewIndex() {
         return this._viewIndex;
     }
@@ -535,7 +540,6 @@ export class MapView {
 
         this.subscriptions.push(
             this.mapService.moveToRectangleTopic.subscribe((target: { targetView: number, rectangle: Rectangle }) => {
-                // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot move to WGS84 position: viewer not available');
                     return;
@@ -551,31 +555,41 @@ export class MapView {
                 // Show the tile outline as a rectangle
                 const start = JulianDate.now();
                 const duration = 5.0; // seconds
-                const entity = this.viewer.entities.add(new Entity({
+                const entity = this.viewer.entities.add({
                     rectangle: {
                         coordinates: target.rectangle,
-                        // If you meant clamped: use heightReference (not height)
                         heightReference: HeightReference.CLAMP_TO_GROUND,
+                        height: 0,
                         material: new ColorMaterialProperty(
                             new CallbackProperty(time =>
                                 Color.AQUA.withAlpha(
-                                    Math.max(0, 1 - JulianDate.secondsDifference(time!, start) / duration)
+                                    Math.max(0, (1 - JulianDate.secondsDifference(JulianDate.now(), start) / duration) * .2)
                                 ), false)
                         ),
                         outline: true,
                         outlineWidth: 3.0,
                         outlineColor: new CallbackProperty(time =>
                             Color.AQUA.withAlpha(
-                                Math.max(0, 1 - JulianDate.secondsDifference(time!, start) / duration)
+                                Math.max(0, 1 - JulianDate.secondsDifference(JulianDate.now(), start) / duration)
                             ), false)
                     }
-                }));
+                });
+                this.viewer.scene.requestRender();
+                this.beginAnimation();
 
                 // Fade it out...
-                const off = this.viewer.clock.onTick.addEventListener(time => {
-                    if (JulianDate.secondsDifference(time, start) >= duration) {
+                const removeListener = this.viewer.clock.onTick.addEventListener(time => {
+                    if (!this.isAvailable()) {
+                        removeListener();
+                        this.endAnimation();
+                        return;
+                    }
+                    this.viewer.scene.requestRender();
+                    if (JulianDate.secondsDifference(JulianDate.now(), start) >= duration) {
                         this.viewer.entities.remove(entity);
-                        off();
+                        this.viewer.scene.requestRender();
+                        removeListener();
+                        this.endAnimation();
                     }
                 });
             })
@@ -912,6 +926,44 @@ export class MapView {
 
     isAvailable() {
         return !!this.viewer && !!this.viewer.scene && typeof this.viewer.isDestroyed === 'function' && !this.viewer.isDestroyed();
+    }
+
+    private beginAnimation() {
+        if (!this.isAvailable()) {
+            return;
+        }
+
+        if (this.ongoingAnimationRequests === 0) {
+            const clock = this.viewer.clock;
+            this.savedClockAnimationState = {
+                shouldAnimate: clock.shouldAnimate,
+                canAnimate: clock.canAnimate,
+            };
+            clock.canAnimate = true;
+            clock.shouldAnimate = true;
+        }
+
+        this.ongoingAnimationRequests++;
+    }
+
+    private endAnimation() {
+        if (!this.isAvailable()) {
+            this.ongoingAnimationRequests = 0;
+            this.savedClockAnimationState = null;
+            return;
+        }
+        if (this.ongoingAnimationRequests === 0) {
+            return;
+        }
+
+        this.ongoingAnimationRequests--;
+        if (this.ongoingAnimationRequests === 0 && this.savedClockAnimationState) {
+            const clock = this.viewer.clock;
+            clock.canAnimate = this.savedClockAnimationState.canAnimate;
+            clock.shouldAnimate = this.savedClockAnimationState.shouldAnimate;
+            this.savedClockAnimationState = null;
+            this.viewer.scene.requestRender();
+        }
     }
 
     private getOpenStreetMapLayerProvider() {
