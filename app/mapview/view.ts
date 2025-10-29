@@ -803,6 +803,7 @@ export class MapView {
                 return;
             }
 
+            this.stateService.focusedView = this._viewIndex;
             this.stateService.setView(this._viewIndex, this.viewer.camera.positionCartographic, {
                 heading: 0.0,
                 pitch: CesiumMath.toRadians(CAMERA_CONSTANTS.DEFAULT_PITCH_DEGREES),
