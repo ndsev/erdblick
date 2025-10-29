@@ -800,14 +800,6 @@ map-view {
     }
   }
 
-  .p-dialog-header {
-    padding: 0 0 0 0.5em;
-
-    .p-dialog-title {
-      font-size: medium;
-    }
-  }
-
   .p-fieldset {
     padding: 0;
 
@@ -827,9 +819,7 @@ map-view {
   .p-tree-node-label {
     width: 100%;
   }
-}
 
-.map-layer-dialog {
   .p-dialog-header {
     display: none;
   }
@@ -865,6 +855,10 @@ map-view {
     .p-tree-node-toggle-button {
       width: 1.25em;
       height: 1.25em;
+    }
+
+    .oblique {
+      font-style: oblique
     }
   }
 }

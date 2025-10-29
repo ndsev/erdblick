@@ -197,7 +197,7 @@ import {Subscription} from "rxjs";
                                               tabindex="0">
                                             more_vert
                                         </span>
-                                        <span style="font-style: oblique">
+                                        <span class="oblique" [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
                                                 [(ngModel)]="node.value[index]"
                                                 (ngModelChange)="updateStyleOption(node, index)"
