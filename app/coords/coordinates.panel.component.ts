@@ -18,7 +18,8 @@ interface PanelOption {
     template: `
         <div class="coordinates-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
             <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
-                      [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
+                      [style]="{'pointer-events': 'all', 'padding-left': '0', 'padding-right': '0', 'width': '2em', 
+                                'height': '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
             <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">

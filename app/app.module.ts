@@ -98,6 +98,7 @@ import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
+import {ToggleSwitch} from "primeng/toggleswitch";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -282,7 +283,8 @@ export const initializeServices = () => {
         PopoverModule,
         SelectButtonModule,
         ChipModule,
-        Splitter
+        Splitter,
+        ToggleSwitch
     ],
     providers: [
         provideAppInitializer(initializeServices),

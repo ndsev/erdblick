@@ -319,14 +319,17 @@ map-view {
   display: flex;
   flex-direction: row-reverse;
   gap: 0.5em;
-  z-index: 110;
+  z-index: 9000;
+  pointer-events: none;
 
   inspection-panel {
     height: fit-content;
+    pointer-events: all;
   }
 
   .inspect-panel {
     min-width: 30em;
+
 
     .inspector-title {
       display: flex;
@@ -1314,7 +1317,8 @@ map-view {
 }
 
 .coordinates-container {
-  z-index: 100;
+  z-index: 9000;
+  pointer-events: none;
   position: absolute;
   bottom: 0.5em;
   left: 0;
@@ -1326,6 +1330,8 @@ map-view {
   align-items: center;
 
   .coordinates-panel {
+    pointer-events: all;
+
     .coordinates-entries {
       display: flex;
       flex-direction: row;

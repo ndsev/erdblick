@@ -56,6 +56,10 @@ import {EditorService} from "../shared/editor.service";
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
+            <div class="button-container">
+                <label>Allow unlimited inspected features <span style="color: var(--p-badge-danger-background)">EXPERIMENTAL!</span>:</label>
+                <p-toggleswitch [(ngModel)]="stateService.isNumSelectionsUnlimited" />
+            </div>
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Storage for Viewer properties and search history:</label>
@@ -142,6 +146,13 @@ import {EditorService} from "../shared/editor.service";
                             <span class="key">Right -></span>
                         </div>
                         <div class="control-desc">Cycle through Viewers to the right</div>
+                    </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Left Click</span>
+                        </div>
+                        <div class="control-desc">Open inspection and pin it immediately</div>
                     </li>
                 </ul>
             </div>

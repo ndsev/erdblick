@@ -325,9 +325,9 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
-    readonly limitNumSelections = this.createState<boolean>({
-        name: 'limitNumSelections',
-        defaultValue: true,
+    readonly unlimitNumSelections = this.createState<boolean>({
+        name: 'unlimitNumSelections',
+        defaultValue: false,
         schema: Boolish
     });
 
@@ -520,6 +520,8 @@ export class AppStateService implements OnDestroy {
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {this.viewSyncState.next(val);};
+    get isNumSelectionsUnlimited() {return this.unlimitNumSelections.getValue();}
+    set isNumSelectionsUnlimited(val: boolean) {this.unlimitNumSelections.next(val);}
 
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -606,35 +608,38 @@ export class AppStateService implements OnDestroy {
             if (panelIndex !== -1) {
                 allPanels[panelIndex].selectedSourceData = sourceDataSelection;
                 this.selectionState.next(allPanels);
-                return;
+                return id;
             }
         }
         // Create a new panel if there is no existing one to change.
         if (allPanels.every(panel => panel.pinned)) {
-            if (this.limitNumSelections.getValue() && allPanels.length >= MAX_NUM_SELECTIONS) {
+            if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
                 console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`)
-                return;
+                return undefined;
             }
+            id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
-                id: 1 + Math.max(-1, ...allPanels.map(panel => panel.id)),
+                id: id,
                 selectedFeatures: featureSelection,
                 selectedSourceData: sourceDataSelection,
                 pinned: false,
                 size: this.defaultInspectionPanelSize
             });
             this.selectionState.next(allPanels);
-            return;
+            return id;
         }
         // Find the first unpinned panel and change the selection there.
         for (let i = 0; i < allPanels.length; i++) {
             if (allPanels[i].pinned) {
                 continue;
             }
+            id = allPanels[i].id;
             allPanels[i].selectedFeatures = featureSelection;
             allPanels[i].selectedSourceData = sourceDataSelection;
             break;
         }
         this.selectionState.next(allPanels);
+        return id;
     }
 
     setInspectionPanelSize(id: number, size: [number, number]) {
@@ -653,7 +658,7 @@ export class AppStateService implements OnDestroy {
         if (index === -1) {
             return;
         }
-        if (isPinned && this.limitNumSelections.getValue() &&
+        if (isPinned && !this.isNumSelectionsUnlimited &&
             allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
             return;
         }

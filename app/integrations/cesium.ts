@@ -89,6 +89,8 @@ export type  Ellipsoid = Cesium.Ellipsoid;
 export const Ellipsoid = Cesium.Ellipsoid;
 export type PerspectiveFrustum = Cesium.PerspectiveFrustum;
 export const PerspectiveFrustum = Cesium.PerspectiveFrustum;
+export type KeyboardEventModifier = Cesium.KeyboardEventModifier;
+export const KeyboardEventModifier = Cesium.KeyboardEventModifier;
 
 // Math is a namespace.
 

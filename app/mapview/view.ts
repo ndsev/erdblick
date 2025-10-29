@@ -16,7 +16,7 @@ import {
     defined,
     ScreenSpaceEventType,
     Billboard,
-    HeightReference, Camera
+    HeightReference, Camera, KeyboardEventModifier
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -157,11 +157,10 @@ export class MapView {
 
     async setup() {
         try {
-            const mapProjection =
-                this.sceneMode.valueOf() === SceneMode.SCENE2D ? new WebMercatorProjection() : new GeographicProjection();
+            const mapProjection = this.sceneMode.valueOf() === SceneMode.SCENE2D ?
+                new WebMercatorProjection() :
+                new GeographicProjection();
 
-            // TODO: Wait for the viewer to be initialised to proceed with the rest of the method
-            //  Maybe wrap it in Promise or something?
             this.viewer = new Viewer(this.canvasId, {
                 baseLayerPicker: false,
                 animation: false,
@@ -342,7 +341,7 @@ export class MapView {
             }
 
             const position = movement.position;
-            let feature = this.viewer.scene.pick(position);
+            const feature = this.viewer.scene.pick(position);
             if (defined(feature)) {
                 if (feature.primitive instanceof Billboard && feature.primitive?.id?.type === "SearchResult") {
                     // This is a search result marker, and it selects its found feature.
@@ -371,9 +370,7 @@ export class MapView {
                 this.stateService.unsetUnpinnedSelections();
                 this.menuService.tileOutline.next(null);
             }
-            // Handle position update after highlighting, because otherwise
-            // there is a race condition between the parameter updates for
-            // feature selection and position update.
+            // Handle position update after highlighting.
             const coordinates = this.viewer.camera.pickEllipsoid(
                 position, this.viewer.scene.globe.ellipsoid
             );
@@ -381,6 +378,31 @@ export class MapView {
                 this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
             }
         }, ScreenSpaceEventType.LEFT_CLICK);
+
+        // Add a handler for Ctrl+Left-Click to pin the selection immediately.
+        this.mouseHandler.setInputAction((movement: any) => {
+            if (environment.visualizationOnly) {
+                return;
+            }
+
+            const position = movement.position;
+            const feature = this.viewer.scene.pick(position);
+            if (defined(feature) && !(feature.primitive instanceof Billboard)) {
+                // Select the feature and pin the panel immediately.
+                const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
+                if (id !== undefined) {
+                    this.stateService.setInspectionPanelPinnedState(id, true);
+                }
+            }
+
+            // Handle position update after highlighting.
+            const coordinates = this.viewer.camera.pickEllipsoid(
+                position, this.viewer.scene.globe.ellipsoid
+            );
+            if (coordinates !== undefined) {
+                this.coordinatesService.mouseClickCoordinates.next(Cartographic.fromCartesian(coordinates));
+            }
+        }, ScreenSpaceEventType.LEFT_CLICK, KeyboardEventModifier.CTRL);
 
         // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
         this.mouseHandler.setInputAction((movement: any) => {
@@ -653,7 +675,6 @@ export class MapView {
         this.scalingFactor = Math.pow(altitude / 1000, 1.1) / 2;
     }
 
-    // TODO: Make sure that we transform the offset according to the heading of the camera
     moveUp() {
         this.stateService.focusedView = this._viewIndex;
         this.moveCameraOnSurface(0, this.cameraMoveUnits);
