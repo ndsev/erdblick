@@ -483,8 +483,9 @@ export class MapPanelComponent {
         );
     }
 
-    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
-        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
+    updateOSMOverlay(viewIndex: number) {
+        this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
+        this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
     }
 
     toggleOSMOverlay(viewIndex: number) {
@@ -492,20 +493,22 @@ export class MapPanelComponent {
         this.updateOSMOverlay(viewIndex);
     }
 
-    updateOSMOverlay(viewIndex: number) {
-        this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
-        this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
+    toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
+        this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
     toggleTileBorders(viewIndex: number, mapName: string, layerName: string) {
         this.mapService.toggleLayerTileBorderVisibility(viewIndex, mapName, layerName);
     }
 
-    toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
-        this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
+    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
+        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
     }
 
-    protected readonly removeGroupPrefix = removeGroupPrefix;
+    updateStyleOption(node: StyleOptionNode, viewIndex: number) {
+        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
+        this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
+    }
 
     addView() {
         // Limit the increment for now since we do not yet support more than 2 views
@@ -524,19 +527,5 @@ export class MapPanelComponent {
         }
     }
 
-    updateStyleOption(node: StyleOptionNode, viewIndex: number) {
-        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
-        this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
-    }
-
-    syncMapStateAcrossViews(index: number) {
-
-    }
-
-    syncOptionsForView(viewIndex: number) {
-        if (viewIndex >= this.syncedOptions.length) {
-            return;
-        }
-        this.syncedOptions[viewIndex] = !this.syncedOptions[viewIndex];
-    }
+    protected readonly removeGroupPrefix = removeGroupPrefix;
 }

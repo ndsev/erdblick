@@ -1,4 +1,4 @@
-import {AppStateService, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
+import {AppStateService, VIEW_SYNC_LAYERS, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -57,7 +57,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     showSyncMenu: boolean = false;
     syncOptions: {name: string, value: string}[] = [
         {name: "Position", value: VIEW_SYNC_POSITION},
-        {name: "Projection", value: VIEW_SYNC_PROJECTION}
+        {name: "Projection", value: VIEW_SYNC_PROJECTION},
+        {name: "Layers", value: VIEW_SYNC_LAYERS}
     ];
     selectedOptions: {name: string, value: string}[] = [];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;

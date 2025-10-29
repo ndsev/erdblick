@@ -1,4 +1,4 @@
-import {AppStateService, InspectionPanelModel, LayerViewConfig} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel, LayerViewConfig, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
@@ -445,5 +445,16 @@ export class MapLayerTree {
             }
         }
         return undefined;
+    }
+
+    syncLayers(viewIndex: number, mapId: string, layerId: string) {
+        // TODO: Sync style options from the given map layer to other map layers
+        //  which have the same options.
+    }
+
+    syncViews(viewIndex: number) {
+        // TODO: Sync from the given view to the other views...
+        //   ... layer activations, tile borders, level.
+        //   ... style options.
     }
 }

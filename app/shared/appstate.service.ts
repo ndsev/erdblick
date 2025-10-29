@@ -384,9 +384,6 @@ export class AppStateService implements OnDestroy {
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
         }
-        if (this.viewSync.includes(VIEW_SYNC_LAYERS)) {
-            // TODO
-        }
     }
 
     ngOnDestroy(): void {
