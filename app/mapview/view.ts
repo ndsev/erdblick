@@ -568,14 +568,14 @@ export class MapView {
                         heightReference: HeightReference.CLAMP_TO_GROUND,
                         height: 0,
                         material: new ColorMaterialProperty(
-                            new CallbackProperty(time =>
+                            new CallbackProperty(_ =>
                                 Color.AQUA.withAlpha(
                                     Math.max(0, (1 - JulianDate.secondsDifference(JulianDate.now(), start) / duration) * .2)
                                 ), false)
                         ),
                         outline: true,
                         outlineWidth: 3.0,
-                        outlineColor: new CallbackProperty(time =>
+                        outlineColor: new CallbackProperty(_ =>
                             Color.AQUA.withAlpha(
                                 Math.max(0, 1 - JulianDate.secondsDifference(JulianDate.now(), start) / duration)
                             ), false)
@@ -585,7 +585,7 @@ export class MapView {
                 this.beginAnimation();
 
                 // Fade it out...
-                const removeListener = this.viewer.clock.onTick.addEventListener(time => {
+                const removeListener = this.viewer.clock.onTick.addEventListener(_ => {
                     if (!this.isAvailable()) {
                         removeListener();
                         this.endAnimation();

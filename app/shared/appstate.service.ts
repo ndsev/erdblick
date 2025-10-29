@@ -1,16 +1,19 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, Params, Router} from "@angular/router";
-import {BehaviorSubject, distinctUntilChanged, skip, Subscription, take} from "rxjs";
+import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, CesiumMath} from "../integrations/cesium";
-import {AppState, AppStateOptions, Boolish, deepEquals, MapViewState, StyleState} from "./app-state";
+import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
+import {ErdblickStyle} from "../styledata/style.service";
+import {coreLib} from "../integrations/wasm";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
+export const VIEW_SYNC_LAYERS = "lay";
 export const MAX_NUM_SELECTIONS = 3;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
@@ -205,7 +208,11 @@ export class AppStateService implements OnDestroy {
     readonly viewSyncState = this.createState<string[]>({
         name: 'viewSync',
         defaultValue: [],
-        schema: z.array(z.union([z.literal(VIEW_SYNC_PROJECTION), z.literal(VIEW_SYNC_POSITION)])),
+        schema: z.array(z.union([
+            z.literal(VIEW_SYNC_PROJECTION),
+            z.literal(VIEW_SYNC_POSITION),
+            z.literal(VIEW_SYNC_LAYERS)
+        ])),
         urlParamName: 'sync',
         urlIncludeInVisualizationOnly: false
     });
@@ -354,11 +361,15 @@ export class AppStateService implements OnDestroy {
             this.isHydrating = false;
 
             // Ensure that the merged app state after hydration is reflected in local storage and URL.
-            this.statePool.values().forEach(state => this.onStateChanged(state, true))
+            this.syncAllStates();
 
             this.isReady = true;
             this.ready.next(true);
         });
+    }
+
+    private syncAllStates() {
+        this.statePool.values().forEach(state => this.onStateChanged(state, true));
     }
 
     syncViews(): void {
@@ -372,6 +383,9 @@ export class AppStateService implements OnDestroy {
         }
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
+        }
+        if (this.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            // TODO
         }
     }
 
@@ -462,12 +476,17 @@ export class AppStateService implements OnDestroy {
                 params[k] = v;
             }
         }
+        // The first URL sync will update the URL fully, with pruned state removed.
+        // Detect this case with the following collection equality check.
+        // In this case, use the "replace" handling to get rid of style options
+        // for removed styles.
+        const queryParamsHandling = this.pendingUrlSyncStates.size === [...this.statePool.values().filter(
+            state => state.isUrlState())].length ? "replace" : "merge";
         this.pendingUrlSyncStates.clear();
-        const replaceUrl = this.replaceUrl;
         this.router.navigate([], {
             queryParams: params,
-            queryParamsHandling: 'merge',
-            replaceUrl
+            queryParamsHandling: queryParamsHandling,
+            replaceUrl: this.replaceUrl
         }).catch(error => {
             console.error('[AppStateService] Failed to sync URL parameters', error);
         });
@@ -923,26 +942,163 @@ export class AppStateService implements OnDestroy {
         window.location.href = origin + pathname;
     }
 
-    pruneUrlOnLayerChange() {
-        // TODO:
-        //  1. Must prune layers that aren't present anymore.
-        //  2. Must prune visibility, tile borders and zoom levels for layers that aren't present anymore.
-        //  3. Must prune style options for the pruned layers.
-    }
+    prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
+        // 1) Build sets of present maps, layers and styles
+        const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+        for (const [mapId, mapNode] of presentMaps.entries()) {
+            // Use feature layers (exclude SourceData) via children
+            for (const layer of mapNode.children) {
+                presentLayerIds.add(`${mapId}/${layer.id}`);
+            }
+        }
 
-    pruneUrlOnStyleChange() {
-        // TODO:
-        //  1. Must prune styles that aren't present anymore.
-        //  2. Must prune style options for the present layers.
-    }
+        const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
+        const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
 
-    pruneUrlOnNumViewsChange() {
-        // TODO:
-        //  1. Must prune all present values for the pruned view.
-    }
+        // 2) Prune layerNames and per-view layer arrays (visibility, borders, zoom levels)
+        const oldLayerNames = this.layerNames;
+        if (oldLayerNames.length) {
+            const keepIndices: number[] = [];
+            const nextLayerNames: string[] = [];
+            for (let i = 0; i < oldLayerNames.length; i++) {
+                const name = oldLayerNames[i];
+                if (presentLayerIds.has(name)) {
+                    keepIndices.push(i);
+                    nextLayerNames.push(name);
+                }
+            }
 
-    pruneUrlOnSelectionChange() {
-        // TODO:
-        //  1. Must prune selections for which their respective maps aren't present anymore.
+            if (keepIndices.length !== oldLayerNames.length) {
+                // Update layer names
+                this.layerNames = nextLayerNames;
+
+                // Helper to filter layer-indexed arrays by keepIndices with fallback
+                const filterLayerArray = <T>(arr: T[], fallback: T): T[] =>
+                    keepIndices.map(idx => (idx < arr.length ? arr[idx] : fallback));
+
+                const views = this.numViews;
+                for (let v = 0; v < views; v++) {
+                    const vis = this.layerVisibilityState.getValue(v);
+                    const borders = this.layerTileBordersState.getValue(v);
+                    const levels = this.layerZoomLevelState.getValue(v);
+                    this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
+                    this.layerTileBordersState.next(v, filterLayerArray<boolean>(borders ?? [], false));
+                    this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
+                }
+            }
+        }
+
+        // 3) Prune style option values that reference pruned layers or non-present styles
+        //    and 4) prune style visibility for non-present styles
+        // Prune style visibility
+        const styleVis = {...this.styleVisibility};
+        let styleVisChanged = false;
+        for (const key of Object.keys(styleVis)) {
+            if (!presentStyleIds.has(key)) {
+                delete styleVis[key];
+                styleVisChanged = true;
+            }
+        }
+        if (styleVisChanged) {
+            this.styleVisibility = styleVis;
+        }
+
+        // Prune style option values
+        const stylesMap = this.styles; // Map<string, (string|number|boolean)[]>
+        let stylesChanged = false;
+        for (const key of Array.from(stylesMap.keys())) {
+            // Key format: `${mapId}/${layerId}/${shortStyleId}/${optionId}`
+            const parts = key.split('/');
+            if (parts.length < 4) {
+                stylesMap.delete(key);
+                stylesChanged = true;
+                continue;
+            }
+            const shortStyleId = parts[parts.length - 2];
+            const mapLayerId = parts.slice(0, -2).join('/');
+            if (!presentLayerIds.has(mapLayerId) || !presentShortStyleIds.has(shortStyleId)) {
+                stylesMap.delete(key);
+                stylesChanged = true;
+            }
+        }
+
+        // 5) Prune extra views in MapViewStates and in StyleState values
+        const views = this.numViews;
+        const pruneViews = <T>(state: MapViewState<T>) => {
+            const arr = state.appState.getValue();
+            if (arr.length > views) {
+                state.appState.next(arr.slice(0, views));
+            }
+        };
+        pruneViews(this.mode2dState);
+        pruneViews(this.osmEnabledState);
+        pruneViews(this.osmOpacityState);
+        pruneViews(this.cameraViewDataState);
+        pruneViews(this.layerVisibilityState);
+        pruneViews(this.layerTileBordersState);
+        pruneViews(this.layerZoomLevelState);
+
+        // Also prune view-dimension from style option arrays
+        for (const [k, vals] of stylesMap.entries()) {
+            if (vals.length > views) {
+                stylesMap.set(k, vals.slice(0, views));
+                stylesChanged = true;
+            }
+        }
+        if (stylesChanged) {
+            this.stylesState.next(stylesMap);
+        }
+
+        // 6) Prune selections that reference maps/layers that are not present anymore
+        const panels = this.selectionState.getValue();
+        const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
+
+        const parseKey = (tileKey: string): string | undefined => {
+            try {
+                const [mapId, layerId, _] = coreLib.parseMapTileKey(tileKey);
+                // res is expected to be [mapId, layerId, tileId]
+                return `${mapId}/${layerId}`
+            } catch (_) {
+                return;
+            }
+        };
+
+        for (const panel of panels) {
+            const updated: InspectionPanelModel<TileFeatureId> = {
+                id: panel.id,
+                features: [],
+                pinned: panel.pinned,
+                size: panel.size,
+                sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
+                color: panel.color
+            };
+
+            // Filter features
+            for (const feat of panel.features) {
+                const mapLayerId = parseKey(feat.mapTileKey);
+                if (mapLayerId && presentLayerIds.has(mapLayerId)) {
+                    updated.features.push(feat);
+                }
+            }
+
+            // Validate sourceData if present
+            if (updated.sourceData) {
+                const mapLayerId = parseKey(updated.sourceData.mapTileKey);
+                if (!mapLayerId || !presentLayerIds.has(mapLayerId)) {
+                    delete updated.sourceData;
+                }
+            }
+
+            if (updated.features.length || updated.sourceData) {
+                nextPanels.push(updated);
+            }
+        }
+
+        if (nextPanels.length !== panels.length) {
+            this.selectionState.next(nextPanels);
+        }
+
+        // Sync all states, so the URL is replaced.
+        this.syncAllStates();
     }
 }

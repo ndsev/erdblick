@@ -3,7 +3,7 @@ import {Fetch} from "./fetch";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileVisualization} from "../mapview/visualization.model";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {AppStateService, InspectionPanelModel, TileFeatureId} from "../shared/appstate.service";
@@ -145,8 +145,7 @@ export class MapDataService {
 
             if (diff > 0) {
                 this.viewVisualizationState.push(
-                    ...Array.from({ length: diff }, () => new ViewVisualizationState())
-                );
+                    ...Array.from({ length: diff }, () => new ViewVisualizationState()));
             } else {
                 this.viewVisualizationState.splice(diff);
             }
@@ -171,6 +170,7 @@ export class MapDataService {
                 );
                 state.visualizedTileLayers.delete(styleId);
             });
+            this.stateService.prune(this.maps.maps, this.styleService.styles);
         });
         this.styleService.styleAddedForId.subscribe(styleId => {
             this.viewVisualizationState.forEach((state, viewIndex) => {
@@ -217,10 +217,13 @@ export class MapDataService {
                     viewState.visualizationQueue.unshift(visu);
                 }
             }
-        })
+        });
 
         await this.reloadDataSources();
 
+        this.stateService.numViewsState.pipe(distinctUntilChanged(), skip(1)).subscribe(_ => {
+            this.stateService.prune(this.maps.maps, this.styleService.styles);
+        });
         this.stateService.selectionState.subscribe(async selected => {
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             for (const selection of selected) {
@@ -315,7 +318,7 @@ export class MapDataService {
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
-    public async reloadDataSources() {
+    async reloadDataSources() {
         await new Fetch(infoUrl)
             .withBufferCallback((infoBuffer: any) => {
                 uint8ArrayToWasm((wasmBuffer: any) => {

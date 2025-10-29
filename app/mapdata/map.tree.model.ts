@@ -181,6 +181,7 @@ export class MapLayerTree {
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
+            this.stateService.prune(this.mapsForMapIds, this.styleService.styles);
         });
         this.styleService.styleGroups.subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
@@ -261,7 +262,9 @@ export class MapLayerTree {
                 for (const style of styleSheets) {
                     if (style.visible && style.featureLayerStyle?.hasLayerAffinity(layer.id)) {
                         for (const option of style.options) {
-                            layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.id, style.shortId));
+                            if (!option.internal) {
+                                layer.children.push(new StyleOptionNode(layer.mapId, layer.id, option, style.id, style.shortId));
+                            }
                         }
                     }
                 }
