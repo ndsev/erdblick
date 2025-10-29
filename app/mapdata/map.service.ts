@@ -7,13 +7,12 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {AppStateService, InspectionPanelModel, TileFeatureId} from "../shared/appstate.service";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
 import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
-import {Cartesian3, Viewer} from "../integrations/cesium";
+import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
 
 const infoUrl = "sources";
 const tileUrl = "tiles";
@@ -80,6 +79,7 @@ export class MapDataService {
     tileVisualizationDestructionTopic: Subject<TileVisualization>;
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
+    moveToRectangleTopic: Subject<{ targetView: number, rectangle: Rectangle }>;
     originAndNormalForFeatureZoomTopic: Subject<{ targetView: number, origin: Cartesian3, normal: Cartesian3}> = new Subject();
     hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
@@ -112,7 +112,6 @@ export class MapDataService {
 
     constructor(public styleService: StyleService,
                 public stateService: AppStateService,
-                private sidePanelService: SidePanelService,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
                 private keyboardService: KeyboardService) {
@@ -132,6 +131,7 @@ export class MapDataService {
 
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number }>();
+        this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: Rectangle }>();
 
         // Unique client ID which ensures that tile fetch requests from this map-service
         // are de-duplicated on the mapget server.

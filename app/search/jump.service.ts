@@ -10,7 +10,7 @@ import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
-import {Cartographic} from "../integrations/cesium";
+import {Cartographic, Rectangle} from "../integrations/cesium";
 
 export interface SearchTarget {
     icon: string;
@@ -18,7 +18,7 @@ export interface SearchTarget {
     name: string;
     label: string;
     enabled: boolean;
-    jump?: (value: string) => number[] | undefined;
+    jump?: (value: string) => number[] | Rectangle | undefined;
     execute?: (value: string) => void;
     validate: (value: string) => boolean;
 }
@@ -123,21 +123,6 @@ export class JumpTargetService {
 
     validateMapgetTileId(value: string) {
         return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
-    }
-
-    parseMapgetTileId(value: string): number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
-        }
-        try {
-            let wgs84TileId = BigInt(value);
-            let position = coreLib.getTilePosition(wgs84TileId);
-            return [position.y, position.x, position.z]
-        } catch (e) {
-            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
-        }
-        return undefined;
     }
 
     getInspectTileSourceDataTarget() {

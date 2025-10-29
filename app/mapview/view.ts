@@ -16,7 +16,12 @@ import {
     defined,
     ScreenSpaceEventType,
     Billboard,
-    HeightReference, Camera, KeyboardEventModifier
+    HeightReference,
+    Camera,
+    KeyboardEventModifier,
+    ColorMaterialProperty,
+    CallbackProperty,
+    JulianDate
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -525,6 +530,54 @@ export class MapView {
                 } else {
                     this.stateService.setView(this._viewIndex, destination);
                 }
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapService.moveToRectangleTopic.subscribe((target: { targetView: number, rectangle: Rectangle }) => {
+                // Safety check: ensure viewer exists and is not destroyed
+                if (!this.isAvailable()) {
+                    console.debug('Cannot move to WGS84 position: viewer not available');
+                    return;
+                }
+
+                if (target.targetView !== this._viewIndex) {
+                    return;
+                }
+                const fauxCamera = new Camera(this.viewer.scene);
+                fauxCamera.setView({destination: target.rectangle, orientation: this.viewer.camera});
+                this.stateService.setView(this._viewIndex, fauxCamera.positionCartographic, fauxCamera);
+
+                // Show the tile outline as a rectangle
+                const start = JulianDate.now();
+                const duration = 5.0; // seconds
+                const entity = this.viewer.entities.add(new Entity({
+                    rectangle: {
+                        coordinates: target.rectangle,
+                        // If you meant clamped: use heightReference (not height)
+                        heightReference: HeightReference.CLAMP_TO_GROUND,
+                        material: new ColorMaterialProperty(
+                            new CallbackProperty(time =>
+                                Color.AQUA.withAlpha(
+                                    Math.max(0, 1 - JulianDate.secondsDifference(time!, start) / duration)
+                                ), false)
+                        ),
+                        outline: true,
+                        outlineWidth: 3.0,
+                        outlineColor: new CallbackProperty(time =>
+                            Color.AQUA.withAlpha(
+                                Math.max(0, 1 - JulianDate.secondsDifference(time!, start) / duration)
+                            ), false)
+                    }
+                }));
+
+                // Fade it out...
+                const off = this.viewer.clock.onTick.addEventListener(time => {
+                    if (JulianDate.secondsDifference(time, start) >= duration) {
+                        this.viewer.entities.remove(entity);
+                        off();
+                    }
+                });
             })
         );
 

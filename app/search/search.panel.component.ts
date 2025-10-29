@@ -1,5 +1,5 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
-import {Cartesian3} from "../integrations/cesium";
+import {Camera, Cartesian3, Rectangle, Scene} from "../integrations/cesium";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -12,6 +12,7 @@ import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
 import {CompletionCandidate} from "./search.worker";
+import {coreLib} from "../integrations/wasm";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -181,14 +182,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "Mapget Tile ID",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.jumpToTargetService.parseMapgetTileId(value) },
+            jump: (value: string) => { return this.parseMapgetTileId(value) },
             validate: (value: string) => { return this.jumpToTargetService.validateMapgetTileId(value) }
         });
         label = "lon = ? | lat = ? | (level = ?)"
         if (this.validateWGS84(value, true)) {
             const coords = this.parseWgs84Coordinates(value, true);
             if (coords !== undefined) {
-                label = `lon = ${coords[0]} | lat = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
+                label = `lon = ${coords[1]} | lat = ${coords[0]}${coords[2] ? ' | level = ' + coords[2] : ''}`;
             }
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -206,7 +207,7 @@ export class SearchPanelComponent implements AfterViewInit {
         if (this.validateWGS84(value, false)) {
             const coords = this.parseWgs84Coordinates(value, true);
             if (coords !== undefined) {
-                label = `lat = ${coords[0]} | lon = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
+                label = `lat = ${coords[0]} | lon = ${coords[1]}${coords[2] ? ' | level = ' + coords[2] : ''}`;
             }
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -470,7 +471,21 @@ export class SearchPanelComponent implements AfterViewInit {
         return undefined;
     }
 
-    jumpToWGS84(coordinates: number[] | undefined) {
+    parseMapgetTileId(value: string): Rectangle | undefined {
+        if (!value) {
+            this.messageService.showError("No value provided!");
+            return;
+        }
+        try {
+            const wgs84TileId = BigInt(value);
+            return Rectangle.fromDegrees(...coreLib.getTileBox(wgs84TileId));
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+        }
+        return undefined;
+    }
+
+    jumpToLocation(coordinates: number[] | undefined | Rectangle) {
         this.sidePanelService.panel = SidePanelState.NONE;
         if (coordinates === null) {
             return;
@@ -479,18 +494,23 @@ export class SearchPanelComponent implements AfterViewInit {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
-        let lat = coordinates[0];
-        let lon = coordinates[1];
         const targetViewIndex = this.stateService.focusedView;
-        const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
-        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : cameraView.destination.alt;
+        if (Array.isArray(coordinates)) {
+            let lat = coordinates[0];
+            let lon = coordinates[1];
+            const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
+            let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
 
-        this.mapService.moveToWgs84PositionTopic.next({
-            x: lon,
-            y: lat,
-            z: alt,
-            targetView: targetViewIndex
-        });
+            this.mapService.moveToWgs84PositionTopic.next({
+                x: lon,
+                y: lat,
+                z: alt,
+                targetView: targetViewIndex
+            });
+            this.jumpToTargetService.markedPosition.next(coordinates);
+        } else {
+            this.mapService.moveToRectangleTopic.next({targetView: targetViewIndex, rectangle: coordinates});
+        }
     }
 
     openInGM(value: string): number[] | undefined {
@@ -588,11 +608,7 @@ export class SearchPanelComponent implements AfterViewInit {
     runTarget(index: number) {
         const item = this.searchItems[index];
         if (item.jump !== undefined) {
-            const coord = item.jump(this.searchInputValue);
-            this.jumpToWGS84(coord);
-            if (coord !== undefined) {
-                this.jumpToTargetService.markedPosition.next(coord);
-            }
+            this.jumpToLocation(item.jump(this.searchInputValue));
             return;
         }
 
