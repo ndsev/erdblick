@@ -598,8 +598,8 @@ export class FeatureSearchService {
 
         this.completionCandidateList = this.completionCandidateList
             .concat(candidates.candidates)
-            .slice(0, this.completionCandidateLimit)
-            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index); // Remove duplicates
+            .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
+            .slice(0, this.completionCandidateLimit);
 
         this.completionCandidates.next(this.completionCandidateList);
     }
@@ -607,12 +607,12 @@ export class FeatureSearchService {
     private addDiagnostics(result : DiagnosticsResultsForTile) {
         this.diagnosticsMessagesList = this.diagnosticsMessagesList
             .concat(result.messages)
-            .slice(0, this.diagnosticsMessageLimit)
             .filter((item, index, array) => {
                 return array.findIndex(other => {
                     return other.message === item.message && other.location?.offset === item.location?.offset;
                 }) === index
-            });
+            })
+            .slice(0, this.diagnosticsMessageLimit);
         this.diagnosticsMessages.next(this.diagnosticsMessagesList);
     }
 

@@ -169,7 +169,7 @@ function processCompletion(task: CompletionWorkerTask) {
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);
 
-        const candidates = search.complete(task.query, task.point, {
+        let candidates = search.complete(task.query, task.point, {
             limit: task.limit,
         });
         search.delete();
@@ -178,7 +178,7 @@ function processCompletion(task: CompletionWorkerTask) {
         // We do not show completion errors.
         if (candidates["error"]) {
             console.error("Completion error", candidates["error"]);
-            return;
+            candidates = [];
         }
 
         // Post result back to the main thread.
