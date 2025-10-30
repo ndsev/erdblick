@@ -1,0 +1,55 @@
+erdblick
+Copyright (c) 2022-2025 Navigation Data Standard e.V.
+
+This software is licensed under the BSD 3-Clause License.
+See the LICENSE file for details.
+
+================================================================================
+
+This software includes or depends upon the following third-party components:
+
+--------------------------------------------------------------------------------
+CesiumJS and Cesium Native
+Copyright 2011-2024 Cesium GS, Inc.
+Licensed under the Apache License, Version 2.0
+https://github.com/CesiumGS/cesium
+https://github.com/CesiumGS/cesium-native
+
+Cesium is used for 3D geospatial visualization and rendering.
+
+--------------------------------------------------------------------------------
+mapget
+Copyright (c) Navigation Data Standard e.V.
+Licensed under the BSD 3-Clause License
+https://github.com/ndsev/mapget
+
+mapget provides the feature service backend for erdblick.
+
+--------------------------------------------------------------------------------
+yaml-cpp
+Copyright (c) 2008-2015 Jesse Beder
+Licensed under the MIT License
+https://github.com/jbeder/yaml-cpp
+
+yaml-cpp is used for parsing YAML-based style definitions.
+
+--------------------------------------------------------------------------------
+PrimeNG
+Copyright (c) 2016-2024 PrimeTek
+Licensed under the MIT License
+https://github.com/primefaces/primeng
+
+PrimeNG provides the Angular UI components.
+
+--------------------------------------------------------------------------------
+Angular
+Copyright (c) 2010-2024 Google LLC
+Licensed under the MIT License
+https://angular.io
+
+Angular is the web application framework.
+
+--------------------------------------------------------------------------------
+
+For a complete list of all dependencies and their licenses, please refer to
+the package.json and CMakeLists.txt files in this repository.
