@@ -47,7 +47,7 @@ import {Rectangle} from "../integrations/cesium";
                     </ng-template>
                     <div class="map-config-controls">
                         <p-button onEnterClick (click)="syncOptionsForView(index)"
-                                  [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success sync-enabled' : 'map-controls-button p-button-secondary'"
+                                  [styleClass]="syncedOptions[index] ? 'map-controls-button toggle-button p-button-success' : 'map-controls-button toggle-button p-button-primary'"
                                   icon="" label="" pTooltip="Sync visualization options in this view"
                                   tooltipPosition="bottom" tabindex="0">
                             <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
@@ -57,7 +57,8 @@ import {Rectangle} from "../integrations/cesium";
                         <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
-                            <p-button onEnterClick (click)="toggleOSMOverlay(index)" class="osm-button"
+                        <p-button onEnterClick (click)="toggleOSMOverlay(index)"
+                                      [styleClass]="osmEnabled[index] ? 'osm-button toggle-button p-button-success' : 'osm-button toggle-button p-button-primary'"
                                       icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                       label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
                             </p-button>
@@ -159,6 +160,7 @@ import {Rectangle} from "../integrations/cesium";
                                                       (click)="toggleTileBorders(index, node.mapId, node.id)"
                                                       label="" pTooltip="Toggle tile borders"
                                                       tooltipPosition="bottom"
+                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'toggle-button p-button-success' : 'toggle-button p-button-primary'"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
                                             <span class="material-icons"
@@ -257,11 +259,6 @@ import {Rectangle} from "../integrations/cesium";
             opacity: 0.5;
         }
 
-        .map-controls-button.sync-enabled {
-            background-color: #2e7d32;
-            border-color: #2e7d32;
-            color: #ffffff;
-        }
     `],
     standalone: false
 })
@@ -341,6 +338,22 @@ export class MapPanelComponent {
                 const numViews = this.stateService.numViews;
                 this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
                     this.mapService.isSyncOptionsForViewEnabled(viewIndex));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.osmEnabledState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.osmEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.osmEnabledState.getValue(index));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.osmOpacityState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.osmOpacityState.getValue(index));
             })
         );
     }
@@ -497,6 +510,7 @@ export class MapPanelComponent {
     updateOSMOverlay(viewIndex: number) {
         this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
         this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
+        this.mapService.syncOsmSettings(viewIndex);
     }
 
     toggleOSMOverlay(viewIndex: number) {

@@ -18,8 +18,8 @@ interface PanelOption {
     template: `
         <div class="coordinates-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
             <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
-                      [style]="{'pointer-events': 'all', 'padding-left': '0', 'padding-right': '0', 'width': '2em', 
-                                'height': '2em', 'box-shadow': 'none'}">
+                      [styleClass]="isMarkerEnabled ? 'toggle-button p-button-success' : 'toggle-button p-button-primary'"
+                      [style]="{'pointer-events': 'all', 'width': '2em', 'height': '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
             <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">
@@ -59,8 +59,8 @@ interface PanelOption {
             <p-button *ngIf="isMarkerEnabled && markerPosition"
                       (click)="focusOnMarker(markerPosition)"
                       label="" pTooltip="Focus on marker" tooltipPosition="bottom"
-                      [style]="{'pointer-events': 'all', 'padding-left': '0', 'padding-right': '0', 'width': '2em', 
-                                'height': '2em', 'box-shadow': 'none'}">
+                      styleClass="toggle-button p-button-primary"
+                      [style]="{'pointer-events': 'all', 'width': '2em', 'height': '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
         </div>

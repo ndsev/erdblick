@@ -376,6 +376,9 @@ export class MapDataService {
         for (const [optionNode, targetIndex] of result.styleOptionChanges) {
             this.applyStyleOptionChange(optionNode, targetIndex);
         }
+
+        this.syncOsmSettingsFromView(viewIndex);
+
         return result;
     }
 
@@ -399,6 +402,37 @@ export class MapDataService {
                 this.applySyncOptionsForView(viewIndex);
             }
         }
+    }
+
+    private syncOsmSettingsFromView(viewIndex: number): boolean {
+        const numViews = this.stateService.numViews;
+        if (viewIndex < 0 || viewIndex >= numViews) {
+            return false;
+        }
+        const sourceOsmEnabled = this.stateService.osmEnabledState.getValue(viewIndex);
+        const sourceOsmOpacity = this.stateService.osmOpacityState.getValue(viewIndex);
+        let changed = false;
+        for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
+            if (targetIndex === viewIndex) {
+                continue;
+            }
+            if (this.stateService.osmEnabledState.getValue(targetIndex) !== sourceOsmEnabled) {
+                this.stateService.osmEnabledState.next(targetIndex, sourceOsmEnabled);
+                changed = true;
+            }
+            if (this.stateService.osmOpacityState.getValue(targetIndex) !== sourceOsmOpacity) {
+                this.stateService.osmOpacityState.next(targetIndex, sourceOsmOpacity);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    public syncOsmSettings(viewIndex: number) {
+        if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            return;
+        }
+        this.syncOsmSettingsFromView(viewIndex);
     }
 
     async reloadDataSources() {
