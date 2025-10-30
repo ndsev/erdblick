@@ -47,7 +47,8 @@ import {Rectangle} from "../integrations/cesium";
                     </ng-template>
                     <div class="map-config-controls">
                         <p-button onEnterClick (click)="syncOptionsForView(index)"
-                                  [styleClass]="syncedOptions[index] ? 'map-controls-button toggle-button p-button-success' : 'map-controls-button toggle-button p-button-primary'"
+                                  [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
+                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
                                   icon="" label="" pTooltip="Sync visualization options in this view"
                                   tooltipPosition="bottom" tabindex="0">
                             <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
@@ -58,7 +59,8 @@ import {Rectangle} from "../integrations/cesium";
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
                         <p-button onEnterClick (click)="toggleOSMOverlay(index)"
-                                      [styleClass]="osmEnabled[index] ? 'osm-button toggle-button p-button-success' : 'osm-button toggle-button p-button-primary'"
+                                      [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
+                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
                                       icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
                                       label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
                             </p-button>
@@ -160,7 +162,7 @@ import {Rectangle} from "../integrations/cesium";
                                                       (click)="toggleTileBorders(index, node.mapId, node.id)"
                                                       label="" pTooltip="Toggle tile borders"
                                                       tooltipPosition="bottom"
-                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'toggle-button p-button-success' : 'toggle-button p-button-primary'"
+                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'p-button-success' : 'p-button-primary'"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
                                             <span class="material-icons"

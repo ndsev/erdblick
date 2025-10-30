@@ -25,6 +25,13 @@ function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
     return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
 }
 
+function featureSetContains(container: FeatureWrapper[], maybeSubset: FeatureWrapper[]) {
+    if (!maybeSubset.length) {
+        return false;
+    }
+    return maybeSubset.every(candidate => container.some(item => item.equals(candidate)));
+}
+
 const DEFAULT_VIEWPORT: Viewport = {
     south: .0,
     west: .0,
@@ -909,11 +916,16 @@ export class MapDataService {
             return;
         }
 
-        const selectedFeatures = this.selectionTopic.getValue().map(panel => {
-            return panel.features;
-        }).flat();
-        // TODO: Use a set difference?
-        if (featureSetsEqual(selectedFeatures, features) || featureSetsEqual(this.hoverTopic.getValue(), features)) {
+        const selectedFeatures = this.selectionTopic.getValue().flatMap(panel => panel.features);
+        const currentHover = this.hoverTopic.getValue();
+
+        if (featureSetsEqual(selectedFeatures, features) || featureSetsEqual(currentHover, features)) {
+            return;
+        }
+        if (featureSetContains(selectedFeatures, features)) {
+            if (currentHover.length) {
+                this.hoverTopic.next([]);
+            }
             return;
         }
         this.hoverTopic.next(features);

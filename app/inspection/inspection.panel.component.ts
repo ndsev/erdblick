@@ -39,6 +39,7 @@ interface SourceLayerMenuItem {
                         </span>
                         <span>
                             <p-button icon="" (click)="togglePinnedState($event)"
+                                      [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
                                       (mousedown)="$event.stopPropagation()">
                                 @if (panel().pinned) {
                                     <span class="material-symbols-outlined"
@@ -47,7 +48,8 @@ interface SourceLayerMenuItem {
                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
                                 }
                             </p-button>
-                            <p-button icon="pi pi-times" (click)="unsetPanel()" (mousedown)="$event.stopPropagation()"/>
+                            <p-button icon="pi pi-times" styleClass="p-button-danger"
+                                      (click)="unsetPanel()" (mousedown)="$event.stopPropagation()"/>
                         </span>
                     </div>
                 </p-accordion-header>
