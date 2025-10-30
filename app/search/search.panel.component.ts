@@ -58,7 +58,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
+                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -684,7 +684,7 @@ export class SearchPanelComponent implements AfterViewInit {
     onKeydown(event: KeyboardEvent) {
         const textarea = this.textarea.nativeElement;
         const dismissCompletionKeys = [
-            'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete'
+            'Home', 'End', 'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'Delete'
         ]
 
         // Dismiss the completion pop-up for control-keys
@@ -719,13 +719,17 @@ export class SearchPanelComponent implements AfterViewInit {
             }
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.searchInputValue) {
+            if (this.completion.visible || this.completion.pending) {
+                this.resetCompletion();
+                return;
+            } else if (this.searchInputValue) {
                 this.setSearchValue("");
                 this.resetCompletion();
                 return;
+            } else {
+                this.dialog.close(event);
+                return;
             }
-            this.resetCompletion();
-            this.dialog.close(event);
         } else if (event.key === 'Tab') {
             if (this.completion.visible) {
                 this.applyCompletion();
