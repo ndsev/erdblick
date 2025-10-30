@@ -9,14 +9,15 @@ import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {SearchPanelComponent} from "./search.panel.component";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
+import {Tree} from "primeng/tree";
+import {Scroller} from "primeng/scroller";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="feature-search-dialog" header="Search Loaded Features"
-                  [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
-                  [position]="'left'" [draggable]="true" [resizable]="true"
-                  (onShow)="onShow($event)" (onHide)="onHide($event)">
+        <p-dialog class="feature-search-dialog" header="Search Loaded Features" [closeOnEscape]="false"
+                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true" 
+                  (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
                     <p-progressBar [value]="percentDone">
@@ -53,26 +54,34 @@ import {AppStateService} from "../shared/appstate.service";
                 <p-tabpanels>
                     <!-- Results -->
                     <p-tabpanel value="results">
-                        <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                        <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
                             <p-colorPicker [(ngModel)]="searchService.pointColor"
                                            (ngModelChange)="searchService.updatePointColor()" appendTo="body"/>
                         </div>
-                        <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
-                                       [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
-                                       placeholder="Select Grouping" [maxSelectedLabels]="5"
-                                       display="chip" optionLabel="name" class="w-full md:w-80">
-                        </p-multiSelect>
-                        
+                        <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
+                            <span>Group:</span>
+                            <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
+                                           [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
+                                           placeholder="Select Grouping" [maxSelectedLabels]="5"
+                                           display="chip" optionLabel="name">
+                            </p-multiSelect>
+                        </div>
+
                         <!-- Results Tree -->
                         <div style="height: 100%">
-                            <p-tree [value]="resultsTree"
+                            <p-tree #tree [value]="resultsTree"
                                     selectionMode="single"
                                     [metaKeySelection]="false"
+                                    [lazy]="true"
                                     [virtualScroll]="true"
                                     [virtualScrollItemSize]="35"
+                                    [filter]="showFilter"
+                                    filterPlaceholder="Filter matched features"
+                                    [scrollHeight]="scrollHeight"
+                                    [highlightOnSelect]="true"
                                     (onNodeSelect)="selectResult($event)"
-                                    emptyMessage="No features matched.">
+                                    [emptyMessage]="resultsStatus">
                             </p-tree>
                         </div>
                     </p-tabpanel>
@@ -95,8 +104,10 @@ import {AppStateService} from "../shared/appstate.service";
                                         <li>
                                             <div>
                                                 <span>{{ message.message }}</span>
-                                                <div><span>Here: </span><code style="width: 100%;"
-                                                                              [innerHTML]="message.query | highlightRegion:message.location.offset:message.location.size:25"></code>
+                                                <div>
+                                                    <span>Here: </span>
+                                                    <code style="width: 100%;"
+                                                          [innerHTML]="message.query | highlightRegion: message.location.offset:message.location.size:25"></code>
                                                 </div>
                                             </div>
                                             <p-button size="small" label="Fix" *ngIf="message.fix"
@@ -138,13 +149,11 @@ import {AppStateService} from "../shared/appstate.service";
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
     traces: Array<TraceResult> = [];
-    selectedResult: any;
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
-    groupedResults: Array<{ header: string; items: Array<{ label: string; mapId: string; layerId: string; featureId: string }> }> = [];
     resultsTree: TreeNode[] = [];
     grouping: { name: string, value: number }[] = [
         {name: 'Maps', value: 1},
@@ -157,8 +166,13 @@ export class FeatureSearchComponent {
     // Active result panel index
     resultPanelIndex: string = "";
 
-    @Input() searchPanelComponent!: SearchPanelComponent;
+    showFilter: boolean = false;
+    resultsStatus: string = "Loading...";
+    scrollHeight: string = "28.5em";
+
+    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`?
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
+    @ViewChild('tree') tree!: Tree;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
@@ -169,6 +183,9 @@ export class FeatureSearchComponent {
         this.searchService.isFeatureSearchActive.subscribe(isActive => {
             this.isPanelVisible = true;
             if (isActive) {
+                this.resultsTree = [];
+                this.showFilter = false;
+                this.resultsStatus = "Loading...";
                 this.canPauseStopSearch = isActive;
             }
         });
@@ -261,13 +278,11 @@ export class FeatureSearchComponent {
         this.isSearchPaused = false;
         this.canPauseStopSearch = false;
         this.results = [];
-        this.groupedResults = [];
+        this.resultsTree = [];
+        this.showFilter = false;
+        this.resultsStatus = "Loading...";
         this.searchService.clear();
         this.isPanelVisible = false;
-    }
-
-    onShow(_: any) {
-        this.recalculateResultsByGroups();
     }
 
     onApplyFix(message: DiagnosticsMessage) {
@@ -303,29 +318,29 @@ export class FeatureSearchComponent {
             4: { label: 'Tile',    get: (r) => r.tileId }
         };
 
-        const buildTree = (items: ResultItem[], depth: number, parentKey: string): TreeNode[] => {
+        const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
             if (depth >= selectedOrder.length || selectedOrder.length === 0) {
-                // Create leaf nodes for results
-                return items.map((it, idx) => ({
+                const leaves = items.map((it, idx) => ({
                     key: `${parentKey}/leaf:${idx}:${it.featureId}`,
                     label: it.label,
                     data: { mapId: it.mapId, featureId: it.featureId },
                     leaf: true,
                     selectable: true
                 } as TreeNode));
+                return [leaves, items.length];
             }
 
             const key = selectedOrder[depth];
             const acc = accessors[key];
             if (!acc) {
-                // Fallback to leaves if accessor missing
-                return items.map((it, idx) => ({
+                const leaves = items.map((it, idx) => ({
                     key: `${parentKey}/leaf:${idx}:${it.featureId}`,
                     label: it.label,
                     data: { mapId: it.mapId, featureId: it.featureId },
                     leaf: true,
                     selectable: true
                 } as TreeNode));
+                return [leaves, items.length];
             }
 
             // Partition items by current accessor
@@ -338,24 +353,49 @@ export class FeatureSearchComponent {
             }
 
             const nodes: TreeNode[] = [];
-            let index = 0;
+            let total = 0;
             for (const [value, groupItems] of partitions) {
-                const nodeKey = `${parentKey}/${acc.label}:${value}`;
+                const nodeKey = `${parentKey}/${acc.label}:${String(value)}`;
+                const [children, childCount] = buildTreeWithCounts(groupItems, depth + 1, nodeKey);
+                total += childCount;
                 nodes.push({
                     key: nodeKey,
-                    label: `${acc.label}: ${value}`,
+                    label: `${acc.label}: ${String(value)} (${childCount})`,
                     selectable: false,
                     expanded: true,
-                    children: buildTree(groupItems, depth + 1, nodeKey)
+                    children
                 } as TreeNode);
-                index++;
             }
-            return nodes;
+            return [nodes, total];
         };
 
-        const tree = buildTree(results, 0, 'root');
+        const [tree] = buildTreeWithCounts(results, 0, 'root');
         this.resultsTree = tree;
-        // Keep groupedResults for potential legacy uses (not used in template anymore)
-        this.groupedResults = [];
+        if (this.resultsTree.length) {
+            this.showFilter = true;
+            this.resultsStatus = "Loading...";
+        } else {
+            this.showFilter = false;
+            this.resultsStatus = "No matches found";
+        }
+    }
+
+    syncTreeScrollHeight(event: MouseEvent) {
+        const element = event.target as HTMLElement;
+        if (!element.classList.contains("feature-search-dialog") || !element.offsetWidth || !element.offsetHeight) {
+            return;
+        }
+
+        // FIXME: Won't update the height of the tree!
+        const currentEmHeight = element.offsetHeight / this.stateService.baseFontSize;
+        this.scrollHeight = `${currentEmHeight - 11.5}em`;
+        setTimeout(() => {
+            let scroller = (<any>this.tree)?.scroller as Scroller;
+            if (scroller) {
+                scroller.init();
+                scroller.scrollHeight = this.scrollHeight;
+                scroller.calculateAutoSize();
+            }
+        }, 0);
     }
 }

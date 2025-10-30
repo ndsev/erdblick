@@ -757,16 +757,18 @@ map-view {
     width: 30em;
     min-width: 25em;
     min-height: 30em;
+    max-height: calc(100vh - 5em);
     margin: 0 !important;
     z-index: 1000 !important;
   }
 
   .p-dialog-content {
-    padding: 0.5em;
+    padding: 0 0.5em 0.5em 0.5em;
   }
 
   .p-dialog-header {
     padding: 0 0 0 0.5em;
+    height: 2em;
 
     .p-dialog-title {
       font-size: medium;
@@ -1205,7 +1207,7 @@ map-view {
     box-shadow: none;
   }
 
-  padding: 0 0 0.5em 0;
+  padding: 0 0 0.25em 0;
   display: flex;
   gap: 0.5em;
   align-items: center;
@@ -1227,7 +1229,7 @@ map-view {
 
 .feature-search-tabs {
   .p-tab {
-    padding: 0.5em 1.5em;
+    padding: 0.25em 1em;
     margin: 0;
     font-size: 0.9em;
   }
@@ -1235,14 +1237,14 @@ map-view {
   .p-tabpanels {
     padding: 0.5em 0 0 0;
     font-size: 0.9em;
+
+    .p-tree {
+      padding: 0.5em 0 0 0;
+    }
   }
 
-  .results-listbox {
-    li {
-      padding: 0.5em 0.5em;
-      font-size: 1em;
-    }
-
+  // Ensure results tree shows a reasonable viewport height
+  .p-tree {
     .p-scroller {
       height: calc(100vh - 23em) !important;
     }
