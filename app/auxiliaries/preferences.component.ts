@@ -9,27 +9,45 @@ import {EditorService} from "../shared/editor.service";
 @Component({
     selector: 'pref-components',
     template: `
-        <div class="bttn-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
-            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="pref-button" pTooltip="Help"
-                      tooltipPosition="right"></p-button>
-            <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
-                      pTooltip="Preferences" tooltipPosition="right"></p-button>
-            <p-button (click)="showControlsDialog()" label="" class="pref-button"
-                      pTooltip="Controls" tooltipPosition="right">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
-            </p-button>
-            <p-button (click)="showStatsDialog()" label="" class="pref-button"
-                      pTooltip="Statistics" tooltipPosition="right">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
-            </p-button>
-            <p-button (click)="openDatasources()" class="pref-button"
-                      icon="pi pi-server" label="" pTooltip="Datasources"
-                      tooltipPosition="bottom" tabindex="0">
-            </p-button>
-            <p-button (click)="openStylesDialog()" class="pref-button"
-                      icon="pi pi-palette" label="" pTooltip="Styles"
-                      tooltipPosition="bottom" tabindex="0">
-            </p-button>
+        <div class="pref-buttons-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
+            <div class="pref-button-subcontainer" (click)="openHelp()">
+                <p-button (click)="openHelp()" icon="pi pi-question" label="" class="pref-button" pTooltip="Help"
+                          tooltipPosition="right"></p-button>
+                <span>Help</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showPreferencesDialog()">
+                <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
+                          pTooltip="Preferences" tooltipPosition="right"></p-button>
+                <span>Preferences</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showControlsDialog()">
+                <p-button (click)="showControlsDialog()" label="" class="pref-button"
+                          pTooltip="Controls" tooltipPosition="right">
+                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
+                </p-button>
+                <span>Controls</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showStatsDialog()">
+                <p-button (click)="showStatsDialog()" label="" class="pref-button"
+                          pTooltip="Statistics" tooltipPosition="right">
+                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
+                </p-button>
+                <span>Statistics</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="openDatasources()">
+                <p-button (click)="openDatasources()" class="pref-button"
+                          icon="pi pi-server" label="" pTooltip="Datasources"
+                          tooltipPosition="bottom" tabindex="0">
+                </p-button>
+                <span>Datasources</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="openStylesDialog()" >
+                <p-button (click)="openStylesDialog()" class="pref-button"
+                          icon="pi pi-palette" label="" pTooltip="Styles"
+                          tooltipPosition="bottom" tabindex="0">
+                </p-button>
+                <span>Styles</span>
+            </div>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">

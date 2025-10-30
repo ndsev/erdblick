@@ -252,6 +252,9 @@ map-view {
       visibility: visible;
       opacity: 1;
       transition: opacity 0.1s, visibility 0.1s;
+      background: var(--p-content-background);
+      border-radius: 6px;
+      padding: 0.25em;
     }
   }
 
@@ -261,7 +264,7 @@ map-view {
   }
 }
 
-.bttn-container {
+.pref-buttons-container {
   display: flex;
   flex-direction: column-reverse;
   gap: 0.5em;
@@ -278,15 +281,35 @@ map-view {
     }
   }
 
-  .pref-button {
-    width: 3em;
-    height: 3em;
+  .pref-button-subcontainer {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5em;
+    cursor: pointer;
+    align-items: center;
+    padding: 0.25em;
+    background: var(--p-content-background);
+    border-radius: 6px;
 
-    .p-button {
-      border-radius: 50%;
-      padding: 0.8em 0;
+    &:hover {
+      background: var(--p-highlight-background);
+    }
+
+    span {
+      font-size: 1em;
+      color: var(--p-content-color);
+    }
+
+    .pref-button {
       width: 3em;
       height: 3em;
+
+      button {
+        border-radius: 50%;
+        padding: 0.8em 0;
+        width: 3em;
+        height: 3em;
+      }
     }
   }
 }
