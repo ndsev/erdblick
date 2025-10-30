@@ -11,3 +11,4 @@ static-visualization-only
 node_modules
 config
 out-tsc
+config/config.json
