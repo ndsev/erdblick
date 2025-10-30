@@ -186,7 +186,9 @@ export class MapLayerTree {
         this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
-            this.stateService.prune(this.mapsForMapIds, this.styleService.styles);
+            if (this.mapsForMapIds.size) {
+                this.stateService.prune(this.mapsForMapIds, this.styleService.styles);
+            }
         });
         this.styleService.styleGroups.subscribe(_ => {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
