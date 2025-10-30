@@ -59,7 +59,8 @@ interface PanelOption {
             <p-button *ngIf="isMarkerEnabled && markerPosition"
                       (click)="focusOnMarker(markerPosition)"
                       label="" pTooltip="Focus on marker" tooltipPosition="bottom"
-                      [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
+                      [style]="{'pointer-events': 'all', 'padding-left': '0', 'padding-right': '0', 'width': '2em', 
+                                'height': '2em', 'box-shadow': 'none'}">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
         </div>
