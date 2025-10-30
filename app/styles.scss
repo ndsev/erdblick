@@ -252,9 +252,6 @@ map-view {
       visibility: visible;
       opacity: 1;
       transition: opacity 0.1s, visibility 0.1s;
-      background: var(--p-content-background);
-      border-radius: 6px;
-      padding: 0.25em;
     }
   }
 
@@ -270,6 +267,10 @@ map-view {
   gap: 0.5em;
   position: relative;
   z-index: 1100;
+  background: var(--p-content-background);
+  box-shadow: var(--p-dialog-shadow);
+  padding: 0.25em 0.5em;
+  border-radius: 6px;
 
   .help-button {
     width: 3em;
