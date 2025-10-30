@@ -6,12 +6,12 @@ import {TileVisualization} from "../mapview/visualization.model";
 import {BehaviorSubject, distinctUntilChanged, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
-import {AppStateService, InspectionPanelModel, TileFeatureId} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel, TileFeatureId, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
-import {MapInfoItem, MapLayerTree, StyleOptionNode} from "./map.tree.model";
+import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
 import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
 
 const infoUrl = "sources";
@@ -139,16 +139,15 @@ export class MapDataService {
 
         this.stateService.numViewsState.subscribe(numViews => {
             const diff = numViews - this.viewVisualizationState.length;
-            if (!diff) {
-                return;
-            }
 
             if (diff > 0) {
                 this.viewVisualizationState.push(
                     ...Array.from({ length: diff }, () => new ViewVisualizationState()));
-            } else {
+            } else if (diff < 0) {
                 this.viewVisualizationState.splice(diff);
             }
+
+            this.reapplySyncOptionsForAllViews();
         });
     }
 
@@ -184,42 +183,34 @@ export class MapDataService {
             });
         });
         this.styleOptionChangedTopic.subscribe(([optionNode, viewIndex]) => {
-            if (viewIndex >= this.viewVisualizationState.length) {
-                return;
+            this.applyStyleOptionChange(optionNode, viewIndex);
+
+            if (this.isSyncOptionsForViewEnabled(viewIndex)) {
+                const syncedOptions = this.maps.syncLayers(viewIndex, optionNode.mapId, optionNode.layerId);
+                for (const syncedOption of syncedOptions) {
+                    this.applyStyleOptionChange(syncedOption, viewIndex);
+                }
             }
 
-            const viewState = this.viewVisualizationState[viewIndex];
-            const visualizationsForStyle = viewState.visualizedTileLayers.get(optionNode.styleId);
-            if (!visualizationsForStyle) {
-                return;
-            }
-            // Get rid of all merged point tiles for the view+map+layer+style.
-            const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
-                viewIndex,
-                optionNode.mapId,
-                optionNode.layerId,
-                optionNode.styleId,
-                coreLib.HighlightMode.NO_HIGHLIGHT);
-            for (const removedMergedPointsTile of this.pointMergeService.clear(mapViewLayerStyleId)) {
-                this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
-            }
-            // Remove all currently queued visualizations for the map+layer+style which changed.
-            viewState.visualizationQueue = viewState.visualizationQueue.filter(visu => {
-                return visu.styleId !== optionNode.styleId || visu.tile.mapName !== optionNode.mapId || visu.tile.layerName !== optionNode.layerId;
-            });
-            // Redraw all visualizations for the map+layer+style.
-            for (const visu of visualizationsForStyle) {
-                console.assert(
-                    visu.viewIndex === viewIndex,
-                    `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`);
-                if (visu.tile.mapName === optionNode.mapId && visu.tile.layerName === optionNode.layerId) {
-                    visu.setStyleOption(optionNode.id, optionNode.value[viewIndex]);
-                    viewState.visualizationQueue.unshift(visu);
-                }
+            const syncResult = this.syncViewsIfEnabled(viewIndex);
+            if (syncResult?.viewConfigChanged) {
+                this.update().then();
             }
         });
 
         await this.reloadDataSources();
+
+        let layerSyncEnabled = this.stateService.viewSync.includes(VIEW_SYNC_LAYERS);
+        this.stateService.viewSyncState.subscribe(syncModes => {
+            const enabled = syncModes.includes(VIEW_SYNC_LAYERS);
+            if (enabled && !layerSyncEnabled) {
+                const result = this.syncViewsIfEnabled(this.stateService.focusedView);
+                if (result?.viewConfigChanged) {
+                    this.update().then();
+                }
+            }
+            layerSyncEnabled = enabled;
+        });
 
         this.stateService.numViewsState.pipe(distinctUntilChanged(), skip(1)).subscribe(_ => {
             this.stateService.prune(this.maps.maps, this.styleService.styles);
@@ -318,6 +309,98 @@ export class MapDataService {
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
+    private applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number) {
+        if (viewIndex >= this.viewVisualizationState.length) {
+            return;
+        }
+        if (optionNode.value.length <= viewIndex) {
+            return;
+        }
+
+        const viewState = this.viewVisualizationState[viewIndex];
+        const visualizationsForStyle = viewState.visualizedTileLayers.get(optionNode.styleId);
+        if (!visualizationsForStyle) {
+            return;
+        }
+
+        const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
+            viewIndex,
+            optionNode.mapId,
+            optionNode.layerId,
+            optionNode.styleId,
+            coreLib.HighlightMode.NO_HIGHLIGHT);
+        for (const removedMergedPointsTile of this.pointMergeService.clear(mapViewLayerStyleId)) {
+            this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
+        }
+
+        viewState.visualizationQueue = viewState.visualizationQueue.filter(visu =>
+            visu.styleId !== optionNode.styleId ||
+            visu.tile.mapName !== optionNode.mapId ||
+            visu.tile.layerName !== optionNode.layerId
+        );
+
+        const optionValue = optionNode.value[viewIndex];
+        for (const visu of visualizationsForStyle) {
+            console.assert(
+                visu.viewIndex === viewIndex,
+                `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`
+            );
+            if (visu.tile.mapName === optionNode.mapId && visu.tile.layerName === optionNode.layerId) {
+                visu.setStyleOption(optionNode.id, optionValue);
+                viewState.visualizationQueue.unshift(visu);
+            }
+        }
+    }
+
+    public setSyncOptionsForView(viewIndex: number, enabled: boolean) {
+        const current = this.stateService.getLayerSyncOption(viewIndex);
+        if (current !== enabled) {
+            this.stateService.setLayerSyncOption(viewIndex, enabled);
+        }
+        if (!enabled) {
+            return;
+        }
+
+        this.applySyncOptionsForView(viewIndex);
+    }
+
+    public isSyncOptionsForViewEnabled(viewIndex: number): boolean {
+        return this.stateService.getLayerSyncOption(viewIndex);
+    }
+
+    private syncViewsIfEnabled(viewIndex: number): SyncViewsResult | null {
+        if (!this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            return null;
+        }
+        const result = this.maps.syncViews(viewIndex);
+        for (const [optionNode, targetIndex] of result.styleOptionChanges) {
+            this.applyStyleOptionChange(optionNode, targetIndex);
+        }
+        return result;
+    }
+
+    private applySyncOptionsForView(viewIndex: number) {
+        for (const layer of this.maps.allFeatureLayers()) {
+            const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id);
+            for (const syncedOption of syncedOptions) {
+                this.applyStyleOptionChange(syncedOption, viewIndex);
+            }
+        }
+        const result = this.syncViewsIfEnabled(viewIndex);
+        if (result?.viewConfigChanged) {
+            this.update().then();
+        }
+    }
+
+    private reapplySyncOptionsForAllViews() {
+        const numViews = this.stateService.numViews;
+        for (let viewIndex = 0; viewIndex < numViews; viewIndex++) {
+            if (this.stateService.getLayerSyncOption(viewIndex)) {
+                this.applySyncOptionsForView(viewIndex);
+            }
+        }
+    }
+
     async reloadDataSources() {
         await new Fetch(infoUrl)
             .withBufferCallback((infoBuffer: any) => {
@@ -329,6 +412,7 @@ export class MapDataService {
             .withJsonCallback((result: Array<MapInfoItem>) => {
                 let maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
                 this.maps$.next(new MapLayerTree(maps, this.selectionTopic, this.stateService, this.styleService));
+                this.reapplySyncOptionsForAllViews();
             })
             .go();
     }
@@ -964,16 +1048,19 @@ export class MapDataService {
 
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
+        this.syncViewsIfEnabled(viewIndex);
         this.update().then();
     }
 
     toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
         this.maps.toggleLayerTileBorderVisibility(viewIndex, mapId, layerId);
+        this.syncViewsIfEnabled(viewIndex);
         this.update().then();
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);
+        this.syncViewsIfEnabled(viewIndex);
         this.update().then();
     }
 

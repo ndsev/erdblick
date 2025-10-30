@@ -167,6 +167,11 @@ export class GroupTreeNode {
     }
 }
 
+export interface SyncViewsResult {
+    styleOptionChanges: Array<[StyleOptionNode, number]>;
+    viewConfigChanged: boolean;
+}
+
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
     private mapsForMapIds: Map<string, MapTreeNode> = new Map();
@@ -447,14 +452,152 @@ export class MapLayerTree {
         return undefined;
     }
 
-    syncLayers(viewIndex: number, mapId: string, layerId: string) {
-        // TODO: Sync style options from the given map layer to other map layers
-        //  which have the same options.
+    syncLayers(viewIndex: number, mapId: string, layerId: string): StyleOptionNode[] {
+        const sourceMap = this.maps.get(mapId);
+        if (!sourceMap) {
+            return [];
+        }
+        const sourceLayer = sourceMap.layers.get(layerId);
+        if (!sourceLayer) {
+            return [];
+        }
+        if (viewIndex >= sourceLayer.viewConfig.length) {
+            return [];
+        }
+
+        const sourceOptions = sourceLayer.children.filter(option => option.value.length > viewIndex);
+        if (!sourceOptions.length) {
+            return [];
+        }
+
+        const sourceOptionKeys = new Map<string, StyleOptionNode>();
+        for (const option of sourceOptions) {
+            sourceOptionKeys.set(`${option.styleId}:${option.id}`, option);
+        }
+
+        const changedOptions: StyleOptionNode[] = [];
+
+        for (const candidateLayer of this.allFeatureLayers()) {
+            if (candidateLayer === sourceLayer) {
+                continue;
+            }
+            if (candidateLayer.children.length < sourceOptions.length) {
+                continue;
+            }
+
+            const candidateOptionMap = new Map<string, StyleOptionNode>();
+            for (const option of candidateLayer.children) {
+                candidateOptionMap.set(`${option.styleId}:${option.id}`, option);
+            }
+
+            let optionsMatch = true;
+            for (const key of sourceOptionKeys.keys()) {
+                const targetOption = candidateOptionMap.get(key);
+                if (!targetOption || targetOption.value.length <= viewIndex) {
+                    optionsMatch = false;
+                    break;
+                }
+            }
+
+            if (!optionsMatch) {
+                continue;
+            }
+
+            for (const [key, sourceOption] of sourceOptionKeys.entries()) {
+                const targetOption = candidateOptionMap.get(key)!;
+                const sourceValue = sourceOption.value[viewIndex];
+                if (targetOption.value[viewIndex] === sourceValue) {
+                    continue;
+                }
+                targetOption.value[viewIndex] = sourceValue;
+                this.stateService.setStyleOptionValues(
+                    targetOption.mapId,
+                    targetOption.layerId,
+                    targetOption.shortStyleId,
+                    targetOption.id,
+                    targetOption.value
+                );
+                changedOptions.push(targetOption);
+            }
+        }
+
+        return changedOptions;
     }
 
-    syncViews(viewIndex: number) {
-        // TODO: Sync from the given view to the other views...
-        //   ... layer activations, tile borders, level.
-        //   ... style options.
+    syncViews(viewIndex: number): SyncViewsResult {
+        const numViews = this.stateService.numViewsState.getValue();
+        if (numViews < 2) {
+            return { styleOptionChanges: [], viewConfigChanged: false };
+        }
+
+        const styleOptionChanges: Array<[StyleOptionNode, number]> = [];
+        let viewConfigChanged = false;
+
+        for (const layer of this.allFeatureLayers()) {
+            if (layer.viewConfig.length <= viewIndex) {
+                continue;
+            }
+            const sourceConfig = layer.viewConfig[viewIndex];
+            let layerConfigMutated = false;
+
+            for (let targetIndex = 0; targetIndex < layer.viewConfig.length; targetIndex++) {
+                if (targetIndex === viewIndex || layer.viewConfig.length <= targetIndex) {
+                    continue;
+                }
+                const targetConfig = layer.viewConfig[targetIndex];
+                if (!targetConfig) {
+                    continue;
+                }
+
+                if (targetConfig.visible !== sourceConfig.visible ||
+                    targetConfig.level !== sourceConfig.level ||
+                    targetConfig.tileBorders !== sourceConfig.tileBorders) {
+                    layer.viewConfig[targetIndex] = {
+                        visible: sourceConfig.visible,
+                        level: sourceConfig.level,
+                        tileBorders: sourceConfig.tileBorders
+                    };
+                    layerConfigMutated = true;
+                }
+            }
+
+            if (layerConfigMutated) {
+                viewConfigChanged = true;
+                this.stateService.setMapLayerConfig(layer.mapId, layer.id, layer.viewConfig);
+            }
+
+            for (const option of layer.children) {
+                if (option.value.length <= viewIndex) {
+                    continue;
+                }
+                const sourceValue = option.value[viewIndex];
+                let optionMutated = false;
+                for (let targetIndex = 0; targetIndex < option.value.length; targetIndex++) {
+                    if (targetIndex === viewIndex) {
+                        continue;
+                    }
+                    if (option.value[targetIndex] !== sourceValue) {
+                        option.value[targetIndex] = sourceValue;
+                        optionMutated = true;
+                        styleOptionChanges.push([option, targetIndex]);
+                    }
+                }
+                if (optionMutated) {
+                    this.stateService.setStyleOptionValues(
+                        option.mapId,
+                        option.layerId,
+                        option.shortStyleId,
+                        option.id,
+                        option.value
+                    );
+                }
+            }
+        }
+
+        if (viewConfigChanged) {
+            this.configureTreeParameters();
+        }
+
+        return { styleOptionChanges, viewConfigChanged };
     }
 }

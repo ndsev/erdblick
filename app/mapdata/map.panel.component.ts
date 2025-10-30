@@ -46,7 +46,8 @@ import {Rectangle} from "../integrations/cesium";
                         </div>
                     </ng-template>
                     <div class="map-config-controls">
-                        <p-button onEnterClick (click)="syncOptionsForView(index)" class="map-controls-button"
+                        <p-button onEnterClick (click)="syncOptionsForView(index)"
+                                  [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success sync-enabled' : 'map-controls-button p-button-secondary'"
                                   icon="" label="" pTooltip="Sync visualization options in this view"
                                   tooltipPosition="bottom" tabindex="0">
                             <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
@@ -255,6 +256,12 @@ import {Rectangle} from "../integrations/cesium";
             pointer-events: none;
             opacity: 0.5;
         }
+
+        .map-controls-button.sync-enabled {
+            background-color: #2e7d32;
+            border-color: #2e7d32;
+            color: #ffffff;
+        }
     `],
     standalone: false
 })
@@ -319,12 +326,21 @@ export class MapPanelComponent {
                 while (this.mapsCollapsed.length < viewIndices.length) {
                     this.mapsCollapsed.push(false);
                 }
-                while (this.syncedOptions.length < viewIndices.length) {
-                    this.syncedOptions.push(false);
+                if (this.mapsCollapsed.length > viewIndices.length) {
+                    this.mapsCollapsed.length = viewIndices.length;
                 }
+                this.syncedOptions = viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
                 setTimeout(() => {
                     this.viewIndices = viewIndices;
                 }, 150);
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.layerSyncOptionsState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
+                    this.mapService.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
     }
@@ -525,6 +541,10 @@ export class MapPanelComponent {
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
     syncOptionsForView(viewIndex: number) {
-        // TODO: Implement
+        const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
+        this.mapService.setSyncOptionsForView(viewIndex, nextState);
+        const numViews = this.stateService.numViews;
+        this.syncedOptions = Array.from({length: numViews}, (_, index) =>
+            this.mapService.isSyncOptionsForViewEnabled(index));
     }
 }

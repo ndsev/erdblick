@@ -262,6 +262,13 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
+    readonly layerSyncOptionsState = this.createMapViewState<boolean>({
+        name: 'layerSyncOptions',
+        defaultValue: false,
+        schema: Boolish,
+        urlIncludeInVisualizationOnly: false
+    });
+
     readonly osmEnabledState = this.createMapViewState<boolean>({
         name: 'osm',
         defaultValue: true,
@@ -551,6 +558,14 @@ export class AppStateService implements OnDestroy {
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
     set viewSync(val: string[]) {this.viewSyncState.next(val);};
+
+    getLayerSyncOption(viewIndex: number): boolean {
+        return this.layerSyncOptionsState.getValue(viewIndex);
+    }
+
+    setLayerSyncOption(viewIndex: number, enabled: boolean): void {
+        this.layerSyncOptionsState.next(viewIndex, enabled);
+    }
     get isNumSelectionsUnlimited() {return this.unlimitNumSelections.getValue();}
     set isNumSelectionsUnlimited(val: boolean) {this.unlimitNumSelections.next(val);}
 
