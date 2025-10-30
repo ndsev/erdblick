@@ -10,3 +10,4 @@ static-visualization-only
 .angular
 node_modules
 config
+out-tsc
