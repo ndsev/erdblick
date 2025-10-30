@@ -108,7 +108,7 @@ import {Scroller} from "primeng/scroller";
                                                 <div>
                                                     <span>Here: </span>
                                                     <code style="width: 100%;"
-                                                          [innerHTML]="message.query | highlightRegion: message.location.offset:message.location.size:25"></code>
+                                                          [innerHTML]="message.query | highlightRegion: message.location?.offset:message.location?.size:25"></code>
                                                 </div>
                                             </div>
                                             <p-button size="small" label="Fix" *ngIf="message.fix"
@@ -396,7 +396,6 @@ export class FeatureSearchComponent {
 
         // Compute scrollable height in em units to respect base font size
         const currentEmHeight = container.offsetHeight / this.stateService.baseFontSize;
-        console.log(currentEmHeight);
         // Linear equation to compensate for the slight difference in the content height
         // when the values are smaller or larger
         this.scrollHeight = `${currentEmHeight + 0.0887574 * currentEmHeight - 14.9763}em`;
@@ -408,6 +407,6 @@ export class FeatureSearchComponent {
                 scroller.scrollHeight = this.scrollHeight;
                 scroller.calculateAutoSize();
             }
-        }, 0);
+        }, 1);
     }
 }

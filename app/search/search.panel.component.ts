@@ -6,7 +6,7 @@ import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
+import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
@@ -282,15 +282,19 @@ export class SearchPanelComponent implements AfterViewInit {
 
         this.stateService.searchState.subscribe(search => {
             if (search.length === 2) {
+                this.searchInputValue = search[1];
                 const currentEntry: [number, string] = [search[0], search[1]];
                 const lastEntry = this.stateService.lastSearchHistoryEntry;
                 if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
-                    this.stateService.lastSearchHistoryEntry= currentEntry;
+                    this.stateService.lastSearchHistoryEntry = currentEntry;
                 }
             }
         });
 
-        this.stateService.lastSearchHistoryEntryState.subscribe(entry => {
+        this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
+            if (!this.stateService.ready) {
+                return;
+            }
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
             if (entry) {
                 const query = entry[1]
@@ -301,7 +305,6 @@ export class SearchPanelComponent implements AfterViewInit {
                     .replace(/Ä/g, "Ae")
                     .replace(/Ö/g, "Oe")
                     .replace(/Ü/g, "Ue");
-                this.searchInputValue = query;
                 this.runTarget(entry[0]);
                 this.dialog.close(new Event("close-on-execute"));
             }

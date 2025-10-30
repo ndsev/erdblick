@@ -608,7 +608,11 @@ export class FeatureSearchService {
         this.diagnosticsMessagesList = this.diagnosticsMessagesList
             .concat(result.messages)
             .slice(0, this.diagnosticsMessageLimit)
-            .filter((item, index, array) => array.findIndex(other => other.message === item.message && other.location.offset === item.location.offset) === index);
+            .filter((item, index, array) => {
+                return array.findIndex(other => {
+                    return other.message === item.message && other.location?.offset === item.location?.offset;
+                }) === index
+            });
         this.diagnosticsMessages.next(this.diagnosticsMessagesList);
     }
 

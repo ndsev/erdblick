@@ -54,7 +54,7 @@ export interface TraceResult {
 export interface DiagnosticsMessage {
     query: string;
     message: string;
-    location: {offset: number, size: number},
+    location?: {offset: number, size: number},
     fix: null | string;
 }
 
