@@ -116,7 +116,7 @@ export class FeatureFilterOptions {
                                          rowData["sourceDataReferences"].length > 0 &&
                                          $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
-                                            @for (item of rowData["sourceDataReferences"]; track item.mapTileKey) {
+                                            @for (item of rowData["sourceDataReferences"]; track $index) {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
@@ -141,7 +141,7 @@ export class FeatureFilterOptions {
                                          rowData["sourceDataReferences"].length > 0 &&
                                          $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
-                                            @for (item of rowData["sourceDataReferences"]; track item.mapTileKey) {
+                                            @for (item of rowData["sourceDataReferences"]; track $index) {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"

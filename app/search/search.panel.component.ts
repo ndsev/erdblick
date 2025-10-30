@@ -813,26 +813,43 @@ export class SearchPanelComponent implements AfterViewInit {
         this.textarea.nativeElement.focus();
     }
 
-    @HostListener('document:mousedown', ['$event'])
-    handleClickOut(event: MouseEvent): void {
-        const clickedInsideComponent = this.elRef.nativeElement.contains(event.target as Node);
+    @HostListener('document:pointerdown', ['$event'])
+    handlePointerDown(event: PointerEvent): void {
+        this.handleGlobalDown(event);
+    }
 
-        // Check if the clicked element is a form control or interactive element
-        const clickedOnInteractiveElement = event.target instanceof HTMLElement && (
-            event.target.tagName === 'BUTTON' ||
-            event.target.tagName === 'INPUT' ||
-            event.target.tagName === 'TEXTAREA' ||
-            event.target.tagName === 'SELECT' ||
-            event.target.isContentEditable ||
-            event.target.closest('p-checkbox') ||
-            event.target.closest('p-dropdown') ||
-            event.target.closest('p-multiselect') ||
-            event.target.closest('p-calendar') ||
-            event.target.closest('p-inputnumber')
+    @HostListener('document:mousedown', ['$event'])
+    handleMouseDown(event: MouseEvent): void {
+        if (window.PointerEvent) {
+            return;
+        }
+        this.handleGlobalDown(event);
+    }
+
+    private handleGlobalDown(event: Event): void {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const clickedInsideComponent = target ? this.elRef.nativeElement.contains(target as Node) : false;
+        const clickedInsideMapView = !!target?.closest('.mapviewer-renderlayer');
+        const clickedInsideResizablePanel = !!target?.closest('.resizable-container');
+
+        // Check if the clicked element is a form control or other interactive element we should ignore.
+        const clickedOnInteractiveElement = !!target && (
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable ||
+            !!target.closest('p-checkbox') ||
+            !!target.closest('p-dropdown') ||
+            !!target.closest('p-multiselect') ||
+            !!target.closest('p-calendar') ||
+            !!target.closest('p-inputnumber') ||
+            (!!target.closest('.p-component') && !clickedInsideMapView) ||
+            clickedInsideResizablePanel
         );
 
         if (!clickedInsideComponent && !clickedOnInteractiveElement) {
-            this.dialog.close(event);
+            this.dialog.close(new MouseEvent(event.type));
         }
     }
 
