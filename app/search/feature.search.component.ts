@@ -16,7 +16,8 @@ import {Scroller} from "primeng/scroller";
     selector: "feature-search",
     template: `
         <p-dialog class="feature-search-dialog" header="Search Loaded Features" [closeOnEscape]="false"
-                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true" 
+                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  (onShow)="syncTreeScrollHeight($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -75,7 +76,7 @@ import {Scroller} from "primeng/scroller";
                                     [metaKeySelection]="false"
                                     [lazy]="true"
                                     [virtualScroll]="true"
-                                    [virtualScrollItemSize]="35"
+                                    [virtualScrollItemSize]="stateService.baseFontSize * 2"
                                     [filter]="showFilter"
                                     filterPlaceholder="Filter matched features"
                                     [scrollHeight]="scrollHeight"
@@ -373,26 +374,37 @@ export class FeatureSearchComponent {
         this.resultsTree = tree;
         if (this.resultsTree.length) {
             this.showFilter = true;
-            this.resultsStatus = "Loading...";
+            this.resultsStatus = "No entries found.";
         } else {
             this.showFilter = false;
-            this.resultsStatus = "No matches found";
+            this.resultsStatus = "No matches found.";
         }
     }
 
     syncTreeScrollHeight(event: MouseEvent) {
-        const element = event.target as HTMLElement;
-        if (!element.classList.contains("feature-search-dialog") || !element.offsetWidth || !element.offsetHeight) {
+        const target = event?.target as HTMLElement | null;
+        // Find the dialog container regardless of which inner element fired the event
+        let wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
+        if (!wrapper) {
+            wrapper = document.querySelector('.feature-search-dialog') as HTMLElement | null;
+        }
+        const dialog = wrapper?.querySelector('.p-dialog') as HTMLElement | null;
+        const container = dialog ?? wrapper;
+        if (!container || !container.offsetHeight || !this.stateService.baseFontSize) {
             return;
         }
 
-        // FIXME: Won't update the height of the tree!
-        const currentEmHeight = element.offsetHeight / this.stateService.baseFontSize;
-        this.scrollHeight = `${currentEmHeight - 11.5}em`;
+        // Compute scrollable height in em units to respect base font size
+        const currentEmHeight = container.offsetHeight / this.stateService.baseFontSize;
+        console.log(currentEmHeight);
+        // Linear equation to compensate for the slight difference in the content height
+        // when the values are smaller or larger
+        this.scrollHeight = `${currentEmHeight + 0.0887574 * currentEmHeight - 14.9763}em`;
+
+        // Nudge the internal scroller to recalculate
         setTimeout(() => {
-            let scroller = (<any>this.tree)?.scroller as Scroller;
+            const scroller = (this.tree as any)?.scroller as Scroller | undefined;
             if (scroller) {
-                scroller.init();
                 scroller.scrollHeight = this.scrollHeight;
                 scroller.calculateAutoSize();
             }

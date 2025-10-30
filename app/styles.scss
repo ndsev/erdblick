@@ -756,19 +756,21 @@ map-view {
   .p-dialog {
     width: 30em;
     min-width: 25em;
-    min-height: 30em;
-    max-height: calc(100vh - 5em);
     margin: 0 !important;
     z-index: 1000 !important;
+    overflow-x: hidden;
   }
 
   .p-dialog-content {
     padding: 0 0.5em 0.5em 0.5em;
+    min-height: 30em;
+    max-height: calc(100vh - 5em);
   }
 
   .p-dialog-header {
     padding: 0 0 0 0.5em;
     height: 2em;
+    overflow: clip;
 
     .p-dialog-title {
       font-size: medium;
