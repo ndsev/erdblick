@@ -1,4 +1,4 @@
-import {AppStateService, VIEW_SYNC_LAYERS, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
+import {AppStateService, VIEW_SYNC_LAYERS, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -57,6 +57,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     showSyncMenu: boolean = false;
     syncOptions: {name: string, value: string}[] = [
         {name: "Position", value: VIEW_SYNC_POSITION},
+        {name: "Movement", value: VIEW_SYNC_MOVEMENT},
         {name: "Projection", value: VIEW_SYNC_PROJECTION},
         {name: "Layers", value: VIEW_SYNC_LAYERS}
     ];
@@ -169,7 +170,27 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     }
 
     updateSelectedOptions() {
-        this.stateService.viewSync = this.selectedOptions.map(option => option.value);
+        const previousSelection = new Set(this.stateService.viewSync);
+        let selectedValues = this.selectedOptions.map(option => option.value);
+        const hasMovement = selectedValues.includes(VIEW_SYNC_MOVEMENT);
+        const hasPosition = selectedValues.includes(VIEW_SYNC_POSITION);
+
+        if (hasMovement && hasPosition) {
+            let valueToRemove = VIEW_SYNC_POSITION;
+            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                valueToRemove = VIEW_SYNC_POSITION;
+            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
+                valueToRemove = VIEW_SYNC_MOVEMENT;
+            }
+            this.selectedOptions = this.selectedOptions.filter(option => option.value !== valueToRemove);
+            selectedValues = this.selectedOptions.map(option => option.value);
+        }
+
+        this.stateService.viewSync = selectedValues;
         this.stateService.syncViews();
     }
 }

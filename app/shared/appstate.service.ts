@@ -13,6 +13,7 @@ export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
+export const VIEW_SYNC_MOVEMENT = "mov";
 export const VIEW_SYNC_LAYERS = "lay";
 export const MAX_NUM_SELECTIONS = 3;
 export const DEFAULT_EM_WIDTH = 30;
@@ -211,6 +212,7 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.union([
             z.literal(VIEW_SYNC_PROJECTION),
             z.literal(VIEW_SYNC_POSITION),
+            z.literal(VIEW_SYNC_MOVEMENT),
             z.literal(VIEW_SYNC_LAYERS)
         ])),
         urlParamName: 'sync',
@@ -557,7 +559,25 @@ export class AppStateService implements OnDestroy {
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
-    set viewSync(val: string[]) {this.viewSyncState.next(val);};
+    set viewSync(val: string[]) {
+        const previous = new Set(this.viewSyncState.getValue());
+        const uniqueValues = Array.from(new Set(val));
+        const hasMovement = uniqueValues.includes(VIEW_SYNC_MOVEMENT);
+        const hasPosition = uniqueValues.includes(VIEW_SYNC_POSITION);
+        let sanitized = uniqueValues;
+
+        if (hasMovement && hasPosition) {
+            if (!previous.has(VIEW_SYNC_MOVEMENT)) {
+                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
+            } else if (!previous.has(VIEW_SYNC_POSITION)) {
+                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_MOVEMENT);
+            } else {
+                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
+            }
+        }
+
+        this.viewSyncState.next(sanitized);
+    };
 
     getLayerSyncOption(viewIndex: number): boolean {
         return this.layerSyncOptionsState.getValue(viewIndex);
@@ -597,16 +617,45 @@ export class AppStateService implements OnDestroy {
     }
 
     setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
-        if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
+        const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
+        const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
+
+        if (syncPosition || syncMovement) {
             // Unfocused view is trying to update itself when the views are synchronized
             if (viewIndex !== this.focusedView) {
                 return;
             }
 
-            for (let i = 0; i < this.numViews; i++) {
-                this._setView(i, destination, orientation);
+            if (syncPosition) {
+                for (let i = 0; i < this.numViews; i++) {
+                    this._setView(i, destination, orientation);
+                }
+                return;
             }
-            return;
+
+            if (syncMovement) {
+                const previous = this.cameraViewDataState.getValue(viewIndex).destination;
+                const destLon = CesiumMath.toDegrees(destination.longitude);
+                const destLat = CesiumMath.toDegrees(destination.latitude);
+                const deltaLon = destLon - previous.lon;
+                const deltaLat = destLat - previous.lat;
+
+                this._setView(viewIndex, destination, orientation);
+
+                for (let i = 0; i < this.numViews; i++) {
+                    if (i === viewIndex) {
+                        continue;
+                    }
+                    const target = this.cameraViewDataState.getValue(i);
+                    const newDestination = Cartographic.fromDegrees(
+                        target.destination.lon + deltaLon,
+                        target.destination.lat + deltaLat,
+                        target.destination.alt
+                    );
+                    this._setView(i, newDestination);
+                }
+                return;
+            }
         }
 
         this._setView(viewIndex, destination, orientation);
