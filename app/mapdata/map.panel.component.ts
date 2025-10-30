@@ -3,7 +3,6 @@ import {MapDataService} from "./map.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {coreLib} from "../integrations/wasm";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
@@ -73,7 +72,7 @@ import {Rectangle} from "../integrations/cesium";
                             </div>
                         </div>
                     </div>
-                    
+
                     <ng-container *ngIf="mapService.maps$ | async as mapGroups">
                         <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
                             No maps loaded.
@@ -82,29 +81,30 @@ import {Rectangle} from "../integrations/cesium";
                             <p-tree [value]="mapGroups.nodes">
                                 <!-- Template for Group nodes -->
                                 <ng-template let-node pTemplate="Group">
-                                <div class="font-bold white-space-nowrap"
-                                     style="display: flex; align-items: center;">
+                                    <div class="font-bold white-space-nowrap"
+                                         style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-icons menu-toggler" tabindex="0"
                                           (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
                                         more_vert
                                     </span>
-                                    <span>
+                                        <span>
                                         <p-checkbox [ngModel]="node.visible[index]"
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
                                                     [binary]="true"
                                                     [inputId]="node.id"
                                                     [name]="node.id" tabindex="0"/>
-                                        <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                        <label [for]="node.id"
+                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                </div>
+                                    </div>
                                 </ng-template>
                                 <!-- Template for Map nodes -->
                                 <ng-template let-node pTemplate="Map">
-                                <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
-                                        [popup]="true"
-                                        appendTo="body"/>
-                                <div class="flex-container">
+                                    <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
+                                            [popup]="true"
+                                            appendTo="body"/>
+                                    <div class="flex-container">
                                     <span>
                                         <span onEnterClick class="material-icons menu-toggler" tabindex="0"
                                               (click)="showLayersToggleMenu($event, index, node.id, '')">
@@ -119,19 +119,19 @@ import {Rectangle} from "../integrations/cesium";
                                         <label [for]="node.id"
                                                style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                    <div class="map-controls">
-                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                  [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
-                                                  tooltipPosition="bottom"
-                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                  tabindex="0"
-                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                        <div class="map-controls">
+                                            <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                      [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
+                                                      tooltipPosition="bottom"
+                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                      tabindex="0"
+                                                      [disabled]="!metadataMenusEntries.get(node.id)?.length">
                                         <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
                                             data_object
                                         </span>
-                                        </p-button>
+                                            </p-button>
+                                        </div>
                                     </div>
-                                </div>
                                 </ng-template>
                                 <!-- Template for Feature Layer nodes -->
                                 <ng-template let-node pTemplate="Features">
@@ -198,15 +198,16 @@ import {Rectangle} from "../integrations/cesium";
                                               tabindex="0">
                                             more_vert
                                         </span>
-                                        <span class="oblique" [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
+                                        <span class="oblique"
+                                              [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
-                                                [(ngModel)]="node.value[index]"
-                                                (ngModelChange)="updateStyleOption(node, index)"
-                                                [binary]="true"
-                                                [inputId]="node.styleId + '_' + node.id"
-                                                [name]="node.styleId + '_' + node.id"/>
+                                                    [(ngModel)]="node.value[index]"
+                                                    (ngModelChange)="updateStyleOption(node, index)"
+                                                    [binary]="true"
+                                                    [inputId]="node.styleId + '_' + node.id"
+                                                    [name]="node.styleId + '_' + node.id"/>
                                             <label [for]="node.styleId + '_' + node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
                                         </span>
                                     </div>
                                 </ng-template>
@@ -216,7 +217,7 @@ import {Rectangle} from "../integrations/cesium";
                     </ng-container>
                 </p-fieldset>
                 @if (viewIndices.length < 2) {
-                    <p-button onEnterClick (click)="addView()" icon="" label="Add View" 
+                    <p-button onEnterClick (click)="addView()" icon="" label="Add View"
                               pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
                         <span class="material-symbols-outlined" style="margin: 0 auto;">
                             add_column_right
@@ -230,13 +231,16 @@ import {Rectangle} from "../integrations/cesium";
         <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false"
              [ngClass]="{'hovered': isMainButtonHovered}">
             <p-button onEnterClick class="layers-button" (mouseenter)="isMainButtonHovered = true"
-                      (click)="isMainButtonHovered = false; showLayerDialog()"
-                      tooltipPosition="right" pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
+                      (click)="isMainButtonHovered = false; toggleLayerDialog()"
+                      tooltipPosition="right"
+                      pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                       label="" tabindex="0">
-                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined"
+                      style="font-size: 1.2em; margin: 0 auto;">
                     stacks
                 </span>
-                <span *ngIf="layerDialogVisible" class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                <span *ngIf="layerDialogVisible" class="material-icons"
+                      style="font-size: 1.2em; margin: 0 auto;">
                     close
                 </span>
             </p-button>
@@ -260,13 +264,13 @@ export class MapPanelComponent {
     viewIndices: number[] = [];
 
     isMainButtonHovered: boolean = false;
-    layerDialogVisible: boolean = false;
     mapsCollapsed: boolean[] = [];
 
     osmEnabled: boolean[] = [true];
     osmOpacityValue: number[] = [30];
 
     syncedOptions: boolean[] = [];
+    layerDialogVisible: boolean = false;
 
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -279,9 +283,8 @@ export class MapPanelComponent {
     constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService,
-                private sidePanelService: SidePanelService) {
-        this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
+                public keyboardService: KeyboardService) {
+        this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
             // Rebuild metadata menus recursively and prune when needed.
@@ -300,14 +303,6 @@ export class MapPanelComponent {
                                 }
                             }))
                     );
-                }
-            })
-        );
-
-        this.subscriptions.push(
-            this.sidePanelService.observable().subscribe(activePanel => {
-                if (activePanel !== SidePanelState.MAPS && activePanel !== SidePanelState.SEARCH) {
-                    this.layerDialogVisible = false;
                 }
             })
         );
@@ -457,11 +452,8 @@ export class MapPanelComponent {
         */
     }
 
-    showLayerDialog() {
+    toggleLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
-        if (this.layerDialogVisible) {
-            this.sidePanelService.panel = SidePanelState.MAPS;
-        }
     }
 
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {

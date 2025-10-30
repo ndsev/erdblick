@@ -254,6 +254,8 @@ export class FeatureSearchService {
     completionCandidateLimit: number = 15;
     private completionCandidateList: CompletionCandidate[] = [];
 
+    showFeatureSearchDialog: boolean = false;
+
     pinTiers = [
         9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,

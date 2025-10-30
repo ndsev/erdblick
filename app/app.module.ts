@@ -41,7 +41,6 @@ import {CoordinatesPanelComponent} from "./coords/coordinates.panel.component";
 import {initializeLibrary} from "./integrations/wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
-import {SidePanelService} from "./shared/sidepanel.service";
 import {MenuModule} from "primeng/menu";
 import {CardModule} from "primeng/card";
 import {CoordinatesService} from "./coords/coordinates.service";
@@ -293,7 +292,6 @@ export const initializeServices = () => {
         InfoMessageService,
         JumpTargetService,
         AppStateService,
-        SidePanelService,
         FeatureSearchService,
         ClipboardService,
         EditorService,

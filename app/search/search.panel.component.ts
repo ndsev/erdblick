@@ -4,7 +4,6 @@ import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
@@ -58,7 +57,7 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
 
             <div class="resizable-container" #searchcontrols>
-                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
+                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
                           [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
@@ -131,7 +130,6 @@ export class SearchPanelComponent implements AfterViewInit {
     activeSearchItems: Array<ExtendedSearchTarget> = [];
     inactiveSearchItems: Array<SearchTarget> = [];
     searchInputValue: string = "";
-    searchMenuVisible: boolean = false;
     searchHistory: Array<any> = [];
     visibleSearchHistory: Array<any> = [];
 
@@ -173,7 +171,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
         /////////// Jump to mapget tile id
         let label = "tileId = ?";
-        if (this.jumpToTargetService.validateMapgetTileId(value)) {
+        if (this.jumpService.validateMapgetTileId(value)) {
             label = `tileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -185,7 +183,7 @@ export class SearchPanelComponent implements AfterViewInit {
             label: label,
             enabled: false,
             jump: (value: string) => { return this.parseMapgetTileId(value) },
-            validate: (value: string) => { return this.jumpToTargetService.validateMapgetTileId(value) }
+            validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
         });
 
         /////////// Jump to lon-lat
@@ -256,21 +254,16 @@ export class SearchPanelComponent implements AfterViewInit {
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
-                private jumpToTargetService: JumpTargetService,
+                private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                private sidePanelService: SidePanelService,
-                private searchService: FeatureSearchService) {
+                public searchService: FeatureSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
-        this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
+        this.jumpService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
         });
 
-        this.sidePanelService.observable().subscribe((panel)=>{
-            this.searchMenuVisible = panel == SidePanelState.SEARCH;
-        });
-
-        this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
+        this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
             this.searchItems = [
                 ...jumpTargets,
                 ...this.staticTargets
@@ -282,7 +275,7 @@ export class SearchPanelComponent implements AfterViewInit {
         //  just search all maps simultaneously.
         // NOTE: Currently users must select specific maps to search. Once cross-map
         // multi-selection is implemented, search can operate on all maps at once.
-        jumpToTargetService.mapSelectionSubject.subscribe(maps => {
+        jumpService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
         });
@@ -310,7 +303,7 @@ export class SearchPanelComponent implements AfterViewInit {
                     .replace(/Ü/g, "Ue");
                 this.searchInputValue = query;
                 this.runTarget(entry[0]);
-                this.sidePanelService.panel = SidePanelState.NONE;
+                this.dialog.close(new Event("close-on-execute"));
             }
             this.reloadSearchHistory();
         });
@@ -497,7 +490,6 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     jumpToLocation(coordinates: number[] | undefined | Rectangle) {
-        this.sidePanelService.panel = SidePanelState.NONE;
         if (coordinates === null) {
             return;
         }
@@ -518,7 +510,7 @@ export class SearchPanelComponent implements AfterViewInit {
                 z: alt,
                 targetView: targetViewIndex
             });
-            this.jumpToTargetService.markedPosition.next(coordinates);
+            this.jumpService.markedPosition.next(coordinates);
         } else {
             this.mapService.moveToRectangleTopic.next({targetView: targetViewIndex, rectangle: coordinates});
         }
@@ -570,7 +562,7 @@ export class SearchPanelComponent implements AfterViewInit {
 
     showSearchOverlay() {
         this.updateCursor();
-        this.sidePanelService.panel = SidePanelState.SEARCH;
+        this.searchService.showFeatureSearchDialog = true;
         this.setSearchValue(this.searchInputValue);
     }
 
@@ -578,14 +570,14 @@ export class SearchPanelComponent implements AfterViewInit {
         this.searchInputValue = value;
         if (!value) {
             this.stateService.setSearchHistoryState(null);
-            this.jumpToTargetService.targetValueSubject.next(value);
-            this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets];
+            this.jumpService.targetValueSubject.next(value);
+            this.searchItems = [...this.jumpService.jumpTargets.getValue(), ...this.staticTargets];
             this.activeSearchItems = [];
             this.inactiveSearchItems = this.searchItems;
             this.visibleSearchHistory = this.searchHistory;
             return;
         }
-        this.jumpToTargetService.targetValueSubject.next(value);
+        this.jumpService.targetValueSubject.next(value);
         this.activeSearchItems = [];
         this.inactiveSearchItems = [];
         for (let i = 0; i < this.searchItems.length; i++) {
@@ -611,7 +603,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     setSelectedMap(value: string|null) {
-        this.jumpToTargetService.setSelectedMap!(value);
+        this.jumpService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
     }
 
@@ -733,7 +725,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 return;
             }
             this.resetCompletion();
-
             this.dialog.close(event);
         } else if (event.key === 'Tab') {
             if (this.completion.visible) {
@@ -798,7 +789,7 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     expandTextarea() {
-        this.sidePanelService.searchOpen = true;
+        this.jumpService.searchIsFocused = true;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         setTimeout(() => {
@@ -810,7 +801,7 @@ export class SearchPanelComponent implements AfterViewInit {
         this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
-        this.sidePanelService.searchOpen = false;
+        this.jumpService.searchIsFocused = false;
     }
 
     clickOnSearchToStart() {
@@ -833,8 +824,7 @@ export class SearchPanelComponent implements AfterViewInit {
             event.target.closest('p-dropdown') ||
             event.target.closest('p-multiselect') ||
             event.target.closest('p-calendar') ||
-            event.target.closest('p-inputnumber') ||
-            event.target.closest('.p-component')
+            event.target.closest('p-inputnumber')
         );
 
         if (!clickedInsideComponent && !clickedOnInteractiveElement) {

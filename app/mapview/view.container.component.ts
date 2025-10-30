@@ -58,8 +58,8 @@ export class MapViewContainerComponent {
         });
 
         // Register a shortcut to cycle the view focus.
-        this.keyboardService.registerShortcut("Ctrl+ArrowRight", this.cycleViewFocus.bind(this, 1));
-        this.keyboardService.registerShortcut("Ctrl+ArrowLeft", this.cycleViewFocus.bind(this, -1));
+        this.keyboardService.registerShortcut("Ctrl+ArrowRight", this.cycleViewFocus.bind(this, 1), true);
+        this.keyboardService.registerShortcut("Ctrl+ArrowLeft", this.cycleViewFocus.bind(this, -1), true);
 
         // Ensure that keyboard shortcuts are always registered for the focused view.
         this.stateService.focusedViewState.subscribe(_ => {

@@ -6,7 +6,6 @@ import {LocateResponse} from "../mapview/visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
@@ -37,6 +36,7 @@ export class JumpTargetService {
     targetValueSubject = new BehaviorSubject<string>("");
     jumpTargets = new BehaviorSubject<Array<SearchTarget>>([]);
     extJumpTargets: Array<SearchTarget> = [];
+    searchIsFocused: boolean = false;
 
     // Communication channels with the map selection dialog (in SearchPanelComponent).
     // The mapSelectionSubject triggers the display of the dialog, and
@@ -48,7 +48,6 @@ export class JumpTargetService {
     constructor(private httpClient: HttpClient,
                 private mapService: MapDataService,
                 private messageService: InfoMessageService,
-                private sidePanelService: SidePanelService,
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
                 private searchService: FeatureSearchService) {
@@ -112,7 +111,6 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             execute: (value: string) => {
-                this.sidePanelService.panel = SidePanelState.FEATURESEARCH;
                 this.searchService.run(value);
             },
             validate: (_: string) => {
