@@ -2,7 +2,7 @@ import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
-import {Listbox} from "primeng/listbox";
+import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
@@ -55,27 +55,26 @@ import {AppStateService} from "../shared/appstate.service";
                     <p-tabpanel value="results">
                         <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
-                            <span><p-colorPicker [(ngModel)]="searchService.pointColor"
-                                                 (ngModelChange)="searchService.updatePointColor()" 
-                                                 appendTo="body"/></span>
+                            <p-colorPicker [(ngModel)]="searchService.pointColor"
+                                           (ngModelChange)="searchService.updatePointColor()" appendTo="body"/>
                         </div>
                         <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
                                        [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
                                        placeholder="Select Grouping" [maxSelectedLabels]="5"
                                        display="chip" optionLabel="name" class="w-full md:w-80">
                         </p-multiSelect>
-
-                        @for (group of groupedResults; track $index) {
-                            <div style="margin-top: 0.5rem; font-weight: 600; font-size: 0.9em;">
-                                {{ group.header }}
-                            </div>
-                            <p-listbox class="results-listbox" [options]="group.items" [(ngModel)]="selectedResult"
-                                       optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
-                                       [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
-                                       emptyMessage="No features matched."
-                                       #listbox
-                            />
-                        }
+                        
+                        <!-- Results Tree -->
+                        <div style="height: 100%">
+                            <p-tree [value]="resultsTree"
+                                    selectionMode="single"
+                                    [metaKeySelection]="false"
+                                    [virtualScroll]="true"
+                                    [virtualScrollItemSize]="35"
+                                    (onNodeSelect)="selectResult($event)"
+                                    emptyMessage="No features matched.">
+                            </p-tree>
+                        </div>
                     </p-tabpanel>
 
                     <!-- Diagnostics -->
@@ -146,6 +145,7 @@ export class FeatureSearchComponent {
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     groupedResults: Array<{ header: string; items: Array<{ label: string; mapId: string; layerId: string; featureId: string }> }> = [];
+    resultsTree: TreeNode[] = [];
     grouping: { name: string, value: number }[] = [
         {name: 'Maps', value: 1},
         {name: 'Layers', value: 2},
@@ -157,8 +157,7 @@ export class FeatureSearchComponent {
     // Active result panel index
     resultPanelIndex: string = "";
 
-    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`!
-    @ViewChild('listbox') listbox!: Listbox;
+    @Input() searchPanelComponent!: SearchPanelComponent;
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
 
     constructor(public searchService: FeatureSearchService,
@@ -213,9 +212,11 @@ export class FeatureSearchComponent {
     }
 
     selectResult(event: any) {
-        if (event.value && event.value.mapId && event.value.featureId) {
+        // Support both listbox change and tree node select events
+        const selected = event?.value || event?.node?.data || event;
+        if (selected && selected.mapId && selected.featureId) {
             for (let i = 0; i < this.stateService.numViews; i++) {
-                this.jumpService.highlightByJumpTargetFilter(i, event.value.mapId, event.value.featureId,
+                this.jumpService.highlightByJumpTargetFilter(i, selected.mapId, selected.featureId,
                     coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
             }
         }
@@ -230,7 +231,6 @@ export class FeatureSearchComponent {
                 this.searchService.run(query, true);
             } else {
                 this.searchService.pause();
-                this.listbox.options = this.searchService.searchResults;
                 this.results = this.searchService.searchResults;
                 this.recalculateResultsByGroups();
                 this.isSearchPaused = true;
@@ -240,7 +240,6 @@ export class FeatureSearchComponent {
 
     stopSearch() {
         if (this.canPauseStopSearch) {
-            this.listbox.options = this.searchService.searchResults;
             this.searchService.stop();
             this.canPauseStopSearch = false;
             this.results = this.searchService.searchResults;
@@ -278,8 +277,9 @@ export class FeatureSearchComponent {
     }
 
     recalculateResultsByGroups() {
+        // Convert results into PrimeNG TreeNodes based on selected grouping
         const results = this.results.map(result => {
-            const featureIdParts = result.featureId.split('.');
+            const featureIdParts = result.featureId.split('.')
             return {
                 label: result.label,
                 mapId: result.mapId,
@@ -287,63 +287,75 @@ export class FeatureSearchComponent {
                 featureId: result.featureId,
                 featureType: featureIdParts[0] ?? "",
                 tileId: Number(featureIdParts[1] ?? 0)
-            }
+            };
         });
 
-        // Selected grouping options as a set for quick lookup
-        const selectedValues = new Set(this.selectedGroupingOptions.map(o => o.value));
+        // Selected grouping values as ordered list following the grouping options
+        const selected = new Set(this.selectedGroupingOptions.map(o => o.value));
+        const selectedOrder: number[] = this.grouping.filter(o => selected.has(o.value)).map(o => o.value);
 
-        // Preserve order as in the "grouping" options for stable grouping
-        const selectedOrder: number[] = this.grouping
-            .filter(opt => selectedValues.has(opt.value))
-            .map(opt => opt.value);
+        type ResultItem = typeof results[number];
 
-        // Helper to group by a key function
-        const groupBy = <T, K extends string | number>(items: T[], keyFn: (item: T) => K): Map<K, T[]> => {
-            const map = new Map<K, T[]>();
-            for (const item of items) {
-                const key = keyFn(item);
-                const arr = map.get(key) || [];
-                arr.push(item);
-                map.set(key, arr);
-            }
-            return map;
+        const accessors: Record<number, { label: string, get: (r: ResultItem) => string | number }> = {
+            1: { label: 'Map',     get: (r) => r.mapId },
+            2: { label: 'Layer',   get: (r) => r.layerId },
+            3: { label: 'Feature', get: (r) => r.featureType },
+            4: { label: 'Tile',    get: (r) => r.tileId }
         };
 
-        // Accessors and labels for headers
-        const accessors: Record<number, { label: string, get: (r: any) => string | number }> = {
-            1: { label: 'Map',         get: (r) => r.mapId },
-            2: { label: 'Layer',       get: (r) => r.layerId },
-            3: { label: 'Feature',     get: (r) => r.featureType },
-            4: { label: 'Tile',        get: (r) => r.tileId },
-        };
-
-        const groups: Array<{ header: string; items:
-                { label: string; mapId: string; layerId: string; featureId: string; featureType: string; tileId: number }[]}> = [];
-
-        const buildGroups = (items: typeof results, depth: number, headerParts: string[]) => {
+        const buildTree = (items: ResultItem[], depth: number, parentKey: string): TreeNode[] => {
             if (depth >= selectedOrder.length || selectedOrder.length === 0) {
-                const header = headerParts.length ? headerParts.join(' • ') : 'All Results';
-                groups.push({ header, items });
-                return;
+                // Create leaf nodes for results
+                return items.map((it, idx) => ({
+                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
+                    label: it.label,
+                    data: { mapId: it.mapId, featureId: it.featureId },
+                    leaf: true,
+                    selectable: true
+                } as TreeNode));
             }
 
             const key = selectedOrder[depth];
             const acc = accessors[key];
             if (!acc) {
-                // Safety: if an unknown key sneaks in, just finish grouping
-                const header = headerParts.length ? headerParts.join(' • ') : 'All Results';
-                groups.push({ header, items });
-                return;
+                // Fallback to leaves if accessor missing
+                return items.map((it, idx) => ({
+                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
+                    label: it.label,
+                    data: { mapId: it.mapId, featureId: it.featureId },
+                    leaf: true,
+                    selectable: true
+                } as TreeNode));
             }
 
-            const partitions = groupBy(items, acc.get);
-            for (const [value, part] of partitions) {
-                buildGroups(part, depth + 1, headerParts.concat(`${acc.label}: ${value}`));
+            // Partition items by current accessor
+            const partitions = new Map<string | number, ResultItem[]>();
+            for (const it of items) {
+                const k = acc.get(it);
+                const arr = partitions.get(k) || [];
+                arr.push(it);
+                partitions.set(k, arr);
             }
+
+            const nodes: TreeNode[] = [];
+            let index = 0;
+            for (const [value, groupItems] of partitions) {
+                const nodeKey = `${parentKey}/${acc.label}:${value}`;
+                nodes.push({
+                    key: nodeKey,
+                    label: `${acc.label}: ${value}`,
+                    selectable: false,
+                    expanded: true,
+                    children: buildTree(groupItems, depth + 1, nodeKey)
+                } as TreeNode);
+                index++;
+            }
+            return nodes;
         };
 
-        buildGroups(results, 0, []);
-        this.groupedResults = groups;
+        const tree = buildTree(results, 0, 'root');
+        this.resultsTree = tree;
+        // Keep groupedResults for potential legacy uses (not used in template anymore)
+        this.groupedResults = [];
     }
 }
