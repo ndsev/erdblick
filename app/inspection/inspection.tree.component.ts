@@ -65,9 +65,10 @@ export class FeatureFilterOptions {
                         </p-button>
                     }
                     @if (geoJson()) {
-                        <p-button (click)="copyToClipboard(geoJson()!)" icon="pi pi-fw pi-copy" label=""
+                        <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" [appendTo]="'body'" [baseZIndex]="9999"></p-menu>
+                        <p-button (click)="showGeoJsonMenu($event)" icon="pi pi-download" label=""
                                   [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
-                                  pTooltip="Copy GeoJSON" tooltipPosition="bottom">
+                                  pTooltip="GeoJSON actions" tooltipPosition="bottom">
                         </p-button>
                     }
                 </div>
@@ -236,6 +237,8 @@ export class InspectionTreeComponent implements OnDestroy {
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
+    @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
+    geoJsonMenuItems: MenuItem[] = [];
 
     constructor(private clipboardService: ClipboardService,
                 public mapService: MapDataService,
@@ -406,6 +409,72 @@ export class InspectionTreeComponent implements OnDestroy {
 
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
+    }
+
+    showGeoJsonMenu(event: MouseEvent) {
+        event.stopPropagation();
+        if (!this.geoJson()) {
+            return;
+        }
+        this.geoJsonMenuItems = [
+            {
+                label: 'Open in new tab',
+                icon: 'pi pi-external-link',
+                command: () => this.openGeoJsonInNewTab()
+            },
+            {
+                label: 'Download (.geojson)',
+                icon: 'pi pi-download',
+                command: () => this.downloadGeoJson()
+            },
+            {
+                label: 'Copy to clipboard',
+                icon: 'pi pi-copy',
+                command: () => this.copyGeoJson()
+            }
+        ];
+        this.geoJsonMenu.toggle(event);
+    }
+
+    private copyGeoJson() {
+        const data = this.geoJson();
+        if (!data) {
+            return;
+        }
+        this.copyToClipboard(data);
+    }
+
+    private downloadGeoJson() {
+        const data = this.geoJson();
+        if (!data) {
+            return;
+        }
+        const blob = new Blob([data], {type: 'application/geo+json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = this.geoJsonFilename();
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        this.messageService.showSuccess('GeoJSON download started');
+    }
+
+    private openGeoJsonInNewTab() {
+        const data = this.geoJson();
+        if (!data) {
+            return;
+        }
+        const blob = new Blob([data], {type: 'application/geo+json'});
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        this.messageService.showSuccess('Opened GeoJSON in new tab');
+    }
+
+    private geoJsonFilename(): string {
+        return `inspection-${this.panelId()}.geojson`;
     }
 
     filterTree(filterString: string) {
