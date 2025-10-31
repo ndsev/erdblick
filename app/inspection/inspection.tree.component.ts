@@ -124,7 +124,9 @@ export class FeatureFilterOptions {
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                          [pTooltip]="sourceDataTooltip(item.qualifier)"
+                                                          [tooltipZIndex]="'9999'"
+                                                          [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
                                             }
                                         </p-buttonGroup>
@@ -149,7 +151,7 @@ export class FeatureFilterOptions {
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          pTooltip="Go to {{ item.qualifier }} Source Data"
+                                                          [pTooltip]="sourceDataTooltip(item.qualifier)"
                                                           tooltipPosition="bottom" />
                                             }
                                         </p-buttonGroup>
@@ -409,6 +411,11 @@ export class InspectionTreeComponent implements OnDestroy {
 
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
+    }
+
+    sourceDataTooltip(qualifier: string): string {
+        const trimmed = qualifier?.trim() ?? '';
+        return trimmed ? `Go to ${trimmed} source data.` : 'Go to source data.';
     }
 
     showGeoJsonMenu(event: MouseEvent) {
