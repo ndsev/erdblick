@@ -1,5 +1,5 @@
 import {Injectable, OnDestroy} from "@angular/core";
-import {NavigationEnd, Params, Router} from "@angular/router";
+import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
 import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, CesiumMath} from "../integrations/cesium";
@@ -81,6 +81,7 @@ export class AppStateService implements OnDestroy {
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
     private pendingStorageSyncStates = new Set<AppState<any>>;
+    private pendingPopstateHydration = false;
     private flushHandle: Promise<void> | null = null;
     private readonly STYLE_OPTIONS_STORAGE_KEY = 'styleOptions';
 
@@ -363,6 +364,7 @@ export class AppStateService implements OnDestroy {
     });
 
     constructor(private readonly router: Router) {
+        // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
             this.setupStateSubscriptions();
             this.hydrateFromStorage();
@@ -374,6 +376,25 @@ export class AppStateService implements OnDestroy {
 
             this.isReady = true;
             this.ready.next(true);
+        });
+
+        // Subsequently, Navigation events may come from usage of the browser back/forward-buttons.
+        this.router.events.subscribe(event => {
+            if (event instanceof NavigationStart) {
+                const nav = this.router.getCurrentNavigation();
+                this.pendingPopstateHydration = nav?.trigger === 'popstate';
+            } else if (event instanceof NavigationEnd) {
+                if (!this.pendingPopstateHydration) {
+                    return;
+                }
+                this.pendingPopstateHydration = false;
+                if (!this.isReady) {
+                    return;
+                }
+                this.withHydration(() => {
+                    this.hydrateFromUrl(this.router.routerState.snapshot.root?.queryParams ?? {});
+                });
+            }
         });
     }
 
