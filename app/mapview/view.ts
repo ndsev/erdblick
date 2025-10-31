@@ -414,8 +414,7 @@ export class MapView {
             }
         }, ScreenSpaceEventType.LEFT_CLICK, KeyboardEventModifier.CTRL);
 
-        // Add a handler for hover (i.e., MOUSE_MOVE) functionality.
-        this.mouseHandler.setInputAction((movement: any) => {
+        const hoverHandler = (movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
             // Do not handle mouse move here if the first element
             // under the cursor is not the Cesium view.
@@ -438,7 +437,11 @@ export class MapView {
                 let feature = this.viewer.scene.pick(position);
                 this.mapService.setHoveredFeatures(Array.isArray(feature?.id) ? feature.id : [feature?.id]).then();
             }
-        }, ScreenSpaceEventType.MOUSE_MOVE);
+        };
+
+        // Add handlers for hover (i.e., MOUSE_MOVE) functionality for default and modifier states.
+        this.mouseHandler.setInputAction(hoverHandler, ScreenSpaceEventType.MOUSE_MOVE);
+        this.mouseHandler.setInputAction(hoverHandler, ScreenSpaceEventType.MOUSE_MOVE, KeyboardEventModifier.CTRL);
 
         // Add a handler for scroll-zooming.
         this.mouseHandler.setInputAction((_: any) => {
