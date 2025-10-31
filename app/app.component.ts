@@ -18,7 +18,7 @@ interface Versions {
     template: `
         <mapview-container></mapview-container>
         <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
-        <p-toast position="top-center" key="tc"></p-toast>
+        <p-toast position="top-center" key="tc" baseZIndex="9500"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
         <inspection-container *ngIf="!appModeService.isVisualizationOnly"></inspection-container>
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>

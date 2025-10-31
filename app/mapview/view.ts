@@ -399,7 +399,7 @@ export class MapView {
             const feature = this.viewer.scene.pick(position);
             if (defined(feature) && !(feature.primitive instanceof Billboard)) {
                 // Select the feature and pin the panel immediately.
-                const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
+                const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id], undefined, true);
                 if (id !== undefined) {
                     this.stateService.setInspectionPanelPinnedState(id, true);
                 }

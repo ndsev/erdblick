@@ -8,6 +8,7 @@ import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
+import {InfoMessageService} from "./info.service";
 
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
@@ -363,7 +364,8 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
-    constructor(private readonly router: Router) {
+    constructor(private readonly router: Router,
+                private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
             this.setupStateSubscriptions();
@@ -713,7 +715,7 @@ export class AppStateService implements OnDestroy {
     //  InspectionPanel -> AppStateService -> MapDataService -> InspectionService -> InspectionPanel
 
      */
-    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number) {
+    setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
         const allPanels = this.selectionState.getValue();
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
@@ -738,10 +740,10 @@ export class AppStateService implements OnDestroy {
                 return;
             }
         }
-        // Create a new panel if there is no existing one to change.
-        if (allPanels.every(panel => panel.pinned)) {
+        const mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+        if (mustCreateNewPanel) {
             if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                console.error(`Tried to set more selections than possible! Current max number: ${MAX_NUM_SELECTIONS}`);
+                this.infoMessageService.showError(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
                 this._replaceUrl = true;
                 return;
             }
@@ -789,7 +791,7 @@ export class AppStateService implements OnDestroy {
         }
         if (isPinned && !this.isNumSelectionsUnlimited &&
             allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
-            return;
+            this.infoMessageService.showError(`To pin more than ${MAX_NUM_SELECTIONS-1} panels, enable unlimited selections in the settings.`);
         }
         allPanels[index].pinned = isPinned;
         this.selectionState.next(allPanels);
