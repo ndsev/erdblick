@@ -519,17 +519,17 @@ export class MapView {
         )
 
         this.subscriptions.push(
-            this.mapService.moveToWgs84PositionTopic.subscribe((pos: { targetView: number, x: number, y: number, z?: number }) => {
+            this.mapService.moveToWgs84PositionTopic.subscribe(value => {
                 // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot move to WGS84 position: viewer not available');
                     return;
                 }
 
-                if (pos.targetView !== this._viewIndex) {
+                if (value.targetView !== this._viewIndex) {
                     return;
                 }
-                const [destination, orientation] = this.performConversionForMovePosition(pos);
+                const [destination, orientation] = this.performConversionForMovePosition(value);
                 if (orientation) {
                     this.stateService.setView(this._viewIndex, destination, orientation);
                 } else {
@@ -539,19 +539,19 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            this.mapService.moveToRectangleTopic.subscribe((target: { targetView: number, rectangle: Rectangle }) => {
+            this.mapService.moveToRectangleTopic.subscribe(value => {
                 if (!this.isAvailable()) {
                     console.debug('Cannot move to WGS84 position: viewer not available');
                     return;
                 }
 
-                if (target.targetView !== this._viewIndex) {
+                if (value.targetView !== this._viewIndex) {
                     return;
                 }
                 const fauxCamera = new Camera(this.viewer.scene);
                 // Use top-down normalised orientation otherwise need to compensate for different parts of the globe.
                 fauxCamera.setView({
-                    destination: target.rectangle,
+                    destination: value.rectangle,
                     orientation: {
                         heading: 0.0, // East, in radians.
                         pitch: CesiumMath.toRadians(CAMERA_CONSTANTS.DEFAULT_PITCH_DEGREES), // Directly looking down.
@@ -564,7 +564,7 @@ export class MapView {
                 const duration = 3.0; // seconds
                 const entity = this.viewer.entities.add({
                     rectangle: {
-                        coordinates: target.rectangle,
+                        coordinates: value.rectangle,
                         heightReference: HeightReference.CLAMP_TO_GROUND,
                         height: 0,
                         material: new ColorMaterialProperty(

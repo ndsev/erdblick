@@ -1,6 +1,6 @@
 import {Component, effect, input} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {MapDataService, SelectedFeatures} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -41,21 +41,18 @@ export class FeaturePanelComponent {
     ];
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
-    selectedFeatures?: SelectedFeatures;
+    selectedFeatures?: FeatureWrapper[];
 
     constructor(private mapService: MapDataService,
                 private keyboardService: KeyboardService) {
-        this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
+        // TODO: This shortcut is broken, the panels will race with each other.
+        // this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
         effect(() => {
-            this.selectedFeatures = {
-                viewIndex: 0,
-                features: this.panel().features
-            };
-
+            this.selectedFeatures = this.panel().features;
             const selectedFeatureInspectionModel: InspectionModelData[] = [];
             const selectedFeatureGeoJsonTexts: string[] = [];
 
-            this.selectedFeatures.features.forEach(featureWrapper => {
+            this.selectedFeatures.forEach(featureWrapper => {
                 featureWrapper.peek((feature: Feature) => {
                     selectedFeatureInspectionModel.push(...feature.inspectionModel());
                     selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
@@ -151,6 +148,6 @@ export class FeaturePanelComponent {
         if (!this.selectedFeatures) {
             return;
         }
-        this.mapService.zoomToFeature(this.selectedFeatures.viewIndex, this.selectedFeatures.features[0]);
+        this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
     }
 }

@@ -50,11 +50,6 @@ class ViewVisualizationState {
     visualizationQueue: TileVisualization[] = [];
 }
 
-export interface SelectedFeatures {
-    viewIndex: number;
-    features: FeatureWrapper[];
-}
-
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -497,7 +492,7 @@ export class MapDataService {
             }
             // Is the tile needed for any view?
             return this.viewVisualizationState.every((_, viewIndex) => {
-                return !this.viewNeedsFeatureTile(viewIndex, tileLayer);
+                return !this.viewShowsFeatureTile(viewIndex, tileLayer);
             });
         }
         let newTileLayers = new Map();
@@ -516,7 +511,7 @@ export class MapDataService {
                 const tileVisus = value.filter(tileVisu => {
                     const mapName = tileVisu.tile.mapName;
                     const layerName = tileVisu.tile.layerName;
-                    if (tileVisu.tile.disposed || !this.viewNeedsFeatureTile(viewIndex, tileVisu.tile)) {
+                    if (tileVisu.tile.disposed || !this.viewShowsFeatureTile(viewIndex, tileVisu.tile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         return false;
                     }
@@ -561,7 +556,7 @@ export class MapDataService {
             // Schedule new visualizations for which the data is already present.
             for (const [styleId, style] of this.styleService.styles) {
                 for (let [tileKey, tile] of this.loadedTileLayers) {
-                    if (this.viewNeedsFeatureTile(viewIndex, tile) && !visualizedTileLayers.get(styleId)?.has(tileKey)) {
+                    if (this.viewShowsFeatureTile(viewIndex, tile) && !visualizedTileLayers.get(styleId)?.has(tileKey)) {
                         this.renderTileLayer(viewIndex, tile, style);
                     }
                 }
@@ -723,7 +718,7 @@ export class MapDataService {
         setTimeout(() => {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                 // Do not render the tile for any view that doesn't need it.
-                if (!this.viewNeedsFeatureTile(viewIndex, tileLayer)) {
+                if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
                     continue;
                 }
 
@@ -936,7 +931,18 @@ export class MapDataService {
         this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
     }
 
-    zoomToFeature(viewIndex: number, featureWrapper: FeatureWrapper) {
+    zoomToFeature(viewIndex: number|undefined, featureWrapper: FeatureWrapper) {
+        const runForTargetViewOrAllAffected = (cb: (viewIndex: number)=>void) => {
+            if (viewIndex !== undefined) {
+                cb(viewIndex);
+            }
+            for (let i = 0; i < this.stateService.numViews; ++i) {
+                if (this.viewShowsFeatureTile(i, featureWrapper.featureTile)) {
+                    cb(i);
+                }
+            }
+        }
+
         featureWrapper.peek((feature: Feature) => {
             const center = feature.center() as Cartesian3;
             const centerCartesian = Cartesian3.fromDegrees(center.x, center.y, center.z);
@@ -972,22 +978,24 @@ export class MapDataService {
                 Cartesian3.negate(normal, normal);
                 Cartesian3.normalize(normal, normal);
                 Cartesian3.multiplyByScalar(normal, 3 * boundingRadius, normal);
-                this.originAndNormalForFeatureZoomTopic.next({
-                    targetView: viewIndex,
-                    origin: centerCartesian,
-                    normal: normal
-                });
+                runForTargetViewOrAllAffected(vi =>
+                    this.originAndNormalForFeatureZoomTopic.next({
+                        targetView: vi,
+                        origin: centerCartesian,
+                        normal: normal
+                    }));
             }
 
             // Fallback for lines/points: Just move the camera to the position.
-            this.moveToWgs84PositionTopic.next({
-                targetView: viewIndex,
-                x: center.x,
-                y: center.y,
-                // TODO: Calculate height using faux Cesium camera with target view rectangle.
-                z: center.z + 3 * boundingRadius
-            });
-        })
+            runForTargetViewOrAllAffected(vi =>
+                this.moveToWgs84PositionTopic.next({
+                    targetView: vi,
+                    x: center.x,
+                    y: center.y,
+                    // TODO: Calculate height using faux Cesium camera with target view rectangle.
+                    z: center.z + 3 * boundingRadius
+                }));
+        });
     }
 
     *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
@@ -1033,7 +1041,7 @@ export class MapDataService {
                 const featureIds = features.map(fw => fw.featureId);
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     // Do not render the highlight for any view that doesn't need it.
-                    if (!this.viewNeedsFeatureTile(viewIndex, featureTile)) {
+                    if (!this.viewShowsFeatureTile(viewIndex, featureTile)) {
                         continue;
                     }
                     for (let [_, style] of this.styleService.styles) {
@@ -1110,7 +1118,7 @@ export class MapDataService {
         this.update().then();
     }
 
-    private viewNeedsFeatureTile(viewIndex: number, tile: FeatureTile) {
+    private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile) {
         if (viewIndex >= this.viewVisualizationState.length) {
             console.error("Attempt to access non-existing view index.");
             return false;

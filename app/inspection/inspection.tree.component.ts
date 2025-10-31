@@ -5,12 +5,13 @@ import {toObservable} from "@angular/core/rxjs-interop";
 import {Subscription} from "rxjs";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "../shared/info.service";
-import {MapDataService, SelectedFeatures} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {Menu} from "primeng/menu";
 import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
+import {FeatureWrapper} from "../mapdata/features.model";
 
 export interface Column {
     key: string,
@@ -56,7 +57,8 @@ export class FeatureFilterOptions {
                         }
                     </p-iconfield>
                     @if (selectedFeatures()) {
-                        <p-button (click)="mapService.focusOnFeature(selectedFeatures()!.viewIndex, selectedFeatures()!.features[0])"
+                        <!-- TODO: Zoom to whole feature collection -->
+                        <p-button (click)="mapService.zoomToFeature(undefined, selectedFeatures()![0])"
                                 label="" pTooltip="Focus on feature" tooltipPosition="bottom"
                                 [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
                             <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
@@ -220,7 +222,7 @@ export class InspectionTreeComponent implements OnDestroy {
     subscriptions: Subscription[] = [];
     filterOptions = input<FeatureFilterOptions>();
     geoJson = input<string>();
-    selectedFeatures = input<SelectedFeatures>();
+    selectedFeatures = input<FeatureWrapper[]>();
 
     filterFields: string[] = [
         "key",
@@ -370,7 +372,7 @@ export class InspectionTreeComponent implements OnDestroy {
             }
         } else if (rowData["hoverId"] && this.selectedFeatures()) {
             this.mapService.setHoveredFeatures([{
-                mapTileKey: this.selectedFeatures()!.features[rowData["featureIndex"]].mapTileKey,
+                mapTileKey: this.selectedFeatures()![rowData["featureIndex"]].mapTileKey,
                 featureId: rowData["hoverId"]
             }]).then();
         }
@@ -378,7 +380,6 @@ export class InspectionTreeComponent implements OnDestroy {
 
     showSourceData(event: Event, sourceDataRef: any) {
         event.stopPropagation();
-
         try {
             this.stateService.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
