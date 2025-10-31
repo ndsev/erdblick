@@ -21,15 +21,18 @@ const abortUrl = "abort";
 /**
  * Determine if two lists of feature wrappers have the same features.
  */
-function featureSetsEqual(rhs: FeatureWrapper[], lhs: FeatureWrapper[]) {
-    return rhs.length === lhs.length && rhs.every(rf => lhs.some(lf => rf.equals(lf)));
+function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]) {
+    return rhs.length === lhs.length && rhs.every(rf =>
+        lhs.some(lf =>
+            rf.mapTileKey === lf.mapTileKey && rf.featureId === lf.featureId));
 }
 
-function featureSetContains(container: FeatureWrapper[], maybeSubset: FeatureWrapper[]) {
+function featureSetContains(container: TileFeatureId[], maybeSubset: TileFeatureId[]) {
     if (!maybeSubset.length) {
         return false;
     }
-    return maybeSubset.every(candidate => container.some(item => item.equals(candidate)));
+    return maybeSubset.every(candidate => container.some(item =>
+        item.mapTileKey === candidate.mapTileKey && item.featureId == candidate.featureId));
 }
 
 const DEFAULT_VIEWPORT: Viewport = {
@@ -220,6 +223,18 @@ export class MapDataService {
         this.stateService.selectionState.subscribe(async selected => {
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             for (const selection of selected) {
+                // Only push a new panel if the selection changed. Otherwise,
+                // just reuse the old panel so that the inspection trees in existing
+                // opened panels are not recalculated.
+                const existing = this.selectionTopic.getValue().find(p => p.id === selection.id);
+                if (existing && featureSetsEqual(selection.features, existing.features)) {
+                    existing.pinned = selection.pinned;
+                    existing.color = selection.color;
+                    existing.size = selection.size;
+                    existing.sourceData = selection.sourceData;
+                    convertedSelections.push(existing);
+                    continue;
+                }
                 convertedSelections.push({
                     id: selection.id,
                     pinned: selection.pinned,
