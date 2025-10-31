@@ -61,7 +61,7 @@ export class FeatureFilterOptions {
                         <p-button (click)="mapService.zoomToFeature(undefined, selectedFeatures()![0])"
                                 label="" pTooltip="Focus on feature" tooltipPosition="bottom"
                                 [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
-                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                         </p-button>
                     }
                     @if (geoJson()) {

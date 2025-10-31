@@ -123,20 +123,28 @@ import {Rectangle} from "../integrations/cesium";
                                         <label [for]="node.id"
                                                style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
-                                        <div class="map-controls">
-                                            <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                      [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
-                                                      tooltipPosition="bottom"
-                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                      tabindex="0"
-                                                      [disabled]="!metadataMenusEntries.get(node.id)?.length">
-                                        <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
-                                            data_object
-                                        </span>
-                                            </p-button>
-                                        </div>
+                                    <div class="map-controls">
+                                        <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
+                                                  label="" pTooltip="Focus on map" tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                  tabindex="0"
+                                                  *ngIf="flatCoverage(node).length">
+                                            <span class="material-icons"
+                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                        </p-button>
+                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                  [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
+                                                  tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                  tabindex="0"
+                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                                data_object
+                                            </span>
+                                        </p-button>
                                     </div>
-                                </ng-template>
+                                </div>
+                            </ng-template>
                                 <!-- Template for Feature Layer nodes -->
                                 <ng-template let-node pTemplate="Features">
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
@@ -176,7 +184,7 @@ import {Rectangle} from "../integrations/cesium";
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
                                             <span class="material-icons"
-                                                  style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                             </p-button>
                                             <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
                                                            (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
@@ -507,6 +515,19 @@ export class MapPanelComponent {
         this.mapService.moveToRectangleTopic.next(
             {targetView: viewIndex, rectangle: targetRect!}
         );
+    }
+
+    flatCoverage(node: any): (number | CoverageRectItem)[] {
+        if (!node || !node.children) {
+            return [];
+        }
+        const coverage: (number | CoverageRectItem)[] = [];
+        for (const child of node.children) {
+            if (child.info && Array.isArray(child.info.coverage)) {
+                coverage.push(...child.info.coverage);
+            }
+        }
+        return coverage;
     }
 
     updateOSMOverlay(viewIndex: number) {
