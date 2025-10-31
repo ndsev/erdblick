@@ -497,9 +497,10 @@ export class InspectionTreeComponent implements OnDestroy {
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
+            const isRelationTypeNode = parent && parent.data["key"] === "Relations";
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
             const hasSingleChild = node.children && node.children.length === 1;
-            node.expanded = isTopLevelNode || isSection || hasSingleChild;
+            node.expanded = isTopLevelNode || isRelationTypeNode || isSection || hasSingleChild;
 
             if (node.children) {
                 this.expandTreeNodes(node.children, node);
