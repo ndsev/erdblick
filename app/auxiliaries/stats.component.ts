@@ -18,7 +18,7 @@ import { ClipboardService } from "../shared/clipboard.service";
                     [showHeader]="false"
                     [style]="{'width': '100%'}">
                 </p-multiSelect>
-                <div style="display: inline-block; cursor: pointer" (click)="considerEmptyTiles = !considerEmptyTiles">
+                <div style="display: inline-block; cursor: pointer">
                     <p-checkbox inputId="stat-empty-tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"/>
                     <label for="stat-empty-tiles" style="margin-left: 0.5em; cursor: pointer">Consider Empty Tiles</label>
                 </div>
