@@ -178,14 +178,14 @@ function processCompletion(task: CompletionWorkerTask) {
         // We do not show completion errors.
         if (candidates["error"]) {
             console.error("Completion error", candidates["error"]);
-            candidates = [];
+            candidates = null;
         }
 
         // Post result back to the main thread.
         let result: CompletionCandidatesForTile = {
             type: 'CompletionCandidatesForTile',
             query: task.query,
-            candidates: candidates.map((item: any) => {
+            candidates: (candidates || []).map((item: any) => {
                 return {
                     text: item.text,
                     begin: item.range[0],
@@ -217,7 +217,11 @@ function processDiagnostics(task: DiagnosticsWorkerTask) {
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);
 
-        const messages = search.diagnostics(task.query, task.diagnostics);
+        let messages = search.diagnostics(task.query, task.diagnostics);
+        if (messages["error"]) {
+            console.error("Diagnostics error", messages["error"]);
+            messages = null;
+        }
 
         search.delete();
         tile.delete();
@@ -225,7 +229,7 @@ function processDiagnostics(task: DiagnosticsWorkerTask) {
         postMessage({
             type: 'DiagnosticsResultsForTile',
             query: task.query,
-            messages: messages,
+            messages: messages || [],
             taskId: task.taskId,
             groupId: task.groupId
         } as DiagnosticsResultsForTile);
