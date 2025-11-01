@@ -9,7 +9,7 @@ import {JSONSchema7} from "json-schema";
 import {FormGroup} from '@angular/forms';
 import {FormlyFormOptions, FormlyFieldConfig, FieldType, FieldArrayType} from '@ngx-formly/core';
 import {FormlyJsonschema} from '@ngx-formly/core/json-schema';
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 
 @Component({
     selector: 'formly-multi-schema-type',
@@ -143,15 +143,11 @@ export class DatasourcesComponent {
     private savedConfigSourceSubscription: Subscription = new Subscription();
 
     constructor(private messageService: InfoMessageService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private formlyJsonSchema: FormlyJsonschema,
                 public editorService: EditorService,
                 private http: HttpClient,
-                private mapService: MapService) {
-        this.parameterService.parameters.subscribe(parameters => {
-            return;
-        });
-
+                private mapService: MapDataService) {
         this.dataSourcesConfigJson.subscribe((config: any) => {
             if (config && config["schema"] && config["model"]) {
                 this.schema = config["schema"];

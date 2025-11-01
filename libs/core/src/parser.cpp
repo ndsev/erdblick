@@ -1,5 +1,6 @@
 #include <iostream>
 #include <regex>
+#include <sstream>
 #include "mapget/model/stringpool.h"
 #include "parser.h"
 
@@ -36,17 +37,16 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                 for (auto const& composition : tp.uniqueIdCompositions_) {
                     for (auto const& withOptionals : {false, true}) {
                         std::vector<mapget::IdPart> idParts;
-                        std::stringstream compositionId;
-                        compositionId << tp.name_;
+                        std::string compositionId = tp.name_;
 
                         for (auto const& idPart : composition) {
                             if (!idPart.isOptional_ || withOptionals) {
-                                compositionId << "." << idPart.idPartLabel_ << ":" << static_cast<uint32_t>(idPart.datatype_);
+                                compositionId += fmt::format(".{}:{}", idPart.idPartLabel_, static_cast<uint32_t>(idPart.datatype_));
                                 idParts.push_back(idPart);
                             }
                         }
 
-                        auto& typeInfo = featureJumpTargets_[compositionId.str()];
+                        auto& typeInfo = featureJumpTargets_[compositionId];
                         if (typeInfo.idParts_.empty()) {
                             typeInfo.idParts_ = idParts;
                             typeInfo.name_ = tp.name_;
@@ -94,8 +94,8 @@ void TileLayerParser::reset()
 
 TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& buffer)
 {
-    std::stringstream inputStream;
-    inputStream << buffer.toString();
+    auto str = buffer.toString();
+    std::istringstream inputStream(str, std::ios::binary);
     auto result = TileFeatureLayer(std::make_shared<mapget::TileFeatureLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
@@ -108,8 +108,8 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
 
 TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
-    std::stringstream inputStream;
-    inputStream << buffer.toString();
+    auto str = buffer.toString();
+    std::istringstream inputStream(str, std::ios::binary);
     auto result = TileSourceDataLayer(std::make_shared<mapget::TileSourceDataLayer>(
         inputStream,
         [this](auto&& mapId, auto&& layerId)
@@ -122,8 +122,8 @@ TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array co
 
 TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const SharedUint8Array& buffer)
 {
-    std::stringstream inputStream;
-    inputStream << buffer.toString();
+    auto str = buffer.toString();
+    std::istringstream inputStream(str, std::ios::binary);
     // Parse just the TileLayer part of the blob, which is the base class of
     // e.g. the TileFeatureLayer. The base class blob always precedes the
     // blob from the derived class.
@@ -246,15 +246,15 @@ void TileLayerParser::getDataSourceInfo(SharedUint8Array& out, std::string const
 void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nodeId)
 {
     auto fieldDict = cachedStrings_->getStringPool(nodeId);
-    std::stringstream outStream;
+    std::ostringstream outStream;
     fieldDict->write(outStream, 0);
     out.writeToArray(outStream.str());
 }
 
 void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
-    std::stringstream bufferStream;
-    bufferStream << buffer.toString();
+    auto str = buffer.toString();
+    std::istringstream bufferStream(str, std::ios::binary);
     auto nodeId = mapget::StringPool::readDataSourceNodeId(bufferStream);
     auto fieldDict = cachedStrings_->getStringPool(nodeId);
     fieldDict->read(bufferStream);

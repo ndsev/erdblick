@@ -2,21 +2,17 @@ import {FeatureTile} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
-    Entity,
     PrimitiveCollection,
     Rectangle,
     Viewer,
-    CallbackProperty,
-    HeightReference,
     ColorGeometryInstanceAttribute,
     GeometryInstance,
     PerInstanceColorAppearance,
     Primitive,
-    RectangleGeometry,
     RectangleOutlineGeometry
 } from "../integrations/cesium";
 import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
-import {MergedPointVisualization, PointMergeService} from "./pointmerge.service";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
     tileId: string,
@@ -38,28 +34,42 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
  * (style sheet, tile layer) combination.
  */
 class TileBoxVisualization {
-    static visualizations: Map<bigint, TileBoxVisualization> = new Map<bigint, TileBoxVisualization>();
-    static outlinePrimitive: Primitive|null = null;
+    static tileBoxStatePerView: {
+        visualizations: Map<bigint, TileBoxVisualization>,
+        outlinePrimitive: Primitive | null
+    }[] = [];
 
-    static get(tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
-        if (!TileBoxVisualization.visualizations.has(tile.tileId)) {
-            TileBoxVisualization.visualizations.set(
-                tile.tileId, new TileBoxVisualization(viewer, tile, color));
-            TileBoxVisualization.updatePrimitive(viewer);
+    static getTileBoxState(viewIndex: number) {
+        while (viewIndex >= this.tileBoxStatePerView.length) {
+            this.tileBoxStatePerView.push({
+                visualizations: new Map<bigint, TileBoxVisualization>(),
+                outlinePrimitive: null,
+            });
         }
-        let result = this.visualizations.get(tile.tileId)!;
+        return this.tileBoxStatePerView[viewIndex];
+    }
+
+    static get(viewIndex: number, tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
+        const state = this.getTileBoxState(viewIndex);
+        if (!state.visualizations.has(tile.tileId)) {
+            state.visualizations.set(
+                tile.tileId, new TileBoxVisualization(tile, color));
+            TileBoxVisualization.updatePrimitive(viewIndex, viewer);
+        }
+        let result = state.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
         result.updateOutlineColor();
         return result;
     }
 
-    static updatePrimitive(viewer: Viewer) {
-        if (this.outlinePrimitive) {
-            viewer.scene.primitives.remove(this.outlinePrimitive);
+    static updatePrimitive(viewIndex: number, viewer: Viewer) {
+        const state = this.getTileBoxState(viewIndex);
+        if (state.outlinePrimitive) {
+            viewer.scene.primitives.remove(state.outlinePrimitive);
         }
-        this.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
-            geometryInstances: [...this.visualizations].map(kv => kv[1].instance),
+        state.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
+            geometryInstances: [...state.visualizations].map(kv => kv[1].instance),
             appearance: new PerInstanceColorAppearance({
                 flat: true,
                 renderState: {
@@ -79,7 +89,7 @@ class TileBoxVisualization {
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
     private instance: GeometryInstance;
 
-    constructor(viewer: Viewer, tile: FeatureTile, color?: Color) {
+    constructor(tile: FeatureTile, color?: Color) {
         this.color = color;
         this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(this.getCurrentOutlineColor());
 
@@ -121,14 +131,14 @@ class TileBoxVisualization {
         ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
     }
 
-    delete(viewer: Viewer, featureCount: number) {
+    delete(viewIndex: number, viewer: Viewer, featureCount: number) {
         --this.refCount;
         this.featureCount -= featureCount;
         if (this.refCount <= 0) {
-            TileBoxVisualization.visualizations.delete(this.id);
-            TileBoxVisualization.updatePrimitive(viewer);
-        }
-        else {
+            const state = TileBoxVisualization.getTileBoxState(viewIndex);
+            state.visualizations.delete(this.id);
+            TileBoxVisualization.updatePrimitive(viewIndex, viewer);
+        } else {
             // Update the outline color since featureCount has changed
             this.updateOutlineColor();
         }
@@ -141,23 +151,25 @@ export class TileVisualization {
     isHighDetail: boolean;
     showTileBorder: boolean = false;
     specialBorderColour: Color | undefined;
+    readonly viewIndex: number;
 
-    private readonly style: StyleWithIsDeleted;
-    private readonly styleName: string;
     private lowDetailVisu: TileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
     private renderingInProgress: boolean = false;
+    private deleted: boolean = false;
+    private readonly style: StyleWithIsDeleted;
+    public readonly styleId: string;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
-    private deleted: boolean = false;
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
-    private readonly options: Record<string, boolean|number>;
+    private readonly options: Record<string, boolean|number|string>;
     private readonly pointMergeService: PointMergeService;
 
     /**
      * Create a tile visualization.
+     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
      * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
@@ -174,7 +186,8 @@ export class TileVisualization {
      * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
      * @param options Option values for option variables defined by the style sheet.
      */
-    constructor(tile: FeatureTile,
+    constructor(viewIndex: number,
+                tile: FeatureTile,
                 pointMergeService: PointMergeService,
                 auxTileFun: (key: string) => FeatureTile | null,
                 style: FeatureLayerStyle,
@@ -182,10 +195,10 @@ export class TileVisualization {
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 featureIdSubset?: string[],
                 boxGrid?: boolean,
-                options?: Record<string, boolean|number>) {
+                options?: Record<string, boolean|number|string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
-        this.styleName = this.style.name();
+        this.styleId = this.style.name();
         this.isHighDetail = highDetail;
         this.renderingInProgress = false;
         this.highlightMode = highlightMode;
@@ -195,6 +208,7 @@ export class TileVisualization {
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
         this.pointMergeService = pointMergeService;
+        this.viewIndex = viewIndex;
     }
 
     /**
@@ -221,6 +235,7 @@ export class TileVisualization {
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
                 let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                    this.viewIndex,
                     this.tile.mapTileKey,
                     this.style,
                     this.options,
@@ -300,7 +315,7 @@ export class TileVisualization {
                 let endTime = performance.now();
 
                 // Add the render time for this style sheet as a statistic to the tile.
-                let timingListKey = `render-time-${this.styleName.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
+                let timingListKey = `render-time-${this.styleId.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
                 let timingList = this.tile.stats.get(timingListKey);
                 if (!timingList) {
                     timingList = [];
@@ -317,7 +332,7 @@ export class TileVisualization {
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
+            this.lowDetailVisu = TileBoxVisualization.get(this.viewIndex, this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
             this.hasTileBorder = true;
         }
 
@@ -340,7 +355,7 @@ export class TileVisualization {
         // Remove point-merge contributions that were made by this map-layer+style visualization combo.
         let removedCornerTiles = this.pointMergeService.remove(
             this.tile.tileId,
-            this.mapLayerStyleId());
+            this.mapViewLayerStyleId());
         for (let removedCornerTile of removedCornerTiles) {
             removedCornerTile.remove(viewer);
         }
@@ -352,7 +367,7 @@ export class TileVisualization {
             this.primitiveCollection = null;
         }
         if (this.lowDetailVisu) {
-            this.lowDetailVisu.delete(viewer, this.tile.numFeatures);
+            this.lowDetailVisu.delete(this.viewIndex, viewer, this.tile.numFeatures);
             this.lowDetailVisu = null;
         }
         this.hasHighDetailVisualization = false;
@@ -380,10 +395,14 @@ export class TileVisualization {
 
     /**
      * Combination of map name, layer name, style name and highlight mode which
-     * (in combination with the tile id) uniquely identifies that rendered contents
-     * if this TileVisualization as expected by the surrounding MergedPointsTiles.
+     * (in combination with the tile id) uniquely identifies the rendered contents
+     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
      */
-    private mapLayerStyleId() {
-        return `${this.tile.mapName}:${this.tile.layerName}:${this.styleName}:${this.highlightMode.value}`;
+    private mapViewLayerStyleId(): MapViewLayerStyleRule {
+        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);
+    }
+
+    public setStyleOption(optionId: string, value: string|number|boolean) {
+        this.options[optionId] = value;
     }
 }

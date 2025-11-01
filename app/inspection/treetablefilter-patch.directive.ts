@@ -20,7 +20,7 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
     constructor(private tt: TreeTable) {}
 
     ngAfterContentInit() {
-        this.tt.findFilteredNodes = (node: TreeTableNode<any>, paramsWithoutNode: any) : boolean => {
+        this.tt.findFilteredNodes = (node: TreeTableNode<any>, paramsWithoutNode: any): boolean => {
             console.assert(paramsWithoutNode.isStrictMode);
             if (node) {
                 let matched = false;

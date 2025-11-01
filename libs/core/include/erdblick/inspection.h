@@ -45,8 +45,8 @@ public:
         };
         sfl::small_vector<SourceDataReference, 1> sourceDataRefs_; // Most nodes have a single source-data reference.
 
-        [[nodiscard]] JsValue toJsValue() const;
-        [[nodiscard]] JsValue childrenToJsValue() const;
+        [[nodiscard]] JsValue toJsValue(std::string_view const& mapId) const;
+        [[nodiscard]] JsValue childrenToJsValue(std::string_view const& mapId) const;
     };
 
     struct InspectionNodeScope

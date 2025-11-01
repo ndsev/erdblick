@@ -72,12 +72,16 @@ export const defined = Cesium.defined;
 export type  PinBuilder = Cesium.PinBuilder;
 export type  Entity = Cesium.Entity;
 export const Entity = Cesium.Entity;
+export type  EntityConstructorOptions = Cesium.Entity.ConstructorOptions;
 export type  Camera = Cesium.Camera;
 export const Camera = Cesium.Camera;
+export type  Scene = Cesium.Scene;
+export const Scene = Cesium.Scene;
 export type HeadingPitchRange = Cesium.HeadingPitchRange;
 export const HeadingPitchRange = Cesium.HeadingPitchRange;
 export type BoundingSphere = Cesium.BoundingSphere;
 export const BoundingSphere = Cesium.BoundingSphere;
+export type SceneMode = Cesium.SceneMode;
 export const SceneMode = Cesium.SceneMode;
 export type  WebMercatorProjection = Cesium.WebMercatorProjection;
 export const WebMercatorProjection = Cesium.WebMercatorProjection;
@@ -85,6 +89,16 @@ export type  GeographicProjection = Cesium.GeographicProjection;
 export const GeographicProjection = Cesium.GeographicProjection;
 export type  Ellipsoid = Cesium.Ellipsoid;
 export const Ellipsoid = Cesium.Ellipsoid;
+export type PerspectiveFrustum = Cesium.PerspectiveFrustum;
+export const PerspectiveFrustum = Cesium.PerspectiveFrustum;
+export type KeyboardEventModifier = Cesium.KeyboardEventModifier;
+export const KeyboardEventModifier = Cesium.KeyboardEventModifier;
+export const EasingFunction = Cesium.EasingFunction;
+export type ColorMaterialProperty = Cesium.ColorMaterialProperty;
+export const ColorMaterialProperty = Cesium.ColorMaterialProperty;
+export type JulianDate = Cesium.JulianDate;
+export const JulianDate = Cesium.JulianDate;
+
 
 // Math is a namespace.
 

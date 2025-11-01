@@ -2,8 +2,6 @@
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource/inter/index.css";
 
-@layer primeng, erdblick;
-
 /* Translucent surfaces used in UI (light/dark specific) */
 :root {
   --erdblick-card-bg: rgba(255, 255, 255, 0.87);
@@ -27,10 +25,12 @@
 }
 
 .source-layer-dropdown {
+  height: 1.6em;
+
   .p-select-label {
     padding: 0.2em;
     min-width: 8em;
-    height: 1.75em;
+    height: 1.6em;
   }
 
   .p-select-dropdown {
@@ -66,22 +66,81 @@ body {
   }
 }
 
-.mapviewer-renderlayer {
-  width: 100%;
+map-view {
+  display: block;
   height: 100%;
-  position: fixed;
-  left: 0;
-  top: 0;
-  overflow: hidden;
-  user-select: none;
-  -moz-user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  -o-user-select: none;
-}
+  width: 100%;
+  position: relative;
 
-#mapViewContainer .cesium-widget-credits {
-  display: none !important;
+  .viewsync-select {
+    position: absolute;
+    left: 0.5em;
+    top: 0.5em;
+    height: 2em;
+    width: 2em;
+    z-index: 110;
+    opacity: 0.75;
+
+    .p-overlay {
+      z-index: 110 !important;
+      top: 2em !important;
+      left: 0 !important;
+    }
+
+    .p-multiselect {
+      box-shadow: none;
+      border: none;
+    }
+
+    .p-multiselect-dropdown {
+      height: 2em;
+      width: 2em;
+    }
+
+    .p-multiselect-label {
+      display: none;
+    }
+
+    .p-multiselect-header {
+      display: none;
+    }
+
+    .p-multiselect {
+      width: 2em;
+      height: 2em;
+    }
+  }
+
+  .viewsync-select:hover {
+    opacity: 1;
+  }
+
+  .mapviewer-renderlayer {
+    position: relative;
+    height: 100vh;
+    inset: 0;
+    overflow: hidden;
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+    box-sizing: border-box;
+
+    &.border::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border: 0.2em solid var(--p-focus-ring-color);
+      border-radius: inherit;
+      z-index: 1000;
+    }
+  }
+
+  [id^="mapViewContainer"] .cesium-widget-credits {
+    display: none !important;
+  }
 }
 
 /* Shared styles for both panels */
@@ -116,13 +175,11 @@ body {
 
 .compass-circle {
   position: absolute;
-  top: 2em;
-  right: 0.5em;
+  bottom: 0.5em;
+  right: 0.7em;
   width: 4em;
   height: 4em;
-  border: 0.15em solid var(--p-button-secondary-border-color);
   border-radius: 50%;
-  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -130,24 +187,26 @@ body {
   color: var(--p-button-secondary-border-color);
   z-index: 110;
   background-color: rgba(255, 255, 255, 0.25);
-}
+  cursor: pointer;
 
-.compass-label {
-  position: absolute;
-  font-size: 0.75em;
-  font-weight: bolder;
-}
-.compass-label.north { top: 0.2em; }
-.compass-label.east  { right: 0.2em; }
-.compass-label.south { bottom: 0.2em; }
-.compass-label.west  { left: 0.2em; }
+  .compass-label {
+    position: absolute;
+    font-size: 0.75em;
+    font-weight: bolder;
+  }
+  .compass-label.north { top: 0.2em; }
+  .compass-label.east  { right: 0.2em; }
+  .compass-label.south { bottom: 0.2em; }
+  .compass-label.west  { left: 0.2em; }
 
-.compass-needle {
-  width: 0.75em;
-  height: 1.5em;
-  background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
-  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-  transform-origin: 50% 50%;
+  .compass-needle {
+    width: 0.75em;
+    height: 1.5em;
+    background: linear-gradient(to bottom, var(--p-primary-500) 50%, var(--p-button-secondary-background) 50%);
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    transform-origin: 50% 50%;
+    cursor: pointer;
+  }
 }
 
 .controls-button {
@@ -202,12 +261,16 @@ body {
   }
 }
 
-.bttn-container {
+.pref-buttons-container {
   display: flex;
   flex-direction: column-reverse;
   gap: 0.5em;
   position: relative;
   z-index: 1100;
+  background: var(--p-content-background);
+  box-shadow: var(--p-dialog-shadow);
+  padding: 0.25em 0.5em;
+  border-radius: 6px;
 
   .help-button {
     width: 3em;
@@ -219,19 +282,38 @@ body {
     }
   }
 
-  .pref-button {
-    width: 3em;
-    height: 3em;
+  .pref-button-subcontainer {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5em;
+    cursor: pointer;
+    align-items: center;
+    padding: 0.25em;
+    background: var(--p-content-background);
+    border-radius: 6px;
 
-    .p-button {
-      border-radius: 50%;
-      padding: 0.8em 0;
+    &:hover {
+      background: var(--p-highlight-background);
+    }
+
+    span {
+      font-size: 1em;
+      color: var(--p-content-color);
+    }
+
+    .pref-button {
       width: 3em;
       height: 3em;
+
+      button {
+        border-radius: 50%;
+        padding: 0.8em 0;
+        width: 3em;
+        height: 3em;
+      }
     }
   }
 }
-
 
 .card {
   background-color: var(--p-content-background);
@@ -254,174 +336,187 @@ body {
   color: var(--p-iconfield-icon-color);
 }
 
-.inspect-panel-small-header {
-  .p-accordionheader {
-    /* Match default header height from .inspect-panel .p-accordionheader (0.95em total) */
-    padding-top: 0.6em !important;
-    padding-bottom: 0.6em !important;
-  }
-
-  .resizable-container {
-    height: calc(100vh - 7.5em);
-    max-height: calc(100vh - 7.5em) !important;
-  }
-}
-
-.inspect-panel {
+.inspection-container {
   position: absolute;
   top: 0.5em;
   right: 0.5em;
-  min-width: 30em;
-  z-index: 110;
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 0.5em;
+  z-index: 9000;
+  pointer-events: none;
 
-  .p-accordionpanel {
-    border: none;
+  inspection-panel {
+    height: fit-content;
+    pointer-events: all;
   }
 
-  .p-accordionheader {
-    padding: 0.93em;
-  }
-
-  .p-accordioncontent-content {
-    padding: 0;
-    border-radius: 0 0 6px 6px;
-  }
-
-  .filter-container {
-    width: 100%;
-    display: flex;
-    gap: 4px;
-    justify-content: center;
-
-    .p-button {
-      width: 2em;
-      height: 2em;
-    }
-  }
-
-  .filter-input {
-    height: 2em;
-    width: 100%;
-    border-radius: 6px;
-    border: solid 1px var(--p-content-border-color);
-    direction: ltr;
-  }
-
-  .resizable-container {
-    width: 40em;
-    height: calc(100vh - 10.5em);
+  .inspect-panel {
     min-width: 30em;
-    min-height: 18em;
-    resize: both;
-    overflow: auto;
-    direction: rtl;
-    max-width: calc(100vw - 28em);
-    max-height: calc(100vh - 10.5em);
-    padding-bottom: 0.5em;
 
-    * {
-      direction: ltr;
-    }
 
-    .source-data-ref-container {
-      .p-buttongroup {
-        width: fit-content;
+    .inspector-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-right: 0.5em;
+
+      & > * {
+        display: flex;
+        gap: 0.25em;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .title {
+        max-width: 20em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .p-button {
-        width: 1.2em;
-        height: 1em;
-        padding: 0.1em;
-        margin-top: 0.1em;
-        color: var(--p-primary-contrast-color);
-        background: var(--p-primary-500);
-        border: 1px solid var(--p-primary-500);
-      }
-
-      .p-button-label {
-        font-family: monospace;
-        font-weight: 700;
-        font-size: 1em;
-      }
-
-      span {
-        font-family: monospace;
-      }
-    }
-
-    .p-tree {
-      border: none;
-      padding: 0;
-      direction: ltr;
-    }
-
-    .p-treetable-header {
-      padding: 0.5em;
-      direction: ltr;
-    }
-
-    .p-treetable-tbody {
-      direction: ltr;
-      border-collapse: collapse;
-      font-size: 0.9em !important;
-
-      td {
-        padding: 0 0 0 0.5em;
-        height: 26px;
-        border-right: 1px solid var(--p-content-border-color);
-      }
-
-      th {
-        padding: 0 0 0 0.5em;
-        height: 26px;
-        border-right: 1px solid var(--p-content-border-color);
-      }
-
-      .p-treetable-toggler {
+        width: 1.75em !important;
+        height: 1.75em !important;
         margin: 0;
-        width: 1.25em;
-        height: 1.25em;
+      }
+    }
+
+    .p-accordionpanel {
+      border: none;
+    }
+
+    .p-accordionheader {
+      padding: 0.5em 0.5em 0.5em 0.75em;
+      overflow: visible;
+
+      .p-colorpicker-panel {
+        z-index: 9999;
       }
 
-      /* Style used for highlighting individual table rows. */
-      tr.highlight {
-        color: black;
+      .p-colorpicker input {
+        height: 1.5em;
+        width: 1.5em;
+      }
+    }
 
-        td {
-          border-color: var(--p-content-border-color);
-          background: var(--p-green-100);
+    .p-accordioncontent-content {
+      padding: 0;
+      border-radius: 0 0 6px 6px;
+    }
+
+    .filter-container {
+      width: 100%;
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+
+      .p-button {
+        width: 2em;
+        height: 2em;
+      }
+    }
+
+    .filter-input {
+      height: 2em;
+      width: 100%;
+      border-radius: 6px;
+      border: solid 1px var(--p-content-border-color);
+      direction: ltr;
+    }
+
+    .resizable-container {
+      width: 30em;
+      height: 40em;
+      min-width: 30em;
+      min-height: 20em;
+      resize: both;
+      overflow: auto;
+      direction: rtl;
+      max-width: calc(100vw - 28em);
+      max-height: calc(100vh - 6em);
+      padding-bottom: 0.5em;
+
+      * {
+        direction: ltr;
+      }
+
+      .source-data-ref-container {
+        .p-buttongroup {
+          width: fit-content;
+        }
+
+        .p-button {
+          width: 1.2em;
+          height: 1em;
+          padding: 0.1em;
+          margin-top: 0.1em;
+          color: var(--p-primary-contrast-color);
+          background: var(--p-primary-500);
+          border: 1px solid var(--p-primary-500);
+        }
+
+        .p-button-label {
+          font-family: monospace;
+          font-weight: 700;
+          font-size: 1em;
+        }
+
+        span {
+          font-family: monospace;
         }
       }
-    }
-  }
-}
 
-.side-menu-dialog {
-  .search-menu {
-    &:first-child {
-      .p-divider {
-        display: none;
-      }
-    }
-
-    .p-divider {
-      margin: 0.9em 0;
-    }
-
-    .search-option {
-      text-align: left;
-      font-size: 0.9em;
-      margin: 0;
-      background: none;
-      border: none;
-      cursor: pointer;
-
-      .search-option-name {
-        font-weight: bold;
+      .p-tree {
+        border: none;
+        padding: 0;
+        direction: ltr;
       }
 
-      .search-option-warning {
-        color: burlywood;
+      .p-treetable-header {
+        padding: 0.5em;
+        direction: ltr;
+      }
+
+      .p-treetable-thead {
+        th {
+          padding: 0.25em;
+        }
+      }
+
+      .p-treetable-tbody {
+        direction: ltr;
+        border-collapse: collapse;
+        font-size: 0.9em !important;
+
+        td {
+          padding: 0 0 0 0.5em;
+          height: 26px;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        th {
+          padding: 0 0 0 0.5em;
+          height: 26px;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        .p-treetable-toggler {
+          margin: 0;
+          width: 1.25em;
+          height: 1.25em;
+        }
+
+        /* Style used for highlighting individual table rows. */
+        tr.highlight {
+          color: black;
+
+          td {
+            border-color: var(--p-content-border-color);
+            background: var(--p-green-100);
+          }
+        }
       }
     }
   }
@@ -435,7 +530,18 @@ body {
   // min-height: 3.5em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
-  z-index: 1500;
+  z-index: 100;
+
+  /* Raise when focused/active or expanded to multi-line */
+  &:focus-within {
+    z-index: 1500;
+  }
+
+  /* When textarea is not in single-line mode (expanded/editing) */
+  &:has(textarea:not(.single-line)) {
+    z-index: 1500;
+  }
+
 
   &.shifted {
     left: 0.5em !important;
@@ -664,7 +770,43 @@ body {
   }
 }
 
-.map-layer-dialog, .side-menu-dialog {
+.feature-search-dialog {
+  z-index: 1000 !important;
+
+  .p-dialog-mask {
+    z-index: 1000 !important;
+  }
+
+  .p-dialog {
+    width: 30em;
+    min-width: 25em;
+    margin: 0 !important;
+    z-index: 1000 !important;
+    overflow-x: hidden;
+  }
+
+  .p-dialog-content {
+    padding: 0 0.5em 0.5em 0.5em;
+    min-height: 30em;
+    max-height: calc(100vh - 5em);
+  }
+
+  .p-dialog-header {
+    padding: 0 0 0 0.5em;
+    height: 2em;
+    overflow: clip;
+
+    .p-dialog-title {
+      font-size: medium;
+    }
+  }
+
+  .p-multiselect {
+    width: 100%;
+  }
+}
+
+.map-layer-dialog {
   z-index: 1000 !important;
 
   .p-dialog-mask {
@@ -693,14 +835,6 @@ body {
     }
   }
 
-  .p-dialog-header {
-    padding: 0 0 0 0.5em;
-
-    .p-dialog-title {
-      font-size: medium;
-    }
-  }
-
   .p-fieldset {
     padding: 0;
 
@@ -720,9 +854,7 @@ body {
   .p-tree-node-label {
     width: 100%;
   }
-}
 
-.map-layer-dialog {
   .p-dialog-header {
     display: none;
   }
@@ -759,14 +891,23 @@ body {
       width: 1.25em;
       height: 1.25em;
     }
+
+    .oblique {
+      font-style: oblique
+    }
   }
 }
 
-.osm-controls {
+.map-config-controls {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  margin-bottom: 0.25em;
+  gap: 0.5em;
+  padding: 0.5em 0.5em 0 0.5em;
+
+  .p-divider-vertical {
+    margin: 0;
+    padding: 0.5em 0;
+  }
 
   button {
     width: 2em;
@@ -774,15 +915,47 @@ body {
     box-shadow: none;
   }
 
-  .slider-input {
-    width: 11em;
-    font-size: 0.9em;
-    padding: 0.5em 0.75em;
+  .osm-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+
+    .slider-input {
+      width: 11em;
+      font-size: 0.9em;
+      padding: 0.5em 0.75em;
+    }
+  }
+}
+
+.styles-container {
+  .p-tree-node-label {
+    width: 100%;
   }
 
-  .p-divider-vertical {
-    margin: 0;
-    padding: 0.5em 0;
+  height: calc(100% - 4em);
+  max-height: calc(75vh - 2em);
+  overflow: auto;
+
+  .flex-container {
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .tree-node-controls {
+      display: flex;
+      gap: 0.5em;
+      width: 8em;
+      justify-content: flex-end;
+      transition: opacity 0s, visibility 0s;
+
+      button {
+        width: 2em;
+        height: 2em;
+        box-shadow: none;
+      }
+    }
   }
 }
 
@@ -850,6 +1023,16 @@ body {
       font-weight: 700;
       border-radius: 6px;
       font-size: 0.9em;
+
+      .close-view-button {
+        .p-button {
+          width: 1.25em;
+          height: 1.25em;
+          background-color: var(--p-badge-danger-background);
+          border-color: var(--p-badge-danger-background);
+          margin-left: 0.25em;
+        }
+      }
     }
 
     .p-fieldset-content {
@@ -887,7 +1070,7 @@ body {
     align-items: center;
 
     &:hover {
-      .layer-controls {
+      .tree-node-controls {
         visibility: visible;
         opacity: 1;
         transition: opacity 0.25s, visibility 0.25s;
@@ -908,7 +1091,7 @@ body {
       padding: 0;
     }
 
-    .layer-controls {
+    .tree-node-controls {
       display: flex;
       gap: 0.5em;
       width: 8em;
@@ -958,29 +1141,6 @@ body {
         width: 2em;
         height: 2em;
         box-shadow: none;
-      }
-    }
-
-    .style-controls {
-      justify-content: flex-end;
-    }
-  }
-
-  .styles-import {
-    justify-content: center;
-    align-items: center;
-    display: flex;
-    padding: 0.5em;
-
-    .p-fileupload {
-      .p-fileupload-choose {
-        padding: 0.5em 1em 0.5em 1em;
-      }
-
-      .p-button-label {
-        box-shadow: none;
-        min-width: 6.4em;
-        font-size: 0.8em;
       }
     }
   }
@@ -1073,7 +1233,7 @@ body {
     box-shadow: none;
   }
 
-  padding: 0 0 0.5em 0;
+  padding: 0 0 0.25em 0;
   display: flex;
   gap: 0.5em;
   align-items: center;
@@ -1095,7 +1255,7 @@ body {
 
 .feature-search-tabs {
   .p-tab {
-    padding: 0.5em 1.5em;
+    padding: 0.25em 1em;
     margin: 0;
     font-size: 0.9em;
   }
@@ -1103,14 +1263,14 @@ body {
   .p-tabpanels {
     padding: 0.5em 0 0 0;
     font-size: 0.9em;
+
+    .p-tree {
+      padding: 0.5em 0 0 0;
+    }
   }
 
-  .results-listbox {
-    li {
-      padding: 0.5em 0.5em;
-      font-size: 1em;
-    }
-
+  // Ensure results tree shows a reasonable viewport height
+  .p-tree {
     .p-scroller {
       height: calc(100vh - 23em) !important;
     }
@@ -1186,7 +1346,8 @@ body {
 }
 
 .coordinates-container {
-  z-index: 100;
+  z-index: 9000;
+  pointer-events: none;
   position: absolute;
   bottom: 0.5em;
   left: 0;
@@ -1198,6 +1359,8 @@ body {
   align-items: center;
 
   .coordinates-panel {
+    pointer-events: all;
+
     .coordinates-entries {
       display: flex;
       flex-direction: row;
@@ -1430,7 +1593,16 @@ body {
     min-height: 3.5em;
     max-width: 100%;
     max-height: calc(100vh - 5em);
-    z-index: 1500;
+    /* Default lower; elevate when focused/expanded */
+    z-index: 100;
+
+    &:focus-within {
+      z-index: 1500;
+    }
+
+    &:has(textarea:not(.single-line)) {
+      z-index: 1500;
+    }
 
     .resizable-container {
       position: relative;
@@ -1502,7 +1674,7 @@ body {
     }
   }
 
-  .map-layer-dialog, .side-menu-dialog {
+  .map-layer-dialog {
     .p-dialog {
       width: 100vw !important;
       height: calc(100vh - 3em) !important;
