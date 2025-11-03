@@ -32,7 +32,7 @@ import {filter} from "rxjs/operators";
                 @for (option of syncOptions; track $index) {
                     <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
                                     [(ngModel)]="option.value" (ngModelChange)="updateSelectedOptions()" 
-                                    onLabel="" offLabel="" [pTooltip]="'Sync ' + option.name" tooltipPosition="bottom">
+                                    onLabel="" offLabel="" pTooltip="Sync {{option.name}}" tooltipPosition="bottom">
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
                         </ng-template>

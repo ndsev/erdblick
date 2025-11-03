@@ -94,7 +94,7 @@ export class FeatureFilterOptions {
                     @for (col of columns(); track $index) {
                         <td [class]="getStyleClassByType(rowData)"
                             style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                            [pTooltip]="rowData[col.key]" tooltipPosition="left"
+                            pTooltip="rowData[col.key]" tooltipPosition="left"
                             [tooltipOptions]="tooltipOptions">
                             <div style="display: flex; flex-direction: row; gap: 0.25em;">
                                 @if ($index === 0) {
@@ -109,7 +109,7 @@ export class FeatureFilterOptions {
                                     </span>
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
-                                            <i class="pi pi-info-circle" [pTooltip]="rowData['info']" tooltipPosition="top"></i>
+                                            <i class="pi pi-info-circle" pTooltip="rowData['info']" tooltipPosition="top"></i>
                                         </span>
                                     }
                                     @if (rowData.hasOwnProperty("sourceDataReferences") && 
@@ -121,7 +121,7 @@ export class FeatureFilterOptions {
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          [pTooltip]="sourceDataTooltip(item.qualifier)"
+                                                          pTooltip="Go to {{item.qualifier?.trim()}} source data."
                                                           [tooltipZIndex]="'9999'"
                                                           [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
@@ -136,7 +136,7 @@ export class FeatureFilterOptions {
                                     </span>
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
-                                            <i class="pi pi-info-circle" [pTooltip]="rowData['info']" tooltipPosition="top"></i>
+                                            <i class="pi pi-info-circle" pTooltip="rowData['info']" tooltipPosition="top"></i>
                                         </span>
                                     }
                                     @if (rowData.hasOwnProperty("sourceDataReferences") &&
@@ -148,7 +148,7 @@ export class FeatureFilterOptions {
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          [pTooltip]="sourceDataTooltip(item.qualifier)"
+                                                          pTooltip="Go to {{item.qualifier?.trim()}} source data."
                                                           tooltipPosition="bottom" />
                                             }
                                         </p-buttonGroup>
@@ -409,11 +409,6 @@ export class InspectionTreeComponent implements OnDestroy {
 
     copyToClipboard(text: string) {
         this.clipboardService.copyToClipboard(text);
-    }
-
-    sourceDataTooltip(qualifier: string): string {
-        const trimmed = qualifier?.trim() ?? '';
-        return trimmed ? `Go to ${trimmed} source data.` : 'Go to source data.';
     }
 
     showGeoJsonMenu(event: MouseEvent) {

@@ -37,7 +37,7 @@ import { ClipboardService } from "../shared/clipboard.service";
                             <td>{{ stat.name }}</td>
                             <td>
                                 {{ stat.peak | number: '1.2-2' }}
-                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(this.peakTileIdPerStat[stat.name][0])" [pTooltip]="this.peakTileIdPerStat[stat.name][0]" tooltipPosition="top"></i>
+                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(this.peakTileIdPerStat[stat.name][0])" pTooltip="this.peakTileIdPerStat[stat.name][0]" tooltipPosition="top"></i>
                             </td>
                             <td>{{ stat.sum | number: '1.2-2' }}</td>
                             <td>{{ stat.average | number: '1.2-2' }}</td>

@@ -13,6 +13,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import * as uuid from 'uuid';
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
 import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
+import {deepEquals} from "../shared/app-state";
 
 const infoUrl = "sources";
 const tileUrl = "tiles";
@@ -227,11 +228,10 @@ export class MapDataService {
                 // just reuse the old panel so that the inspection trees in existing
                 // opened panels are not recalculated.
                 const existing = this.selectionTopic.getValue().find(p => p.id === selection.id);
-                if (existing && featureSetsEqual(selection.features, existing.features)) {
+                if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
                     existing.pinned = selection.pinned;
                     existing.color = selection.color;
                     existing.size = selection.size;
-                    existing.sourceData = selection.sourceData;
                     convertedSelections.push(existing);
                     continue;
                 }

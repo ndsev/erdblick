@@ -31,7 +31,7 @@ import {Scroller} from "primeng/scroller";
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
-                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
+                          pTooltip="{{isSearchPaused ? 'Resume search' : 'Pause search'}}"></p-button>
                 <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>

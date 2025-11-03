@@ -131,7 +131,7 @@ import {Rectangle} from "../integrations/cesium";
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                         </p-button>
                                         <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                  [pTooltip]="!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'"
+                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
                                                   tooltipPosition="bottom"
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0"
