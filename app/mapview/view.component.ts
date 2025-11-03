@@ -5,6 +5,7 @@ import {
     Component,
     ElementRef,
     OnDestroy,
+    OnInit,
     ViewChild,
     input,
     InputSignal
@@ -41,7 +42,7 @@ import {environment} from "../environments/environment";
                 }
             </p-buttonGroup>
         }
-        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
+        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly && !isNarrow" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()" appendTo="body" />
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
         @defer (when mapView) {
@@ -58,13 +59,14 @@ import {environment} from "../environments/environment";
     `],
     standalone: false
 })
-export class MapViewComponent implements AfterViewInit, OnDestroy {
+export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: MapView;
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
+    isNarrow: boolean = false;
     syncOptions: {name: string, code: string, value: boolean, icon: string, tooltip: string}[] = [
         {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
         {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
@@ -74,6 +76,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
     private modeSubscription?: Subscription;
+    private mediaQueryList?: MediaQueryList;
+    private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
 
     /**
      * Construct a Cesium View with a Model.
@@ -107,6 +111,22 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         this.stateService.focusedViewState.subscribe(focusedViewIndex => {
             this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
         });
+    }
+
+    ngOnInit() {
+        if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+            this.mediaQueryList = window.matchMedia('(max-width: 56em)');
+            this.isNarrow = this.mediaQueryList.matches;
+            this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
+                this.isNarrow = event.matches;
+                this.cdr.markForCheck();
+            };
+            if (typeof this.mediaQueryList.addEventListener === 'function') {
+                this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
+            } else {
+                this.mediaQueryList.addListener(this.mediaQueryChangeListener);
+            }
+        }
     }
 
     ngAfterViewInit() {
@@ -151,6 +171,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        if (this.mediaQueryList && this.mediaQueryChangeListener) {
+            if (typeof this.mediaQueryList.removeEventListener === 'function') {
+                this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
+            } else {
+                this.mediaQueryList.removeListener(this.mediaQueryChangeListener);
+            }
+        }
         this.modeSubscription?.unsubscribe();
         this.mapView?.destroy().then();
     }

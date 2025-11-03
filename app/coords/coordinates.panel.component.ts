@@ -16,7 +16,7 @@ interface PanelOption {
 @Component({
     selector: "coordinates-panel",
     template: `
-        <div class="coordinates-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
+        <div class="coordinates-container">
             <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
@@ -61,14 +61,6 @@ interface PanelOption {
             </p-button>
         </div>
     `,
-    styles: [`
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 4em;
-                padding-bottom: 0;
-            }
-        }
-    `],
     standalone: false
 })
 export class CoordinatesPanelComponent implements OnDestroy {

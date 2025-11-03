@@ -397,8 +397,8 @@ map-view {
 
   .layers-button {
     button {
-      width: 3em;
-      height: 3em;
+      width: 2.5em;
+      height: 2.5em;
       box-shadow: none;
     }
   }
@@ -694,7 +694,7 @@ map-view {
 .search-wrapper {
   position: absolute;
   top: 0.25em;
-  left: 3.5em;
+  left: 2.9em;
   min-width: 22em;
   // min-height: 3.5em;
   max-width: calc(100vw - 5em);
@@ -739,7 +739,7 @@ map-view {
       resize: none;
       animation-duration: 0.1s !important;
       transition-duration: 0.1s !important;
-      padding: 0.75em;
+      padding: 0.625em;
       font-size: 1em;
       margin-top: 0;
       margin-bottom: 0;
@@ -750,12 +750,12 @@ map-view {
     }
 
     textarea.single-line {
-      min-height: 3em;
+      min-height: 2.5em;
       width: 24em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
-      padding: 0.75em;
+      padding: 0.625em;
     }
 
     .completion-popup {
@@ -997,10 +997,10 @@ map-view {
     min-width: 27.5em;
     margin: 0 !important;
     position: absolute;
-    bottom: 0;
+    bottom: 0.25em;
     left: 0;
     overflow: auto;
-    height: calc(100% - 3.5em);
+    height: calc(100% - 3.2em);
     z-index: 1000 !important;
   }
 
@@ -1161,6 +1161,10 @@ map-view {
 
   .p-tree {
     padding: 0;
+
+    .p-tree-root {
+      overflow: hidden;
+    }
 
     .p-tree-node-label {
       width: 100%;
@@ -1855,11 +1859,11 @@ map-view {
       position: absolute;
       top: 0;
       left: 0;
-      width: 2.5em;
-      height: 2.5em;
 
-      .p-button {
+      button {
         border-radius: 0;
+        width: 3em;
+        height: 3em;
       }
     }
   }
@@ -1986,54 +1990,12 @@ map-view {
     right: 1.25rem !important;
   }
 
-  .inspect-panel {
-    position: absolute;
-    top: inherit;
-    left: 0;
-    bottom: 0;
-    right: inherit;
-    min-width: 100vw;
-    width: 100vw;
-    transform: rotate(180deg);
-    z-index: 120;
+  .inspection-container {
+    display: none;
+  }
 
-    .resizable-container {
-      min-width: 100vw;
-      max-width: 100vw;
-      max-height: calc(100vh - 3em);
-      margin: 0;
-      resize: none;
-      overflow: auto;
-      direction: ltr;
-
-
-      .resize-handle {
-        display: block;
-        width: 100vw;
-        height: 1.5em;
-        background-color: var(--surface-b);
-        text-align: center;
-
-        i {
-          font-size: 1em;
-          font-weight: bolder;
-          color: darkgrey;
-          margin-top: 0.25em;
-        }
-      }
-    }
-
-    .p-accordionheader,
-    .p-accordioncontent-content {
-      transform: rotate(180deg) !important;
-      border-radius: 0;
-    }
-
-    .p-accordionheader {
-      .p-accordionheader-toggle-icon {
-        transform: scaleY(-1);
-      }
-    }
+  .main-button-controls {
+    padding-top: 3.25em;
   }
 
   .editor-dialog {
