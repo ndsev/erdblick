@@ -1,12 +1,12 @@
-import {Component} from "@angular/core";
+import {Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
 import {CesiumMath} from "../integrations/cesium";
 import {ClipboardService} from "../shared/clipboard.service";
 import {coreLib} from "../integrations/wasm";
-import {InspectionService} from "../inspection/inspection.service";
 import {KeyValue} from "@angular/common";
+import {combineLatest, Subscription} from "rxjs";
 
 interface PanelOption {
     name: string,
@@ -16,9 +16,9 @@ interface PanelOption {
 @Component({
     selector: "coordinates-panel",
     template: `
-        <div class="coordinates-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
-            <p-button (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" tooltipPosition="bottom"
-                      [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
+        <div class="coordinates-container">
+            <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
+                      tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
             <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">
@@ -55,25 +55,15 @@ interface PanelOption {
                     </ng-container>
                 </div>
             </p-card>
-            <p-button *ngIf="isMarkerEnabled && markerPosition"
-                      (click)="mapService.moveToWgs84PositionTopic.next(markerPosition)"
-                      label="" pTooltip="Focus on marker" tooltipPosition="bottom"
-                      [style]="{'padding-left': '0', 'padding-right': '0', width: '2em', height: '2em', 'box-shadow': 'none'}">
+            <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button" styleClass="p-button-primary"
+                      (click)="focusOnMarker(markerPosition)" label="" pTooltip="Focus on marker" tooltipPosition="bottom">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
         </div>
     `,
-    styles: [`
-        @media only screen and (max-width: 56em) {
-            .elevated {
-                bottom: 4em;
-                padding-bottom: 0;
-            }
-        }
-    `],
     standalone: false
 })
-export class CoordinatesPanelComponent {
+export class CoordinatesPanelComponent implements OnDestroy {
 
     longitude: number | undefined = undefined;
     latitude: number | undefined = undefined;
@@ -86,20 +76,23 @@ export class CoordinatesPanelComponent {
     markerButtonTooltip: string = "Enable marker placement";
     displayOptions: Array<PanelOption> = [{name: "WGS84"}];
     selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
+    private subscriptions: Subscription[] = [];
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
-                public inspectionService: InspectionService,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: `Mapget TileId (level ${level})`});
         }
-        this.parametersService.parameters.subscribe(parameters => {
-            this.isMarkerEnabled = parameters.marker;
-            if (parameters.markedPosition.length == 2) {
-                this.longitude = parameters.markedPosition[0];
-                this.latitude = parameters.markedPosition[1];
+        this.subscriptions.push(combineLatest([
+            this.stateService.markerState,
+            this.stateService.markedPositionState
+        ]).subscribe(([markerEnabled, markedPosition]) => {
+            this.isMarkerEnabled = markerEnabled;
+            if (markedPosition.length === 2) {
+                this.longitude = markedPosition[0];
+                this.latitude = markedPosition[1];
                 if (this.isMarkerEnabled) {
                     this.markerPosition = {x: this.longitude, y: this.latitude};
                     this.markerButtonIcon = "wrong_location";
@@ -110,12 +103,19 @@ export class CoordinatesPanelComponent {
                 if (this.isMarkerEnabled) {
                     this.markerButtonIcon = "location_on";
                     this.markerButtonTooltip = "Disable marker placement";
+                } else {
+                    this.markerButtonIcon = "location_off";
+                    this.markerButtonTooltip = "Enable marker placement";
                 }
                 this.markerPosition = null;
                 this.updateValues();
             }
             this.restoreSelectedOptions();
-        });
+        }));
+
+        this.subscriptions.push(this.stateService.enabledCoordsTileIdsState.subscribe(() => {
+            this.restoreSelectedOptions();
+        }));
 
         this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
             if (!this.markerPosition && coordinates) {
@@ -127,8 +127,12 @@ export class CoordinatesPanelComponent {
         });
     }
 
+    ngOnDestroy() {
+        this.subscriptions.forEach(sub => sub.unsubscribe());
+    }
+
     private restoreSelectedOptions() {
-        for (const option of this.parametersService.getCoordinatesAndTileIds()) {
+        for (const option of this.stateService.enabledCoordsTileIds) {
             if (!this.isSelectedOption(option) && this.displayOptions.some(val => val.name == option)) {
                 this.selectedOptions.push({name: option});
             }
@@ -184,26 +188,26 @@ export class CoordinatesPanelComponent {
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
             this.isMarkerEnabled = false;
-            this.parametersService.setMarkerState(false);
+            this.stateService.setMarkerState(false);
             this.markerButtonIcon = "location_off";
             this.markerButtonTooltip = "Enable marker placement";
         } else if (this.markerPosition) {
             this.isMarkerEnabled = true;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
             this.markerPosition = null;
-            this.parametersService.setMarkerState(true);
-            this.parametersService.setMarkerPosition(null);
+            this.stateService.setMarkerState(true);
+            this.stateService.setMarkerPosition(null);
             this.markerButtonIcon = "wrong_location";
             this.markerButtonTooltip = "Reset marker";
         }
@@ -218,11 +222,11 @@ export class CoordinatesPanelComponent {
     }
 
     updateSelectedOptions() {
-        this.parametersService.setCoordinatesAndTileIds(this.selectedOptions.reduce(
+        this.stateService.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
             array.push(option.name);
             return array;
-        }, new Array<string>()));
+        }, new Array<string>());
     }
 
     compareLevels(a: KeyValue<string, bigint> , b: KeyValue<string, bigint>): number {
@@ -230,5 +234,14 @@ export class CoordinatesPanelComponent {
         const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
 
         return aLevel - bLevel;
+    }
+
+    focusOnMarker(markerPosition:  {x: number, y: number}) {
+        const focusedViewIndex = this.stateService.focusedView;
+        this.mapService.moveToWgs84PositionTopic.next({
+            targetView: focusedViewIndex,
+            x: markerPosition.x,
+            y: markerPosition.y
+        });
     }
 }

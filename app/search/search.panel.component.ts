@@ -1,17 +1,17 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
-import {Cartesian3} from "../integrations/cesium";
+import {Camera, Cartesian3, Rectangle, Scene} from "../integrations/cesium";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {Dialog} from "primeng/dialog";
 import {KeyboardService} from "../shared/keyboard.service";
-import {debounceTime, distinctUntilChanged, map, of, startWith, Subject, switchMap, timer} from "rxjs";
-import {RightClickMenuService} from "../mapviewer/rightclickmenu.service";
+import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "textarea-caret";
 import {CompletionCandidate} from "./search.worker";
+import {coreLib} from "../integrations/wasm";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -40,9 +40,6 @@ interface ExtendedSearchTarget extends SearchTarget {
                     (mousedown)="onCompletionPopupDown($event)"
                     [style.top.px]="completion.top"
                     [style.left.px]="completion.left">
-                    <p-progress-spinner *ngIf="completion.pending"
-                        aria-label="Loading completion candidates"
-                        [style]="{ height: '1em', width: '1em' }" />
                     <div *ngFor="let item of completionItems; index as idx"
                         [ngClass]="{'selected': idx === completion.selectionIndex}"
                         (click)="applyCompletion(item.query)">
@@ -53,12 +50,15 @@ interface ExtendedSearchTarget extends SearchTarget {
                            {{ item.hint }}
                         </div>
                     </div>
+                    <p-progress-spinner *ngIf="completion.pending"
+                        aria-label="Loading completion candidates"
+                        [style]="{ height: '1em', width: '1em' }" />
                 </div>
             </div>
 
             <div class="resizable-container" #searchcontrols>
-                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchMenuVisible"
-                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" >
+                <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
+                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -130,7 +130,6 @@ export class SearchPanelComponent implements AfterViewInit {
     activeSearchItems: Array<ExtendedSearchTarget> = [];
     inactiveSearchItems: Array<SearchTarget> = [];
     searchInputValue: string = "";
-    searchMenuVisible: boolean = false;
     searchHistory: Array<any> = [];
     visibleSearchHistory: Array<any> = [];
 
@@ -169,8 +168,10 @@ export class SearchPanelComponent implements AfterViewInit {
     public get staticTargets() {
         const targetsArray: Array<SearchTarget> = [];
         const value = this.searchInputValue.trim();
+
+        /////////// Jump to mapget tile id
         let label = "tileId = ?";
-        if (this.jumpToTargetService.validateMapgetTileId(value)) {
+        if (this.jumpService.validateMapgetTileId(value)) {
             label = `tileId = ${value}`;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
@@ -181,15 +182,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "Mapget Tile ID",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.jumpToTargetService.parseMapgetTileId(value) },
-            validate: (value: string) => { return this.jumpToTargetService.validateMapgetTileId(value) }
+            jump: (value: string) => { return this.parseMapgetTileId(value) },
+            validate: (value: string) => { return this.jumpService.validateMapgetTileId(value) }
         });
+
+        /////////// Jump to lon-lat
         label = "lon = ? | lat = ? | (level = ?)"
         if (this.validateWGS84(value, true)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lon = ${coords[0]} | lat = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
-            }
+            label = this.parseWgs84Coordinates(value, true)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -199,15 +199,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "WGS84 Lon-Lat Coordinates",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, true) },
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, true)?.target },
             validate: (value: string) => { return this.validateWGS84(value, true) }
         });
+
+        /////////// Jump to lat-lon
         label = "lat = ? | lon = ? | (level = ?)"
         if (this.validateWGS84(value, false)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lat = ${coords[0]} | lon = ${coords[1]}${coords.length === 3 && coords[3] ? ' | level = ' + coords[2] : ''}`;
-            }
+            label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -217,15 +216,14 @@ export class SearchPanelComponent implements AfterViewInit {
             name: "WGS84 Lat-Lon Coordinates",
             label: label,
             enabled: false,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, false) },
+            jump: (value: string) => { return this.parseWgs84Coordinates(value, false)?.target },
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
+
+        /////////// Jump to Google Maps/OSM
         label = "lat = ? | lon = ?"
         if (this.validateWGS84(value, false)) {
-            const coords = this.parseWgs84Coordinates(value, true);
-            if (coords !== undefined) {
-                label = `lat = ${coords[0]} | lon = ${coords[1]}`;
-            }
+            label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
             label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
         }
@@ -252,25 +250,20 @@ export class SearchPanelComponent implements AfterViewInit {
 
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapService,
-                public parametersService: AppStateService,
+                public mapService: MapDataService,
+                public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
-                private jumpToTargetService: JumpTargetService,
+                private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                private sidePanelService: SidePanelService,
-                private searchService: FeatureSearchService) {
+                public searchService: FeatureSearchService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
-        this.jumpToTargetService.targetValueSubject.subscribe((event: string) => {
+        this.jumpService.targetValueSubject.subscribe((event: string) => {
             this.validateMenuItems();
         });
 
-        this.sidePanelService.observable().subscribe((panel)=>{
-            this.searchMenuVisible = panel == SidePanelState.SEARCH;
-        });
-
-        this.jumpToTargetService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
+        this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
             this.searchItems = [
                 ...jumpTargets,
                 ...this.staticTargets
@@ -282,25 +275,26 @@ export class SearchPanelComponent implements AfterViewInit {
         //  just search all maps simultaneously.
         // NOTE: Currently users must select specific maps to search. Once cross-map
         // multi-selection is implemented, search can operate on all maps at once.
-        jumpToTargetService.mapSelectionSubject.subscribe(maps => {
+        jumpService.mapSelectionSubject.subscribe(maps => {
             this.mapSelection = maps;
             this.mapSelectionVisible = true;
         });
 
-        this.parametersService.parameters.pipe(distinctUntilChanged()).subscribe(parameters => {
-           if (parameters.search.length) {
-               const lastEntry = this.parametersService.lastSearchHistoryEntry.getValue();
-               if (lastEntry) {
-                   if (parameters.search[0] != lastEntry[0] && parameters.search[1] != lastEntry[1]) {
-                       this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-                   }
-               } else {
-                   this.parametersService.lastSearchHistoryEntry.next(parameters.search);
-               }
-           }
+        this.stateService.searchState.subscribe(search => {
+            if (search.length === 2) {
+                this.searchInputValue = search[1];
+                const currentEntry: [number, string] = [search[0], search[1]];
+                const lastEntry = this.stateService.lastSearchHistoryEntry;
+                if (!lastEntry || lastEntry[0] !== currentEntry[0] || lastEntry[1] !== currentEntry[1]) {
+                    this.stateService.lastSearchHistoryEntry = currentEntry;
+                }
+            }
         });
 
-        this.parametersService.lastSearchHistoryEntry.subscribe(entry => {
+        this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
+            if (!this.stateService.ready) {
+                return;
+            }
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.
             if (entry) {
                 const query = entry[1]
@@ -311,9 +305,8 @@ export class SearchPanelComponent implements AfterViewInit {
                     .replace(/Ä/g, "Ae")
                     .replace(/Ö/g, "Oe")
                     .replace(/Ü/g, "Ue");
-                this.searchInputValue = query;
                 this.runTarget(entry[0]);
-                this.sidePanelService.panel = SidePanelState.NONE;
+                this.dialog.close(new Event("close-on-execute"));
             }
             this.reloadSearchHistory();
         });
@@ -326,7 +319,7 @@ export class SearchPanelComponent implements AfterViewInit {
                     // NOTE: Currently relying on string name matching which is fragile. Should use
                     // stable IDs for actions to avoid issues with name changes or localization.
                     if (this.searchItems[i].name === "Inspect Tile Layer Source Data") {
-                        this.parametersService.setSearchHistoryState([i, value]);
+                        this.stateService.setSearchHistoryState([i, value]);
                         break;
                     }
                 }
@@ -353,7 +346,17 @@ export class SearchPanelComponent implements AfterViewInit {
             const length = this.completionItems.length
             if (length <= this.completion.selectionIndex)
                 this.completion.selectionIndex = length;
-            this.completion.visible = length > 0;
+
+            // Only show the pop-up if the pop-up was prev. hidden
+            // or the currently focused element is the query input.
+            // This is to prevent the pop-up showing if the user quickly
+            // tabs out of the query input before the first completion
+            // items are ready.
+            const focusValid =
+                this.completion.visible ||
+                this.textarea.nativeElement === document.activeElement;
+
+            this.completion.visible = length > 0 && focusValid;
         });
 
         this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
@@ -396,11 +399,11 @@ export class SearchPanelComponent implements AfterViewInit {
         localStorage.setItem("searchHistory", JSON.stringify(searchHistory));
         this.reloadSearchHistory();
         if (index == 0) {
-            this.parametersService.resetSearchHistoryState();
+            this.stateService.search = [];
         }
     }
 
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): number[] | undefined {
+    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): {target: Rectangle | number[], label: string, coords: number[]} | undefined {
         let lon = 0;
         let lat = 0;
         let level = 0;
@@ -468,13 +471,38 @@ export class SearchPanelComponent implements AfterViewInit {
         }
 
         if (isMatched) {
-            return [lat, lon, level];
+            if (level) {
+                const tileId = coreLib.getTileIdFromPosition(lon, lat, level);
+                return {
+                    target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                    label: isLonLat ? `lon = ${lon} | lat = ${lat} | level = ${level}` : `lat = ${lat} | lon = ${lon} | level = ${level}`,
+                    coords: [lat, lon]
+                };
+            }
+            return {
+                target: [lat, lon, 0],
+                label: isLonLat ? `lon = ${lon} | lat = ${lat}` : `lat = ${lat} | lon = ${lon}`,
+                coords: [lat, lon]
+            };
         }
         return undefined;
     }
 
-    jumpToWGS84(coordinates: number[] | undefined) {
-        this.sidePanelService.panel = SidePanelState.NONE;
+    parseMapgetTileId(value: string): Rectangle | undefined {
+        if (!value) {
+            this.messageService.showError("No value provided!");
+            return;
+        }
+        try {
+            const wgs84TileId = BigInt(value);
+            return Rectangle.fromDegrees(...coreLib.getTileBox(wgs84TileId));
+        } catch (e) {
+            this.messageService.showError("Possibly malformed TileId: " + (e as Error).message.toString());
+        }
+        return undefined;
+    }
+
+    jumpToLocation(coordinates: number[] | undefined | Rectangle) {
         if (coordinates === null) {
             return;
         }
@@ -482,45 +510,53 @@ export class SearchPanelComponent implements AfterViewInit {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
-        let lat = coordinates[0];
-        let lon = coordinates[1];
-        let alt = coordinates.length > 2 && coordinates[2] > 0 ? coordinates[2] : this.parametersService.parameters.getValue().alt;
+        const targetViewIndex = this.stateService.focusedView;
+        if (Array.isArray(coordinates)) {
+            let lat = coordinates[0];
+            let lon = coordinates[1];
+            const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
+            let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
 
-        this.mapService.moveToWgs84PositionTopic.next({
-            x: lon,
-            y: lat,
-            z: alt
-        });
+            this.mapService.moveToWgs84PositionTopic.next({
+                x: lon,
+                y: lat,
+                z: alt,
+                targetView: targetViewIndex
+            });
+            this.jumpService.markedPosition.next(coordinates);
+        } else {
+            this.mapService.moveToRectangleTopic.next({targetView: targetViewIndex, rectangle: coordinates});
+        }
     }
 
     openInGM(value: string): number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
-            return undefined;
+            return;
         }
-        let result = this.parseWgs84Coordinates(value, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
+        const result = this.parseWgs84Coordinates(value, false)?.coords;
+        if (result) {
+            const lat = result[0];
+            const lon = result[1];
             window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
             return result;
         }
-        return undefined;
+        return;
     }
 
-    openInOSM(value: string): number[] | undefined {
+    openInOSM(value: string): Rectangle | number[] | undefined {
         if (!value) {
             this.messageService.showError("No value provided!");
             return;
         }
-        let result = this.parseWgs84Coordinates(value, false);
-        if (result !== undefined) {
-            let lat = result[0];
-            let lon = result[1];
+        const result = this.parseWgs84Coordinates(value, false)?.coords;
+        if (result) {
+            const lat = result[0];
+            const lon = result[1];
             window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
             return result;
         }
-        return undefined;
+        return;
     }
 
     validateMenuItems() {
@@ -530,28 +566,31 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     validateWGS84(value: string, isLonLat: boolean = false) {
-        const coords = this.parseWgs84Coordinates(value, isLonLat);
-        return coords !== undefined && coords[0] >= -90 && coords[0] <= 90 && coords[1] >= -180 && coords[1] <= 180;
+        const result = this.parseWgs84Coordinates(value, isLonLat);
+        if (result) {
+            return result.coords[0] >= -90 && result.coords[0] <= 90 && result.coords[1] >= -180 && result.coords[1] <= 180;
+        }
+        return false;
     }
 
     showSearchOverlay() {
         this.updateCursor();
-        this.sidePanelService.panel = SidePanelState.SEARCH;
+        this.searchService.showFeatureSearchDialog = true;
         this.setSearchValue(this.searchInputValue);
     }
 
     setSearchValue(value: string) {
         this.searchInputValue = value;
         if (!value) {
-            this.parametersService.setSearchHistoryState(null);
-            this.jumpToTargetService.targetValueSubject.next(value);
-            this.searchItems = [...this.jumpToTargetService.jumpTargets.getValue(), ...this.staticTargets];
+            this.stateService.setSearchHistoryState(null);
+            this.jumpService.targetValueSubject.next(value);
+            this.searchItems = [...this.jumpService.jumpTargets.getValue(), ...this.staticTargets];
             this.activeSearchItems = [];
             this.inactiveSearchItems = this.searchItems;
             this.visibleSearchHistory = this.searchHistory;
             return;
         }
-        this.jumpToTargetService.targetValueSubject.next(value);
+        this.jumpService.targetValueSubject.next(value);
         this.activeSearchItems = [];
         this.inactiveSearchItems = [];
         for (let i = 0; i < this.searchItems.length; i++) {
@@ -577,22 +616,18 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     setSelectedMap(value: string|null) {
-        this.jumpToTargetService.setSelectedMap!(value);
+        this.jumpService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
     }
 
     targetToHistory(index: number) {
-        this.parametersService.setSearchHistoryState([index, this.searchInputValue]);
+        this.stateService.setSearchHistoryState([index, this.searchInputValue]);
     }
 
     runTarget(index: number) {
         const item = this.searchItems[index];
         if (item.jump !== undefined) {
-            const coord = item.jump(this.searchInputValue);
-            this.jumpToWGS84(coord);
-            if (coord !== undefined) {
-                this.jumpToTargetService.markedPosition.next(coord);
-            }
+            this.jumpToLocation(item.jump(this.searchInputValue));
             return;
         }
 
@@ -636,13 +671,15 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     onFocus() {
-        setTimeout(() => {
-            this.textarea.nativeElement.setSelectionRange(
-                this.savedSelectionStart, 
-                this.savedSelectionEnd, 
-                this.savedSelectionDirection
-            );
-        }, 0);
+        if (!this.completion.visible) {
+            setTimeout(() => {
+                this.textarea.nativeElement.setSelectionRange(
+                    this.savedSelectionStart,
+                    this.savedSelectionEnd,
+                    this.savedSelectionDirection
+                );
+            }, 0);
+        }
     }
 
     onKeyup(event: KeyboardEvent) {
@@ -660,7 +697,7 @@ export class SearchPanelComponent implements AfterViewInit {
     onKeydown(event: KeyboardEvent) {
         const textarea = this.textarea.nativeElement;
         const dismissCompletionKeys = [
-            'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete'
+            'Home', 'End', 'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'Delete'
         ]
 
         // Dismiss the completion pop-up for control-keys
@@ -668,6 +705,7 @@ export class SearchPanelComponent implements AfterViewInit {
             if (this.completion.visible)
                 event.preventDefault();
             this.completion.visible = false;
+            textarea.focus();
         }
 
         // Prevent defaults if completion is active
@@ -685,23 +723,26 @@ export class SearchPanelComponent implements AfterViewInit {
                 event.stopPropagation();
             } else {
                 if (this.searchInputValue.trim() && this.activeSearchItems.length) {
-                    this.parametersService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
+                    this.stateService.setSearchHistoryState([this.activeSearchItems[0].index, this.searchInputValue]);
                 } else {
-                    this.parametersService.setSearchHistoryState(null);
+                    this.stateService.setSearchHistoryState(null);
                 }
 
                 textarea.blur();
             }
         } else if (event.key === 'Escape') {
             event.stopPropagation();
-            if (this.searchInputValue) {
+            if (this.completion.visible || this.completion.pending) {
+                this.resetCompletion();
+                return;
+            } else if (this.searchInputValue) {
                 this.setSearchValue("");
                 this.resetCompletion();
                 return;
+            } else {
+                this.dialog.close(event);
+                return;
             }
-            this.resetCompletion();
-
-            this.dialog.close(event);
         } else if (event.key === 'Tab') {
             if (this.completion.visible) {
                 this.applyCompletion();
@@ -723,7 +764,14 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.setSearchValue(text);
                 this.textarea.nativeElement.focus();
             } else {
-                this.setSearchValue(this.completionItems[this.completion.selectionIndex].query);
+                let item = this.completionItems[this.completion.selectionIndex];
+                this.setSearchValue(item.query);
+
+                let cursor = item.begin + item.text.length
+                setTimeout(() => {
+                    this.textarea.nativeElement.setSelectionRange(
+                        cursor, cursor, "forward");
+                }, 0);
             }
 
             this.completionItems = [];
@@ -753,12 +801,12 @@ export class SearchPanelComponent implements AfterViewInit {
     selectHistoryEntry(index: number) {
         const entry = this.searchHistory[index];
         if (entry.index !== undefined && entry.input !== undefined) {
-            this.parametersService.setSearchHistoryState([entry.index, entry.input]);
+            this.stateService.setSearchHistoryState([entry.index, entry.input]);
         }
     }
 
     expandTextarea() {
-        this.sidePanelService.searchOpen = true;
+        this.jumpService.searchIsFocused = true;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         setTimeout(() => {
@@ -770,7 +818,7 @@ export class SearchPanelComponent implements AfterViewInit {
         this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
         this.renderer.addClass(this.textarea.nativeElement, 'single-line');
-        this.sidePanelService.searchOpen = false;
+        this.jumpService.searchIsFocused = false;
     }
 
     clickOnSearchToStart() {
@@ -778,27 +826,43 @@ export class SearchPanelComponent implements AfterViewInit {
         this.textarea.nativeElement.focus();
     }
 
-    @HostListener('document:mousedown', ['$event'])
-    handleClickOut(event: MouseEvent): void {
-        const clickedInsideComponent = this.elRef.nativeElement.contains(event.target as Node);
+    @HostListener('document:pointerdown', ['$event'])
+    handlePointerDown(event: PointerEvent): void {
+        this.handleGlobalDown(event);
+    }
 
-        // Check if the clicked element is a form control or interactive element
-        const clickedOnInteractiveElement = event.target instanceof HTMLElement && (
-            event.target.tagName === 'BUTTON' ||
-            event.target.tagName === 'INPUT' ||
-            event.target.tagName === 'TEXTAREA' ||
-            event.target.tagName === 'SELECT' ||
-            event.target.isContentEditable ||
-            event.target.closest('p-checkbox') ||
-            event.target.closest('p-dropdown') ||
-            event.target.closest('p-multiselect') ||
-            event.target.closest('p-calendar') ||
-            event.target.closest('p-inputnumber') ||
-            event.target.closest('.p-component')
+    @HostListener('document:mousedown', ['$event'])
+    handleMouseDown(event: MouseEvent): void {
+        if (window.PointerEvent) {
+            return;
+        }
+        this.handleGlobalDown(event);
+    }
+
+    private handleGlobalDown(event: Event): void {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const clickedInsideComponent = target ? this.elRef.nativeElement.contains(target as Node) : false;
+        const clickedInsideMapView = !!target?.closest('.mapviewer-renderlayer');
+        const clickedInsideResizablePanel = !!target?.closest('.resizable-container');
+
+        // Check if the clicked element is a form control or other interactive element we should ignore.
+        const clickedOnInteractiveElement = !!target && (
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable ||
+            !!target.closest('p-checkbox') ||
+            !!target.closest('p-dropdown') ||
+            !!target.closest('p-multiselect') ||
+            !!target.closest('p-calendar') ||
+            !!target.closest('p-inputnumber') ||
+            (!!target.closest('.p-component') && !clickedInsideMapView) ||
+            clickedInsideResizablePanel
         );
 
         if (!clickedInsideComponent && !clickedOnInteractiveElement) {
-            this.dialog.close(event);
+            this.dialog.close(new MouseEvent(event.type));
         }
     }
 

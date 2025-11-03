@@ -8,8 +8,8 @@ import { DomSanitizer } from '@angular/platform-browser';
 export class HighlightRegion implements PipeTransform {
     constructor(private sanitizer: DomSanitizer) {}
 
-    transform(value: string, start: number, size: number, epsilon: number): any {
-        if (!value || start < 0 || size <= 0)
+    transform(value: string, start: number|undefined, size: number|undefined, epsilon: number): any {
+        if (!value || !start || !size || start < 0 || size <= 0)
             return '';
         if (!epsilon || epsilon <= 0)
             epsilon = 1e6;

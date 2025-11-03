@@ -1,17 +1,13 @@
-import {Component} from '@angular/core';
+import {Component, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
-import {ActivatedRoute, NavigationEnd, Params, Router} from "@angular/router";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
-import {filter} from "rxjs";
 import {AppModeService} from "./shared/app-mode.service";
+import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
+import {InfoMessageService} from "./shared/info.service";
 
-// Helper to stringify with booleans in compact representation
-function stringifyForUrl(value: any): string {
-    return JSON.stringify(value, (_: string, value: any) => {
-        return typeof value === 'boolean' ? (value ? 1 : 0) : value;
-    });
-}
+// Redeclare window with extended interface
+declare let window: DebugWindow;
 
 interface Versions {
     name: string;
@@ -21,14 +17,15 @@ interface Versions {
 @Component({
     selector: 'app-root',
     template: `
-        <erdblick-view></erdblick-view>
+        <mapview-container></mapview-container>
         <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
-        <p-toast position="top-center" key="tc"></p-toast>
+        <p-toast position="top-center" key="tc" baseZIndex="9500"></p-toast>
         <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
-        <inspection-panel *ngIf="!appModeService.isVisualizationOnly"></inspection-panel>
+        <inspection-container *ngIf="!appModeService.isVisualizationOnly"></inspection-container>
         <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
+        <style-panel></style-panel>
         <div id="info">
             <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
                 {{ copyright }}
@@ -85,13 +82,19 @@ export class AppComponent {
     distributionVersions: Array<Versions> = [];
     distributionVersionsDialogVisible: boolean = false;
 
-
     constructor(private httpClient: HttpClient,
-                private router: Router,
-                private activatedRoute: ActivatedRoute,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public appModeService: AppModeService,
-                public parametersService: AppStateService) {
+                public stateService: AppStateService,
+                private viewContainerRef: ViewContainerRef,
+                private infoMessageService: InfoMessageService) {
+        // Register a default container for alert dialogs
+        this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
+        window.ebDebug = new ErdblickDebugApi(
+            this.mapService,
+            this.stateService
+        );
+
         this.httpClient.get("config.json", {responseType: 'json'}).subscribe({
             next: (data: any) => {
                 try {
@@ -124,7 +127,6 @@ export class AppComponent {
                 this.getBasicVersion();
             }
         });
-        this.init();
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.copyright = "";
             let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
@@ -134,41 +136,8 @@ export class AppComponent {
         });
     }
 
-    init() {
-        this.router.events.subscribe()
-        // Forward URL parameter changes to the ParameterService.
-        this.router.events.pipe(
-            // Filter the events to only include NavigationEnd events
-            filter(event => event instanceof NavigationEnd)
-        ).subscribe((event) => {
-            this.parametersService.parseAndApplyQueryParams(this.activatedRoute.snapshot.queryParams);
-        });
-
-        // Forward ParameterService updates to the URL.
-        this.parametersService.parameters.subscribe(parameters => {
-            // Only forward new parameters into the query, if we have
-            // parsed the initial values.
-            if (!this.parametersService.initialQueryParamsSet) {
-                return;
-            }
-            const entries = [...Object.entries(parameters)].filter(value =>
-                this.parametersService.isUrlParameter(value[0])
-            );
-            entries.forEach(entry => entry[1] = stringifyForUrl(entry[1]));
-            this.updateQueryParams(Object.fromEntries(entries), this.parametersService.replaceUrl);
-        });
-    }
-
-    updateQueryParams(params: Params, replaceUrl: boolean): void {
-        this.router.navigate([], {
-            queryParams: params,
-            queryParamsHandling: 'merge',
-            replaceUrl: replaceUrl
-        });
-    }
-
     openLegalInfo() {
-        this.parametersService.legalInfoDialogVisible = true;
+        this.stateService.legalInfoDialogVisible = true;
     }
 
     showExposedVersions() {

@@ -24,7 +24,7 @@ import {FieldsetModule} from "primeng/fieldset";
 import {AlertDialogComponent, InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
-import {MapService} from "./mapdata/map.service";
+import {MapDataService} from "./mapdata/map.service";
 import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
@@ -33,17 +33,14 @@ import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
 import {SourceDataPanelComponent} from "./inspection/sourcedata.panel.component";
-import {InspectionService} from "./inspection/inspection.service";
 import {AppStateService} from "./shared/appstate.service";
 import {PreferencesComponent} from "./auxiliaries/preferences.component";
 import {FileUploadModule} from "primeng/fileupload";
 import {EditorComponent} from "./shared/editor.component";
-import {ErdblickViewComponent} from "./mapviewer/view.component";
 import {CoordinatesPanelComponent} from "./coords/coordinates.panel.component";
 import {initializeLibrary} from "./integrations/wasm";
 import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
-import {SidePanelService} from "./shared/sidepanel.service";
 import {MenuModule} from "primeng/menu";
 import {CardModule} from "primeng/card";
 import {CoordinatesService} from "./coords/coordinates.service";
@@ -73,7 +70,8 @@ import {
 import {EditorService} from "./shared/editor.service";
 import {FormlyFieldConfig, FormlyModule} from "@ngx-formly/core";
 import {ReactiveFormsModule} from '@angular/forms';
-import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
+import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
+
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
@@ -81,7 +79,7 @@ import {TooltipModule} from "primeng/tooltip";
 import {StatsDialogComponent} from "./auxiliaries/stats.component";
 import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedataselection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
-import {RightClickMenuService} from "./mapviewer/rightclickmenu.service";
+import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
@@ -90,14 +88,17 @@ import {provideAnimationsAsync} from "@angular/platform-browser/animations/async
 import {providePrimeNG} from "primeng/config";
 import {definePreset} from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
-import {ErdblickViewUIComponent} from "./mapviewer/view.ui.component";
-import {ViewService} from "./mapviewer/view.service";
-import {CameraService} from "./mapviewer/camera.service";
-import {MarkerService} from "./coords/marker.service";
-import {ViewStateService} from "./mapviewer/view.state.service";
+import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
 import {SelectButtonModule} from 'primeng/selectbutton';
 import {ChipModule} from "primeng/chip";
 import {StyleComponent} from "./styledata/style.component";
+import {MapViewContainerComponent} from "./mapview/view.container.component";
+import {MapViewComponent} from "./mapview/view.component";
+import {Splitter} from "primeng/splitter";
+import {InspectionContainerComponent} from "./inspection/inspection.container.component";
+import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
+import {ToggleSwitch} from "primeng/toggleswitch";
+import {ToggleButton} from "primeng/togglebutton";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -164,7 +165,7 @@ export function typeValidationMessage({ schemaType }: any) {
 
 export const initializeServices = () => {
     const styleService = inject(StyleService);
-    const mapService = inject(MapService);
+    const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
 
     return (async () => {
@@ -185,7 +186,6 @@ export const initializeServices = () => {
         SourceDataPanelComponent,
         PreferencesComponent,
         EditorComponent,
-        ErdblickViewComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         AlertDialogComponent,
@@ -201,7 +201,11 @@ export const initializeServices = () => {
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
         ErdblickViewUIComponent,
-        StyleComponent
+        StyleComponent,
+        MapViewContainerComponent,
+        MapViewComponent,
+        InspectionContainerComponent,
+        InspectionTreeComponent
     ],
     bootstrap: [
         AppComponent
@@ -278,25 +282,22 @@ export const initializeServices = () => {
         InputIconModule,
         PopoverModule,
         SelectButtonModule,
-        ChipModule
+        ChipModule,
+        Splitter,
+        ToggleSwitch,
+        ToggleButton
     ],
     providers: [
         provideAppInitializer(initializeServices),
-        MapService,
+        MapDataService,
         MessageService,
         InfoMessageService,
         JumpTargetService,
-        InspectionService,
         AppStateService,
-        SidePanelService,
         FeatureSearchService,
         ClipboardService,
         EditorService,
         RightClickMenuService,
-        ViewStateService,
-        CameraService,
-        ViewService,
-        MarkerService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

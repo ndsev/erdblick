@@ -85,7 +85,7 @@ export class FeatureTile {
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
         // Deserialize the WASM tileFeatureLayer from the blob.
-        let result = await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
+        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let startTime = performance.now();
             let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
             let endTime = performance.now();
@@ -102,7 +102,6 @@ export class FeatureTile {
             deserializedLayer.delete();
             return result;
         }, this.tileFeatureLayerBlob);
-        return result;
     }
 
     /**
@@ -171,9 +170,13 @@ export class FeatureTile {
  * Using the peek-function, it is possible to access the
  * WASM feature view in a memory-safe way.
  */
-export class FeatureWrapper {
+export class FeatureWrapper implements TileFeatureId {
     public readonly featureId: string;
     public featureTile: FeatureTile;
+
+    get mapTileKey(): string {
+        return this.featureTile.mapTileKey;
+    }
 
     /**
      * Construct a feature wrapper from a featureTile and a feature index

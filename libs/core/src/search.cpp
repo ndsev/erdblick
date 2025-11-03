@@ -128,7 +128,6 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
     simfil::CompletionOptions opts;
     opts.limit = limit;
     opts.timeoutMs = timeoutMs;
-    opts.autoWildcard = true;
 
     std::string errorMessage;
     std::set<simfil::CompletionCandidate> joinedResult;
@@ -139,16 +138,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
             break;
         }
 
-        const auto n = std::min<int>(result->size(), limit - joinedResult.size());
-        if (n > 0) {
-            auto end = result->begin();
-            std::advance(end, n);
-            joinedResult.insert(result->begin(), end);
-        }
-
-        if (limit > 0 && joinedResult.size() >= limit) {
-            break;
-        }
+        joinedResult.insert(result->begin(), result->end());
     }
 
     auto obj = JsValue::List();
@@ -170,6 +160,7 @@ erdblick::NativeJsValue erdblick::FeatureLayerSearch::complete(std::string const
             item.type == simfil::CompletionCandidate::Type::CONSTANT ? "Constant" :
             item.type == simfil::CompletionCandidate::Type::FIELD ? "Field" :
             item.type == simfil::CompletionCandidate::Type::FUNCTION ? "Function" :
+            item.type == simfil::CompletionCandidate::Type::HINT ? "Hint" :
             "";
 
         //const auto hint = item.hint.empty() ? JsValue::Undefined() : JsValue(item.hint);

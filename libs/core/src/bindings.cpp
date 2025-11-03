@@ -235,16 +235,16 @@ uint64_t getTileNeighbor(uint64_t tileIdValue, int32_t offsetX, int32_t offsetY)
 
 /** Get the full string key of a map tile feature layer. */
 std::string getTileFeatureLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
-    auto tileKey = mapget::MapTileKey();
-    tileKey.layer_ = mapget::LayerType::Features;
-    tileKey.mapId_ = mapId;
-    tileKey.layerId_ = layerId;
-    tileKey.tileId_ = tileId;
-    return tileKey.toString();
+    return mapget::MapTileKey(mapget::LayerType::Features, mapId, layerId, tileId).toString();
+}
+
+/** Get the full string key of a map SourceData layer. */
+std::string getSourceDataLayerKey(std::string const& mapId, std::string const& layerId, uint64_t tileId) {
+    return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, tileId).toString();
 }
 
 /** Get mapId, layerId and tileId of a MapTileKey. */
-NativeJsValue parseTileFeatureLayerKey(std::string const& key) {
+NativeJsValue parseMapTileKey(std::string const& key) {
     auto tileKey = mapget::MapTileKey(key);
     return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
 }
@@ -337,7 +337,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureStyleOptionType
     em::enum_<FeatureStyleOptionType>("FeatureStyleOptionType")
-        .value("Bool", FeatureStyleOptionType::Bool);
+        .value("Bool", FeatureStyleOptionType::Bool)
+        .value("Color", FeatureStyleOptionType::Color)
+        .value("String", FeatureStyleOptionType::String);
 
     ////////// FeatureStyleOption
     em::value_object<FeatureStyleOption>("FeatureStyleOption")
@@ -345,13 +347,16 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("id", &FeatureStyleOption::id_)
         .field("type", &FeatureStyleOption::type_)
         .field("defaultValue", &FeatureStyleOption::defaultValue_) // Ensure correct binding/conversion for YAML::Node
-        .field("description", &FeatureStyleOption::description_);
+        .field("description", &FeatureStyleOption::description_)
+        .field("internal", &FeatureStyleOption::internal_);
 
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
-        .function("name", &FeatureLayerStyle::name);
+        .function("name", &FeatureLayerStyle::name)
+        .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
+        .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
@@ -429,7 +434,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// FeatureLayerVisualization
     em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
-        .constructor<std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
         .function("run", &FeatureLayerVisualization::run)
         .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
@@ -493,7 +498,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Get/Parse full id of a TileFeatureLayer
     em::function("getTileFeatureLayerKey", &getTileFeatureLayerKey);
-    em::function("parseTileFeatureLayerKey", &parseTileFeatureLayerKey);
+    em::function("getSourceDataLayerKey", &getSourceDataLayerKey);
+    em::function("parseMapTileKey", &parseMapTileKey);
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);

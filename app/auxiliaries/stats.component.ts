@@ -1,13 +1,12 @@
 import { Component } from "@angular/core";
-import { MapService } from "../mapdata/map.service";
+import { MapDataService } from "../mapdata/map.service";
 import { debounceTime } from "rxjs";
 import { ClipboardService } from "../shared/clipboard.service";
 
 @Component({
     selector: 'stats-dialog',
     template: `
-        <p-dialog header="Viewport Statistics" [(visible)]="mapService.statsDialogVisible" [modal]="false"
-                  [style]="{'min-height': '20em', 'min-width': '40em', 'width': '40em'}">
+        <p-dialog header="Viewport Statistics" class="stats-dialog" [(visible)]="mapService.statsDialogVisible" [modal]="false">
             <div class="dialog-content">
                 <p-multiSelect
                     [options]="availableMapLayers"
@@ -18,7 +17,7 @@ import { ClipboardService } from "../shared/clipboard.service";
                     [showHeader]="false"
                     [style]="{'width': '100%'}">
                 </p-multiSelect>
-                <div style="display: inline-block; cursor: pointer" (click)="considerEmptyTiles = !considerEmptyTiles">
+                <div style="display: inline-block; cursor: pointer">
                     <p-checkbox inputId="stat-empty-tiles" [(ngModel)]="considerEmptyTiles" [binary]="true" (ngModelChange)="update()"/>
                     <label for="stat-empty-tiles" style="margin-left: 0.5em; cursor: pointer">Consider Empty Tiles</label>
                 </div>
@@ -37,7 +36,7 @@ import { ClipboardService } from "../shared/clipboard.service";
                             <td>{{ stat.name }}</td>
                             <td>
                                 {{ stat.peak | number: '1.2-2' }}
-                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(getTileIdWithPeak(stat.name))" [pTooltip]="getTileIdWithPeak(stat.name)" tooltipPosition="top"></i>
+                                <i class="pi pi-info-circle" (click)="clipboardService.copyToClipboard(this.peakTileIdPerStat[stat.name][0])" pTooltip="{{this.peakTileIdPerStat[stat.name][0]}}" tooltipPosition="top"></i>
                             </td>
                             <td>{{ stat.sum | number: '1.2-2' }}</td>
                             <td>{{ stat.average | number: '1.2-2' }}</td>
@@ -80,8 +79,9 @@ export class StatsDialogComponent {
     public considerEmptyTiles: boolean = false;
     public consideredTilesCount: number = 0;
     public needsUpdate: boolean = false;
+    public peakTileIdPerStat: Record<string, [string, number]> = {}
 
-    constructor(public mapService: MapService, public clipboardService: ClipboardService) {
+    constructor(public mapService: MapDataService, public clipboardService: ClipboardService) {
         this.update();
         this.mapService.statsDialogNeedsUpdate.subscribe(_ => this.needsUpdate = true);
         this.mapService.statsDialogNeedsUpdate.pipe(debounceTime(1000)).subscribe(_ => this.update());
@@ -121,6 +121,11 @@ export class StatsDialogComponent {
                     statsAccumulator.set(key, []);
                 }
                 statsAccumulator.set(key, statsAccumulator.get(key)!.concat(value));
+
+                // Find peak value per stat
+                if (!this.peakTileIdPerStat.hasOwnProperty(key) || value.some(v => v > this.peakTileIdPerStat[key][1])) {
+                    this.peakTileIdPerStat[key] = [String(tile.tileId), Math.max(...value)];
+                }
             }
         });
 
@@ -133,25 +138,6 @@ export class StatsDialogComponent {
         }).sort((a, b) => a.name.localeCompare(b.name));
 
         this.needsUpdate = false;
-    }
-
-    getTileIdWithPeak(statName: string): string {
-        let peakValue = -Infinity;
-        let peakTileId = '';
-        this.mapService.loadedTileLayers.forEach(tile => {
-            if (!this.considerEmptyTiles && tile.numFeatures <= 0) {
-                return;
-            }
-            if (this.selectedMapLayers.findIndex(entry => entry.label == `${tile.mapName} - ${tile.layerName}`) < 0) {
-                return;
-            }
-            const stats = tile.stats;
-            if (stats.has(statName) && stats.get(statName)?.some(v => v > peakValue)) {
-                peakValue = Math.max(...stats.get(statName)!);
-                peakTileId = String(tile.tileId);
-            }
-        });
-        return peakTileId;
     }
 }
 

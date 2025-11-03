@@ -1,27 +1,39 @@
-import {Component} from '@angular/core';
+import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {OnDestroy, OnInit} from '@angular/core';
+import {EditorService} from "../shared/editor.service";
 
 @Component({
     selector: 'pref-components',
     template: `
-        <div class="bttn-container" [ngClass]="{'elevated': inspectionService.isInspectionPanelVisible }">
-            <p-button (click)="openHelp()" icon="pi pi-question" label="" class="pref-button" pTooltip="Help"
-                      tooltipPosition="right"></p-button>
-            <p-button (click)="showPreferencesDialog()" icon="pi pi-cog" label="" class="pref-button"
-                      pTooltip="Preferences" tooltipPosition="right"></p-button>
-            <p-button (click)="showControlsDialog()" label="" class="pref-button"
-                      pTooltip="Controls" tooltipPosition="right">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">keyboard</span>
-            </p-button>
-            <p-button (click)="showStatsDialog()" label="" class="pref-button"
-                      pTooltip="Statistics" tooltipPosition="right">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">insights</span>
-            </p-button>
+        <div class="pref-buttons-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
+            <div class="pref-button-subcontainer" (click)="openHelp()">
+                <span class="material-symbols-outlined">question_mark</span>
+                <span>Help</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showPreferencesDialog()">
+                <span class="material-symbols-outlined">settings</span>
+                <span>Preferences</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showControlsDialog()">
+                <span class="material-symbols-outlined">keyboard</span>
+                <span>Controls</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="showStatsDialog()">
+                <span class="material-symbols-outlined">bar_chart_4_bars</span>
+                <span>Statistics</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="openDatasources()">
+                <span class="material-symbols-outlined">data_table</span>
+                <span>Datasources</span>
+            </div>
+            <div class="pref-button-subcontainer" (click)="openStylesDialog()" >
+                <span class="material-symbols-outlined">palette</span>
+                <span>Styles</span>
+            </div>
         </div>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">
@@ -47,6 +59,10 @@ import {OnDestroy, OnInit} from '@angular/core';
             <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Allow unlimited inspected features <span style="color: var(--p-badge-danger-background)">EXPERIMENTAL!</span>:</label>
+                <p-toggleswitch [(ngModel)]="stateService.isNumSelectionsUnlimited" />
             </div>
             <p-divider></p-divider>
             <div class="button-container">
@@ -121,6 +137,27 @@ import {OnDestroy, OnInit} from '@angular/core';
                         </div>
                         <div class="control-desc">Open Viewport Statistics</div>
                     </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Left <-</span>
+                        </div>
+                        <div class="control-desc">Cycle through Viewers to the left</div>
+                    </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Right -></span>
+                        </div>
+                        <div class="control-desc">Cycle through Viewers to the right</div>
+                    </li>
+                    <li>
+                        <div class="key-multi">
+                            <span class="key highlight">Ctrl</span>
+                            <span class="key">Left Click</span>
+                        </div>
+                        <div class="control-desc">Open inspection and pin it immediately</div>
+                    </li>
                 </ul>
             </div>
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
@@ -132,7 +169,7 @@ import {OnDestroy, OnInit} from '@angular/core';
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                width: 30em;
+                width: 29em;
                 margin: 1em 0;
             }
 
@@ -224,6 +261,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToVisualizeInput: number = 0;
 
     controlsDialogVisible = false;
+    stylesDialogVisible = false;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -239,16 +277,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.updateDarkClass(e.matches);
         }
     };
+    private subscriptions: Subscription[] = [];
 
     constructor(private messageService: InfoMessageService,
-                public mapService: MapService,
+                public mapService: MapDataService,
                 public styleService: StyleService,
-                public inspectionService: InspectionService,
-                public parametersService: AppStateService) {
-        this.parametersService.parameters.subscribe(parameters => {
-            this.tilesToLoadInput = parameters.tilesLoadLimit;
-            this.tilesToVisualizeInput = parameters.tilesVisualizeLimit;
-        });
+                public stateService: AppStateService,
+                public editorService: EditorService) {
+        this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
+            this.tilesToLoadInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
+            this.tilesToVisualizeInput = limit;
+        }));
     }
 
     ngOnInit() {
@@ -258,6 +299,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     ngOnDestroy() {
+        this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
@@ -267,10 +309,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
-        let parameters = this.parametersService.p();
-        parameters.tilesLoadLimit = Number(this.tilesToLoadInput);
-        parameters.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.parametersService.parameters.next(parameters);
+        this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
+        this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.mapService.update().then();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
@@ -290,17 +330,17 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     openHelp() {
-        window.open("https://developer.nds.live/tools/the-new-mapviewer/user-guide", "_blank");
+        window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
     }
 
     clearURLProperties() {
-        this.parametersService.resetStorage();
+        this.stateService.resetStorage();
     }
 
     clearImportedStyles() {
         for (let styleId of this.styleService.styles.keys()) {
             if (this.styleService.styles.get(styleId)!.imported) {
-                this.styleService.deleteStyle(styleId);
+                this.styleService.deleteStyle(styleId, true);
             }
         }
         this.styleService.clearStorageForImportedStyles();
@@ -355,6 +395,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
             this.mediaQueryList = undefined;
         }
+    }
+
+    openDatasources() {
+        this.editorService.styleEditorVisible = false;
+        this.editorService.datasourcesEditorVisible = true;
+    }
+
+    openStylesDialog() {
+        this.styleService.stylesDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

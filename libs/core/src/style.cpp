@@ -22,6 +22,16 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
             name_ = name.Scalar();
     }
 
+    if (auto enabled = styleYaml["default"]) {
+        if (enabled.IsScalar())
+            enabled_ = enabled.as<bool>();
+    }
+
+    if (auto layer = styleYaml["layer"]) {
+        if (layer.IsScalar())
+            layerAffinity_ = layer.as<std::string>();
+    }
+
     if (!styleYaml["rules"] || !(styleYaml["rules"].IsSequence())) {
         std::cout << "YAML stylesheet error: Spec does not contain any rules?" << std::endl;
         return;
@@ -56,6 +66,18 @@ const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
     return options_;
 }
 
+bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
+    if (!layerAffinity_) {
+        return true;
+    }
+    return std::regex_match(layerName.begin(), layerName.end(), *layerAffinity_);
+}
+
+bool FeatureLayerStyle::defaultEnabled() const
+{
+    return enabled_;
+}
+
 std::string const& FeatureLayerStyle::name() const {
     return name_;
 }
@@ -76,6 +98,12 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
         if (type == "bool") {
             type_ = FeatureStyleOptionType::Bool;
         }
+        else if (type == "color") {
+            type_ = FeatureStyleOptionType::Color;
+        }
+        else if (type == "string") {
+            type_ = FeatureStyleOptionType::String;
+        }
         else {
             // TODO: Eventually we need to throw an exception here.
             std::cout << "Unrecognized option type " << type << std::endl;
@@ -91,6 +119,9 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
     }
     if (auto node = yaml["description"]) {
         description_ = node.as<std::string>();
+    }
+    if (auto node = yaml["internal"]) {
+        internal_ = node.as<bool>();
     }
 }
 

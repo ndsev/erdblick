@@ -1,13 +1,16 @@
 import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
 import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "../integrations/cesium";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager} from "./job-group";
+import {AppStateService} from "../shared/appstate.service";
 
+export const MAX_VISIBLE_TILES_PER_LEVEL = 69;
 export const MAX_ZOOM_LEVEL = 15;
+export const SAFE_ZOOM_LEVEL = 10;
 
 export interface SearchResultPrimitiveId {
     type: string,
@@ -38,22 +41,22 @@ class FeatureSearchQuadTreeNode {
     parentId: bigint | null;
     level: number;
     children: Array<FeatureSearchQuadTreeNode>;
-    count: number;
-    markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = [];
+    countPerLayer: Map<string, number>;
+    markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
     rectangle: Rectangle;
     center: Cartesian3 | null;
 
     constructor(tileId: bigint,
                 parentTileId: bigint | null,
                 level: number,
-                count: number,
+                countPerLayer: Map<string, number>,
                 children: Array<FeatureSearchQuadTreeNode> = [],
-                markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> = []) {
+                markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = []) {
         this.tileId = tileId;
         this.parentId = parentTileId;
         this.level = level;
         this.children = children;
-        this.count = count;
+        this.countPerLayer = new Map(countPerLayer.entries());
         this.markers = markers;
 
         const tileBox = tileId >= 0 ? coreLib.getTileBox(tileId) as Array<number> : [0, 0, 0, 0];
@@ -65,23 +68,23 @@ class FeatureSearchQuadTreeNode {
        return Rectangle.contains(this.rectangle, point);
     }
 
-    contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
+    contains(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
         return markers.some(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
+    filterPointsForNode(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
         return markers.filter(marker =>
             this.containsPoint(marker[1].cartographicRad as Cartographic)
         );
     }
 
-    addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]> | Cartographic) {
+    addChildren(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> | Cartographic) {
         const existingIds = this.children.map(child => child.tileId);
         const missingIds = generateChildrenIds(this.tileId).filter(id => !existingIds.includes(id));
         for (const id of missingIds) {
-            const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, 0);
+            const child = new FeatureSearchQuadTreeNode(id, this.tileId, this.level + 1, new Map());
             if (Array.isArray(markers)) {
                 if (child.contains(markers)) {
                     this.children.push(child);
@@ -93,6 +96,15 @@ class FeatureSearchQuadTreeNode {
             }
         }
     }
+
+    incrementCountForMapLayer(mapLayer: string, increment: number) {
+        if (this.countPerLayer.has(mapLayer)) {
+            const currentCount = this.countPerLayer.get(mapLayer)!;
+            this.countPerLayer.set(mapLayer, currentCount + increment);
+            return;
+        }
+        this.countPerLayer.set(mapLayer, increment);
+    }
 }
 
 class FeatureSearchQuadTree {
@@ -100,10 +112,10 @@ class FeatureSearchQuadTree {
     private maxDepth: number = MAX_ZOOM_LEVEL;
 
     constructor() {
-        this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, 0);
+        this.root = new FeatureSearchQuadTreeNode(-1n, null, -1, new Map());
     }
 
-    private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>): Cartesian3 {
+    private calculateAveragePosition(markers: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>): Cartesian3 {
         const sum = markers.reduce(
             (acc, marker) => {
                 acc.x += marker[1].cartesian.x;
@@ -117,11 +129,11 @@ class FeatureSearchQuadTree {
         return new Cartesian3(sum.x / markers.length, sum.y / markers.length, sum.z / markers.length);
     }
 
-    insert(tileId: bigint, markers: Array<[SearchResultPrimitiveId, SearchResultPosition]>) {
-        const markersCenter = this.calculateAveragePosition(markers);
+    insert(tileId: bigint, mapLayerId: string, results: Array<[SearchResultPrimitiveId, SearchResultPosition, string]>) {
+        const markersCenter = this.calculateAveragePosition(results);
         const markersCenterCartographic = Cartographic.fromCartesian(markersCenter);
         let currentLevel = 0;
-        this.root.addChildren(markers);
+        this.root.addChildren(results);
         let targetNode: FeatureSearchQuadTreeNode | null = this.root;
         let nodes = this.root.children;
 
@@ -133,7 +145,7 @@ class FeatureSearchQuadTree {
                     break mainLoop;
                 }
                 if (node.containsPoint(markersCenterCartographic)) {
-                    node.count += markers.length;
+                    node.incrementCountForMapLayer(mapLayerId, results.length);
                     node.center = node.center ? new Cartesian3(
                         (node.center.x + markersCenter.x) / 2,
                         (node.center.y + markersCenter.y) / 2,
@@ -153,23 +165,23 @@ class FeatureSearchQuadTree {
         }
 
         if (targetNode) {
-            targetNode.count += markers.length;
+            targetNode.incrementCountForMapLayer(mapLayerId, results.length);
             targetNode.center = markersCenter;
-            targetNode.addChildren(markers);
+            targetNode.addChildren(results);
             nodes = targetNode.children;
             let next: Array<FeatureSearchQuadTreeNode> = [];
             while (currentLevel <= this.maxDepth) {
                 next = [];
                 for (const node of nodes) {
-                    const containedMarkers = node.filterPointsForNode(markers);
+                    const containedMarkers = node.filterPointsForNode(results);
                     if (containedMarkers.length) {
                         const subMarkersCenter = this.calculateAveragePosition(containedMarkers);
-                        node.count += containedMarkers.length;
+                        node.incrementCountForMapLayer(mapLayerId, containedMarkers.length);
                         node.center = subMarkersCenter;
                         if (node.level == this.maxDepth) {
                             node.markers.push(...containedMarkers);
                         } else {
-                            node.addChildren(markers);
+                            node.addChildren(results);
                             next.push(...node.children);
                         }
                     }
@@ -217,12 +229,10 @@ export class FeatureSearchService {
     currentSearchGroup: JobGroup | null = null;
     currentCompletionGroup: JobGroup | null = null;
     taskIdCounter: number = 0;
-    taskGruoupIdCounter: number = 0;
+    taskGroupIdCounter: number = 0;
 
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
-    visualization: BillboardCollection = new BillboardCollection();
-    visualizationPositions: Array<Cartesian3> = [];
-    visualizationChanged: Subject<void> = new Subject<void>();
+    resultChanged: Subject<void> = new Subject<void>();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
     totalTiles: number = 0;
     doneTiles: number = 0;
@@ -232,7 +242,7 @@ export class FeatureSearchService {
     totalFeatureCount: number = 0;
     progress: Subject<number> = new Subject<number>();
     pinGraphicsByTier: Map<number, string> = new Map<number, string>;
-    searchResults: Array<any> = [];
+    searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     traceResults: Array<any> = [];
 
     diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
@@ -244,8 +254,10 @@ export class FeatureSearchService {
     completionCandidateLimit: number = 15;
     private completionCandidateList: CompletionCandidate[] = [];
 
+    showFeatureSearchDialog: boolean = false;
+
     pinTiers = [
-        10000, 9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
+        9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
         900, 800, 700, 600, 500, 400, 300, 200, 100,
         90, 80, 70, 60, 50, 40, 30, 20, 10,
         9, 8, 7, 6, 5, 4, 3, 2, 1
@@ -263,7 +275,8 @@ export class FeatureSearchService {
         return `data:image/svg+xml;base64,${btoa(svg)}`;
     };
 
-    constructor(private mapService: MapService) {
+    constructor(private mapService: MapDataService,
+                private stateService: AppStateService) {
         // Instantiate pin graphics
         this.makeClusterPins();
 
@@ -393,7 +406,12 @@ export class FeatureSearchService {
         // Fill up work queue and start processing.
         // TODO: What if we move / change the viewport during the search?
         if (!this.cachedWorkQueue.length) {
-            let tasks = this.mapService.getPrioritisedTiles().map(makeTask);
+            let tasks: SearchWorkerTask[] = [];
+            for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+                this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                    tasks.push(makeTask(tile));
+                })
+            }
 
             this.workQueue = this.workQueue.concat(tasks);
             this.totalTiles += tasks.length;
@@ -435,8 +453,6 @@ export class FeatureSearchService {
     clear() {
         this.stop();
         this.resultTree = new FeatureSearchQuadTree();
-        this.visualization.removeAll();
-        this.visualizationPositions = [];
         this.resultsPerTile.clear();
         this.workQueue = [];
         this.cachedWorkQueue = [];
@@ -452,7 +468,7 @@ export class FeatureSearchService {
         this.startTime = 0;
         this.endTime = 0;
         this.timeElapsed = this.formatTime(0);
-        this.visualizationChanged.next();
+        this.resultChanged.next();
         this.errors.clear();
         this.completionCandidateList = [];
         this.completionPending.next(false);
@@ -468,7 +484,7 @@ export class FeatureSearchService {
 
     /// Generate a new task-group id
     private generateTaskGroupId(): string {
-        return `group_${Date.now()}_${++this.taskGruoupIdCounter}`;
+        return `group_${Date.now()}_${++this.taskGroupIdCounter}`;
     }
 
     private startDiagnosticsForCompletedSearch(query: string) {
@@ -502,7 +518,12 @@ export class FeatureSearchService {
             return task;
         };
 
-        const diagTasks = this.mapService.getPrioritisedTiles().map(makeDiagnosticsTask);
+        let diagTasks: DiagnosticsWorkerTask[] = [];
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                diagTasks.push(makeDiagnosticsTask(tile));
+            });
+        }
         this.workQueue = this.workQueue.concat(diagTasks);
         this.runWorkers();
     }
@@ -563,7 +584,11 @@ export class FeatureSearchService {
         this.completionPending.next(true);
         this.completionCandidates.next([]);
 
-        this.workQueue = this.workQueue.concat(this.mapService.getPrioritisedTiles().map(makeTask));
+        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
+            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
+                this.workQueue.push(makeTask(tile));
+            });
+        }
         this.runWorkers();
     }
 
@@ -573,9 +598,8 @@ export class FeatureSearchService {
 
         this.completionCandidateList = this.completionCandidateList
             .concat(candidates.candidates)
-            .slice(0, this.completionCandidateLimit)
             .filter((item, index, array) => array.findIndex(other => other.query === item.query) === index) // Remove duplicates
-            .sort((a: CompletionCandidate, b: CompletionCandidate) => a.text.localeCompare(b.text));
+            .slice(0, this.completionCandidateLimit);
 
         this.completionCandidates.next(this.completionCandidateList);
     }
@@ -583,8 +607,12 @@ export class FeatureSearchService {
     private addDiagnostics(result : DiagnosticsResultsForTile) {
         this.diagnosticsMessagesList = this.diagnosticsMessagesList
             .concat(result.messages)
-            .slice(0, this.diagnosticsMessageLimit)
-            .filter((item, index, array) => array.findIndex(other => other.message === item.message && other.location.offset === item.location.offset) === index);
+            .filter((item, index, array) => {
+                return array.findIndex(other => {
+                    return other.message === item.message && other.location?.offset === item.location?.offset;
+                }) === index
+            })
+            .slice(0, this.diagnosticsMessageLimit);
         this.diagnosticsMessages.next(this.diagnosticsMessagesList);
     }
 
@@ -614,9 +642,10 @@ export class FeatureSearchService {
         // Add visualizations and register the search result.
         if (tileResult.matches.length && tileResult.tileId) {
             const mapTileKey = tileResult.matches[0][0];
-            const mapId = mapTileKey.split(':')[1]
+            const [mapId, layerId, _] = coreLib.parseMapTileKey(mapTileKey);
+            const mapLayerId = `${mapId}/${layerId}`;
             this.resultsPerTile.set(mapTileKey, tileResult);
-            this.resultTree.insert(tileResult.tileId, tileResult.matches.map(result => {
+            this.resultTree.insert(tileResult.tileId, mapLayerId, tileResult.matches.map(result => {
                 if (result[2].cartographic) {
                     result[2].cartographicRad = Cartographic.fromDegrees(
                         result[2].cartographic.x,
@@ -627,8 +656,8 @@ export class FeatureSearchService {
                 result[2].cartographic = null;
                 const featureId = result[1];
                 const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
-                this.searchResults.push({label: `${featureId}`, mapId: mapId, featureId: featureId});
-                return [id, result[2]];
+                this.searchResults.push({label: `${featureId}`, mapId: mapId, layerId: layerId, featureId: featureId});
+                return [id, result[2], mapLayerId];
             }));
         }
 
@@ -638,7 +667,7 @@ export class FeatureSearchService {
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.totalFeatureCount += tileResult.numFeatures;
-        this.visualizationChanged.next();
+        this.resultChanged.next();
     }
 
     private scheduleTask(worker: Worker, task: WorkerTask) {
@@ -648,7 +677,7 @@ export class FeatureSearchService {
 
     updatePointColor() {
         this.makeClusterPins();
-        this.visualizationChanged.next();
+        this.resultChanged.next();
     }
 
     private formatTime(milliseconds: number): string {

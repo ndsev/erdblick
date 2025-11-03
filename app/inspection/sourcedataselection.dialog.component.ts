@@ -1,10 +1,7 @@
 import {Component} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
-import {RightClickMenuService, SourceDataDropdownOption} from "../mapviewer/rightclickmenu.service";
-import {MapService} from "../mapdata/map.service";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {InspectionService} from "./inspection.service";
-import {CallbackProperty, Color, HeightReference, Rectangle} from "../integrations/cesium";
+import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
+import {MapDataService} from "../mapdata/map.service";
+import {Color, HeightReference, Rectangle} from "../integrations/cesium";
 import {coreLib} from "../integrations/wasm";
 
 @Component({
@@ -81,8 +78,7 @@ export class SourceDataLayerSelectionDialogComponent {
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
-    constructor(private mapService: MapService,
-                private inspectionService: InspectionService,
+    constructor(private mapService: MapDataService,
                 public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
             this.tileIds = data;
@@ -150,11 +146,11 @@ export class SourceDataLayerSelectionDialogComponent {
 
     *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
         const level = coreLib.getTileLevel(tileId);
-        for (const [_, mapInfo] of this.mapService.maps.getValue().entries()) {
+        for (const [_, mapInfo] of this.mapService.maps.maps.entries()) {
             for (const [_, layerInfo] of mapInfo.layers.entries()) {
                 if (layerInfo.type == "SourceData") {
-                    if (!layerInfo.zoomLevels.length || layerInfo.zoomLevels.includes(level)) {
-                        yield { id: mapInfo.mapId, name: mapInfo.mapId };
+                    if (!layerInfo.info.zoomLevels.length || layerInfo.info.zoomLevels.includes(level)) {
+                        yield { id: mapInfo.id, name: mapInfo.id };
                         break;
                     }
                 }
@@ -227,7 +223,7 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {
                 const id = this.mapIds[i].id as string;
-                const layers = this.inspectionService.findLayersForMapId(id);
+                const layers = this.mapService.findLayersForMapId(id);
                 this.mapIds[i]["disabled"] = !layers.length;
                 this.sourceDataLayersPerMapId.set(id, layers);
             }
@@ -236,7 +232,7 @@ export class SourceDataLayerSelectionDialogComponent {
 
     outlineTheTileBox(tileId: bigint, color: Color) {
         const tileBox = coreLib.getTileBox(tileId);
-        const entity = {
+        this.menuService.tileOutline.next({
             rectangle: {
                 coordinates: Rectangle.fromDegrees(...tileBox),
                 height: HeightReference.CLAMP_TO_GROUND,
@@ -245,8 +241,7 @@ export class SourceDataLayerSelectionDialogComponent {
                 outlineWidth: 3.,
                 outlineColor: color
             }
-        }
-        this.menuService.tileOutline.next(entity);
+        });
     }
 
     onMapIdChange(mapId: SourceDataDropdownOption) {

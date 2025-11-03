@@ -1,174 +1,121 @@
-import {
-    Component,
-    OnInit,
-    Input,
-    ViewChild,
-    OnDestroy,
-    AfterViewInit,
-    ElementRef,
-    Renderer2
-} from "@angular/core";
-import {TreeTableNode} from "primeng/api";
-import {InspectionService, SelectedSourceData} from "./inspection.service";
-import {MapService} from "../mapdata/map.service";
-import {coreLib} from "../integrations/wasm";
+import {Component, output, input, effect} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {TreeTable} from "primeng/treetable";
-import {AppStateService} from "../shared/appstate.service";
-import {Subscription} from "rxjs";
+import {InspectionPanelModel} from "../shared/appstate.service";
+import {TreeTableNode} from "primeng/api";
+import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
+import {FeatureWrapper} from "../mapdata/features.model";
+import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {Fetch} from "../mapdata/fetch";
+import {Column} from "./inspection.tree.component";
 
 @Component({
     selector: 'sourcedata-panel',
     template: `
-        <div class="flex resizable-container" #resizeableContainer
-             [style.width.px]="inspectionContainerWidth"
-             [style.height.px]="inspectionContainerHeight"
-             (mouseup)="parameterService.onInspectionContainerResize($event)"
-             [ngClass]="{'resizable-container-expanded': isExpanded}">
-<!--            <div class="resize-handle" (click)="isExpanded = !isExpanded">-->
-<!--                <i *ngIf="!isExpanded" class="pi pi-chevron-up"></i>-->
-<!--                <i *ngIf="isExpanded" class="pi pi-chevron-down"></i>-->
-<!--            </div>-->
-            <ng-container *ngIf="errorMessage.length == 0; else errorTemplate">
-                <p-treeTable #tt scrollHeight="flex" filterMode="strict"
-                    [value]="treeData"
-                    [loading]="loading"
-                    [autoLayout]="true"
-                    [scrollable]="true"
-                    [resizableColumns]="true"
-                    [virtualScroll]="true"
-                    [virtualScrollItemSize]="26"
-                    [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
-                    [globalFilterFields]="filterFields"
-                >
-                    <ng-template pTemplate="caption">
-                        <p-iconfield class="filter-container">
-                            <p-inputicon styleClass="pi pi-filter"/>
-                            <input class="filter-input" type="text" pInputText placeholder="Filter data for selected layer"
-                                   [(ngModel)]="filterString"
-                                   (ngModelChange)="tt.filterGlobal(filterString, 'contains')"
-                                   (input)="tt.filterGlobal($any($event.target).value, 'contains')"
-                            />
-                            <i *ngIf="filterString" (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                        </p-iconfield>
-                    </ng-template>
-
-                    <ng-template pTemplate="colgroup">
-                        <colgroup>
-                            <col *ngFor="let col of columns" [style.width]="col.width" />
-                        </colgroup>
-                    </ng-template>
-
-                    <ng-template pTemplate="header">
-                        <tr>
-                            <th *ngFor="let col of columns" ttResizableColumn>
-                                {{ col.header }}
-                            </th>
-                        </tr>
-                    </ng-template>
-
-                    <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                        <tr [ttRow]="rowNode" [class]="rowData.styleClass || ''">
-                            <td *ngFor="let col of columns; let i = index" style="white-space: nowrap; text-overflow: ellipsis">
-                                <p-treeTableToggler [rowNode]="rowNode" *ngIf="i == 0" />
-                                <span *ngIf="filterFields.indexOf(col.key) != -1" [innerHTML]="col.transform(rowData[col.key]) | highlight: filterString"></span>
-                                <span *ngIf="filterFields.indexOf(col.key) == -1" [innerHTML]="col.transform(rowData[col.key])"></span>
-                            </td>
-                        </tr>
-                    </ng-template>
-                </p-treeTable>
-            </ng-container>
-
-            <ng-template #errorTemplate>
-                <div class="error">
-                    <div>
-                        <strong>Error</strong><br>
-                        {{ errorMessage }}
-                    </div>
-                </div>
-            </ng-template>
-        </div>
-    `,
-    styles: [`
-        @media only screen and (max-width: 56em) {
-            .resizable-container-expanded {
-                height: calc(100vh - 3em);
-            }
+        @if (loading) {
+            <div class="spinner">
+                <p-progressSpinner ariaLabel="loading"/>
+            </div>
+        } @else {
+            <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [firstHighlightedItemIndex]="firstHighlightedItemIndex">
+            </inspection-tree>
         }
-    `],
+    `,
+    styles: [``],
     standalone: false
 })
-export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestroy {
+export class SourceDataPanelComponent {
 
-    @Input() sourceData!: SelectedSourceData;
-    @ViewChild('tt') table!: TreeTable;
-    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
-
-    treeData: TreeTableNode[] = [];
-    filterFields = [
-        "key",
-        "value"
-    ];
-    columns = [
-        { key: "key",     header: "Key",     width: '0*',    transform: (v: any) => v },
-        { key: "value",   header: "Value",   width: '0*',    transform: (v: any) => v },
-        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter },
-        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter },
-    ]
+    panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;
-    filterString = "";
+
+    treeData: TreeTableNode[] = [];
+    columns: Column[] = [
+        { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
+        { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
+        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
+        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) }
+    ]
+
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
-    errorMessage = "";
-    isExpanded = false;
+    firstHighlightedItemIndex: number = 0;
 
-    inspectionContainerWidth: number;
-    inspectionContainerHeight: number;
-    containerSizeSubscription: Subscription;
-
-    constructor(private inspectionService: InspectionService,
-                public parameterService: AppStateService,
-                private renderer: Renderer2,
-                public mapService: MapService) {
-        this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-        this.inspectionContainerHeight = this.parameterService.inspectionContainerHeight * this.parameterService.baseFontSize;
-        this.containerSizeSubscription = this.parameterService.parameters.subscribe(parameter => {
-            if (parameter.panel.length == 2) {
-                this.inspectionContainerWidth = parameter.panel[0] * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (parameter.panel[1] + 3) * this.parameterService.baseFontSize;
-            } else {
-                this.inspectionContainerWidth = this.parameterService.inspectionContainerWidth * this.parameterService.baseFontSize;
-                this.inspectionContainerHeight = (window.innerHeight - (this.parameterService.inspectionContainerHeight + 3) * this.parameterService.baseFontSize) * this.parameterService.baseFontSize;
+    constructor() {
+        effect(() => {
+            if (!this.panel().sourceData) {
+                return;
             }
+
+            this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
+                .then(layer => {
+                    const root = layer.toObject();
+                    this.addressFormat = layer.addressFormat();
+
+                    layer.delete();
+
+                    if (root) {
+                        this.treeData = root.children ? root.children : [root];
+                        this.selectItemWithAddress(this.panel().sourceData!.address);
+                    } else {
+                        this.treeData = [];
+                        this.setError('Empty layer.');
+                    }
+                })
+                .catch(error => {
+                    this.setError(`${error}`);
+                })
+                .finally(() => {
+                    this.loading = false;
+                });
         });
     }
 
-    ngOnInit(): void {
-        this.inspectionService.loadSourceDataLayer(this.sourceData.tileId, this.sourceData.layerId, this.sourceData.mapId)
-            .then(layer => {
-                const root = layer.toObject()
-                this.addressFormat = layer.addressFormat();
+    async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
+        const parser = new coreLib.TileLayerParser();
+        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const newRequestBody = JSON.stringify({
+            requests: [{
+                mapId: mapId,
+                layerId: layerId,
+                tileIds: [Number(tileId)]
+            }]
+        });
 
-                layer.delete();
-
-                if (root) {
-                    this.treeData = root.children ? root.children : [root]
-                    this.selectItemWithAddress(this.sourceData.address);
+        let layer: TileSourceDataLayer | undefined;
+        let fetch = new Fetch("tiles")
+            .withChunkProcessing()
+            .withMethod("POST")
+            .withBody(newRequestBody)
+            .withBufferCallback((message: any, messageType: any) => {
+                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        parser.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
+                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+                    layer = uint8ArrayToWasm((wasmBlob: any) => {
+                        return parser.readTileSourceDataLayer(wasmBlob);
+                    }, blob);
                 } else {
-                    this.treeData = []
-                    this.setError('Empty layer.')
+                    throw new Error(`Unknown message type ${messageType}.`)
                 }
-            })
-            .catch(error => {
-                this.setError(`${error}`)
-            })
-            .finally(() => {
-                this.loading = false;
             });
-    }
 
-    ngAfterViewInit() {
-        this.detectSafari();
+        return fetch.go()
+            .then(_ => {
+                if (!layer)
+                    throw new Error(`Unknown error while loading layer.`);
+                const error = layer.getError();
+                if (error) {
+                    layer.delete();
+                    throw new Error(`Error while loading layer: ${error}`);
+                }
+                return layer;
+            }).finally(() => {
+                parser.delete();
+            });
     }
 
     /**
@@ -180,9 +127,7 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
-        this.errorMessage = message;
-
-        console.error("Error while processing SourceData tree:", this.errorMessage);
+        this.error.emit(message);
     }
 
     /**
@@ -192,16 +137,17 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
      * @param schema Zserio schema string
      * @return string HTML
      */
-    schemaTypeURLFormatter(schema?: string) {
-        if (!schema) {
-            return schema;
+    schemaTypeURLFormatter(colKey: string, rowData: any) {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
         }
 
+        const schema = rowData[colKey];
         const prefix = "https://developer.nds.live/schema/";
-
         const match = schema.match(/^nds\.(([^.]+\.)+)v(\d{4}_\d{2})((\.[^.]*)+)/);
-        if (!match || match.length <= 4)
+        if (!match || match.length <= 4) {
             return schema;
+        }
 
         // Sub-namespaces in front of the version get joined by "-". Names past the version get joined by "/"
         const url =
@@ -211,14 +157,18 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    addressFormatter(address?: any): string {
+    addressFormatter(colKey: string, rowData: any): string {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
+        }
+        const address = rowData[colKey];
+        if (!address) {
+            return "";
+        }
         if (typeof address === 'object') {
             return `${address.offset}:${address.size}`
-        } else if (address) {
-            return `${address}`
-        } else {
-            return '';
         }
+        return address;
     }
 
     selectItemWithAddress(address?: bigint) {
@@ -301,32 +251,6 @@ export class SourceDataPanelComponent implements OnInit, AfterViewInit, OnDestro
             }
         }
 
-        setTimeout(() => {
-            this.table.scrollToVirtualIndex(firstHighlightedItemIndex || 0);
-        }, 0);
-    }
-
-    clearFilter() {
-        this.filterString = "";
-        this.table.filterGlobal("" , 'contains')
-    }
-
-    onKeydown(event: any) {
-        event.stopPropagation();
-
-        if (event.key === 'Escape') {
-            this.clearFilter();
-        }
-    }
-
-    ngOnDestroy() {
-        this.containerSizeSubscription.unsubscribe();
-    }
-
-    detectSafari() {
-        const isSafari = /Safari/i.test(navigator.userAgent);
-        if (isSafari) {
-            this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
-        }
+        this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
     }
 }

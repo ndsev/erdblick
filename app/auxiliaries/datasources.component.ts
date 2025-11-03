@@ -9,7 +9,7 @@ import {JSONSchema7} from "json-schema";
 import {FormGroup} from '@angular/forms';
 import {FormlyFormOptions, FormlyFieldConfig, FieldType, FieldArrayType} from '@ngx-formly/core';
 import {FormlyJsonschema} from '@ngx-formly/core/json-schema';
-import {MapService} from "../mapdata/map.service";
+import {MapDataService} from "../mapdata/map.service";
 
 @Component({
     selector: 'formly-multi-schema-type',
@@ -79,12 +79,12 @@ export class ArrayTypeComponent extends FieldArrayType {}
     selector: 'datasources',
     template: `
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
+                  #editorDialog (onShow)="loadConfigEditor()" class="editor-dialog datasource-dialog" appendTo="body">
             <p *ngIf="errorMessage">{{ errorMessage }}</p>
             <div [ngClass]="{'loading': loading || errorMessage }">
                 <editor></editor>
                 <div *ngIf="!errorMessage && !readOnly" 
-                     style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; 
+                     style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; 
                      justify-content: space-between;">
                     <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                         <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"
@@ -143,15 +143,11 @@ export class DatasourcesComponent {
     private savedConfigSourceSubscription: Subscription = new Subscription();
 
     constructor(private messageService: InfoMessageService,
-                public parameterService: AppStateService,
+                public stateService: AppStateService,
                 private formlyJsonSchema: FormlyJsonschema,
                 public editorService: EditorService,
                 private http: HttpClient,
-                private mapService: MapService) {
-        this.parameterService.parameters.subscribe(parameters => {
-            return;
-        });
-
+                private mapService: MapDataService) {
         this.dataSourcesConfigJson.subscribe((config: any) => {
             if (config && config["schema"] && config["model"]) {
                 this.schema = config["schema"];

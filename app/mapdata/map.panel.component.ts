@@ -1,16 +1,15 @@
 import {Component, ViewChild} from "@angular/core";
-import {CoverageRectItem, MapService, removeGroupPrefix, MapInfoItem} from "./map.service";
-import {AppStateService} from "../shared/appstate.service";
+import {MapDataService} from "./map.service";
+import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
-import {KeyValue} from "@angular/common";
 import {coreLib} from "../integrations/wasm";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
 import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {KeyboardService} from "../shared/keyboard.service";
-import {EditorService} from "../shared/editor.service";
-import {InspectionService} from "../inspection/inspection.service";
 import {AppModeService} from "../shared/app-mode.service";
+import {CoverageRectItem, GroupTreeNode, MapTreeNode, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
+import {Subscription} from "rxjs";
+import {Rectangle} from "../integrations/cesium";
 
 
 @Component({
@@ -21,207 +20,171 @@ import {AppModeService} from "../shared/app-mode.service";
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
-            <div class="osm-controls">
-                <p-button onEnterClick (click)="openDatasources()" class="osm-button"
-                          icon="pi pi-server" label="" pTooltip="Open datasources configuration"
-                          tooltipPosition="bottom" tabindex="0">
-                </p-button>
-                <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
-                <span style="font-size: 0.9em">OSM Overlay:</span>
-                <p-button onEnterClick (click)="toggleOSMOverlay()" class="osm-button"
-                          icon="{{osmEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
-                          label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
-                </p-button>
-                <div *ngIf="osmEnabled" style="display: inline-block">
-                    <input type="text" pInputText [(ngModel)]="osmOpacityString"
-                           (input)="onOsmOpacityInput($event)"
-                           (keydown.enter)="updateOSMOverlay()"
-                           (blur)="updateOSMOverlay()"
-                           class="w-full slider-input" tabindex="0"/>
-                    <p-slider [(ngModel)]="osmOpacityValue" (ngModelChange)="updateOSMOverlay()"
-                              class="w-full" tabindex="-1">
-                    </p-slider>
-                </div>
-            </div>
-            <p-fieldset class="map-tab" legend="Maps and Layers" [toggleable]="true" [(collapsed)]="mapsCollapsed">
-                <ng-container *ngIf="mapService.mapGroups | async as mapGroups">
-                    <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
-                        No maps loaded.
-                    </div>
-                    <div *ngIf="mapGroups.size" class="maps-container">
-                        <ng-container *ngFor="let group of mapGroups | keyvalue: unordered">
-                            <div class="card" *ngIf="group.value.groupId != 'ungrouped'">
-                                <p-tree [value]="[group.value]">
-                                    <ng-template let-node pTemplate="Group">
-                                        <span>
-                                            <p-checkbox [ngModel]="isGroupAnyVisible(node)"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleGroup(node.groupId)"
-                                                        [binary]="true"
-                                                        [inputId]="node.groupId"
-                                                        [name]="node.groupId" tabindex="0"/>
-                                            <label [for]="node.groupId" style="margin-left: 0.5em; cursor: pointer">
-                                                {{ removeGroupPrefix(node.groupId) }}
-                                            </label>
-                                        </span>
-                                    </ng-template>
-                                    <ng-template let-node pTemplate="Map">
-                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)"
-                                                [popup]="true"
-                                                appendTo="body"/>
-                                        <div class="flex-container">
-                                        <span>
-                                            <p-checkbox [(ngModel)]="node.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleMap(node.mapId)"
-                                                        [binary]="true"
-                                                        [inputId]="node.mapId"
-                                                        [name]="node.mapId" tabindex="0"/>
-                                            <label [for]="node.mapId"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.mapId) }}</label>
-                                        </span>
-                                            <div class="map-controls">
-                                                <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                          [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
-                                                          tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0"
-                                                          [disabled]="!metadataMenusEntries.get(node.mapId)?.length">
-                                                    <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
-                                                        data_object
-                                                    </span>
-                                                </p-button>
-                                            </div>
-                                        </div>
-                                    </ng-template>
-                                    <ng-template let-node pTemplate="Features">
-                                        <div *ngIf="node.type != 'SourceData'" class="flex-container">
-                                            <div class="font-bold white-space-nowrap"
-                                                 style="display: flex; align-items: center;">
-                                                <span onEnterClick class="material-icons menu-toggler" tabindex="0"
-                                                      (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
-                                                    more_vert
-                                                </span>
-                                                <span>
-                                                <p-checkbox [(ngModel)]="node.visible"
-                                                            (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
-                                                            [binary]="true"
-                                                            [inputId]="node.layerId"
-                                                            [name]="node.layerId" tabindex="0"/>
-                                                <label [for]="node.layerId"
-                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
-                                                </span>
-                                            </div>
-                                            <div class="layer-controls">
-                                                <p-button onEnterClick
-                                                          (click)="toggleTileBorders(node.mapId, node.layerId)"
-                                                          label="" pTooltip="Toggle tile borders"
-                                                          tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0">
-                                                    <span class="material-icons"
-                                                          style="font-size: 1.2em; margin: 0 auto;">
-                                                        {{ node.tileBorders ? 'select_all' : 'deselect' }}
-                                                    </span>
-                                                </p-button>
-                                                <p-button onEnterClick *ngIf="node.coverage.length"
-                                                          (click)="focus(node.coverage[0], $event)"
-                                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0">
-                                                    <span class="material-icons"
-                                                          style="font-size: 1.2em; margin: 0 auto;">loupe</span>
-                                                </p-button>
-                                                <p-inputNumber [(ngModel)]="node.level"
-                                                               (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.layerId)"
-                                                               [showButtons]="true" [min]="0" [max]="15"
-                                                               buttonLayout="horizontal" spinnerMode="horizontal"
-                                                               inputId="horizontal"
-                                                               decrementButtonClass="p-button-secondary"
-                                                               incrementButtonClass="p-button-secondary"
-                                                               incrementButtonIcon="pi pi-plus"
-                                                               decrementButtonIcon="pi pi-minus"
-                                                               pTooltip="Change zoom level" tooltipPosition="bottom"
-                                                               tabindex="0">
-                                                </p-inputNumber>
-                                            </div>
-                                            <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                                   [(ngModel)]="node.level"/>
-                                        </div>
-                                    </ng-template>
-                                </p-tree>
+            <ng-container *ngFor="let index of viewIndices">
+                <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
+                    <ng-template #header>
+                        <div>
+                            @if (stateService.numViews > 1) {
+                                @if (index < 1) {
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                        splitscreen_left
+                                    </span>
+                                    <span class="font-bold">Maps Left View</span>
+                                } @else {
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                        splitscreen_right
+                                    </span>
+                                    <span class="font-bold">Maps Right View</span>
+                                    <p-button onEnterClick (click)="removeView($event, index)" class="close-view-button"
+                                              icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
+                                              tooltipPosition="bottom" tabindex="0">
+                                    </p-button>
+                                }
+                            } @else {
+                                <span class="font-bold">Maps</span>
+                            }
+                        </div>
+                    </ng-template>
+                    <div class="map-config-controls">
+                        <p-button onEnterClick (click)="syncOptionsForView(index)"
+                                  [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
+                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                  icon="" label="" pTooltip="Sync visualization options in this view"
+                                  tooltipPosition="bottom" tabindex="0">
+                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                {{ syncedOptions[index] ? "sync" : "sync_disabled" }}
+                            </span>
+                        </p-button>
+                        <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                        <div class="osm-controls">
+                            <span style="font-size: 0.9em">OSM Overlay:</span>
+                        <p-button onEnterClick (click)="toggleOSMOverlay(index)"
+                                      [styleClass]="osmEnabled[index] ? 'osm-button p-button-success' : 'osm-button p-button-primary'"
+                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                      icon="{{osmEnabled[index] ? 'pi pi-eye' : 'pi pi-eye-slash'}}"
+                                      label="" pTooltip="Toggle OSM overlay" tooltipPosition="bottom" tabindex="0">
+                            </p-button>
+                            <div *ngIf="osmEnabled[index]" style="display: inline-block">
+                                <input type="text" pInputText [(ngModel)]="osmOpacityValue[index]"
+                                       (input)="onOsmOpacityInput($event, index)"
+                                       (keydown.enter)="updateOSMOverlay(index)"
+                                       (blur)="updateOSMOverlay(index)"
+                                       class="w-full slider-input" tabindex="0"/>
+                                <p-slider [(ngModel)]="osmOpacityValue[index]" (ngModelChange)="updateOSMOverlay(index)"
+                                          class="w-full" tabindex="-1">
+                                </p-slider>
                             </div>
-                        </ng-container>
-                        <div class="card" *ngIf="mapGroups.has('ungrouped')">
-                            <p-tree [value]="mapGroups.get('ungrouped')?.children">
+                        </div>
+                    </div>
+
+                    <ng-container *ngIf="mapService.maps$ | async as mapGroups">
+                        <div *ngIf="!mapGroups.size" style="margin-top: 0.75em">
+                            No maps loaded.
+                        </div>
+                        <div *ngIf="mapGroups.size" class="maps-container">
+                            <p-tree [value]="mapGroups.nodes">
+                                <!-- Template for Group nodes -->
+                                <ng-template let-node pTemplate="Group">
+                                    <div class="font-bold white-space-nowrap"
+                                         style="display: flex; align-items: center;">
+                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                              (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
+                                            more_vert
+                                        </span>
+                                        <span class="checkbox-entry">
+                                            <p-checkbox [ngModel]="node.visible[index]"
+                                                        (click)="$event.stopPropagation()"
+                                                        (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
+                                                        [binary]="true"
+                                                        [inputId]="index + '_' + node.id"
+                                                        [name]="index + '_' + node.id" tabindex="0"/>
+                                            <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                        </span>
+                                    </div>
+                                </ng-template>
+                                <!-- Template for Map nodes -->
                                 <ng-template let-node pTemplate="Map">
-                                    <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.mapId)" [popup]="true"
+                                    <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
+                                            [popup]="true"
                                             appendTo="body"/>
                                     <div class="flex-container">
-                                        <span>
-                                            <p-checkbox [(ngModel)]="node.visible"
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="toggleMap(node.mapId)"
-                                                        [binary]="true"
-                                                        [inputId]="node.mapId"
-                                                        [name]="node.mapId" tabindex="0"/>
-                                            <label [for]="node.mapId"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.mapId }}</label>
+                                    <span class="checkbox-entry">
+                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                              (click)="showLayersToggleMenu($event, index, node.id, '')">
+                                                more_vert
                                         </span>
-                                        <div class="map-controls">
-                                            <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                      [pTooltip]="!metadataMenusEntries.get(node.mapId)?.length ? 'No metadata available' : 'Request service metadata'"
-                                                      tooltipPosition="bottom"
-                                                      [style]="{'padding-left': '0', 'padding-right': '0'}" tabindex="0"
-                                                      [disabled]="!metadataMenusEntries.get(node.mapId)?.length">
+                                        <p-checkbox [(ngModel)]="node.visible[index]"
+                                                    (click)="$event.stopPropagation()"
+                                                    (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
+                                                    [binary]="true"
+                                                    [inputId]="index + '_' + node.id"
+                                                    [name]="index + '_' + node.id" tabindex="0"/>
+                                        <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                    </span>
+                                    <div class="map-controls">
+                                        <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
+                                                  label="" pTooltip="Focus on map" tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                  tabindex="0"
+                                                  *ngIf="flatCoverage(node).length">
+                                            <span class="material-icons"
+                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                        </p-button>
+                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
+                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
+                                                  tooltipPosition="bottom"
+                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                  tabindex="0"
+                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
                                             <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
                                                 data_object
                                             </span>
-                                            </p-button>
-                                        </div>
+                                        </p-button>
                                     </div>
-                                </ng-template>
+                                </div>
+                            </ng-template>
+                                <!-- Template for Feature Layer nodes -->
                                 <ng-template let-node pTemplate="Features">
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
-                                             style="margin-left: 0.5em; display: flex; align-items: center;">
-                                            <span onEnterClick class="material-icons menu-toggler"
-                                                  tabindex="0"
-                                                  (click)="showLayersToggleMenu($event, node.mapId, node.layerId)">
+                                             style="display: flex; align-items: center;">
+                                            <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                                  (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
                                                 more_vert
                                             </span>
-                                            <span>
-                                                <p-checkbox [(ngModel)]="node.visible"
+                                            <span class="checkbox-entry">
+                                                <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
                                                             (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleLayer(node.mapId, node.layerId)"
+                                                            (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
                                                             [binary]="true"
-                                                            [inputId]="node.layerId"
-                                                            [name]="node.layerId" tabindex="0"/>
-                                                <label [for]="node.layerId"
-                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.layerId }}</label>
+                                                            [inputId]="index + '_' + node.key"
+                                                            [name]="index + '_' + node.key" tabindex="0"/>
+                                                <label [for]="index + '_' + node.key">{{ node.id }}</label>
                                             </span>
                                         </div>
-                                        <div class="layer-controls">
+                                        <div class="tree-node-controls">
                                             <p-button onEnterClick
-                                                      (click)="toggleTileBorders(node.mapId, node.layerId)"
-                                                      label="" pTooltip="Toggle tile borders" tooltipPosition="bottom"
+                                                      (click)="toggleTileBorders(index, node.mapId, node.id)"
+                                                      label="" pTooltip="Toggle tile borders"
+                                                      tooltipPosition="bottom"
+                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'p-button-success' : 'p-button-primary'"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
-                                                <span class="material-icons"
-                                                      style="font-size: 1.2em; margin: 0 auto;">
-                                                    {{ node.tileBorders ? 'select_all' : 'deselect' }}
-                                                </span>
+                                            <span class="material-icons"
+                                                  style="font-size: 1.2em; margin: 0 auto;">
+                                                {{ node.viewConfig[index].tileBorders ? 'select_all' : 'deselect' }}
+                                            </span>
                                             </p-button>
-                                            <p-button onEnterClick *ngIf="node.coverage.length"
-                                                      (click)="focus(node.coverage[0], $event)"
+                                            <p-button onEnterClick *ngIf="node.info.coverage.length"
+                                                      (click)="focus($event, index, node.info.coverage)"
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
-                                                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                                            <span class="material-icons"
+                                                  style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                             </p-button>
-                                            <p-inputNumber [(ngModel)]="node.level"
-                                                           (ngModelChange)="onLayerLevelChanged($event, node.mapId, node.layerId)"
+                                            <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
+                                                           (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
                                                            [showButtons]="true" [min]="0" [max]="15"
                                                            buttonLayout="horizontal" spinnerMode="horizontal"
                                                            inputId="horizontal"
@@ -234,28 +197,59 @@ import {AppModeService} from "../shared/app-mode.service";
                                             </p-inputNumber>
                                         </div>
                                         <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                               [(ngModel)]="node.level"/>
+                                               [(ngModel)]="node.viewConfig[index].level"/>
                                     </div>
                                 </ng-template>
+                                <!-- Template for boolean style option nodes -->
+                                <ng-template let-node pTemplate="Bool">
+                                    <div style="display: flex; align-items: center;">
+                                        <span onEnterClick class="material-icons menu-toggler"
+                                              (click)="$event.stopPropagation()"
+                                              tabindex="0">
+                                            more_vert
+                                        </span>
+                                        <span class="checkbox-entry oblique"
+                                              [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
+                                            <p-checkbox
+                                                    [(ngModel)]="node.value[index]"
+                                                    (ngModelChange)="updateStyleOption(node, index)"
+                                                    [binary]="true"
+                                                    [inputId]="index + '_' + node.key"
+                                                    [name]="index + '_' + node.key"/>
+                                            <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
+                                        </span>
+                                    </div>
+                                </ng-template>
+                                <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                             </p-tree>
                         </div>
-                    </div>
-                </ng-container>
-            </p-fieldset>
-            <style-panel></style-panel>
+                    </ng-container>
+                </p-fieldset>
+                @if (viewIndices.length < 2) {
+                    <p-button onEnterClick class="add-view-button" (click)="addView()" icon="" label="Add View"
+                              pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
+                        <span class="material-symbols-outlined" style="margin: 0 auto;">
+                            add_column_right
+                        </span>
+                    </p-button>
+                }
+            </ng-container>
         </p-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <div class="main-button-controls" (mouseleave)="isMainButtonHovered = false"
              [ngClass]="{'hovered': isMainButtonHovered}">
             <p-button onEnterClick class="layers-button" (mouseenter)="isMainButtonHovered = true"
-                      (click)="isMainButtonHovered = false; showLayerDialog()"
-                      tooltipPosition="right" pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
+                      (click)="isMainButtonHovered = false; toggleLayerDialog()"
+                      tooltipPosition="right"
+                      pTooltip="{{layerDialogVisible ? 'Hide map layers' : 'Show map layers'}}"
                       label="" tabindex="0">
-                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                <span *ngIf="!layerDialogVisible" class="material-symbols-outlined"
+                      style="font-size: 1.2em; margin: 0 auto;">
                     stacks
                 </span>
-                <span *ngIf="layerDialogVisible" class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                <span *ngIf="layerDialogVisible" class="material-icons"
+                      style="font-size: 1.2em; margin: 0 auto;">
                     close
                 </span>
             </p-button>
@@ -270,16 +264,23 @@ import {AppModeService} from "../shared/app-mode.service";
             pointer-events: none;
             opacity: 0.5;
         }
+
     `],
     standalone: false
 })
 export class MapPanelComponent {
-    isMainButtonHovered: boolean = false;
-    layerDialogVisible: boolean = false;
-    mapsCollapsed: boolean = false;
 
-    osmEnabled: boolean = true;
-    osmOpacityValue: number = 30;
+    subscriptions: Subscription[] = [];
+    viewIndices: number[] = [];
+
+    isMainButtonHovered: boolean = false;
+    mapsCollapsed: boolean[] = [];
+
+    osmEnabled: boolean[] = [true];
+    osmOpacityValue: number[] = [30];
+
+    syncedOptions: boolean[] = [];
+    layerDialogVisible: boolean = false;
 
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -289,84 +290,87 @@ export class MapPanelComponent {
     metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
     private _reinitializingAfterPrune: boolean = false;
 
-    constructor(public mapService: MapService,
+    constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
-                public parameterService: AppStateService,
-                public keyboardService: KeyboardService,
-                public editorService: EditorService,
-                private inspectionService: InspectionService,
-                private sidePanelService: SidePanelService) {
-        this.keyboardService.registerShortcut('m', this.showLayerDialog.bind(this), true);
+                public stateService: AppStateService,
+                public keyboardService: KeyboardService) {
+        this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
-        this.parameterService.parameters.subscribe(parameters => {
-            this.osmEnabled = parameters.osm;
-            this.osmOpacityValue = parameters.osmOpacity;
-        });
-        // Rebuild metadata menus recursively and prune when needed.
-        this.mapService.mapGroups.subscribe(mapGroups => {
-            this.metadataMenusEntries.clear();
-            const collectMaps = (node: any) => {
-                if (!node) return;
-                if (node.type === 'Group') {
-                    for (const child of node.children) collectMaps(child);
-                } else {
-                    const mapItem = node;
+        this.subscriptions.push(
+            // Rebuild metadata menus recursively and prune when needed.
+            this.mapService.maps$.subscribe(mapTree => {
+                this.metadataMenusEntries.clear();
+                for (const [_, mapItem] of mapTree.maps) {
                     this.metadataMenusEntries.set(
-                        mapItem.mapId,
-                        this.inspectionService.findLayersForMapId(mapItem.mapId, true)
+                        mapItem.id,
+                        this.mapService.findLayersForMapId(mapItem.id, true)
                             .map(layer => ({
                                 label: layer.name,
-                                command: () => this.inspectionService.loadSourceDataInspectionForService(mapItem.mapId, layer.id)
+                                command: () => {
+                                    this.stateService.setSelection({
+                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0n)
+                                    } as SelectedSourceData);
+                                }
                             }))
                     );
                 }
-            };
+            })
+        );
 
-            const allLeafMaps: MapInfoItem[] = [];
-            for (const [_, group] of mapGroups) {
-                collectMaps(group);
-                allLeafMaps.push(...this.collectLeafMaps(group));
-            }
-            // If all layers were pruned (complete maps config change), reinitialize default maps once
-            if (allLeafMaps.length > 0 && this.parameterService.pruneMapLayerConfig(allLeafMaps)) {
-                if (!this._reinitializingAfterPrune) {
-                    this._reinitializingAfterPrune = true;
-                    try {
-                        this.mapService.processMapsUpdate();
-                    } finally {
-                        this._reinitializingAfterPrune = false;
-                    }
+        this.subscriptions.push(
+            this.stateService.numViewsState.subscribe(numViews => {
+                this.osmEnabled = [];
+                this.osmOpacityValue = [];
+                const viewIndices = Array.from({length: numViews}, (_, i) => i);
+                viewIndices.forEach(viewIndex => {
+                    this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
+                    this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
+                });
+                while (this.mapsCollapsed.length < viewIndices.length) {
+                    this.mapsCollapsed.push(false);
                 }
-            }
-        });
-        this.sidePanelService.observable().subscribe(activePanel => {
-            if (activePanel !== SidePanelState.MAPS && activePanel !== SidePanelState.SEARCH) {
-                this.layerDialogVisible = false;
-            }
-        });
+                if (this.mapsCollapsed.length > viewIndices.length) {
+                    this.mapsCollapsed.length = viewIndices.length;
+                }
+                this.syncedOptions = viewIndices.map(viewIndex => this.mapService.isSyncOptionsForViewEnabled(viewIndex));
+                setTimeout(() => {
+                    this.viewIndices = viewIndices;
+                }, 150);
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.layerSyncOptionsState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
+                    this.mapService.isSyncOptionsForViewEnabled(viewIndex));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.osmEnabledState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.osmEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.osmEnabledState.getValue(index));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.osmOpacityState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.osmOpacityState.getValue(index));
+            })
+        );
     }
 
-    get osmOpacityString(): string {
-        return 'Opacity: ' + this.osmOpacityValue;
-    }
-
-    set osmOpacityString(value: string) {
-        const match = value.match(/(\d+(?:\.\d+)?)/);
-        if (match) {
-            const numValue = parseFloat(match[1]);
-            if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
-                this.osmOpacityValue = numValue;
-            }
-        }
-    }
-
-    onOsmOpacityInput(event: any) {
+    onOsmOpacityInput(event: any, viewIndex: number) {
         const inputElement = event.target as HTMLInputElement;
         const value = inputElement.value;
 
         // Extract only numerical characters and decimal points
         const numericalOnly = value.replace(/[^0-9.]/g, '');
-        let numValue = parseFloat(numericalOnly);
+        let numValue = parseInt(numericalOnly);
 
         // Validate and clamp the value
         if (isNaN(numValue) || numValue < 0) {
@@ -375,7 +379,7 @@ export class MapPanelComponent {
             numValue = 100;
         }
 
-        this.osmOpacityValue = numValue;
+        this.osmOpacityValue[viewIndex] = numValue;
         // Always show "Opacity: X"
         const formattedValue = 'Opacity: ' + numValue;
         if (inputElement.value !== formattedValue) {
@@ -383,195 +387,197 @@ export class MapPanelComponent {
             inputElement.dispatchEvent(new Event('input'));
         }
 
-        this.updateOSMOverlay();
+        this.updateOSMOverlay(viewIndex);
     }
 
-    // TODO: Refactor these into a generic solution
-    showLayersToggleMenu(event: MouseEvent, mapName: string, layerName: string) {
+    showLayersToggleMenu(event: MouseEvent, viewIndex: number, mapId: string, layerId: string) {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
-                label: 'Toggle All off but This',
+                label: 'Toggle All Off But This',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.visible = id == layerName;
-                            this.toggleLayer(mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, layer.mapId.startsWith(mapId) && (!layerId || layer.id === layerId));
                     }
                 }
             },
             {
-                label: 'Toggle All on but This',
+                label: 'Toggle All On But This',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.visible = id != layerName;
-                            this.toggleLayer(mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, !layer.mapId.startsWith(mapId) || !!(layerId && layer.id !== layerId));
                     }
                 }
             },
             {
                 label: 'Toggle All Off',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.visible = false;
-                            this.toggleLayer(mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
                     }
                 }
             },
             {
                 label: 'Toggle All On',
                 command: () => {
-                    if (this.mapService.maps.getValue().has(mapName)) {
-                        for (const id of this.mapService.maps.getValue().get(mapName)!.layers.keys()!) {
-                            this.mapService.maps.getValue().get(mapName)!.layers.get(id)!.visible = true;
-                            this.toggleLayer(mapName, layerName);
-                        }
+                    for (const layer of this.mapService.maps.allFeatureLayers()) {
+                        this.mapService.setMapLayerVisibility(viewIndex, layer.mapId, layer.id, false);
                     }
                 }
             }
         ];
     }
 
-    showLayerDialog() {
+    showOptionsToggleMenu(event: MouseEvent, node: StyleOptionNode) {
+        this.toggleMenu.toggle(event);
+        /* this.toggleMenuItems = [
+            {
+                label: 'Toggle All off but This',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id == optionId);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All on but This',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, id != optionId);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All Off',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, false);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            },
+            {
+                label: 'Toggle All On',
+                command: () => {
+                    const style = this.styleService.styles.get(styleId);
+                    if (style === undefined || style === null) {
+                        return;
+                    }
+                    // for (const id in style.params.options) {
+                    //     this.styleService.toggleOption(style.id, id, true);
+                    // }
+                    this.applyStyleConfig(style.id);
+                }
+            }
+        ];
+        */
+    }
+
+    toggleLayerDialog() {
         this.layerDialogVisible = !this.layerDialogVisible;
-        if (this.layerDialogVisible) {
-            this.sidePanelService.panel = SidePanelState.MAPS;
-        }
     }
 
-    focus(coverage: number | CoverageRectItem, event?: any) {
-        event?.stopPropagation();
-        if (coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max")) {
-            let coverageStruct = coverage as CoverageRectItem;
-            let minPos = coreLib.getTilePosition(BigInt(coverageStruct.min));
-            let maxPos = coreLib.getTilePosition(BigInt(coverageStruct.max));
-            this.mapService.moveToWgs84PositionTopic.next(
-                {x: (minPos.x + maxPos.x) * .5, y: (minPos.y + maxPos.y) * .5}
-            );
-        } else {
-            const position = coreLib.getTilePosition(BigInt(coverage as number));
-            this.mapService.moveToWgs84PositionTopic.next(
-                {x: position.x, y: position.y}
-            );
-        }
-    }
-
-    onLayerLevelChanged(event: Event, mapName: string, layerName: string) {
-        this.mapService.setMapLayerLevel(mapName, layerName, Number(event.toString()));
-    }
-
-    toggleOSMOverlay() {
-        this.osmEnabled = !this.osmEnabled;
-        this.updateOSMOverlay();
-    }
-
-    updateOSMOverlay() {
-        const parameters = this.parameterService.parameters.getValue();
-        if (parameters) {
-            parameters.osm = this.osmEnabled;
-            parameters.osmOpacity = this.osmOpacityValue;
-            this.parameterService.parameters.next(parameters);
-        }
-    }
-
-    toggleTileBorders(mapName: string, layerName: string) {
-        this.mapService.toggleLayerTileBorderVisibility(mapName, layerName);
-    }
-
-    toggleLayer(mapName: string, layerName: string = "") {
-        this.mapService.toggleMapLayerVisibility(mapName, layerName);
-    }
-
-    unordered(a: KeyValue<string, any>, b: KeyValue<string, any>): number {
-        return 0;
-    }
-
-    openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
-    }
-
-    toggleMap(mapId: string) {
-        if (!mapId) {
-            return;
-        }
-        this.mapService.toggleMapLayerVisibility(mapId);
-    }
-
-    toggleGroup(groupId: string) {
-        if (!groupId || groupId === 'ungrouped') {
-            return;
-        }
-        const root = this.mapService.mapGroups.getValue();
-        const group = this.findMapGroupById(root, groupId);
-        if (!group) return;
-        // Recompute current visibility at the time of click (derived): any descendant map visible
-        const currentVisible = this.collectLeafMaps(group).some(m => m.visible);
-        const target = !currentVisible;
-        const mapIds = this.collectMapIds(group);
-        for (const mapId of mapIds) {
-            this.mapService.toggleMapLayerVisibility(mapId, "", target, true);
-        }
-        this.mapService.processMapsUpdate();
-        this.mapService.update().then();
-    }
-
-    private findMapGroupById(groups: Map<string, any>, groupId: string): any {
-        for (const [id, group] of groups) {
-            if (id === groupId || group.groupId === groupId) return group;
-            const found = this.findInGroupChildren(group, groupId);
-            if (found) return found;
-        }
-        return undefined;
-    }
-
-    private findInGroupChildren(group: any, groupId: string): any {
-        if (!group || !group.children) return undefined;
-        for (const child of group.children) {
-            if (child.type === 'Group') {
-                if (child.groupId === groupId) return child;
-                const found = this.findInGroupChildren(child, groupId);
-                if (found) return found;
-            }
-        }
-        return undefined;
-    }
-
-    private collectMapIds(group: any): string[] {
-        const ids: string[] = [];
-        if (!group || !group.children) return ids;
-        for (const child of group.children) {
-            if (child.type === 'Group') {
-                ids.push(...this.collectMapIds(child));
+    focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
+        event.stopPropagation();
+        let tileIds = coverages.map(coverage => {
+            return coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max") ?
+                [BigInt((coverage as CoverageRectItem).min), BigInt((coverage as CoverageRectItem).max)] :
+                [BigInt(coverage as number)]
+        }).flat();
+        let targetRect: Rectangle | null = null;
+        for (const tileId of tileIds) {
+            const tileIdRect = Rectangle.fromDegrees(...coreLib.getTileBox(tileId));
+            if (targetRect) {
+                Rectangle.union(tileIdRect, targetRect, targetRect);
             } else {
-                ids.push(child.mapId);
+                targetRect = tileIdRect;
             }
         }
-        return ids;
+        this.stateService.focusedView = viewIndex;
+        this.mapService.moveToRectangleTopic.next(
+            {targetView: viewIndex, rectangle: targetRect!}
+        );
     }
 
-    private collectLeafMaps(group: any): MapInfoItem[] {
-        const maps: MapInfoItem[] = [];
-        if (!group || !group.children) return maps;
-        for (const child of group.children) {
-            if (child.type === 'Group') {
-                maps.push(...this.collectLeafMaps(child));
-            } else {
-                maps.push(child as MapInfoItem);
+    flatCoverage(node: any): (number | CoverageRectItem)[] {
+        if (!node || !node.children) {
+            return [];
+        }
+        const coverage: (number | CoverageRectItem)[] = [];
+        for (const child of node.children) {
+            if (child.info && Array.isArray(child.info.coverage)) {
+                coverage.push(...child.info.coverage);
             }
         }
-        return maps;
+        return coverage;
     }
 
-    isGroupAnyVisible(group: any): boolean {
-        return this.collectLeafMaps(group).some(m => m.visible);
+    updateOSMOverlay(viewIndex: number) {
+        this.stateService.osmEnabledState.next(viewIndex, this.osmEnabled[viewIndex]);
+        this.stateService.osmOpacityState.next(viewIndex, this.osmOpacityValue[viewIndex]);
+        this.mapService.syncOsmSettings(viewIndex);
+    }
+
+    toggleOSMOverlay(viewIndex: number) {
+        this.osmEnabled[viewIndex] = !this.osmEnabled[viewIndex];
+        this.updateOSMOverlay(viewIndex);
+    }
+
+    toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
+        this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
+    }
+
+    toggleTileBorders(viewIndex: number, mapName: string, layerName: string) {
+        this.mapService.toggleLayerTileBorderVisibility(viewIndex, mapName, layerName);
+    }
+
+    onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {
+        this.mapService.setMapLayerLevel(viewIndex, mapName, layerName, Number(event.toString()));
+    }
+
+    updateStyleOption(node: StyleOptionNode, viewIndex: number) {
+        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
+        this.mapService.styleOptionChangedTopic.next([node, viewIndex]);
+    }
+
+    addView() {
+        // Limit the increment for now since we do not yet support more than 2 views
+        if (this.stateService.numViews < 2) {
+            this.stateService.numViews += 1;
+        }
+    }
+
+    removeView(event: MouseEvent, index: number) {
+        event.stopPropagation();
+        // Right now we just decrement, but for more than 2 views we should consider the actual indices
+        // We cannot have fewer views than at least 1
+        if (this.stateService.numViews > 1) {
+            this.viewIndices.pop();
+            this.stateService.numViews -= 1;
+        }
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
-}
 
+    syncOptionsForView(viewIndex: number) {
+        const nextState = !this.mapService.isSyncOptionsForViewEnabled(viewIndex);
+        this.mapService.setSyncOptionsForView(viewIndex, nextState);
+        const numViews = this.stateService.numViews;
+        this.syncedOptions = Array.from({length: numViews}, (_, index) =>
+            this.mapService.isSyncOptionsForViewEnabled(index));
+    }
+}

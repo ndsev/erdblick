@@ -1,123 +1,147 @@
 import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
-import {InspectionService} from "../inspection/inspection.service";
-import {MapService} from "../mapdata/map.service";
-import {SidePanelService, SidePanelState} from "../shared/sidepanel.service";
-import {Listbox} from "primeng/listbox";
+import {MapDataService} from "../mapdata/map.service";
+import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
 import {SearchPanelComponent} from "./search.panel.component";
+import {coreLib} from "../integrations/wasm";
+import {AppStateService} from "../shared/appstate.service";
+import {Tree} from "primeng/tree";
+import {Scroller} from "primeng/scroller";
 
 @Component({
     selector: "feature-search",
     template: `
-        <div [ngClass]="{'z-index-low': sidePanelService.featureSearchOpen && sidePanelService.searchOpen}">
-            <p-dialog class="side-menu-dialog" header="Search Loaded Features"
-                      [(visible)]="isPanelVisible" style="padding: 0 0.5em 0.5em 0.5em"
-                      [position]="'topleft'" [draggable]="false" [resizable]="false"
-                      (onShow)="onShow($event)" (onHide)="onHide($event)">
-                <div class="feature-search-controls">
-                    <div class="progress-bar-container">
-                        <p-progressBar [value]="percentDone">
-                            <ng-template pTemplate="content" let-percentDone>
-                                <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
-                            </ng-template>
-                        </p-progressBar>
-                    </div>
-                    <p-button (click)="pauseSearch()"
-                              [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
-                              label=""
-                              [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
-                              [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
-                    <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
-                              pTooltip="Stop search" tooltipPosition="bottom"></p-button>
+        <p-dialog class="feature-search-dialog" header="Search Loaded Features" [closeOnEscape]="false"
+                  [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
+                  (onShow)="syncTreeScrollHeight($event)"
+                  (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
+            <div class="feature-search-controls">
+                <div class="progress-bar-container">
+                    <p-progressBar [value]="percentDone">
+                        <ng-template pTemplate="content" let-percentDone>
+                            <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
+                        </ng-template>
+                    </p-progressBar>
                 </div>
+                <p-button (click)="pauseSearch()"
+                          [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
+                          label=""
+                          [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
+                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
+                <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
+                          pTooltip="Stop search" tooltipPosition="bottom"></p-button>
+            </div>
 
-                <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
-                    <p-tablist>
-                        <p-tab value="results">
-                            <span>Results</span>
-                            <p-badge [value]="results.length" />
-                        </p-tab>
-                        <p-tab value="diagnostics">
-                            <span>Diagnostics</span>
-                            <p-badge [value]="diagnostics.length" />
-                        </p-tab>
-                        <p-tab value="traces" *ngIf="traces.length > 0">
-                            <span>Traces</span>
-                            <p-badge [value]="traces.length" />
-                        </p-tab>
-                    </p-tablist>
+            <p-tabs [(value)]="resultPanelIndex" class="feature-search-tabs" scrollable>
+                <p-tablist>
+                    <p-tab value="results">
+                        <span>Results</span>
+                        <p-badge [value]="results.length"/>
+                    </p-tab>
+                    <p-tab value="diagnostics">
+                        <span>Diagnostics</span>
+                        <p-badge [value]="diagnostics.length"/>
+                    </p-tab>
+                    <p-tab value="traces" *ngIf="traces.length > 0">
+                        <span>Traces</span>
+                        <p-badge [value]="traces.length"/>
+                    </p-tab>
+                </p-tablist>
 
-                    <p-tabpanels>
-                        <!-- Results -->
-                        <p-tabpanel value="results">
-                            <div style="display: flex; flex-direction: row; justify-content: space-between; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
-                                <span>Highlight colour:</span>
-                                <span><p-colorPicker [(ngModel)]="searchService.pointColor"
-                                                    (ngModelChange)="searchService.updatePointColor()" appendTo="body"/></span>
+                <p-tabpanels>
+                    <!-- Results -->
+                    <p-tabpanel value="results">
+                        <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
+                            <span>Highlight colour:</span>
+                            <p-colorPicker [(ngModel)]="searchService.pointColor"
+                                           (ngModelChange)="searchService.updatePointColor()" appendTo="body"/>
+                        </div>
+                        <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
+                            <span>Group:</span>
+                            <p-multiSelect [options]="grouping" [(ngModel)]="selectedGroupingOptions" [filter]="false"
+                                           [showToggleAll]="false" (ngModelChange)="recalculateResultsByGroups()"
+                                           placeholder="Select Grouping" [maxSelectedLabels]="5"
+                                           display="chip" optionLabel="name">
+                            </p-multiSelect>
+                        </div>
+
+                        <!-- Results Tree -->
+                        <div style="height: 100%">
+                            <p-tree #tree [value]="resultsTree"
+                                    selectionMode="single"
+                                    [metaKeySelection]="false"
+                                    [lazy]="true"
+                                    [virtualScroll]="true"
+                                    [virtualScrollItemSize]="stateService.baseFontSize * 2"
+                                    [filter]="showFilter"
+                                    filterPlaceholder="Filter matched features"
+                                    [scrollHeight]="scrollHeight"
+                                    [highlightOnSelect]="true"
+                                    (onNodeSelect)="selectResult($event)"
+                                    [emptyMessage]="resultsStatus">
+                            </p-tree>
+                        </div>
+                    </p-tabpanel>
+
+                    <!-- Diagnostics -->
+                    <p-tabpanel value="diagnostics">
+                        <div id="searchDiagnosticsPanel">
+                            <div>
+                                <span class="section-heading">Results</span>
+                                <ul>
+                                    <li><span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span></li>
+                                    <li><span>Features:</span><span>{{ searchService.totalFeatureCount }}</span></li>
+                                    <li><span>Matched:</span><span>{{ searchService.searchResults.length }}</span></li>
+                                </ul>
                             </div>
-                            <p-listbox class="results-listbox" [options]="results" [(ngModel)]="selectedResult"
-                                    optionLabel="label" [virtualScroll]="true" [virtualScrollItemSize]="35"
-                                    [multiple]="false" [metaKeySelection]="false" (onChange)="selectResult($event)"
-                                    emptyMessage="No features matched."
-                                    #listbox
-                            />
-                        </p-tabpanel>
-
-                        <!-- Diagnostics -->
-                        <p-tabpanel value="diagnostics">
-                            <div id="searchDiagnosticsPanel">
-                                <div>
-                                    <span class="section-heading">Results</span>
-                                    <ul>
-                                        <li><span>Elapsed time:</span><span>{{ searchService.timeElapsed }}</span></li>
-                                        <li><span>Features:</span><span>{{ searchService.totalFeatureCount }}</span></li>
-                                        <li><span>Matched:</span><span>{{ searchService.searchResults.length }}</span></li>
-                                    </ul>
-                                </div>
-                                <div *ngIf="diagnostics.length > 0">
-                                    <span class="section-heading">Diagnostics</span>
-                                    <ul>
-                                        @for (message of diagnostics; track message; let first = $first) {
-                                            <li>
+                            <div *ngIf="diagnostics.length > 0">
+                                <span class="section-heading">Diagnostics</span>
+                                <ul>
+                                    @for (message of diagnostics; track message) {
+                                        <li>
+                                            <div>
+                                                <span>{{ message.message }}</span>
                                                 <div>
-                                                    <span>{{ message.message }}</span>
-                                                    <div><span>Here: </span><code style="width: 100%;" [innerHTML]="message.query | highlightRegion:message.location.offset:message.location.size:25"></code></div>
+                                                    <span>Here: </span>
+                                                    <code style="width: 100%;"
+                                                          [innerHTML]="message.query | highlightRegion: message.location?.offset:message.location?.size:25"></code>
                                                 </div>
-                                                <p-button size="small" label="Fix" *ngIf="message.fix" (onClick)="onApplyFix(message)" />
-                                            </li>
-                                        }
-                                    </ul>
-                                </div>
-                            </div>
-                        </p-tabpanel>
-
-                        <!-- Traces -->
-                        <p-tabpanel value="traces">
-                            <div id="searchTracesPanel">
-                                <table>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Calls</th>
-                                        <th>Time</th>
-                                    </tr>
-                                    @for (trace of traces; track trace; let first = $first) {
-                                        <tr>
-                                            <td>{{ trace.name }}</td>
-                                            <td>{{ trace.calls }}</td>
-                                            <td>{{ trace.totalus }} &mu;s</td>
-                                        </tr>
+                                            </div>
+                                            <p-button size="small" label="Fix" *ngIf="message.fix"
+                                                      (onClick)="onApplyFix(message)"/>
+                                        </li>
                                     }
-                                </table>
+                                </ul>
                             </div>
-                        </p-tabpanel>
-                    </p-tabpanels>
-                </p-tabs>
-            </p-dialog>
-        </div>
+                        </div>
+                    </p-tabpanel>
+
+                    <!-- Traces -->
+                    <p-tabpanel value="traces">
+                        <div id="searchTracesPanel">
+                            <table>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Calls</th>
+                                    <th>Time</th>
+                                </tr>
+                                @for (trace of traces; track trace; let first = $first) {
+                                    <tr>
+                                        <td>{{ trace.name }}</td>
+                                        <td>{{ trace.calls }}</td>
+                                        <td>{{ trace.totalus }} &mu;s</td>
+                                    </tr>
+                                }
+                            </table>
+                        </div>
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
+        </p-dialog>
         <div #alert></div>
     `,
     styles: [``],
@@ -125,35 +149,44 @@ import {SearchPanelComponent} from "./search.panel.component";
 })
 export class FeatureSearchComponent {
     isPanelVisible: boolean = false;
-    placeholder: Array<any> = [];
     traces: Array<TraceResult> = [];
-    selectedResult: any;
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
-    results: Array<any> = [];
+    results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
+    resultsTree: TreeNode[] = [];
+    grouping: { name: string, value: number }[] = [
+        {name: 'Maps', value: 1},
+        {name: 'Layers', value: 2},
+        {name: 'Feature', value: 3},
+        {name: 'Tile', value: 4}
+    ];
+    selectedGroupingOptions: { name: string, value: number }[] = [this.grouping[0]];
 
     // Active result panel index
-    resultPanelIndex: any = 0;
+    resultPanelIndex: string = "";
 
-    @Input() searchPanelComponent!: SearchPanelComponent;
-    @ViewChild('listbox') listbox!: Listbox;
+    showFilter: boolean = false;
+    resultsStatus: string = "Loading...";
+    scrollHeight: string = "28.5em";
+
+    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`?
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
+    @ViewChild('tree') tree!: Tree;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
-                public mapService: MapService,
-                public inspectionService: InspectionService,
-                public sidePanelService: SidePanelService,
+                public mapService: MapDataService,
+                public stateService: AppStateService,
                 public keyboardService: KeyboardService,
                 private infoMessageService: InfoMessageService) {
-        this.sidePanelService.observable().subscribe(panel=> {
-            this.isPanelVisible = panel == SidePanelState.FEATURESEARCH || this.isPanelVisible;
-        });
         this.searchService.isFeatureSearchActive.subscribe(isActive => {
+            this.isPanelVisible = true;
             if (isActive) {
-                this.placeholder = [{label: "Loading..."}];
+                this.resultsTree = [];
+                this.showFilter = false;
+                this.resultsStatus = "Loading...";
                 this.canPauseStopSearch = isActive;
             }
         });
@@ -182,7 +215,7 @@ export class FeatureSearchComponent {
             this.infoMessageService.showAlertDialog(
                 this.alertContainer,
                 'Feature Search Errors',
-                Array.from(errors).join('\n'))
+                Array.from(errors).join('\n'));
 
         } else if (results.length == 0) {
             if (this.diagnostics.length > 0)
@@ -193,15 +226,15 @@ export class FeatureSearchComponent {
 
         this.traces = traces
         this.results = results;
+        this.recalculateResultsByGroups();
     }
 
     selectResult(event: any) {
-        if (event.value && event.value.mapId && event.value.featureId) {
-            this.jumpService.highlightByJumpTargetFilter(event.value.mapId, event.value.featureId).then(() => {
-                if (this.inspectionService.selectedFeatures.length) {
-                    this.mapService.focusOnFeature(this.inspectionService.selectedFeatures[0]);
-                }
-            });
+        // Support both listbox change and tree node select events
+        const selected = event?.value || event?.node?.data || event;
+        if (selected && selected.mapId && selected.featureId) {
+            this.jumpService.highlightByJumpTargetFilter(selected.mapId, selected.featureId,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.stateService.focusedView).then();
         }
     }
 
@@ -214,7 +247,8 @@ export class FeatureSearchComponent {
                 this.searchService.run(query, true);
             } else {
                 this.searchService.pause();
-                this.listbox.options = this.searchService.searchResults;
+                this.results = this.searchService.searchResults;
+                this.recalculateResultsByGroups();
                 this.isSearchPaused = true;
             }
         }
@@ -222,9 +256,10 @@ export class FeatureSearchComponent {
 
     stopSearch() {
         if (this.canPauseStopSearch) {
-            this.listbox.options = this.searchService.searchResults;
             this.searchService.stop();
             this.canPauseStopSearch = false;
+            this.results = this.searchService.searchResults;
+            this.recalculateResultsByGroups();
 
             if (this.searchService.errors.size) {
                 this.infoMessageService.showAlertDialog(
@@ -235,20 +270,141 @@ export class FeatureSearchComponent {
         }
     }
 
-    onHide(event: any) {
+    onHide(_: any) {
+        this.traces = [];
+        this.diagnostics = [];
+        this.percentDone = 0;
+        this.isSearchPaused = false;
+        this.canPauseStopSearch = false;
+        this.results = [];
+        this.resultsTree = [];
+        this.showFilter = false;
+        this.resultsStatus = "Loading...";
         this.searchService.clear();
-        this.sidePanelService.featureSearchOpen = false;
-        this.keyboardService.dialogOnHide(event);
-    }
-
-    onShow(event: any) {
-        this.sidePanelService.featureSearchOpen = true;
-        this.keyboardService.dialogOnShow(event);
+        this.isPanelVisible = false;
     }
 
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
             this.searchPanelComponent.setSearchValue(message.fix);
         }
+    }
+
+    recalculateResultsByGroups() {
+        // Convert results into PrimeNG TreeNodes based on selected grouping
+        const results = this.results.map(result => {
+            const featureIdParts = result.featureId.split('.')
+            return {
+                label: result.label,
+                mapId: result.mapId,
+                layerId: result.layerId,
+                featureId: result.featureId,
+                featureType: featureIdParts[0] ?? "",
+                tileId: Number(featureIdParts[1] ?? 0)
+            };
+        });
+
+        // Selected grouping values as ordered list following the grouping options
+        const selected = new Set(this.selectedGroupingOptions.map(o => o.value));
+        const selectedOrder: number[] = this.grouping.filter(o => selected.has(o.value)).map(o => o.value);
+
+        type ResultItem = typeof results[number];
+
+        const accessors: Record<number, { label: string, get: (r: ResultItem) => string | number }> = {
+            1: { label: 'Map',     get: (r) => r.mapId },
+            2: { label: 'Layer',   get: (r) => r.layerId },
+            3: { label: 'Feature', get: (r) => r.featureType },
+            4: { label: 'Tile',    get: (r) => r.tileId }
+        };
+
+        const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
+            if (depth >= selectedOrder.length || selectedOrder.length === 0) {
+                const leaves = items.map((it, idx) => ({
+                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
+                    label: it.label,
+                    data: { mapId: it.mapId, featureId: it.featureId },
+                    leaf: true,
+                    selectable: true
+                } as TreeNode));
+                return [leaves, items.length];
+            }
+
+            const key = selectedOrder[depth];
+            const acc = accessors[key];
+            if (!acc) {
+                const leaves = items.map((it, idx) => ({
+                    key: `${parentKey}/leaf:${idx}:${it.featureId}`,
+                    label: it.label,
+                    data: { mapId: it.mapId, featureId: it.featureId },
+                    leaf: true,
+                    selectable: true
+                } as TreeNode));
+                return [leaves, items.length];
+            }
+
+            // Partition items by current accessor
+            const partitions = new Map<string | number, ResultItem[]>();
+            for (const it of items) {
+                const k = acc.get(it);
+                const arr = partitions.get(k) || [];
+                arr.push(it);
+                partitions.set(k, arr);
+            }
+
+            const nodes: TreeNode[] = [];
+            let total = 0;
+            for (const [value, groupItems] of partitions) {
+                const nodeKey = `${parentKey}/${acc.label}:${String(value)}`;
+                const [children, childCount] = buildTreeWithCounts(groupItems, depth + 1, nodeKey);
+                total += childCount;
+                nodes.push({
+                    key: nodeKey,
+                    label: `${acc.label}: ${String(value)} (${childCount})`,
+                    selectable: false,
+                    expanded: true,
+                    children
+                } as TreeNode);
+            }
+            return [nodes, total];
+        };
+
+        const [tree] = buildTreeWithCounts(results, 0, 'root');
+        this.resultsTree = tree;
+        if (this.resultsTree.length) {
+            this.showFilter = true;
+            this.resultsStatus = "No entries found.";
+        } else {
+            this.showFilter = false;
+            this.resultsStatus = "No matches found.";
+        }
+    }
+
+    syncTreeScrollHeight(event: MouseEvent) {
+        const target = event?.target as HTMLElement | null;
+        // Find the dialog container regardless of which inner element fired the event
+        let wrapper = target?.closest('.feature-search-dialog') as HTMLElement | null;
+        if (!wrapper) {
+            wrapper = document.querySelector('.feature-search-dialog') as HTMLElement | null;
+        }
+        const dialog = wrapper?.querySelector('.p-dialog') as HTMLElement | null;
+        const container = dialog ?? wrapper;
+        if (!container || !container.offsetHeight || !this.stateService.baseFontSize) {
+            return;
+        }
+
+        // Compute scrollable height in em units to respect base font size
+        const currentEmHeight = container.offsetHeight / this.stateService.baseFontSize;
+        // Linear equation to compensate for the slight difference in the content height
+        // when the values are smaller or larger
+        this.scrollHeight = `${currentEmHeight + 0.0887574 * currentEmHeight - 14.9763}em`;
+
+        // Nudge the internal scroller to recalculate
+        setTimeout(() => {
+            const scroller = (this.tree as any)?.scroller as Scroller | undefined;
+            if (scroller) {
+                scroller.scrollHeight = this.scrollHeight;
+                scroller.calculateAutoSize();
+            }
+        }, 1);
     }
 }

@@ -1,8 +1,9 @@
 import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
-import {InspectionService} from "../inspection/inspection.service";
 import {coreLib} from "../integrations/wasm";
+import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {EntityConstructorOptions} from "../integrations/cesium";
 
 export interface SourceDataDropdownOption {
     id: bigint | string,
@@ -19,10 +20,10 @@ export class RightClickMenuService {
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
-    tileOutline: Subject<object | null> = new Subject<object | null>();
+    tileOutline: Subject<EntityConstructorOptions | null> = new Subject<EntityConstructorOptions | null>();
     customTileAndMapId: Subject<[string, string]> = new Subject<[string, string]>();
 
-    constructor(private inspectionService: InspectionService) {
+    constructor(private stateService: AppStateService) {
         this.menuItems.next([{
             label: 'Inspect Source Data for Tile',
             icon: 'pi pi-database',
@@ -59,11 +60,9 @@ export class RightClickMenuService {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.inspectionService.loadSourceDataInspection(
-                    Number(sourceDataParams.tileId),
-                    sourceDataParams.mapId,
-                    sourceDataParams.layerId
-                );
+                this.stateService.setSelection({
+                    mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
+                } as SelectedSourceData);
             }
         };
         const items = this.menuItems.getValue();
