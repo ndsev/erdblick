@@ -340,7 +340,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     clearImportedStyles() {
         for (let styleId of this.styleService.styles.keys()) {
             if (this.styleService.styles.get(styleId)!.imported) {
-                this.styleService.deleteStyle(styleId);
+                this.styleService.deleteStyle(styleId, true);
             }
         }
         this.styleService.clearStorageForImportedStyles();

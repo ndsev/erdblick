@@ -13,7 +13,7 @@ import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/e
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
-import {shortId4} from "./hash";
+import {shortId4, sipHash64Hex} from "./hash";
 import {InfoMessageService} from "../shared/info.service";
 
 interface StyleConfigEntry {
@@ -65,6 +65,7 @@ export class StyleService {
     stylesDialogVisible: boolean = false;
 
     styleHashes: Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}> = new Map();
+    styleUrls: StyleConfigEntry[] = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
     erroredStyleIds: Map<string, string> = new Map<string, string>();
 
@@ -97,22 +98,22 @@ export class StyleService {
                 throw new Error("Missing style configuration in config.json.");
             }
 
-            let styleUrls = [...data["styles"]] as [StyleConfigEntry];
-            styleUrls.forEach((styleEntry: StyleConfigEntry) => {
+            this.styleUrls = [...data["styles"]] as [StyleConfigEntry];
+            this.styleUrls.forEach((styleEntry: StyleConfigEntry) => {
                 if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("bundle")) {
                     styleEntry.url = `bundle/styles/${styleEntry.url}`;
                 }
             });
 
             const styleHashes = this.loadStyleHashes();
-            const dataMap = await this.fetchStylesYamlSources(styleUrls);
+            const dataMap = await this.fetchStylesYamlSources(this.styleUrls);
             for (const [styleUrl, styleString] of dataMap) {
                 const styleId = this.initializeStyle(styleString, styleUrl);
                 if (!styleId) {
                     continue;
                 }
                 this.builtinStylesCount++;
-                await this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
+                this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
             }
             this.loadModifiedBuiltinStyles();
         } catch (error) {
@@ -308,22 +309,50 @@ export class StyleService {
         return true;
     }
 
-    deleteStyle(styleId: string) {
-        // TODO: check if the style was modified and offer to export it
-        // NOTE: Should implement dirty checking to detect unsaved changes and prompt user
-        // with export option before deletion to prevent accidental loss of work.
-        let style = this.styles.get(styleId);
-        if (!style) {
+    deleteStyle(styleId: string, force: boolean = false) {
+        // Implement deletion with safety for imported styles and restoration of built-ins.
+        const style = this.styles.get(styleId);
+        if (!style || !style.imported) {
             return;
         }
+
+        // When deleting an imported style: optionally export if modified, then restore matching built-in if available.
+        try {
+            if (style.modified && !force) {
+                const proceed = window.confirm(`Imported style ${style.id} was modified. Export before deleting?`);
+                if (proceed) {
+                    // Ignore return value; even if export fails, continue with deletion.
+                    this.exportStyleYamlFile(styleId);
+                }
+            }
+        } catch (e) {
+            // In case running outside browser or confirm not available, ignore.
+        }
+
+        // Delete the imported style entry and notify listeners.
         style.featureLayerStyle?.delete();
         this.styleRemovedForId.next(styleId);
         this.styles.delete(styleId);
-        if (style.imported) {
-            this.importedStylesCount--;
-            this.saveImportedStyles();
-        } else {
-            this.saveModifiedBuiltinStyles();
+        this.importedStylesCount--;
+        this.saveImportedStyles();
+
+        // Try to restore corresponding built-in style (same id) using recorded styleHashes (url -> {id,...}).
+        for (const url of this.styleUrls) {
+            if (url.id === styleId) {
+                const builtinUrl = url.url;
+                this.fetchStylesYamlSources([{id: styleId, url: builtinUrl} as any]).then(map => {
+                    const source = map.get(builtinUrl!);
+                    if (source) {
+                        const restoredId = this.initializeStyle(source, builtinUrl!, styleId, false, false);
+                        if (restoredId) {
+                            this.reapplyStyle(restoredId);
+                        }
+                    }
+                }).catch(err => {
+                    console.error('Failed to restore built-in style after deletion:', err);
+                });
+                break;
+            }
         }
     }
 
@@ -595,8 +624,8 @@ export class StyleService {
         return styleHashes;
     }
 
-    private async compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
-        const styleHash = await this.styleSha256(style.source);
+    private compareStyleHashes(style: ErdblickStyle, styleHashes: Map<string, string>) {
+        const styleHash = sipHash64Hex(style.source);
         this.styleHashes.set(style.url, {
             id: style.id,
             sha256: styleHash,
@@ -610,17 +639,5 @@ export class StyleService {
         const pairs = Array.from(this.styleHashes, ([styleUrl, status]) => [styleUrl, status.sha256]);
         localStorage.setItem('styleHashes', JSON.stringify(pairs));
         this.styleHashes.clear();
-    }
-
-    private async styleSha256(input: string): Promise<string> {
-        // TODO: We have our own hash in hash.ts that we can use.
-        if (globalThis.isSecureContext && globalThis.crypto?.subtle) {
-            const data = new TextEncoder().encode(input);
-            const buffer = await crypto.subtle.digest('SHA-256', data);
-            return Array.from(new Uint8Array(buffer), b => b.toString(16)
-                .padStart(2, '0')).join('');
-        } else {
-            return "";
-        }
     }
 }

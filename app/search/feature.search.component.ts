@@ -215,7 +215,7 @@ export class FeatureSearchComponent {
             this.infoMessageService.showAlertDialog(
                 this.alertContainer,
                 'Feature Search Errors',
-                Array.from(errors).join('\n'))
+                Array.from(errors).join('\n'));
 
         } else if (results.length == 0) {
             if (this.diagnostics.length > 0)

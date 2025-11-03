@@ -143,3 +143,19 @@ export function shortId4(
     const top20 = Number((h >> 44n) & 0x0f_ffffn);    // take top 20 bits
     return crockfordBase32_20bits(top20);
 }
+
+/**
+ * 64-bit SipHash digest as 16-char lowercase hex.
+ * - `key` is any string; keep it stable for consistent hashes.
+ * - Accepts string or pre-encoded bytes to avoid double work.
+ */
+export function sipHash64Hex(
+    input: string | Uint8Array,
+    key = "style-hash-v1"
+): string {
+    const { k0, k1 } = deriveKey128(key);
+    const bytes = typeof input === "string" ? utf8Bytes(input) : input;
+    const h = siphash24(bytes, k0, k1); // 64-bit BigInt
+    // Convert to fixed-width 16-hex chars (lowercase)
+    return h.toString(16).padStart(16, "0");
+}

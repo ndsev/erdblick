@@ -1,9 +1,10 @@
-import {Component} from '@angular/core';
+import {Component, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {AppModeService} from "./shared/app-mode.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
+import {InfoMessageService} from "./shared/info.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -84,7 +85,11 @@ export class AppComponent {
     constructor(private httpClient: HttpClient,
                 public mapService: MapDataService,
                 public appModeService: AppModeService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                private viewContainerRef: ViewContainerRef,
+                private infoMessageService: InfoMessageService) {
+        // Register a default container for alert dialogs
+        this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         window.ebDebug = new ErdblickDebugApi(
             this.mapService,
             this.stateService

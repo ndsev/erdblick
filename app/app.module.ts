@@ -98,6 +98,7 @@ import {Splitter} from "primeng/splitter";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
+import {ToggleButton} from "primeng/togglebutton";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -283,7 +284,8 @@ export const initializeServices = () => {
         SelectButtonModule,
         ChipModule,
         Splitter,
-        ToggleSwitch
+        ToggleSwitch,
+        ToggleButton
     ],
     providers: [
         provideAppInitializer(initializeServices),

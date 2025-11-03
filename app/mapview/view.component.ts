@@ -5,7 +5,6 @@ import {
     Component,
     ElementRef,
     OnDestroy,
-    OnInit,
     ViewChild,
     input,
     InputSignal
@@ -28,9 +27,15 @@ import {filter} from "rxjs/operators";
     selector: 'map-view',
     template: `
         <div #viewer [ngClass]="{'border': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        <p-multiSelect *ngIf="showSyncMenu" dropdownIcon="pi pi-link" [options]="syncOptions" [(ngModel)]="selectedOptions"
-                       (ngModelChange)="updateSelectedOptions()" optionLabel="name" [filter]="false" [showToggleAll]="false"
-                       placeholder="" class="viewsync-select"/>
+        @if (showSyncMenu) {
+            <p-buttonGroup class="viewsync-select">
+                @for (option of syncOptions; track $index) {
+                    <p-toggleButton onIcon="pi pi-check" offIcon="pi pi-times" [ngClass]="{'green': option.value}"
+                                    [(ngModel)]="option.value" (ngModelChange)="updateSelectedOptions()" 
+                                    [onLabel]="option.name" [offLabel]="option.name" />
+                }
+            </p-buttonGroup>
+        }
         <p-contextMenu *ngIf="!appModeService.isVisualizationOnly" [target]="viewer" [model]="menuItems"
                        (onHide)="onContextMenuHide()" appendTo="body" />
         <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
@@ -55,13 +60,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
-    syncOptions: {name: string, value: string}[] = [
-        {name: "Position", value: VIEW_SYNC_POSITION},
-        {name: "Movement", value: VIEW_SYNC_MOVEMENT},
-        {name: "Projection", value: VIEW_SYNC_PROJECTION},
-        {name: "Layers", value: VIEW_SYNC_LAYERS}
+    syncOptions: {name: string, code: string, value: boolean}[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, value: false},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false}
     ];
-    selectedOptions: {name: string, value: string}[] = [];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
     private modeSubscription?: Subscription;
@@ -72,7 +76,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
      * @param featureSearchService
      * @param stateService The parameter service, used to update
      * @param jumpService
-     * @param inspectionService
      * @param keyboardService
      * @param menuService
      * @param coordinatesService Necessary to pass mouse events to the coordinates panel
@@ -160,7 +163,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
             this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
             this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
             const currentSyncState = new Set(this.stateService.viewSync);
-            this.selectedOptions = this.syncOptions.filter(option => currentSyncState.has(option.value));
+            this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
             this.cdr.markForCheck();
         });
     }
@@ -171,9 +174,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
 
     updateSelectedOptions() {
         const previousSelection = new Set(this.stateService.viewSync);
-        let selectedValues = this.selectedOptions.map(option => option.value);
-        const hasMovement = selectedValues.includes(VIEW_SYNC_MOVEMENT);
-        const hasPosition = selectedValues.includes(VIEW_SYNC_POSITION);
+        const hasMovement = this.syncOptions.some(option => option.code === VIEW_SYNC_MOVEMENT && option.value);
+        const hasPosition = this.syncOptions.some(option => option.code === VIEW_SYNC_POSITION && option.value);
 
         if (hasMovement && hasPosition) {
             let valueToRemove = VIEW_SYNC_POSITION;
@@ -186,11 +188,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
             } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
                 valueToRemove = VIEW_SYNC_MOVEMENT;
             }
-            this.selectedOptions = this.selectedOptions.filter(option => option.value !== valueToRemove);
-            selectedValues = this.selectedOptions.map(option => option.value);
+            for (const option of this.syncOptions) {
+                if (option.code === valueToRemove) {
+                    option.value = false;
+                }
+            }
         }
 
-        this.stateService.viewSync = selectedValues;
+        this.stateService.viewSync = this.syncOptions.filter(option =>
+            option.value).map(option=> option.code);
         this.stateService.syncViews();
     }
 }
