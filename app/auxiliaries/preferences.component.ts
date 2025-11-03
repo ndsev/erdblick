@@ -169,7 +169,7 @@ import {EditorService} from "../shared/editor.service";
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                width: 30em;
+                width: 29em;
                 margin: 1em 0;
             }
 

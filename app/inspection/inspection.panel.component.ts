@@ -34,7 +34,7 @@ interface SourceLayerMenuItem {
                                           (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
                                           scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
                                           optionLabel="label"
-                                          optionDisabled="disabled" appendTo="body"/>
+                                          optionDisabled="disabled"/>
                             }
                         </span>
                         <span>
@@ -159,9 +159,11 @@ export class InspectionPanelComponent implements AfterViewInit {
         // back to the feature-set from which it was called up.
         event.stopPropagation();
         const panel = this.panel();
-        this.title = panel.features.length > 1 ?
-            `Selected ${panel.features.length} features` :
-            panel.features[0].featureId;
+        if (panel.features.length) {
+            this.title = panel.features.length > 1 ?
+                `Selected ${panel.features.length} features` :
+                panel.features[0].featureId;
+        }
         this.errorMessage = "";
         this.stateService.setSelection(this.panel().features, this.panel().id);
     }

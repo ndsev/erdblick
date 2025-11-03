@@ -26,6 +26,7 @@
 
 .source-layer-dropdown {
   height: 1.6em;
+  z-index: 9999;
 
   .p-select-label {
     padding: 0.2em;
@@ -73,6 +74,19 @@ body {
 
   .p-contextmenu {
     width: 22em;
+  }
+
+  .p-dialog {
+    z-index: 9001 !important;
+
+    .p-dialog-header {
+      padding: 0.75em !important;
+      height: 2.5em !important;
+    }
+
+    .p-dialog-content {
+      padding: 0.5em !important;
+    }
   }
 }
 
@@ -658,7 +672,6 @@ map-view {
     z-index: 1500;
   }
 
-
   &.shifted {
     left: 0.5em !important;
   }
@@ -689,10 +702,16 @@ map-view {
       transition-duration: 0.1s !important;
       padding: 0.75em;
       font-size: 1em;
+      margin-top: 0;
+      margin-bottom: 0;
+      border-bottom-width: 0;
+      border-bottom-style: solid;
+      border-top-width: 0;
+      border-top-style: solid;
     }
 
     textarea.single-line {
-      min-height: 2.9em;
+      min-height: 3em;
       width: 24em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
@@ -1352,6 +1371,15 @@ map-view {
 .pref-dialog {
   margin: 0;
 
+  .p-dialog-header {
+    padding: 0.75em !important;
+    height: 2.5em !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em !important;
+  }
+
   .p-dialog-content {
     .p-button {
       margin: 0.5em 0.5em 0.5em 0;
@@ -1775,17 +1803,24 @@ map-view {
     flex-direction: column-reverse;
   }
 
-  .layers-button {
+  .main-button-controls {
     position: absolute;
     top: 0;
     left: 0;
-    width: 3em;
 
-    .p-button {
-      border-radius: 0;
-      height: 3em;
+    .layers-button {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2.5em;
+      height: 2.5em;
+
+      .p-button {
+        border-radius: 0;
+      }
     }
   }
+
 
   .search-wrapper {
     position: absolute;
