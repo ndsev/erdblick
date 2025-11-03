@@ -36,14 +36,13 @@ export class FeatureFilterOptions {
                      [scrollable]="true"
                      [resizableColumns]="true"
                      [virtualScroll]="true"
-                     [virtualScrollItemSize]="26"
+                     [virtualScrollItemSize]="'1.5em'"
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
                 <!-- TODO: transfer the inlined styles to styles.SCSS -->
-                <div class="flex justify-content-end align-items-center"
-                     style="display: flex; align-content: center; justify-content: center; width: 100%;">
-                    <p-iconfield class="filter-container">
+                <div class="filter-container">
+                    <p-iconfield class="input-container">
                         @if (filterOptions()) {
                             <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
                                          style="cursor: pointer"/>
@@ -59,16 +58,14 @@ export class FeatureFilterOptions {
                     @if (selectedFeatures()) {
                         <!-- TODO: Zoom to whole feature collection -->
                         <p-button (click)="mapService.zoomToFeature(undefined, selectedFeatures()![0])"
-                                label="" pTooltip="Focus on feature" tooltipPosition="bottom"
-                                [style]="{'padding-left': '0', 'padding-right': '0', 'margin-left': '0.5em', width: '2em', height: '2em'}">
-                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                label="" pTooltip="Focus on feature" tooltipPosition="bottom">
+                            <span class="material-symbols-outlined">center_focus_strong</span>
                         </p-button>
                     }
                     @if (geoJson()) {
-                        <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" [appendTo]="'body'" [baseZIndex]="9999"></p-menu>
-                        <p-button (click)="showGeoJsonMenu($event)" icon="pi pi-download" label=""
-                                  [style]="{'margin-left': '0.5em', width: '2em', height: '2em'}"
+                        <p-button (click)="showGeoJsonMenu($event)" icon="" label=""
                                   pTooltip="GeoJSON actions" tooltipPosition="bottom">
+                            <span class="material-symbols-outlined">download</span>
                         </p-button>
                     }
                 </div>
@@ -169,6 +166,7 @@ export class FeatureFilterOptions {
                 </tr>
             </ng-template>
         </p-treeTable>
+        <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="9999"></p-menu>
         <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="9999" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">

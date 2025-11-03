@@ -2,16 +2,12 @@ import {
     AfterViewInit,
     Component,
     computed,
-    EffectRef,
     ElementRef,
-    Injector,
-    OnDestroy,
-    ViewChild,
-    effect,
     input,
     InputSignal,
-    runInInjectionContext,
-    Signal
+    OnDestroy,
+    Signal,
+    ViewChild
 } from "@angular/core";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
@@ -19,99 +15,54 @@ import {CesiumMath} from "../integrations/cesium";
 import {MapView} from "./view";
 import {AppStateService} from "../shared/appstate.service";
 import {toObservable, toSignal} from "@angular/core/rxjs-interop";
-import {fromEventPattern, map, Observable, Subscription, switchMap, tap} from "rxjs";
+import {Observable, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
+import {SceneMode} from "../integrations/cesium";
 
 @Component({
     selector: 'erdblick-view-ui',
     template: `
-        <div class="compass-circle" [ngClass]="{'mirrored-compass': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly" 
-             (click)="mapView()?.resetOrientation()" pTooltip="Reset Orientation (R)">
-            <div class="compass-label north">N</div>
-            <div class="compass-label east">E</div>
-            <div class="compass-label south">S</div>
-            <div class="compass-label west">W</div>
-            <div class="compass-needle" #compassNeedle (click)="mapView()?.resetOrientation()"></div>
-        </div>
-        <div class="navigation-controls" [ngClass]="{'mirrored-controls': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly">
-            <div class="nav-control-group">
-                <p-button icon="pi pi-plus" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
-                          size="small" pTooltip="Zoom In (Q)"></p-button>
-                <p-button icon="pi pi-minus" (onClick)="mapView()?.zoomOut()" [rounded]="true" severity="secondary"
-                          size="small" pTooltip="Zoom Out (E)"></p-button>
-            </div>
-            <div class="nav-control-group">
-                <p-button icon="pi pi-arrow-up" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
-                          size="small" pTooltip="Move Up (W)"></p-button>
-                <div class="nav-horizontal">
-                    <p-button icon="pi pi-arrow-left" (onClick)="mapView()?.moveLeft()" [rounded]="true"
-                              severity="secondary" size="small" pTooltip="Move Left (A)"></p-button>
-                    <p-button icon="pi pi-arrow-right" (onClick)="mapView()?.moveRight()" [rounded]="true"
-                              severity="secondary" size="small" pTooltip="Move Right (D)"></p-button>
+        @if (!appModeService.isVisualizationOnly) {
+            <div class="view-ui-container" [ngClass]="{'mirrored': isPrimary()}">
+                <div class="navigation-controls">
+                    <div class="nav-control-group">
+                        <p-button icon="pi pi-plus" (onClick)="mapView()?.zoomIn()" [rounded]="true" severity="secondary"
+                                  size="small" pTooltip="Zoom In (Q)" class="move-button"></p-button>
+                        <p-button icon="pi pi-minus" (onClick)="mapView()?.zoomOut()" [rounded]="true" severity="secondary"
+                                  size="small" pTooltip="Zoom Out (E)" class="move-button"></p-button>
+                    </div>
+                    <div class="nav-control-group">
+                        <p-button icon="pi pi-arrow-up" (onClick)="mapView()?.moveUp()" [rounded]="true" severity="secondary"
+                                  size="small" pTooltip="Move Up (W)" class="move-button"></p-button>
+                        <div class="nav-horizontal">
+                            <p-button icon="pi pi-arrow-left" (onClick)="mapView()?.moveLeft()" [rounded]="true"
+                                      severity="secondary" size="small" pTooltip="Move Left (A)" class="move-button"></p-button>
+                            <p-button icon="pi pi-arrow-right" (onClick)="mapView()?.moveRight()" [rounded]="true"
+                                      severity="secondary" size="small" pTooltip="Move Right (D)" class="move-button"></p-button>
+                        </div>
+                        <p-button icon="pi pi-arrow-down" (onClick)="mapView()?.moveDown()" [rounded]="true"
+                                  severity="secondary" size="small" pTooltip="Move Down (S)" class="move-button"></p-button>
+                    </div>
                 </div>
-                <p-button icon="pi pi-arrow-down" (onClick)="mapView()?.moveDown()" [rounded]="true"
-                          severity="secondary" size="small" pTooltip="Move Down (S)"></p-button>
+                <div class="compass-circle" (click)="mapView()?.resetOrientation()" pTooltip="Reset Orientation (R)">
+                    <div class="compass-label north">N</div>
+                    <div class="compass-label east">E</div>
+                    <div class="compass-label south">S</div>
+                    <div class="compass-label west">W</div>
+                    <div class="compass-needle" #compassNeedle (click)="mapView()?.resetOrientation()"></div>
+                </div>
+                <div class="scene-mode-toggle">
+                    <p-selectButton [options]="projectionOptions" [(ngModel)]="projection"
+                                    (ngModelChange)="toggleSceneMode()" optionLabel="mode">
+                        <ng-template #item let-item>
+                            <span class="material-symbols-outlined">{{ item.icon }}</span>
+                        </ng-template>
+                    </p-selectButton>
+                </div>
             </div>
-        </div>
-        <div class="scene-mode-toggle" [ngClass]="{'mirrored-toggle': isPrimary()}" *ngIf="!appModeService.isVisualizationOnly">
-            <p-button
-                    [ngClass]="{'blue': is2D()}"
-                    [label]="is2D() ? '2D' : '3D'"
-                    [pTooltip]="is2D() ? 'Switch to 3D' : 'Switch to 2D'"
-                    tooltipPosition="left"
-                    (onClick)="toggleSceneMode()"
-                    [rounded]="true"
-                    severity="secondary"
-                    size="large">
-            </p-button>
-        </div>
+        }
     `,
-    styles: [`
-        .scene-mode-toggle {
-            position: absolute;
-            bottom: 5em;
-            right: 1em;
-            z-index: 110;
-        }
-
-        .mirrored-toggle {
-            left: 1em !important;
-            right: unset !important;
-        }
-
-        .navigation-controls {
-            position: absolute;
-            bottom: 9em;
-            right: 0.5em;
-            z-index: 110;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5em;
-            align-items: center;
-        }
-        
-        .mirrored-controls {
-            left: 0.5em !important;
-            right: unset !important;
-        }
-
-        .nav-control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25em;
-            align-items: center;
-        }
-
-        .nav-horizontal {
-            display: flex;
-            gap: 0.25em;
-        }
-        
-        .mirrored-compass {
-            left: 0.7em !important;
-            right: unset !important;
-        }
-    `],
+    styles: [``],
     standalone: false
 })
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
@@ -127,6 +78,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         }
         return this.numViews() > 1 && mapView.viewIndex === 0;
     });
+    projectionOptions: {icon: string, mode: string}[] = [
+        { icon: '3d', mode: '3D projection' },
+        { icon: '2d', mode: '2D projection' },
+    ];
+    projection: {icon: string, mode: string} = this.projectionOptions[0];
 
     private mapViewSubscription = new Subscription();
     private mapView$: Observable<MapView | undefined>;
@@ -142,6 +98,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
             filter(mv=> mv !== undefined)).subscribe(mapView => {
+                this.projection = mapView?.getSceneMode() === SceneMode.SCENE2D ?
+                    { icon: '2d', mode: '2D projection' } :
+                    { icon: '3d', mode: '3D projection' };
                 let currentRotationDeg = 0;
                 mapView.viewer.clock.onTick.addEventListener(() => {
                     if (needle && mapView.isAvailable()) {
@@ -177,7 +136,8 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (!mapView) {
             return;
         }
+        this.stateService.focusedView = mapView.viewIndex;
         const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
         this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
-        this.stateService.focusedView = mapView.viewIndex;    }
+    }
 }

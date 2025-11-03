@@ -79,12 +79,12 @@ export class ArrayTypeComponent extends FieldArrayType {}
     selector: 'datasources',
     template: `
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog class="editor-dialog" (onShow)="loadConfigEditor()" [style]="{'min-height': '14em', 'min-width': '36em'}">
+                  #editorDialog (onShow)="loadConfigEditor()" class="editor-dialog datasource-dialog" appendTo="body">
             <p *ngIf="errorMessage">{{ errorMessage }}</p>
             <div [ngClass]="{'loading': loading || errorMessage }">
                 <editor></editor>
                 <div *ngIf="!errorMessage && !readOnly" 
-                     style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; 
+                     style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; 
                      justify-content: space-between;">
                     <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                         <p-button (click)="applyEditedDatasourceConfig()" label="Apply" icon="pi pi-check"

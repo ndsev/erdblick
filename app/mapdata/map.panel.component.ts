@@ -21,9 +21,9 @@ import {Rectangle} from "../integrations/cesium";
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
             <ng-container *ngFor="let index of viewIndices">
-                <p-fieldset class="map-tab" legend="" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
+                <p-fieldset class="map-tab" [toggleable]="true" [(collapsed)]="mapsCollapsed[index]">
                     <ng-template #header>
-                        <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
+                        <div>
                             @if (stateService.numViews > 1) {
                                 @if (index < 1) {
                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
@@ -87,20 +87,19 @@ import {Rectangle} from "../integrations/cesium";
                                 <ng-template let-node pTemplate="Group">
                                     <div class="font-bold white-space-nowrap"
                                          style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-icons menu-toggler" tabindex="0"
-                                          (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
-                                        more_vert
-                                    </span>
-                                        <span>
-                                        <p-checkbox [ngModel]="node.visible[index]"
-                                                    (click)="$event.stopPropagation()"
-                                                    (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
-                                                    [binary]="true"
-                                                    [inputId]="node.id"
-                                                    [name]="node.id" tabindex="0"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
-                                    </span>
+                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                              (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
+                                            more_vert
+                                        </span>
+                                        <span class="checkbox-entry">
+                                            <p-checkbox [ngModel]="node.visible[index]"
+                                                        (click)="$event.stopPropagation()"
+                                                        (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
+                                                        [binary]="true"
+                                                        [inputId]="node.id"
+                                                        [name]="node.id" tabindex="0"/>
+                                            <label [for]="node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                        </span>
                                     </div>
                                 </ng-template>
                                 <!-- Template for Map nodes -->
@@ -109,7 +108,7 @@ import {Rectangle} from "../integrations/cesium";
                                             [popup]="true"
                                             appendTo="body"/>
                                     <div class="flex-container">
-                                    <span>
+                                    <span class="checkbox-entry">
                                         <span onEnterClick class="material-icons menu-toggler" tabindex="0"
                                               (click)="showLayersToggleMenu($event, index, node.id, '')">
                                                 more_vert
@@ -120,8 +119,7 @@ import {Rectangle} from "../integrations/cesium";
                                                     [binary]="true"
                                                     [inputId]="node.id"
                                                     [name]="node.id" tabindex="0"/>
-                                        <label [for]="node.id"
-                                               style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                        <label [for]="node.id">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
                                     <div class="map-controls">
                                         <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
@@ -154,15 +152,14 @@ import {Rectangle} from "../integrations/cesium";
                                                   (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
                                                 more_vert
                                             </span>
-                                            <span>
+                                            <span class="checkbox-entry">
                                                 <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
                                                             (click)="$event.stopPropagation()"
                                                             (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
                                                             [binary]="true"
                                                             [inputId]="node.id"
                                                             [name]="node.id" tabindex="0"/>
-                                                <label [for]="node.id"
-                                                       style="margin-left: 0.5em; cursor: pointer">{{ node.id }}</label>
+                                                <label [for]="node.id">{{ node.id }}</label>
                                             </span>
                                         </div>
                                         <div class="tree-node-controls">
@@ -211,7 +208,7 @@ import {Rectangle} from "../integrations/cesium";
                                               tabindex="0">
                                             more_vert
                                         </span>
-                                        <span class="oblique"
+                                        <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
                                                     [(ngModel)]="node.value[index]"
@@ -219,8 +216,7 @@ import {Rectangle} from "../integrations/cesium";
                                                     [binary]="true"
                                                     [inputId]="node.styleId + '_' + node.id"
                                                     [name]="node.styleId + '_' + node.id"/>
-                                            <label [for]="node.styleId + '_' + node.id"
-                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.info.label }}</label>
+                                            <label [for]="node.styleId + '_' + node.id">{{ node.info.label }}</label>
                                         </span>
                                     </div>
                                 </ng-template>
@@ -230,7 +226,7 @@ import {Rectangle} from "../integrations/cesium";
                     </ng-container>
                 </p-fieldset>
                 @if (viewIndices.length < 2) {
-                    <p-button onEnterClick (click)="addView()" icon="" label="Add View"
+                    <p-button onEnterClick class="add-view-button" (click)="addView()" icon="" label="Add View"
                               pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
                         <span class="material-symbols-outlined" style="margin: 0 auto;">
                             add_column_right

@@ -18,7 +18,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
 @Component({
     selector: 'style-panel',
     template: `
-        <p-dialog header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
+        <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
                   [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles>
             <ng-container *ngIf="styleService.styleGroups | async as styleGroups">
                 <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
@@ -85,6 +85,8 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                                 </span>
                             </div>
                         </ng-template>
+                        <ng-template let-node pTemplate="String">
+                        </ng-template>
                     </p-tree>
                 </div>
             </ng-container>
@@ -96,7 +98,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                 </span>
                 </div>
             </div>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
+            <div class="dialog-controls">
                 <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
                               accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
@@ -129,7 +131,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
                   class="editor-dialog" appendTo="body">
             <editor></editor>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
+            <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                     <p-button (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
                               [disabled]="!sourceWasModified"></p-button>

@@ -104,6 +104,7 @@ export class InspectionPanelComponent implements AfterViewInit {
                 public stateService: AppStateService,
                 private renderer: Renderer2) {
         effect(() => {
+            this.title = "";
             const panel = this.panel();
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;
@@ -136,6 +137,7 @@ export class InspectionPanelComponent implements AfterViewInit {
                     this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
                 } else {
                     this.layerMenuItems = [];
+                    this.title = "";
                     this.selectedLayerItem = undefined;
                 }
             } else {
@@ -156,6 +158,10 @@ export class InspectionPanelComponent implements AfterViewInit {
         // The back-button can be used to navigate from a SourceData selection
         // back to the feature-set from which it was called up.
         event.stopPropagation();
+        const panel = this.panel();
+        this.title = panel.features.length > 1 ?
+            `Selected ${panel.features.length} features` :
+            panel.features[0].featureId;
         this.errorMessage = "";
         this.stateService.setSelection(this.panel().features, this.panel().id);
     }

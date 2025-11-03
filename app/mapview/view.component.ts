@@ -30,9 +30,13 @@ import {filter} from "rxjs/operators";
         @if (showSyncMenu) {
             <p-buttonGroup class="viewsync-select">
                 @for (option of syncOptions; track $index) {
-                    <p-toggleButton onIcon="pi pi-check" offIcon="pi pi-times" [ngClass]="{'green': option.value}"
+                    <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
                                     [(ngModel)]="option.value" (ngModelChange)="updateSelectedOptions()" 
-                                    [onLabel]="option.name" [offLabel]="option.name" />
+                                    onLabel="" offLabel="" [pTooltip]="'Sync ' + option.name" tooltipPosition="bottom">
+                        <ng-template #icon>
+                            <span class="material-symbols-outlined">{{ option.icon }}</span>
+                        </ng-template>
+                    </p-toggleButton>
                 }
             </p-buttonGroup>
         }
@@ -60,11 +64,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
-    syncOptions: {name: string, code: string, value: boolean}[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, value: false},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false}
+    syncOptions: {name: string, code: string, value: boolean, icon: string}[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers"}
     ];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
@@ -174,8 +178,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
 
     updateSelectedOptions() {
         const previousSelection = new Set(this.stateService.viewSync);
-        const hasMovement = this.syncOptions.some(option => option.code === VIEW_SYNC_MOVEMENT && option.value);
-        const hasPosition = this.syncOptions.some(option => option.code === VIEW_SYNC_POSITION && option.value);
+        const hasMovement = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_MOVEMENT && option.value);
+        const hasPosition = this.syncOptions.some(option =>
+            option.code === VIEW_SYNC_POSITION && option.value);
 
         if (hasMovement && hasPosition) {
             let valueToRemove = VIEW_SYNC_POSITION;
