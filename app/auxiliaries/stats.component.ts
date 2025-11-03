@@ -6,8 +6,7 @@ import { ClipboardService } from "../shared/clipboard.service";
 @Component({
     selector: 'stats-dialog',
     template: `
-        <p-dialog header="Viewport Statistics" [(visible)]="mapService.statsDialogVisible" [modal]="false"
-                  [style]="{'min-height': '20em', 'min-width': '40em', 'width': '40em'}">
+        <p-dialog header="Viewport Statistics" class="stats-dialog" [(visible)]="mapService.statsDialogVisible" [modal]="false">
             <div class="dialog-content">
                 <p-multiSelect
                     [options]="availableMapLayers"

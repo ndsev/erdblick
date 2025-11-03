@@ -81,11 +81,9 @@ export class StyleService {
 
     styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
 
-    constructor(
-        private httpClient: HttpClient,
-        private stateService: AppStateService,
-        private infoMessageService: InfoMessageService
-    ) {
+    constructor(private httpClient: HttpClient,
+                private stateService: AppStateService,
+                private infoMessageService: InfoMessageService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -177,7 +175,9 @@ export class StyleService {
         });
 
         // Ensure that if the style was renamed, its visibility is retained.
-        this.stateService.setStyleVisibility(styleId, isVisible);
+        if (this.stateService.ready.getValue()) {
+            this.stateService.setStyleVisibility(styleId, isVisible);
+        }
 
         return styleId;
     }
@@ -492,6 +492,7 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
+        style.visible = this.stateService.getStyleVisibility(styleId);
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.visible) {

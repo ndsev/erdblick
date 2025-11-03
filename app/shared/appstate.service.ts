@@ -978,7 +978,6 @@ export class AppStateService implements OnDestroy {
 
     setStyleVisibility(styleId: string, val: boolean) {
         this.styleVisibility[styleId] = val;
-        // Trigger BehaviorSubject update.
         this.styleVisibilityState.next(this.styleVisibility);
     }
 

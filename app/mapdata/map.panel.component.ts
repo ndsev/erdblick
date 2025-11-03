@@ -96,9 +96,9 @@ import {Rectangle} from "../integrations/cesium";
                                                         (click)="$event.stopPropagation()"
                                                         (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
                                                         [binary]="true"
-                                                        [inputId]="node.id"
-                                                        [name]="node.id" tabindex="0"/>
-                                            <label [for]="node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                                        [inputId]="index + '_' + node.id"
+                                                        [name]="index + '_' + node.id" tabindex="0"/>
+                                            <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
                                         </span>
                                     </div>
                                 </ng-template>
@@ -117,9 +117,9 @@ import {Rectangle} from "../integrations/cesium";
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
                                                     [binary]="true"
-                                                    [inputId]="node.id"
-                                                    [name]="node.id" tabindex="0"/>
-                                        <label [for]="node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                                    [inputId]="index + '_' + node.id"
+                                                    [name]="index + '_' + node.id" tabindex="0"/>
+                                        <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
                                     <div class="map-controls">
                                         <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
@@ -157,9 +157,9 @@ import {Rectangle} from "../integrations/cesium";
                                                             (click)="$event.stopPropagation()"
                                                             (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
                                                             [binary]="true"
-                                                            [inputId]="node.id"
-                                                            [name]="node.id" tabindex="0"/>
-                                                <label [for]="node.id">{{ node.id }}</label>
+                                                            [inputId]="index + '_' + node.key"
+                                                            [name]="index + '_' + node.key" tabindex="0"/>
+                                                <label [for]="index + '_' + node.key">{{ node.id }}</label>
                                             </span>
                                         </div>
                                         <div class="tree-node-controls">
@@ -214,9 +214,9 @@ import {Rectangle} from "../integrations/cesium";
                                                     [(ngModel)]="node.value[index]"
                                                     (ngModelChange)="updateStyleOption(node, index)"
                                                     [binary]="true"
-                                                    [inputId]="node.styleId + '_' + node.id"
-                                                    [name]="node.styleId + '_' + node.id"/>
-                                            <label [for]="node.styleId + '_' + node.id">{{ node.info.label }}</label>
+                                                    [inputId]="index + '_' + node.key"
+                                                    [name]="index + '_' + node.key"/>
+                                            <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
                                         </span>
                                     </div>
                                 </ng-template>

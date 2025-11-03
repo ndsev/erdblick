@@ -76,16 +76,18 @@ body {
     width: 22em;
   }
 
-  .p-dialog {
-    z-index: 9001 !important;
+  .editor-dialog {
+    .p-dialog {
+      z-index: 9001 !important;
 
-    .p-dialog-header {
-      padding: 0.75em !important;
-      height: 2.5em !important;
-    }
+      .p-dialog-header {
+        padding: 0.75em !important;
+        height: 2.5em !important;
+      }
 
-    .p-dialog-content {
-      padding: 0.5em !important;
+      .p-dialog-content {
+        padding: 0.5em !important;
+      }
     }
   }
 }
@@ -202,6 +204,27 @@ map-view {
   padding: 0;
   margin: 0;
   overflow: hidden;
+}
+
+.stats-dialog {
+  .p-dialog-mask {
+    z-index: 9001 !important;
+  }
+
+  .p-dialog {
+    min-height: 20em;
+    min-width: 40em;
+    width: 40em;
+
+    .p-dialog-header {
+      padding: 0.75em !important;
+      height: 2.5em !important;
+    }
+
+    .p-dialog-content {
+      padding: 0.5em !important;
+    }
+  }
 }
 
 .datasource-dialog {
@@ -383,7 +406,7 @@ map-view {
   flex-direction: column-reverse;
   gap: 0.25em;
   position: relative;
-  z-index: 1100;
+  z-index: 9001;
   background: var(--p-content-background);
   box-shadow: var(--p-dialog-shadow);
   padding: 0.25em;
@@ -911,17 +934,17 @@ map-view {
 }
 
 .feature-search-dialog {
-  z-index: 1000 !important;
+  z-index: 9001 !important;
 
   .p-dialog-mask {
-    z-index: 1000 !important;
+    z-index: 9001 !important;
   }
 
   .p-dialog {
     width: 30em;
     min-width: 25em;
     margin: 0 !important;
-    z-index: 1000 !important;
+    z-index: 9001 !important;
     overflow-x: hidden;
   }
 
@@ -1088,6 +1111,10 @@ map-view {
 }
 
 .styles-dialog {
+  .p-dialog-mask {
+    z-index: 9001 !important;
+  }
+
   .p-dialog {
     min-width: 30em;
     width: 30em;

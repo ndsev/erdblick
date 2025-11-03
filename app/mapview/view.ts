@@ -666,11 +666,11 @@ export class MapView {
                         this.tileOutlineEntity = null;
                     }
                     this.tileOutlineEntity = this.viewer.entities.add(entity);
-                    this.viewer.scene.render();
+                    this.viewer.scene.requestRender();
                 } else if (this.tileOutlineEntity) {
                     this.viewer.entities.remove(this.tileOutlineEntity);
                     this.tileOutlineEntity = null;
-                    this.viewer.scene.render();
+                    this.viewer.scene.requestRender();
                 }
             })
         );

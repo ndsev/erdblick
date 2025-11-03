@@ -330,7 +330,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     openHelp() {
-        window.open("https://developer.nds.live/tools/the-new-mapviewer/user-guide", "_blank");
+        window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
     }
 
     clearURLProperties() {

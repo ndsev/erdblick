@@ -260,10 +260,10 @@ export class StyleComponent {
         if (style === undefined || style === null) {
             return;
         }
+        this.stateService.setStyleVisibility(styleId, style.visible);
         if (redraw) {
             this.styleService.reapplyStyle(styleId);
         }
-        // this.stateService.setStyleConfig(styleId, style.params);
     }
 
     resetStyle(styleId: string) {
