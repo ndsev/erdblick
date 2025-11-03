@@ -346,7 +346,17 @@ export class SearchPanelComponent implements AfterViewInit {
             const length = this.completionItems.length
             if (length <= this.completion.selectionIndex)
                 this.completion.selectionIndex = length;
-            this.completion.visible = length > 0;
+
+            // Only show the pop-up if the pop-up was prev. hidden
+            // or the currently focused element is the query input.
+            // This is to prevent the pop-up showing if the user quickly
+            // tabs out of the query input before the first completion
+            // items are ready.
+            const focusValid =
+                this.completion.visible ||
+                this.textarea.nativeElement === document.activeElement;
+
+            this.completion.visible = length > 0 && focusValid;
         });
 
         this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
