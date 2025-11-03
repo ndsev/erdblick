@@ -55,7 +55,8 @@ import {SceneMode} from "../integrations/cesium";
                     <p-selectButton [options]="projectionOptions" [(ngModel)]="projection"
                                     (ngModelChange)="toggleSceneMode()" optionLabel="mode">
                         <ng-template #item let-item>
-                            <span class="material-symbols-outlined">{{ item.icon }}</span>
+                            <!-- <span class="material-symbols-outlined">{{ item.icon }}</span> -->
+                            <span>{{ item.label }}</span>
                         </ng-template>
                     </p-selectButton>
                 </div>
@@ -78,11 +79,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         }
         return this.numViews() > 1 && mapView.viewIndex === 0;
     });
-    projectionOptions: {icon: string, mode: string}[] = [
-        { icon: '3d', mode: '3D projection' },
-        { icon: '2d', mode: '2D projection' },
+    projectionOptions: {icon: string, label: string, mode: string}[] = [
+        { icon: '3d', label: '3D', mode: '3D projection' },
+        { icon: '2d', label: '2D', mode: '2D projection' },
     ];
-    projection: {icon: string, mode: string} = this.projectionOptions[0];
+    projection: {icon: string, label: string, mode: string} = this.projectionOptions[0];
 
     private mapViewSubscription = new Subscription();
     private mapView$: Observable<MapView | undefined>;
@@ -99,8 +100,8 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         this.mapViewSubscription.add(this.mapView$.pipe(
             filter(mv=> mv !== undefined)).subscribe(mapView => {
                 this.projection = mapView?.getSceneMode() === SceneMode.SCENE2D ?
-                    { icon: '2d', mode: '2D projection' } :
-                    { icon: '3d', mode: '3D projection' };
+                    { icon: '2d', label: '2D', mode: '2D projection' } :
+                    { icon: '3d', label: '3D', mode: '3D projection' };
                 let currentRotationDeg = 0;
                 mapView.viewer.clock.onTick.addEventListener(() => {
                     if (needle && mapView.isAvailable()) {

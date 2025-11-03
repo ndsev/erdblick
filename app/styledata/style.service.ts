@@ -492,7 +492,7 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.visible = this.stateService.getStyleVisibility(styleId);
+        style.visible = this.stateService.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.visible) {

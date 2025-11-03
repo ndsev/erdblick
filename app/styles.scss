@@ -284,7 +284,7 @@ map-view {
       }
 
       .p-togglebutton-content {
-        padding: 0;
+        padding: 0.3em;
 
         .material-symbols-outlined {
           font-size: 2em;
@@ -294,10 +294,7 @@ map-view {
       .p-togglebutton-checked {
         .p-togglebutton-content {
           background: var(--p-button-success-background) !important;
-        }
-
-        .material-symbols-outlined {
-          color: var(--p-button-success-color) !important;
+          color: var(--p-gray-900) !important;
         }
       }
     }
