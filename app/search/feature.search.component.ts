@@ -31,7 +31,7 @@ import {Scroller} from "primeng/scroller";
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
-                          pTooltip="{{isSearchPaused ? 'Resume search' : 'Pause search'}}"></p-button>
+                          [pTooltip]="isSearchPaused ? 'Resume search' : 'Pause search'"></p-button>
                 <p-button (click)="stopSearch()" icon="pi pi-stop-circle" label="" [disabled]="!canPauseStopSearch"
                           pTooltip="Stop search" tooltipPosition="bottom"></p-button>
             </div>
@@ -233,10 +233,8 @@ export class FeatureSearchComponent {
         // Support both listbox change and tree node select events
         const selected = event?.value || event?.node?.data || event;
         if (selected && selected.mapId && selected.featureId) {
-            for (let i = 0; i < this.stateService.numViews; i++) {
-                this.jumpService.highlightByJumpTargetFilter(i, selected.mapId, selected.featureId,
-                    coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
-            }
+            this.jumpService.highlightByJumpTargetFilter(selected.mapId, selected.featureId,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.stateService.focusedView).then();
         }
     }
 

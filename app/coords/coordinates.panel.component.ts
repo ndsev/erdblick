@@ -17,7 +17,7 @@ interface PanelOption {
     selector: "coordinates-panel",
     template: `
         <div class="coordinates-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
-            <p-button class="marker-button" (click)="toggleMarker()" label="" pTooltip="markerButtonTooltip" 
+            <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>

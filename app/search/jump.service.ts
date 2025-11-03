@@ -268,7 +268,8 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        this.highlightByJumpTarget(this.stateService.focusedView, fjt).then();
+                        this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+                            this.stateService.focusedView).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }
@@ -283,18 +284,21 @@ export class JumpTargetService {
         ]);
     }
 
-    async highlightByJumpTargetFilter(viewIndex: number, mapId: string, featureId: string, mode: HighlightMode=coreLib.HighlightMode.SELECTION_HIGHLIGHT, moveCamera: boolean = false) {
+    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
         let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.highlightByJumpTarget(viewIndex, featureJumpTargets[validIndex], moveCamera, mapId, mode);
+        await this.highlightByJumpTarget(featureJumpTargets[validIndex], mapId, mode, cameraMoveViewIndex);
     }
 
-    async highlightByJumpTarget(viewIndex: number, action: FeatureJumpAction, moveCamera: boolean = true,
-                                mapId?: string | null, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+    async highlightByJumpTarget(
+        action: FeatureJumpAction,
+        mapId?: string | null,
+        mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+        cameraMoveViewIndex?: number) {
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -345,8 +349,8 @@ export class JumpTargetService {
                 featureId: featureId
             }]).then(_ => {
                 // TODO: Focus on whole feature-set?
-                if (moveCamera) {
-                    this.mapService.focusOnFeature(viewIndex, this.mapService.hoverTopic.getValue()[0]);
+                if (cameraMoveViewIndex) {
+                    this.mapService.focusOnFeature(cameraMoveViewIndex, this.mapService.hoverTopic.getValue()[0]);
                 }
             });
         }

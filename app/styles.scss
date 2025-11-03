@@ -176,6 +176,10 @@ map-view {
   }
 }
 
+.p-tooltip {
+  z-index: 9002 !important;
+}
+
 /* Shared styles for both panels */
 #info {
   position: absolute;

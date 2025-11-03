@@ -153,8 +153,7 @@ export class MapView {
                 protected jumpService: JumpTargetService,
                 protected menuService: RightClickMenuService,
                 protected coordinatesService: CoordinatesService,
-                protected stateService: AppStateService)
-    {
+                protected stateService: AppStateService) {
         this._viewIndex = id;
         this.canvasId = canvasId;
         this.sceneMode = sceneMode;
@@ -358,8 +357,8 @@ export class MapView {
                     if (feature.primitive.id) {
                         const featureInfo = this.featureSearchService.searchResults[feature.primitive.id.index];
                         if (featureInfo.mapId && featureInfo.featureId) {
-                            this.jumpService.highlightByJumpTargetFilter(this._viewIndex, featureInfo.mapId,
-                                featureInfo.featureId, coreLib.HighlightMode.SELECTION_HIGHLIGHT, true).then();
+                            this.jumpService.highlightByJumpTargetFilter(featureInfo.mapId,
+                                featureInfo.featureId,coreLib.HighlightMode.SELECTION_HIGHLIGHT, this._viewIndex).then();
                         }
                     } else {
                         // Convert Cartesian3 position to WGS84 degrees.
@@ -418,7 +417,8 @@ export class MapView {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
             // Do not handle mouse move here if the first element
             // under the cursor is not the Cesium view.
-            if (document.elementFromPoint(position.x, position.y)?.tagName.toLowerCase() !== "canvas") {
+            const canvasRect = this.viewer.canvas.getBoundingClientRect(); // Add the offset from the canvas dom element.
+            if (document.elementFromPoint(position.x + canvasRect.left, position.y + canvasRect.top)?.tagName.toLowerCase() !== "canvas") {
                 return;
             }
             // Do not handle mouse move here if the camera is currently being moved.
@@ -427,9 +427,7 @@ export class MapView {
             }
 
             if (!environment.visualizationOnly) {
-                const coordinates = this.viewer.camera.pickEllipsoid(
-                    position, this.viewer.scene.globe.ellipsoid
-                );
+                const coordinates = this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
                 if (coordinates !== undefined) {
                     this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
                 }

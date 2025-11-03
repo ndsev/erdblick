@@ -94,7 +94,7 @@ export class FeatureFilterOptions {
                     @for (col of columns(); track $index) {
                         <td [class]="getStyleClassByType(rowData)"
                             style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                            pTooltip="rowData[col.key]" tooltipPosition="left"
+                            pTooltip="{{rowData[col.key]}}" tooltipPosition="left"
                             [tooltipOptions]="tooltipOptions">
                             <div style="display: flex; flex-direction: row; gap: 0.25em;">
                                 @if ($index === 0) {
@@ -109,7 +109,7 @@ export class FeatureFilterOptions {
                                     </span>
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
-                                            <i class="pi pi-info-circle" pTooltip="rowData['info']" tooltipPosition="top"></i>
+                                            <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
                                         </span>
                                     }
                                     @if (rowData.hasOwnProperty("sourceDataReferences") && 
@@ -122,7 +122,6 @@ export class FeatureFilterOptions {
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
                                                           pTooltip="Go to {{item.qualifier?.trim()}} source data."
-                                                          [tooltipZIndex]="'9999'"
                                                           [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
                                             }
@@ -136,7 +135,7 @@ export class FeatureFilterOptions {
                                     </span>
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
-                                            <i class="pi pi-info-circle" pTooltip="rowData['info']" tooltipPosition="top"></i>
+                                            <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
                                         </span>
                                     }
                                     @if (rowData.hasOwnProperty("sourceDataReferences") &&
@@ -337,17 +336,16 @@ export class InspectionTreeComponent implements OnDestroy {
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                this.jumpService.highlightByJumpTargetFilter(
-                    viewIndex,
-                    rowData["mapId"],
-                    rowData["value"]).then();
-            }
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"]).then();
         }
     }
 
     onNodeHover(event: any, rowData: any) {
         event.stopPropagation();
+        console.log('event', event);
+        console.log('rowData', rowData);
         this.highlightHoveredEntry(rowData);
     }
 
@@ -366,13 +364,10 @@ export class InspectionTreeComponent implements OnDestroy {
             return;
         }
         if (rowData["type"] == this.InspectionValueType.FEATUREID.value) {
-            for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                this.jumpService.highlightByJumpTargetFilter(
-                    viewIndex,
-                    rowData["mapId"],
-                    rowData["value"],
-                    coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
-            }
+            this.jumpService.highlightByJumpTargetFilter(
+                rowData["mapId"],
+                rowData["value"],
+                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         } else if (rowData["hoverId"] && this.selectedFeatures()) {
             this.mapService.setHoveredFeatures([{
                 mapTileKey: this.selectedFeatures()![rowData["featureIndex"]].mapTileKey,

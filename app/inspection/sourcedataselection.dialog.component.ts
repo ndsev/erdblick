@@ -27,7 +27,7 @@ import {coreLib} from "../integrations/wasm";
                            pInputText [(ngModel)]="customTileId" (ngModelChange)="onCustomTileIdChange($event)"/>
                     <p-button *ngIf="!errorString" (click)="toggleCustomTileIdInput()" class="osm-button"
                               icon="{{showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus'}}"
-                              label="" pTooltip="{{showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'}}" tooltipPosition="bottom" tabindex="0">
+                              label="" [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'" tooltipPosition="bottom" tabindex="0">
                     </p-button>
                 </div>
                 
