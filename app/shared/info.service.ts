@@ -14,7 +14,8 @@ import {MessageService} from "primeng/api";
 @Component({
     selector: 'alert-dialog',
     template: `
-        <p-dialog [header]="headerText" [(visible)]="display" [modal]="true" [closable]="true" [dismissableMask]="true" (onHide)="close()">
+        <p-dialog class="alert-dialog" [header]="headerText" [(visible)]="display" [modal]="true" [closable]="true" 
+                  [dismissableMask]="true" (onHide)="close()">
             @if (hint) {
                 <p>{{ hint }}</p>
             }

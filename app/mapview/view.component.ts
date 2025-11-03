@@ -22,17 +22,18 @@ import {MapView2D} from "./view2d";
 import {MapView3D} from "./view3d";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
+import {environment} from "../environments/environment";
 
 @Component({
     selector: 'map-view',
     template: `
         <div #viewer [ngClass]="{'border': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
-        @if (showSyncMenu) {
+        @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select">
                 @for (option of syncOptions; track $index) {
                     <p-toggleButton onIcon="" offIcon="" [ngClass]="{'green': option.value}"
                                     [(ngModel)]="option.value" (ngModelChange)="updateSelectedOptions()" 
-                                    onLabel="" offLabel="" pTooltip="Sync {{option.name}}" tooltipPosition="bottom">
+                                    onLabel="" offLabel="" pTooltip="{{option.tooltip}}" tooltipPosition="bottom">
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
                         </ng-template>
@@ -64,11 +65,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
-    syncOptions: {name: string, code: string, value: boolean, icon: string}[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers"}
+    syncOptions: {name: string, code: string, value: boolean, icon: string, tooltip: string}[] = [
+        {name: "Position", code: VIEW_SYNC_POSITION, value: false, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
+        {name: "Movement", code: VIEW_SYNC_MOVEMENT, value: false, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
+        {name: "Projection", code: VIEW_SYNC_PROJECTION, value: false, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
+        {name: "Layers", code: VIEW_SYNC_LAYERS, value: false, icon: "layers", tooltip: "Sync layer activation/style/OSM settings across views"},
     ];
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
@@ -205,4 +206,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
             option.value).map(option=> option.code);
         this.stateService.syncViews();
     }
+
+    protected readonly environment = environment;
 }

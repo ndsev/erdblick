@@ -206,6 +206,21 @@ map-view {
   overflow: hidden;
 }
 
+.alert-dialog {
+  .p-dialog-mask {
+    z-index: 9001 !important;
+  }
+
+  .p-dialog-header {
+    padding: 0.75em !important;
+    height: 2.5em !important;
+  }
+
+  .p-dialog-content {
+    padding: 0.5em !important;
+  }
+}
+
 .stats-dialog {
   .p-dialog-mask {
     z-index: 9001 !important;
