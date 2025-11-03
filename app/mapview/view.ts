@@ -416,9 +416,16 @@ export class MapView {
         const hoverHandler = (movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
             // Do not handle mouse move here if the first element
-            // under the cursor is not the Cesium view.
-            const canvasRect = this.viewer.canvas.getBoundingClientRect(); // Add the offset from the canvas dom element.
-            if (document.elementFromPoint(position.x + canvasRect.left, position.y + canvasRect.top)?.tagName.toLowerCase() !== "canvas") {
+            // under the cursor is not the Cesium view, or the mouse is outside the view.
+            const canvasRect = this.viewer.canvas.getBoundingClientRect();
+            const mouseX = position.x + canvasRect.left; // Add the offset from the canvas dom element.
+            const mouseY = position.y + canvasRect.top;
+            const hoveredDomElName = document.elementFromPoint(mouseX, mouseY)?.tagName.toLowerCase();
+            if (hoveredDomElName !== "canvas" ||
+                mouseX < canvasRect.left ||
+                mouseX > canvasRect.right ||
+                mouseY < canvasRect.top ||
+                mouseY > canvasRect.bottom) {
                 return;
             }
             // Do not handle mouse move here if the camera is currently being moved.
