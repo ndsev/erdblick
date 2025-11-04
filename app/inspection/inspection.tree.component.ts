@@ -344,8 +344,6 @@ export class InspectionTreeComponent implements OnDestroy {
 
     onNodeHover(event: any, rowData: any) {
         event.stopPropagation();
-        console.log('event', event);
-        console.log('rowData', rowData);
         this.highlightHoveredEntry(rowData);
     }
 
