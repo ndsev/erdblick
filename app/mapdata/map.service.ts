@@ -183,7 +183,7 @@ export class MapDataService {
                 for (let [_, tileLayer] of this.loadedTileLayers) {
                     const style = this.styleService.styles.get(styleId);
                     if (style) {
-                        this.renderTileLayer(viewIndex, tileLayer, style);
+                        this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
                     }
                 }
             });
@@ -285,7 +285,7 @@ export class MapDataService {
                 }, message);
             } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
                 const tileLayerBlob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                this.addTileFeatureLayer(tileLayerBlob, null, "", null);
+                this.addTileFeatureLayer(tileLayerBlob);
             } else {
                 console.error(`Encountered unknown message type ${messageType}!`);
             }
@@ -572,7 +572,7 @@ export class MapDataService {
             for (const [styleId, style] of this.styleService.styles) {
                 for (let [tileKey, tile] of this.loadedTileLayers) {
                     if (this.viewShowsFeatureTile(viewIndex, tile) && !visualizedTileLayers.get(styleId)?.has(tileKey)) {
-                        this.renderTileLayer(viewIndex, tile, style);
+                        this.renderTileLayerOnDemand(viewIndex, tile, style);
                     }
                 }
             }
@@ -699,7 +699,7 @@ export class MapDataService {
         await this.currentFetch.go();
     }
 
-    addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null, styleId: string, preventCulling: any) {
+    addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
 
         // Consider, if this tile is a selection tile request.
@@ -737,17 +737,11 @@ export class MapDataService {
                     continue;
                 }
 
-                if (style && styleId) {
-                    if (style.visible && style.featureLayerStyle?.hasLayerAffinity(tileLayer.layerName)) {
-                        this.renderTileLayer(viewIndex, tileLayer, style);
-                    }
+                if (style) {
+                    this.renderTileLayer(viewIndex, tileLayer, style);
                 } else {
-                    // TODO: Don't render for each style anymore.
-                    //   (render if style is active and relevant for map layer...)
                     this.styleService.styles.forEach((style) => {
-                        if (style.visible && style.featureLayerStyle?.hasLayerAffinity(tileLayer.layerName)) {
-                            this.renderTileLayer(viewIndex, tileLayer, style);
-                        }
+                        this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
                     });
                 }
             }
@@ -777,6 +771,12 @@ export class MapDataService {
         }
         this.loadedTileLayers.delete(tileLayer.mapTileKey);
         this.statsDialogNeedsUpdate.next();
+    }
+
+    private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
+        if (style.visible && style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName)) {
+            this.renderTileLayer(viewIndex, tileLayer, style);
+        }
     }
 
     private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
@@ -1060,7 +1060,7 @@ export class MapDataService {
                         continue;
                     }
                     for (let [_, style] of this.styleService.styles) {
-                        if (style.featureLayerStyle && style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
+                        if (style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
                             const styleOptions = this.maps.getLayerStyleOptions(
                                 viewIndex, featureTile.mapName, featureTile.layerName, style.id) ?? {};
                             if (group.color) {
