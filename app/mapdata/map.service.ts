@@ -941,8 +941,13 @@ export class MapDataService {
         this.hoverTopic.next(features);
     }
 
-    focusOnFeature(viewIndex: number, feature: FeatureWrapper) {
-        const position = feature.peek((parsedFeature: Feature) => parsedFeature.center());
+    async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
+        const features = await this.loadFeatures([tileFeatureId]);
+        if (!features.length) {
+            this.messageService.showError(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
+            return;
+        }
+        const position = features[0].peek((parsedFeature: Feature) => parsedFeature.center());
         this.moveToWgs84PositionTopic.next({targetView: viewIndex, x: position.x, y: position.y});
     }
 
@@ -952,7 +957,7 @@ export class MapDataService {
                 cb(viewIndex);
             }
             for (let i = 0; i < this.stateService.numViews; ++i) {
-                if (this.viewShowsFeatureTile(i, featureWrapper.featureTile)) {
+                if (this.viewShowsFeatureTile(i, featureWrapper.featureTile, true)) {
                     cb(i);
                 }
             }
@@ -1133,14 +1138,16 @@ export class MapDataService {
         this.update().then();
     }
 
-    private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile) {
+    private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile, skipViewportCheck: boolean = false) {
         if (viewIndex >= this.viewVisualizationState.length) {
             console.error("Attempt to access non-existing view index.");
             return false;
         }
-        const viewState = this.viewVisualizationState[viewIndex];
-        if (!viewState.visibleTileIds.has(tile.tileId)) {
-            return false;
+        if (!skipViewportCheck) {
+            const viewState = this.viewVisualizationState[viewIndex];
+            if (!viewState.visibleTileIds.has(tile.tileId)) {
+                return false;
+            }
         }
         return this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName) &&
             tile.level() === this.maps.getMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
