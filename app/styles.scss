@@ -180,6 +180,10 @@ map-view {
   z-index: 9002 !important;
 }
 
+.p-splitter {
+  border: 0 !important;
+}
+
 /* Shared styles for both panels */
 #info {
   position: absolute;
@@ -694,7 +698,7 @@ map-view {
 .search-wrapper {
   position: absolute;
   top: 0.25em;
-  left: 2.9em;
+  left: 3em;
   min-width: 22em;
   // min-height: 3.5em;
   max-width: calc(100vw - 5em);
@@ -743,10 +747,8 @@ map-view {
       font-size: 1em;
       margin-top: 0;
       margin-bottom: 0;
-      border-bottom-width: 0;
-      border-bottom-style: solid;
-      border-top-width: 0;
-      border-top-style: solid;
+      border: 0 solid !important;
+      box-shadow: none !important;
     }
 
     textarea.single-line {
@@ -993,8 +995,8 @@ map-view {
   }
 
   .p-dialog {
-    max-width: 27.5em;
-    min-width: 27.5em;
+    max-width: 27em;
+    min-width: 27em;
     margin: 0 !important;
     position: absolute;
     bottom: 0.25em;
