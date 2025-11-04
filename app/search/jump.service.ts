@@ -347,11 +347,14 @@ export class JumpTargetService {
             await this.mapService.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
-            }]).then(_ => {
-                // TODO: Focus on whole feature-set?
-                if (cameraMoveViewIndex) {
-                    this.mapService.focusOnFeature(cameraMoveViewIndex, this.mapService.hoverTopic.getValue()[0]);
-                }
+            }]);
+        }
+
+        // Center the camera on the feature if a view index was passed.
+        if (cameraMoveViewIndex !== undefined) {
+            await this.mapService.focusOnFeature(cameraMoveViewIndex, {
+                featureId: featureId,
+                mapTileKey: selectThisFeature.tileId,
             });
         }
     }
