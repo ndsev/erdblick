@@ -54,6 +54,17 @@ class ViewVisualizationState {
     visualizationQueue: TileVisualization[] = [];
 }
 
+interface SelectionTileRequest {
+    remoteRequest: {
+        mapId: string,
+        layerId: string,
+        tileIds: Array<number>
+    };
+    tileKey: string;
+    resolve: null | ((tile: FeatureTile) => void);
+    reject: null | ((why: any) => void);
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -96,22 +107,7 @@ export class MapDataService {
         return this.maps$.getValue();
     }
 
-    /**
-     * When true, clearing the selection does not reset the side panel state.
-     * This is used when removing selections due to layer deactivation.
-     */
-    private preserveSidePanel: boolean = false;
-
-    selectionTileRequest: {
-        remoteRequest: {
-            mapId: string,
-            layerId: string,
-            tileIds: Array<number>
-        },
-        tileKey: string,
-        resolve: null | ((tile: FeatureTile) => void),
-        reject: null | ((why: any) => void),
-    } | null = null;
+    selectionTileRequests: SelectionTileRequest[] = [];
     statsDialogVisible: boolean = false;
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
     clientId: string = "";
@@ -235,11 +231,12 @@ export class MapDataService {
                     convertedSelections.push(existing);
                     continue;
                 }
+                const features = await this.loadFeatures(selection.features);
                 convertedSelections.push({
                     id: selection.id,
                     pinned: selection.pinned,
                     size: selection.size,
-                    features: await this.loadFeatures(selection.features),
+                    features: features,
                     sourceData: selection.sourceData,
                     color: selection.color
                 });
@@ -513,7 +510,7 @@ export class MapDataService {
         let newTileLayers = new Map();
         for (let tileLayer of this.loadedTileLayers.values()) {
             if (evictTileLayer(tileLayer)) {
-                tileLayer.destroy();
+                tileLayer.dispose();
             } else {
                 newTileLayers.set(tileLayer.mapTileKey, tileLayer);
             }
@@ -594,21 +591,21 @@ export class MapDataService {
         }
 
         let requests = [];
-        if (this.selectionTileRequest) {
+        for (const selectionTileRequest of this.selectionTileRequests) {
             // Do not go forward with the selection tile request, if it
             // pertains to a map layer that is not available anymore.
             const mapLayerItem = this.maps.maps
-                .get(this.selectionTileRequest.remoteRequest.mapId)?.layers
-                .get(this.selectionTileRequest.remoteRequest.layerId);
+                .get(selectionTileRequest.remoteRequest.mapId)?.layers
+                .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
-                requests.push(this.selectionTileRequest.remoteRequest);
+                requests.push(selectionTileRequest.remoteRequest);
                 if (this.currentFetch) {
                     // Disable the re-fetch filtering logic by setting the old
                     // fetches' body to null.
                     this.currentFetch.bodyJson = null;
                 }
             } else {
-                this.selectionTileRequest.reject!("Map layer is not available.");
+                selectionTileRequest.reject!("Map layer is not available.");
             }
         }
 
@@ -702,13 +699,19 @@ export class MapDataService {
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
 
-        // Consider, if this tile is a selection tile request.
-        if (this.selectionTileRequest && tileLayer.mapTileKey == this.selectionTileRequest.tileKey) {
-            this.selectionTileRequest.resolve!(tileLayer);
-            this.selectionTileRequest = null;
-        }
+        // Consider, if this tile is needed by a selection tile request.
+        let neededBySelection = false;
+        this.selectionTileRequests = this.selectionTileRequests.filter(request => {
+            if (tileLayer.mapTileKey === request.tileKey) {
+                neededBySelection = true;
+                request.resolve!(tileLayer);
+                return false;
+            }
+            return true;
+        });
+
         // Don't add a tile that is not supposed to be visible.
-        else if (!preventCulling) {
+        if (!neededBySelection && !preventCulling) {
             if (!this.viewVisualizationState.some(state =>
                 state.visibleTileIds.has(tileLayer.tileId))) {
                 return;
@@ -749,7 +752,7 @@ export class MapDataService {
     }
 
     private removeTileLayer(tileLayer: FeatureTile) {
-        tileLayer.destroy();
+        tileLayer.dispose();
         for (const viewState of this.viewVisualizationState) {
             for (let [styleId, tileVisus] of viewState.visualizedTileLayers) {
                 tileVisus = tileVisus.filter(tileVisu => {
@@ -835,12 +838,12 @@ export class MapDataService {
     }
 
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
-        let result = new Map<string, FeatureTile>();
+        const result = new Map<string, FeatureTile>();
 
         // TODO: Optimize this loop to make just a single update call.
         // NOTE: Currently each missing tile triggers a separate update() call, which is inefficient.
         // Should batch all missing tiles and make a single update call for better performance.
-        for (let tileKey of tileKeys) {
+        for (const tileKey of tileKeys) {
             if (!tileKey) {
                 continue;
             }
@@ -851,8 +854,8 @@ export class MapDataService {
                 continue;
             }
 
-            let [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
-            this.selectionTileRequest = {
+            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
+            const selectionTileRequest: SelectionTileRequest =  {
                 remoteRequest: {
                     mapId: mapId,
                     layerId: layerId,
@@ -860,14 +863,15 @@ export class MapDataService {
                 },
                 tileKey: tileKey,
                 resolve: null,
-                reject: null,
-            }
+                reject: null
+            };
 
-            let selectionTilePromise = new Promise<FeatureTile>((resolve, reject) => {
-                this.selectionTileRequest!.resolve = resolve;
-                this.selectionTileRequest!.reject = reject;
-            })
+            const selectionTilePromise = new Promise<FeatureTile>((resolve, reject) => {
+                selectionTileRequest.resolve = resolve;
+                selectionTileRequest.reject = reject;
+            });
 
+            this.selectionTileRequests.push(selectionTileRequest);
             this.update().then();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
@@ -1061,7 +1065,7 @@ export class MapDataService {
                 const featureIds = features.map(fw => fw.featureId);
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     // Do not render the highlight for any view that doesn't need it.
-                    if (!this.viewShowsFeatureTile(viewIndex, featureTile)) {
+                    if (!this.viewShowsFeatureTile(viewIndex, featureTile, true)) {
                         continue;
                     }
                     for (let [_, style] of this.styleService.styles) {
