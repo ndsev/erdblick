@@ -107,7 +107,7 @@ export class FeatureTile {
     /**
      * Mark this tile as "not available anymore".
      */
-    destroy() {
+    dispose() {
         this.disposed = true;
     }
 

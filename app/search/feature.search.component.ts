@@ -159,8 +159,8 @@ export class FeatureSearchComponent {
     grouping: { name: string, value: number }[] = [
         {name: 'Maps', value: 1},
         {name: 'Layers', value: 2},
-        {name: 'Feature', value: 3},
-        {name: 'Tile', value: 4}
+        {name: 'Features', value: 3},
+        {name: 'Tiles', value: 4}
     ];
     selectedGroupingOptions: { name: string, value: number }[] = [this.grouping[0]];
 
@@ -313,8 +313,8 @@ export class FeatureSearchComponent {
         const accessors: Record<number, { label: string, get: (r: ResultItem) => string | number }> = {
             1: { label: 'Map',     get: (r) => r.mapId },
             2: { label: 'Layer',   get: (r) => r.layerId },
-            3: { label: 'Feature', get: (r) => r.featureType },
-            4: { label: 'Tile',    get: (r) => r.tileId }
+            3: { label: 'Features', get: (r) => r.featureType },
+            4: { label: 'Tiles',    get: (r) => r.tileId }
         };
 
         const buildTreeWithCounts = (items: ResultItem[], depth: number, parentKey: string): [TreeNode[], number] => {
