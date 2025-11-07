@@ -216,9 +216,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
             this.subscriptions.push(
                 this.mapView!.hoveredFeatureIds.subscribe(result => {
-                    this.featureIdsPopover.hide();
                     this.featureIdsContent = [];
                     if (!result || !result.featureIds.length) {
+                        this.featureIdsPopover.hide();
                         return;
                     }
                     result.featureIds.forEach((featureId) => {
@@ -236,8 +236,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     const y = result.position.y + canvasRect.top;
                     const anchor = this.anchorRef.nativeElement;
                     anchor.style.position = 'fixed';
-                    anchor.style.left = `${x}px`;
-                    anchor.style.top = `${y}px`;
+                    anchor.style.left = `${x - 16}px`;
+                    anchor.style.top = `${y - 4}px`;
                     anchor.style.width = '1px';
                     anchor.style.height = '1px';
                     anchor.style.pointerEvents = 'none';
