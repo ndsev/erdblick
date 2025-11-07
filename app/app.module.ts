@@ -99,6 +99,12 @@ import {InspectionContainerComponent} from "./inspection/inspection.container.co
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
+import {DockableLayoutComponent} from "./dockable.layout.component";
+import {Menubar} from "primeng/menubar";
+import {DynamicDialogModule} from "primeng/dynamicdialog";
+import {DialogService} from "primeng/dynamicdialog";
+import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
+import {Ripple} from "primeng/ripple";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -205,7 +211,9 @@ export const initializeServices = () => {
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,
-        InspectionTreeComponent
+        InspectionTreeComponent,
+        DockableLayoutComponent,
+        InspectionPanelDialogComponent
     ],
     bootstrap: [
         AppComponent
@@ -240,6 +248,7 @@ export const initializeServices = () => {
         AppRoutingModule,
         SpeedDialModule,
         DialogModule,
+        DynamicDialogModule,
         FormsModule,
         ScrollPanelModule,
         BadgeModule,
@@ -285,7 +294,9 @@ export const initializeServices = () => {
         ChipModule,
         Splitter,
         ToggleSwitch,
-        ToggleButton
+        ToggleButton,
+        Menubar,
+        Ripple
     ],
     providers: [
         provideAppInitializer(initializeServices),
@@ -298,6 +309,7 @@ export const initializeServices = () => {
         ClipboardService,
         EditorService,
         RightClickMenuService,
+        DialogService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

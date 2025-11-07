@@ -5,6 +5,7 @@ import {AppStateService} from "./shared/appstate.service";
 import {AppModeService} from "./shared/app-mode.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
+import {environment} from "./environments/environment";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -17,15 +18,15 @@ interface Versions {
 @Component({
     selector: 'app-root',
     template: `
-        <mapview-container></mapview-container>
-        <map-panel *ngIf="!appModeService.isVisualizationOnly"></map-panel>
-        <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
-        <search-panel *ngIf="!appModeService.isVisualizationOnly"></search-panel>
-        <inspection-container *ngIf="!appModeService.isVisualizationOnly"></inspection-container>
-        <coordinates-panel *ngIf="!appModeService.isVisualizationOnly"></coordinates-panel>
-        <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
+        <dockable-layout></dockable-layout>
+        @if (!environment.visualizationOnly) {
+            <datasources></datasources>
+            <map-panel></map-panel>
+            <stats-dialog></stats-dialog>
+            <style-panel></style-panel>
+            <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
+        }
         <legal-dialog></legal-dialog>
-        <style-panel></style-panel>
         <div id="info">
             <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
                 {{ copyright }}
@@ -152,4 +153,6 @@ export class AppComponent {
                 this.erdblickVersion = `${this.title} ${data.toString()}`;
             });
     }
+
+    protected readonly environment = environment;
 }

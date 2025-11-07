@@ -92,6 +92,63 @@ body {
   }
 }
 
+mapview-container {
+  width: 100%;
+}
+
+
+.main-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9000 !important;
+  width: 100%;
+
+  .p-menubar {
+    padding: 0 0 0 15em;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    background: color-mix(in srgb, var(--p-menubar-background) 70%, transparent);
+    height: 2em;
+
+    &:hover {
+      background: var(--p-menubar-background);
+    }
+
+    p-menubarsub {
+      z-index: 101;
+    }
+
+    .p-menubar-item-link {
+      padding: 0.25em !important;
+      font-size: 0.9em;
+
+      .material-symbols-outlined {
+        font-size: 1.2em;
+      }
+    }
+  }
+}
+
+.dock-toggle {
+  width: 1.25em;
+  height: 2em;
+  cursor: pointer;
+  background-color: white;
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.25em 0;
+  opacity: 0.75;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
 map-view {
   display: block;
   height: 100%;
@@ -100,8 +157,8 @@ map-view {
 
   .viewsync-select {
     position: absolute;
-    left: 0.25em;
-    top: 0.25em;
+    right: 0.25em;
+    top: 2.25em;
     z-index: 110;
     opacity: 0.75;
 
@@ -111,7 +168,7 @@ map-view {
 
     .p-buttongroup > .p-togglebutton {
       border-radius: 0;
-      padding: 0em;
+      padding: 0;
 
       &:first-child {
         border-top-left-radius: var(--p-togglebutton-border-radius) !important;
@@ -177,11 +234,12 @@ map-view {
 }
 
 .p-tooltip {
-  z-index: 9002 !important;
+  z-index: 9003 !important;
 }
 
 .p-splitter {
   border: 0 !important;
+  width: 100% !important;
 }
 
 /* Shared styles for both panels */
@@ -393,7 +451,7 @@ map-view {
 
 .main-button-controls {
   position: absolute;
-  top: 0.25em;
+  top: 2em;
   left: 0.25em;
   display: flex;
   flex-direction: column;
@@ -496,24 +554,192 @@ map-view {
   color: var(--p-iconfield-icon-color);
 }
 
+.inspection-dialog {
+  .p-dialog {
+    min-height: 20em;
+    min-width: 25em;
+    height: 40em;
+    width: 30em;
+    overflow: hidden;
+    max-width: calc(100vw - 5em);
+    max-height: calc(100vh - 5em);
+  }
+
+  .p-dialog-header {
+    padding: 0.25em 0.25em 0 0.25em;
+
+    .p-colorpicker-panel {
+      z-index: 9500;
+    }
+
+    .p-colorpicker input {
+      height: 1.5em;
+      width: 1.5em;
+    }
+
+    .inspector-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+
+      & > * {
+        display: flex;
+        gap: 0.25em;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .title {
+        max-width: 20em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: bold;
+      }
+
+      .p-button {
+        width: 1.75em !important;
+        height: 1.75em !important;
+        margin: 0;
+      }
+    }
+  }
+
+  .p-dialog-content {
+    min-height: 30em;
+    min-width: 20em;
+    padding: 0.25em;
+
+    .filter-container {
+      display: flex;
+      align-content: center;
+      gap: 0.25em;
+      width: 100%;
+
+      .input-container {
+        width: 100%;
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+
+        .p-button {
+          width: 1.75em;
+          height: 1.75em;
+        }
+
+        .filter-input {
+          height: 1.75em;
+          width: 100%;
+          border-radius: 6px;
+          border: solid 1px var(--p-content-border-color);
+          direction: ltr;
+        }
+      }
+
+      button {
+        width: 1.75em;
+        height: 1.75em;
+      }
+    }
+
+    .resizable-container {
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+
+      .source-data-ref-container {
+        .p-buttongroup {
+          width: fit-content;
+        }
+
+        .p-button {
+          width: 1.2em;
+          height: 1em;
+          padding: 0.1em;
+          margin-top: 0.1em;
+          color: var(--p-primary-contrast-color);
+          background: var(--p-primary-500);
+          border: 1px solid var(--p-primary-500);
+        }
+
+        .p-button-label {
+          font-family: monospace;
+          font-weight: 700;
+          font-size: 1em;
+        }
+
+        span {
+          font-family: monospace;
+        }
+      }
+
+      .p-tree {
+        border: none;
+        padding: 0;
+      }
+
+      .p-treetable-header {
+        padding: 0;
+      }
+
+      .p-treetable-thead {
+        th {
+          padding: 0.25em;
+          font-size: 0.9em;
+        }
+      }
+
+      .p-treetable-tbody {
+        border-collapse: collapse;
+        font-size: 0.9em !important;
+
+        td {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        th {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        .p-treetable-toggler {
+          margin: 0;
+          width: 1.25em;
+          height: 1.25em;
+        }
+
+        /* Style used for highlighting individual table rows. */
+        tr.highlight {
+          color: black;
+
+          td {
+            border-color: var(--p-content-border-color);
+            background: var(--p-green-100);
+          }
+        }
+      }
+    }
+  }
+}
+
 .inspection-container {
-  position: absolute;
-  top: 0.25em;
-  right: 0.25em;
   display: flex;
-  flex-direction: row-reverse;
+  flex-direction: column;
   gap: 0.25em;
-  z-index: 9000;
-  pointer-events: none;
+  overflow-y: scroll;
+  height: 100vh;
+  width: 100%;
 
   inspection-panel {
     height: fit-content;
-    pointer-events: all;
   }
 
   .inspect-panel {
     min-width: 30em;
-
 
     .inspector-title {
       display: flex;
@@ -552,7 +778,7 @@ map-view {
       overflow: visible;
 
       .p-colorpicker-panel {
-        z-index: 9999;
+        z-index: 9500;
       }
 
       .p-colorpicker input {
@@ -601,9 +827,9 @@ map-view {
     .resizable-container {
       width: 30em;
       height: 40em;
-      min-width: 30em;
+      min-width: 20em;
       min-height: 20em;
-      resize: both;
+      resize: vertical;
       overflow: auto;
       direction: rtl;
       max-width: calc(100vw - 28em);
@@ -696,11 +922,12 @@ map-view {
 }
 
 .search-wrapper {
-  position: absolute;
-  top: 0.25em;
-  left: 3em;
-  min-width: 22em;
-  // min-height: 3.5em;
+  padding-top: 0.1em;
+  padding-left: 0.125em;
+  position: fixed;
+  top: 0;
+  left: 0;
+  min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
   z-index: 100;
@@ -747,17 +974,16 @@ map-view {
       font-size: 1em;
       margin-top: 0;
       margin-bottom: 0;
-      border: 0 solid !important;
       box-shadow: none !important;
     }
 
     textarea.single-line {
-      min-height: 2.5em;
-      width: 24em !important;
+      min-height: 1.5em;
+      width: 15em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
-      padding: 0.625em;
+      padding: 0.25em;
     }
 
     .completion-popup {
@@ -987,6 +1213,19 @@ map-view {
   }
 }
 
+.maps-close-button {
+  position: absolute;
+  top: 2.75em;
+  left: 25em;
+
+  .p-button {
+    width: 1.75em;
+    height: 1.75em;
+
+    border-radius: 0 var(--p-button-border-radius) var(--p-button-border-radius) 0;
+  }
+}
+
 .map-layer-dialog {
   z-index: 1000 !important;
 
@@ -995,14 +1234,14 @@ map-view {
   }
 
   .p-dialog {
-    max-width: 27em;
-    min-width: 27em;
+    max-width: 25em;
+    min-width: 25em;
     margin: 0 !important;
     position: absolute;
-    bottom: 0.25em;
+    bottom: 0;
     left: 0;
     overflow: auto;
-    height: calc(100% - 3.2em);
+    height: calc(100% - 2em);
     z-index: 1000 !important;
   }
 
@@ -1878,7 +2117,7 @@ map-view {
     min-width: 100%;
     min-height: 3.5em;
     max-width: 100%;
-    max-height: calc(100vh - 5em);
+    max-height: calc(100vh - 5em);;
     /* Default lower; elevate when focused/expanded */
     z-index: 100;
 
@@ -1896,7 +2135,7 @@ map-view {
       min-height: 0;
       overflow: auto;
       max-width: 100%;
-      max-height: calc(100vh - 11.5em);
+      max-height: calc(100vh - 11.5em);;
       border-radius: 0;
       margin-left: -3em;
       resize: none;

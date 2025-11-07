@@ -65,6 +65,7 @@ export class MapViewContainerComponent {
         this.stateService.focusedViewState.subscribe(_ => {
             this.setupKeyboardShortcutsForFocusedView();
         });
+
     }
 
     cycleViewFocus(direction: number) {
@@ -102,4 +103,8 @@ export class MapViewContainerComponent {
             break;
         }
     }
+
+
+
+    protected readonly environment = environment;
 }

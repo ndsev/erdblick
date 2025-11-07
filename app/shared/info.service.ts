@@ -61,12 +61,14 @@ export class InfoMessageService {
 
     showError(message: string) {
         this.messageService.add({ key: 'tc', severity: 'error', summary: 'Error', detail: message });
-        return;
+    }
+
+    showWarning(message: string) {
+        this.messageService.add({ key: 'tc', severity: 'warn', summary: 'Warning', detail: message });
     }
 
     showSuccess(message: string) {
         this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: message });
-        return;
     }
 
     registerDefaultContainer(ref: ViewContainerRef) {
