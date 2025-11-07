@@ -7,7 +7,7 @@ import {coreLib} from "../integrations/wasm";
 @Component({
     selector: 'inspection-panel-dialog',
     template: `
-        <p-dialog [modal]="false" [closable]="false" [visible]="true">
+        <p-dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true">
         @if (panel()) {
             <ng-template #header>
                 <div class="inspector-title">
@@ -48,41 +48,40 @@ import {coreLib} from "../integrations/wasm";
                 </div>
             </ng-template>
             
-            @if (errorMessage) {
-                <div>
-                    <strong>Error</strong><br>{{ errorMessage }}
+            <ng-template #content>
+                <div class="resizable-container">
+                    <div style="width: 100%; height: 100%">
+                        @if (errorMessage) {
+                            <div>
+                                <strong>Error</strong><br>{{ errorMessage }}
+                            </div>
+                        } @else if (panel().sourceData) {
+                            <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
+                        } @else {
+                            <feature-panel [panel]="panel()"></feature-panel>
+                        }
+                    </div>
                 </div>
-            } @else if (panel().sourceData) {
-                <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
-            } @else {
-                <feature-panel [panel]="panel()"></feature-panel>
-            }
+            </ng-template>
         }
         </p-dialog>
     `,
     styles: [``],
     standalone: false
 })
-export class InspectionPanelDialogComponent implements AfterViewInit {
+export class InspectionPanelDialogComponent {
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     title = "";
     errorMessage: string = "";
     layerMenuItems: { label: string, disabled: boolean, command: () => void }[] = [];
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
 
-    @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
-
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
                 private renderer: Renderer2) {
         effect(() => {
-            const p = this.panel();
-            this.updateHeaderFor(p);
+            this.updateHeaderFor(this.panel());
         });
-    }
-
-    ngAfterViewInit() {
-        this.detectSafari();
     }
 
     private updateHeaderFor(panel: InspectionPanelModel<FeatureWrapper>) {
@@ -138,25 +137,6 @@ export class InspectionPanelDialogComponent implements AfterViewInit {
 
     onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
-    }
-
-    onInspectionContainerResize(event: MouseEvent, panel: InspectionPanelModel<FeatureWrapper> | undefined): void {
-        if (!panel) return;
-        const element = event.target as HTMLElement;
-        if (!element.classList.contains("resizable-container") || !element.offsetWidth || !element.offsetHeight) return;
-
-        const currentEmWidth = element.offsetWidth / this.stateService.baseFontSize;
-        const currentEmHeight = element.offsetHeight / this.stateService.baseFontSize;
-        panel.size[0] = currentEmWidth < DEFAULT_EM_WIDTH ? DEFAULT_EM_WIDTH : currentEmWidth;
-        panel.size[1] = currentEmHeight;
-        this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
-    }
-
-    detectSafari() {
-        const isSafari = /Safari/i.test(navigator.userAgent);
-        if (isSafari) {
-            this.renderer.addClass(this.resizeableContainer?.nativeElement, 'safari');
-        }
     }
 
     onSourceDataError(errorMessage: string) {

@@ -98,7 +98,7 @@ mapview-container {
 
 
 .main-bar {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   z-index: 9000 !important;
@@ -138,8 +138,9 @@ mapview-container {
   border-top-left-radius: 6px;
   border-bottom-left-radius: 6px;
   position: absolute;
-  top: calc(50vh - 1em);
   right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   padding: 0.25em 0;
   opacity: 0.75;
 
@@ -553,25 +554,192 @@ map-view {
   color: var(--p-iconfield-icon-color);
 }
 
+.inspection-dialog {
+  .p-dialog {
+    min-height: 20em;
+    min-width: 25em;
+    height: 40em;
+    width: 30em;
+    overflow: hidden;
+    max-width: calc(100vw - 5em);
+    max-height: calc(100vh - 5em);
+  }
+
+  .p-dialog-header {
+    padding: 0.25em 0.25em 0 0.25em;
+
+    .p-colorpicker-panel {
+      z-index: 9500;
+    }
+
+    .p-colorpicker input {
+      height: 1.5em;
+      width: 1.5em;
+    }
+
+    .inspector-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+
+      & > * {
+        display: flex;
+        gap: 0.25em;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .title {
+        max-width: 20em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: bold;
+      }
+
+      .p-button {
+        width: 1.75em !important;
+        height: 1.75em !important;
+        margin: 0;
+      }
+    }
+  }
+
+  .p-dialog-content {
+    min-height: 30em;
+    min-width: 20em;
+    padding: 0.25em;
+
+    .filter-container {
+      display: flex;
+      align-content: center;
+      gap: 0.25em;
+      width: 100%;
+
+      .input-container {
+        width: 100%;
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+
+        .p-button {
+          width: 1.75em;
+          height: 1.75em;
+        }
+
+        .filter-input {
+          height: 1.75em;
+          width: 100%;
+          border-radius: 6px;
+          border: solid 1px var(--p-content-border-color);
+          direction: ltr;
+        }
+      }
+
+      button {
+        width: 1.75em;
+        height: 1.75em;
+      }
+    }
+
+    .resizable-container {
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+
+      .source-data-ref-container {
+        .p-buttongroup {
+          width: fit-content;
+        }
+
+        .p-button {
+          width: 1.2em;
+          height: 1em;
+          padding: 0.1em;
+          margin-top: 0.1em;
+          color: var(--p-primary-contrast-color);
+          background: var(--p-primary-500);
+          border: 1px solid var(--p-primary-500);
+        }
+
+        .p-button-label {
+          font-family: monospace;
+          font-weight: 700;
+          font-size: 1em;
+        }
+
+        span {
+          font-family: monospace;
+        }
+      }
+
+      .p-tree {
+        border: none;
+        padding: 0;
+      }
+
+      .p-treetable-header {
+        padding: 0;
+      }
+
+      .p-treetable-thead {
+        th {
+          padding: 0.25em;
+          font-size: 0.9em;
+        }
+      }
+
+      .p-treetable-tbody {
+        border-collapse: collapse;
+        font-size: 0.9em !important;
+
+        td {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        th {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        .p-treetable-toggler {
+          margin: 0;
+          width: 1.25em;
+          height: 1.25em;
+        }
+
+        /* Style used for highlighting individual table rows. */
+        tr.highlight {
+          color: black;
+
+          td {
+            border-color: var(--p-content-border-color);
+            background: var(--p-green-100);
+          }
+        }
+      }
+    }
+  }
+}
+
 .inspection-container {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 0.25em;
-  z-index: 9000;
-  pointer-events: none;
   overflow-y: scroll;
   height: 100vh;
   width: 100%;
-  justify-content: flex-end;
 
   inspection-panel {
     height: fit-content;
-    pointer-events: all;
   }
 
   .inspect-panel {
     min-width: 30em;
-
 
     .inspector-title {
       display: flex;
@@ -610,7 +778,7 @@ map-view {
       overflow: visible;
 
       .p-colorpicker-panel {
-        z-index: 9999;
+        z-index: 9500;
       }
 
       .p-colorpicker input {
@@ -659,9 +827,9 @@ map-view {
     .resizable-container {
       width: 30em;
       height: 40em;
-      min-width: 30em;
+      min-width: 20em;
       min-height: 20em;
-      resize: both;
+      resize: vertical;
       overflow: auto;
       direction: rtl;
       max-width: calc(100vw - 28em);
