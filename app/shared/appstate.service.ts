@@ -49,6 +49,7 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
+    undocked: boolean;
 }
 
 export interface CameraViewState {
@@ -145,7 +146,8 @@ export class AppStateService implements OnDestroy {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                s += `${state.size[0]}:${state.size[1]}~${state.color}`;
+                // size ~ color ~ undockedFlag
+                s += `${state.size[0]}:${state.size[1]}~${state.color}~${state.undocked ? 1 : 0}`;
                 return s;
             });
         },
@@ -156,11 +158,12 @@ export class AppStateService implements OnDestroy {
             }
             for (const panelStateStr of payload) {
                 const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 6) {
+                if (parts.length < 7) {
                     continue;
                 }
                 const id = Number(parts.shift()!);
                 const pinState = parts.shift() === "1";
+                const undocked = parts.pop()! === "1";
                 const color = parts.pop()!;
                 const sizeParts = parts.pop()!.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
@@ -170,7 +173,8 @@ export class AppStateService implements OnDestroy {
                     features: [],
                     pinned: pinState,
                     size: size as [number, number],
-                    color: color
+                    color: color,
+                    undocked: undocked
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -360,6 +364,18 @@ export class AppStateService implements OnDestroy {
 
     readonly unlimitNumSelections = this.createState<boolean>({
         name: 'unlimitNumSelections',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly mapsOpenState = this.createState<boolean>({
+        name: 'mapsOpenState',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly dockOpenState = this.createState<boolean>({
+        name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
     });
@@ -743,7 +759,7 @@ export class AppStateService implements OnDestroy {
         const mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
         if (mustCreateNewPanel) {
             if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                this.infoMessageService.showError(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
+                this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
                 this._replaceUrl = true;
                 return;
             }
@@ -754,7 +770,8 @@ export class AppStateService implements OnDestroy {
                 sourceData: sourceDataSelection,
                 pinned: false,
                 size: this.defaultInspectionPanelSize,
-                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length]
+                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length],
+                undocked: false
             });
             this.selectionState.next(allPanels);
             return id;
@@ -789,11 +806,23 @@ export class AppStateService implements OnDestroy {
         if (index === -1) {
             return;
         }
+        const maxPinned = MAX_NUM_SELECTIONS - 1;
         if (isPinned && !this.isNumSelectionsUnlimited &&
-            allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
-            this.infoMessageService.showError(`To pin more than ${MAX_NUM_SELECTIONS-1} panels, enable unlimited selections in the settings.`);
+            allPanels.filter(panel => panel.pinned).length >= maxPinned) {
+            this.infoMessageService.showWarning(`To pin more than ${maxPinned} panels, enable unlimited selections in the settings.`);
+            return;
         }
         allPanels[index].pinned = isPinned;
+        this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelUndockedState(id: number, undocked: boolean) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index === -1) {
+            return;
+        }
+        allPanels[index].undocked = undocked;
         this.selectionState.next(allPanels);
     }
 
@@ -1153,7 +1182,8 @@ export class AppStateService implements OnDestroy {
                 pinned: panel.pinned,
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
-                color: panel.color
+                color: panel.color,
+                undocked: panel.undocked
             };
 
             // Filter features

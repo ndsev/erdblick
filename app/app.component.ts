@@ -5,6 +5,7 @@ import {AppStateService} from "./shared/appstate.service";
 import {AppModeService} from "./shared/app-mode.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
+import {environment} from "./environments/environment";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -25,15 +26,14 @@ interface SurveyConfig {
 @Component({
     selector: 'app-root',
     template: `
-        <mapview-container></mapview-container>
-        @if (!appModeService.isVisualizationOnly) {
+        <dockable-layout></dockable-layout>
+        @if (!environment.visualizationOnly) {
+            <datasources></datasources>
             <map-panel></map-panel>
-            <search-panel></search-panel>
-            <inspection-container></inspection-container>
             <coordinates-panel></coordinates-panel>
             <stats-dialog></stats-dialog>
             <style-panel></style-panel>
-            <survey></survey>
+            <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
         <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         <legal-dialog></legal-dialog>
@@ -170,4 +170,6 @@ export class AppComponent {
                 this.erdblickVersion = `${this.title} ${data.toString()}`;
             });
     }
+
+    protected readonly environment = environment;
 }

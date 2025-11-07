@@ -24,6 +24,7 @@ import {MapView3D} from "./view3d";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
+import {Popover} from "primeng/popover";
 
 @Component({
     selector: 'map-view',
@@ -48,6 +49,14 @@ import {environment} from "../environments/environment";
         @defer (when mapView) {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
+        <div #popoverAnchor class="popover-anchor"></div>
+        <p-popover #popover>
+            <ng-template pTemplate="content">
+                @for (content of featureIdsContent; track $index) {
+                    {{ content }}<br>
+                }
+            </ng-template>
+        </p-popover>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -60,6 +69,7 @@ import {environment} from "../environments/environment";
     standalone: false
 })
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
+    subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: MapView;
@@ -78,6 +88,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private modeSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
+
+    @ViewChild('popover') featureIdsPopover!: Popover;
+    @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
+    featureIdsContent: string[] = [];
 
     /**
      * Construct a Cesium View with a Model.
@@ -101,16 +115,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public appModeService: AppModeService,
                 private cdr: ChangeDetectorRef
     ) {
-        // TODO: Consider only if the view is focused?
-        //   Fix the tile outline
-        this.menuService.menuItems.subscribe(items => {
-            // if (this.stateService.focusedView === this.mapView?.viewIndex)
-            this.menuItems = [...items];
-        });
+        this.subscriptions.push(
+            // TODO: Consider only if the view is focused?
+            //   Fix the tile outline
+            this.menuService.menuItems.subscribe(items => {
+                // if (this.stateService.focusedView === this.mapView?.viewIndex)
+                this.menuItems = [...items];
+            })
+        );
 
-        this.stateService.focusedViewState.subscribe(focusedViewIndex => {
-            this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
-        });
+        this.subscriptions.push(
+            this.stateService.focusedViewState.subscribe(focusedViewIndex => {
+                this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
+            })
+        );
     }
 
     ngOnInit() {
@@ -196,6 +214,38 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
             const currentSyncState = new Set(this.stateService.viewSync);
             this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
+            this.subscriptions.push(
+                this.mapView!.hoveredFeatureIds.subscribe(result => {
+                    this.featureIdsPopover.hide();
+                    this.featureIdsContent = [];
+                    if (!result || !result.featureIds.length) {
+                        return;
+                    }
+                    result.featureIds.forEach((featureId) => {
+                        if (!featureId) {
+                            return;
+                        }
+                        if (typeof featureId === "string") {
+                            this.featureIdsContent.push(featureId)
+                        } else {
+                            this.featureIdsContent.push(featureId.featureId);
+                        }
+                    });
+                    const canvasRect = this.mapView!.viewer.canvas.getBoundingClientRect();
+                    const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
+                    const y = result.position.y + canvasRect.top;
+                    const anchor = this.anchorRef.nativeElement;
+                    anchor.style.position = 'fixed';
+                    anchor.style.left = `${x}px`;
+                    anchor.style.top = `${y}px`;
+                    anchor.style.width = '1px';
+                    anchor.style.height = '1px';
+                    anchor.style.pointerEvents = 'none';
+
+                    this.featureIdsPopover.show({ currentTarget: anchor } as unknown as MouseEvent);
+
+                })
+            );
             this.cdr.markForCheck();
         });
     }

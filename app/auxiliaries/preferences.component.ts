@@ -5,36 +5,27 @@ import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
 import {EditorService} from "../shared/editor.service";
+import {environment} from "../environments/environment";
 
 @Component({
     selector: 'pref-components',
     template: `
-        <div class="pref-buttons-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
-            <div class="pref-button-subcontainer" (click)="openHelp()">
-                <span class="material-symbols-outlined">question_mark</span>
-                <span>Help</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showPreferencesDialog()">
-                <span class="material-symbols-outlined">settings</span>
-                <span>Preferences</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showControlsDialog()">
-                <span class="material-symbols-outlined">keyboard</span>
-                <span>Controls</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showStatsDialog()">
-                <span class="material-symbols-outlined">bar_chart_4_bars</span>
-                <span>Statistics</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openDatasources()">
-                <span class="material-symbols-outlined">data_table</span>
-                <span>Datasources</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openStylesDialog()" >
-                <span class="material-symbols-outlined">palette</span>
-                <span>Styles</span>
-            </div>
-        </div>
+        <p-menubar class="main-bar" [model]="menuItems">
+            <ng-template #start>
+                @if (!environment.visualizationOnly) {
+                    <search-panel></search-panel>
+                }
+            </ng-template>
+            <ng-template #item let-item>
+                <a pRipple class="p-menubar-item-link" (click)="item.command()">
+                    <span class="material-symbols-outlined">{{ item.icon }}</span>
+                    <span>{{ item.name }}</span>
+                </a>
+            </ng-template>
+            <ng-template #end>
+                Clickable VERSION
+            </ng-template>
+        </p-menubar>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" #pref class="pref-dialog">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
@@ -268,6 +259,43 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         { label: 'On', value: 'on' },
         { label: 'Auto', value: 'auto' }
     ];
+    menuItems = [
+        {
+            name: "Maps",
+            icon: "stacks",
+            command: () => { this.showMapsPanel(); }
+        },
+        {
+            name: 'Styles',
+            icon: 'palette',
+            command: () => { this.openStylesDialog(); }
+        },
+        {
+            name: 'Datasources',
+            icon: 'data_table',
+            command: () => { this.openDatasources(); }
+        },
+        {
+            name: 'Statistics',
+            icon: 'bar_chart_4_bars',
+            command: () => { this.showStatsDialog(); }
+        },
+        {
+            name: 'Controls',
+            icon: 'keyboard',
+            command: () => { this.showControlsDialog(); }
+        },
+        {
+            name: 'Preferences',
+            icon: 'settings',
+            command: () => { this.showPreferencesDialog(); }
+        },
+        {
+            name: 'Help',
+            icon: 'question_mark',
+            command: () => { this.openHelp(); }
+        }
+    ];
     private mediaQueryList?: MediaQueryList;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly DARK_MODE_KEY = 'ui.darkMode';
@@ -406,6 +434,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.stylesDialogVisible = true;
     }
 
+    private showMapsPanel() {
+        this.stateService.mapsOpenState.next(true);
+    }
+
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
+    protected readonly environment = environment;
 }

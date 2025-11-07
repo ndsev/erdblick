@@ -196,6 +196,7 @@ export class MapDataService {
                     existing.pinned = selection.pinned;
                     existing.color = selection.color;
                     existing.size = selection.size;
+                    existing.undocked = selection.undocked ?? false;
                     convertedSelections.push(existing);
                     continue;
                 }
@@ -206,7 +207,8 @@ export class MapDataService {
                     size: selection.size,
                     features: features,
                     sourceData: selection.sourceData,
-                    color: selection.color
+                    color: selection.color,
+                    undocked: selection.undocked ?? false
                 });
             }
             this.selectionTopic.next(convertedSelections);
