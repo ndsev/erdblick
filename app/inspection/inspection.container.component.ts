@@ -4,12 +4,19 @@ import {MapDataService} from "../mapdata/map.service";
 @Component({
     selector: 'inspection-container',
     template: `
-        <div class="inspection-container" *ngIf="mapService.selectionTopic | async as panels">
-            @if (panels.length > 0) {
-                @for (panel of panels; track panel.id) {
-                    @if (panel.features.length > 0 || panel.sourceData !== undefined) {
-                        <inspection-panel [panel]="panel"></inspection-panel>
+        <div *ngIf="mapService.selectionTopic | async as panels">
+            <div class="inspection-container">
+                @if (panels.length > 0) {
+                    @for (panel of panels; track panel.id) {
+                        @if ((panel.features.length > 0 || panel.sourceData !== undefined) && !panel.undocked) {
+                            <inspection-panel [panel]="panel" (ejectedPanel)="onEject($event)"></inspection-panel>
+                        }
                     }
+                }
+            </div>
+            @for (panel of panels; track panel.id) {
+                @if ((panel.features.length > 0 || panel.sourceData !== undefined) && panel.undocked) {
+                    <inspection-panel-dialog [panel]="panel"></inspection-panel-dialog>
                 }
             }
         </div>
@@ -19,4 +26,8 @@ import {MapDataService} from "../mapdata/map.service";
 })
 export class InspectionContainerComponent {
     constructor(public mapService: MapDataService) {}
+
+    onEject(panel: any) {
+        this.mapService.stateService.setInspectionPanelUndockedState(panel.id, true);
+    }
 }

@@ -1,4 +1,4 @@
-import {AfterViewInit, Component, ElementRef, input, Renderer2, ViewChild, effect} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -38,12 +38,14 @@ interface SourceLayerMenuItem {
                             }
                         </span>
                         <span>
+                            <p-button icon="" (click)="undock($event)" (mousedown)="$event.stopPropagation()">
+                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">eject</span>
+                            </p-button>
                             <p-button icon="" (click)="togglePinnedState($event)"
                                       [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
                                       (mousedown)="$event.stopPropagation()">
                                 @if (panel().pinned) {
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">keep</span>
+                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep</span>
                                 } @else {
                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
                                 }
@@ -97,6 +99,7 @@ export class InspectionPanelComponent implements AfterViewInit {
     selectedLayerItem?: SourceLayerMenuItem;
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
 
@@ -112,7 +115,6 @@ export class InspectionPanelComponent implements AfterViewInit {
                 this.title = tileId === 0n ? `Metadata for ${mapId}: ` : `${tileId}.`;
                 const map = this.mapService.maps.maps.get(mapId);
                 if (map) {
-                    // TODO: Fix missing entries for the metadata on tile 0
                     this.layerMenuItems = Array.from(map.layers.values())
                         .filter(item => item.type === "SourceData")
                         .filter(item => {
@@ -170,7 +172,6 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
-            // TODO: FIXXXXXXXXXX!!!
             this.selectedLayerItem.command();
         }
     }
@@ -214,5 +215,10 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
+    }
+
+    undock(event: MouseEvent) {
+        event.stopPropagation();
+        this.ejectedPanel.emit(this.panel());
     }
 }
