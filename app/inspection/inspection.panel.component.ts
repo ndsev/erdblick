@@ -57,8 +57,8 @@ interface SourceLayerMenuItem {
                 </p-accordion-header>
 
                 <p-accordion-content>
-                    <div class="flex resizable-container" #resizeableContainer
-                         [style.width.em]="panel().size[0]"
+                    <div class="resizable-container" #resizeableContainer
+                         [style.width.%]="100"
                          [style.height.em]="panel().size[1]"
                          (mouseup)="onInspectionContainerResize($event, panel())"
                          [ngClass]="{'resizable-container-expanded': isExpanded}">

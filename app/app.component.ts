@@ -30,7 +30,6 @@ interface SurveyConfig {
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
             <map-panel></map-panel>
-            <coordinates-panel></coordinates-panel>
             <stats-dialog></stats-dialog>
             <style-panel></style-panel>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
