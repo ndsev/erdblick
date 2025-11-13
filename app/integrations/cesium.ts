@@ -5,7 +5,6 @@
 // See: https://github.com/CesiumGS/cesium/pull/11519
 // In index.js, we have the Cesium.js import, so Cesium is
 // available as a global variable.
-
 import * as Cesium from "cesium";
 
 // Add aliases for any required types. Wherever the type

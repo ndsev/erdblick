@@ -4,7 +4,8 @@ export interface ErdblickCore_ extends ErdblickCore {
     HEAPU8: Uint8Array
 }
 
-export let coreLib: ErdblickCore_;
+// Keep as any to allow safe default stub assignment pre-initialization in tests.
+export let coreLib: any;
 
 export async function initializeLibrary(): Promise<void> {
     if (coreLib)
@@ -73,4 +74,49 @@ export function logFreeMemory() {
     let avail = coreLib!.getFreeMemory()/1024/1024;
     let total = coreLib!.getTotalMemory()/1024/1024;
     console.log(`Free memory: ${Math.round(avail*1000)/1000} MiB (${avail/total}%)`)
+}
+
+// Provide a minimal safe default stub for tests and environments
+// where the WASM library isn't initialized. This avoids import-time
+// crashes when unit tests are collected before vi.mock takes effect.
+const __isVitest = (() => {
+    try {
+        // Vitest sets a global marker and also import.meta.vitest
+        if (typeof globalThis !== 'undefined' && (globalThis as any).__VITEST__) return true;
+        // @ts-ignore
+        if (typeof import.meta !== 'undefined' && (import.meta as any).vitest) return true;
+    } catch {}
+    return false;
+})();
+
+if (!coreLib && __isVitest) {
+    const HEAPU8 = new Uint8Array(1024 * 1024);
+    class SharedArrayStub {
+        private len: number;
+        constructor(len = 0) { this.len = len; }
+        getSize() { return this.len; }
+        getPointer() { return 0; }
+        delete() {}
+    }
+
+    // Very small subset used by unit tests.
+    const stub: any = {
+        HEAPU8,
+        SharedUint8Array: SharedArrayStub,
+        setExceptionHandler: (_: any) => {},
+        getTileIdFromPosition: (_x: number, _y: number, _l: number) => 100n,
+        getTilePosition: (_: bigint) => ({ x: 10, y: 10 }),
+        getTileNeighbor: (id: bigint, dx: number, dy: number) => id + BigInt(dx + dy * 2),
+        getTileLevel: (_: bigint) => 10,
+        getTileBox: (_: bigint) => [0, 0, 1, 1],
+        parseMapTileKey: (key: string) => {
+            // Accept both 'map:layer:tile' and 'map/layer/tile' formats.
+            const parts = key.includes(':') ? key.split(':') : key.split('/');
+            const [mapId, layerId, tileId] = [parts[0] ?? '', parts[1] ?? '', parts[2] ?? '0'];
+            return [mapId, layerId, BigInt(String(tileId).replace(/[^0-9-]/g, '') || '0')];
+        },
+        HighlightMode: { NO_HIGHLIGHT: { value: 0 }, SELECTION_HIGHLIGHT: { value: 1 }, HOVER_HIGHLIGHT: { value: 2 } },
+        GeomType: { POINT: 0, LINESTRING: 1, POLYGON: 2 },
+    };
+    coreLib = stub as ErdblickCore_;
 }

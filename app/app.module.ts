@@ -13,7 +13,6 @@ import {BadgeModule} from "primeng/badge";
 import {TreeModule} from "primeng/tree";
 import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
-import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
 import {PanelMenuModule} from "primeng/panelmenu";
 import {TreeTableModule} from "primeng/treetable";
@@ -25,7 +24,6 @@ import {AlertDialogComponent, InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
 import {MapDataService} from "./mapdata/map.service";
-import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
@@ -71,7 +69,6 @@ import {EditorService} from "./shared/editor.service";
 import {FormlyFieldConfig, FormlyModule} from "@ngx-formly/core";
 import {ReactiveFormsModule} from '@angular/forms';
 import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
-
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
@@ -245,7 +242,6 @@ export const initializeServices = () => {
         BadgeModule,
         TreeModule,
         AccordionModule,
-        OverlayPanelModule,
         DividerModule,
         TabsModule,
         PanelMenuModule,
@@ -253,7 +249,6 @@ export const initializeServices = () => {
         ToastModule,
         InputNumberModule,
         FieldsetModule,
-        InputSwitchModule,
         SliderModule,
         FileUploadModule,
         CheckboxModule,
