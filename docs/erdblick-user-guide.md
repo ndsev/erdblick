@@ -1,0 +1,43 @@
+# Erdblick User Guide
+
+- Setup Guide (erdblick-setup.md)
+  - Basic Setup with pypi mapget
+  - Simple mapget.yaml with GeoJSON Data Source
+    (TODO: We need to migrate the GeoJSON Data Source from mapget-live-cpp to mapget)
+- Basic UI Layout Guide (erdblick-ui-basics.md)
+  - Map Config Panel, Compass, Coordinate View, Main Menu
+  - Settings
+- Search Guide (erdblick-search.md)
+  - Feature Search with simfil
+  - Jump-to-Feature Actions
+  - Jump-to-Tile/Coordinate Actions
+  - SourceDataInspection Actions
+  - TODO: How are we gonna have a simfil reference here, as simfil is integrated via mapviewer repo, not the erdblick repo??
+- Style System Guide (erdblick-stylesystem.md)
+  - Style Options in Tree
+  - Style Sheet Dialog
+  - Style Sheet Editor/Language
+- Split-Screen Usage Guide (erdblick-split.md)
+- Inspection Guide (erdblick-inspection.md)
+  - Single Selection, Focus, Folding
+  - Multi-Selection, Pinning
+  - Highlight Color
+  - GeoJson Export
+  - SourceData Inspection
+- SourceData Inspection Guide (erdblick-sourcedata.md)
+- URL Guide (erdblick-url.md)
+- Troubleshooting Guide (erdblick-troubleshooting.md)
+  - Performance Hints
+    - Activate as few maps as possible
+    - Ensure maps have advertised coverage
+    - Use a Chromium-based browser
+    - Check out the stats dialog
+  - I cannot see any data...
+    - Ensure viewport in right place
+      - Use zoom-to-coverage of available
+    - Ensure map layer is activated incl. style options
+    - Activate tile borders to see whether tiles are empty
+    - Use right-click SourceData Inspection Action
+    - Settings Reset
+- DataSource Editor Guide (erdblick-datasource-editor.md)
+
