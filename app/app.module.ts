@@ -20,7 +20,7 @@ import {ToastModule} from "primeng/toast";
 import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
-import {AlertDialogComponent, InfoMessageService} from "./shared/info.service";
+import {InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
 import {MapDataService} from "./mapdata/map.service";
@@ -185,7 +185,6 @@ export const initializeServices = () => {
         EditorComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
-        AlertDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
         ArrayTypeComponent,
