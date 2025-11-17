@@ -269,6 +269,14 @@
                                 }
                             ]
                         },
+                        "test": {
+                            "fileReplacements": [
+                                {
+                                    "replace": "app/integrations/cesium.ts",
+                                    "with": "app/integrations/cesium.test.ts"
+                                }
+                            ]
+                        },
                         "visualization-only-dev": {
                             "outputPath": "static-visualization-only",
                             "optimization": {

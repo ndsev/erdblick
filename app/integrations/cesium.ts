@@ -5,16 +5,28 @@
 // @cesium/* and trigger optimization bailouts.
 //
 // We therefore only use type information from the "cesium"
-// package and reference the global `Cesium` at runtime.
-// The following import provides full typings without causing
-// a runtime import or bundling.
+// package and resolve the runtime instance from the global
+// UMD bundle via globalThis.Cesium. The following import
+// provides full typings without causing a runtime import
+// or bundling.
 import type * as CesiumType from "cesium";
-declare const Cesium: typeof CesiumType;
+
+function getCesiumRuntime(): typeof CesiumType {
+    const cesium = (globalThis as any).Cesium as typeof CesiumType | undefined;
+    if (!cesium) {
+        throw new Error(
+            "[Cesium integration] globalThis.Cesium is not available. " +
+            "Ensure the Cesium UMD bundle Cesiumis loaded before Angular bootstraps."
+        );
+    }
+    return cesium;
+}
+
+const Cesium = getCesiumRuntime();
 
 // Add aliases for any required types. Wherever the type
 // has a static function, such as Cartesian3.fromDegrees,
 // it must also be exported as a const.
-
 export type  Cartesian2 = CesiumType.Cartesian2;
 export const Cartesian2 = Cesium.Cartesian2;
 export type  Cartesian3 = CesiumType.Cartesian3;
