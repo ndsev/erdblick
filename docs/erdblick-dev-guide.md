@@ -203,15 +203,180 @@ flowchart TB
 
 In code, the main responsibilities are:
 
-- `AppComponent` and the PrimeNG-based panels present the UI (maps & layers, styles, search, inspection, preferences, statistics, DataSource editor).
-- `MapViewComponent` and `MapView` encapsulate the Cesium viewer per pane (2D/3D), read camera changes, and forward interaction events to services.
+- `AppComponent` and the PrimeNG-based panels present the UI (maps and layers, styles, search, inspection, preferences, statistics, DataSource editor).
+- `MapViewComponent` and `MapView` encapsulate the Cesium viewer per pane (two or more views), read camera changes, and forward interaction events to services.
 - `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
-- `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover/selection highlights.
+- `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
 - `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
 - `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
 - A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor.
 
-The rest of this guide walks from the backend up through the tile cache, renderer, and tools that sit on top.
+The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
+
+### Map Data (mapdata/*)
+
+```mermaid
+flowchart LR
+  MapPanel[MapPanelComponent<br>maps and layers]
+  MapSvc[MapDataService<br>tiles and visualizations]
+  State[AppStateService<br>shared state]
+  StyleSvc[StyleService<br>styles]
+  Core[WASM core<br>TileLayerParser]
+  Backend[Backend<br>/sources /tiles /config]
+  View[MapView<br>camera and render]
+
+  MapPanel --> MapSvc
+  MapPanel --> State
+
+  View --> MapSvc
+  State --> MapSvc
+
+  MapSvc --> StyleSvc
+  MapSvc --> Core
+  MapSvc --> Backend
+  MapSvc --> View
+```
+
+This view focuses on the tile pipeline and the map tree:
+
+- `MapPanelComponent` provides the UI for map and layer configuration and notifies both `MapDataService` and `AppStateService`.
+- `MapDataService` keeps track of maps, tiles, and tile visualizations per view and per style.
+- `AppStateService` contributes viewport and selection information that influences which tiles are requested and kept.
+- `StyleService` provides style definitions when tiles are converted into Cesium primitives.
+- The WASM core (`TileLayerParser` and related types) turns tile streams into feature-layer objects.
+- The backend responds to `/sources`, `/tiles`, and `/config` calls initiated from this group.
+
+### Map Views (mapview/*)
+
+```mermaid
+flowchart LR
+  MapViewComp[MapViewComponent<br>Angular wrapper]
+  MapViewModel[MapView<br>Cesium glue]
+  CesiumViewer[Cesium Viewer<br>scene]
+  State[AppStateService<br>shared state]
+  MapSvc[MapDataService<br>tiles]
+  SearchSvc[FeatureSearchService<br>search results]
+  JumpSvc[JumpTargetService<br>jump targets]
+  CoordSvc[CoordinatesService<br>cursor coordinates]
+  MenuSvc[RightClickMenuService<br>context menus]
+
+  MapViewComp --> MapViewModel
+  MapViewModel --> CesiumViewer
+
+  MapViewModel --> State
+  MapViewModel --> MapSvc
+  MapViewModel --> SearchSvc
+  MapViewModel --> JumpSvc
+  MapViewModel --> CoordSvc
+  MapViewModel --> MenuSvc
+```
+
+Here the emphasis is on user interaction and camera control:
+
+- `MapViewComponent` owns one Cesium canvas per view and passes the view index and configuration into `MapView`.
+- `MapView` configures the Cesium `Viewer`, translates mouse and keyboard events into navigation or selection actions, and listens to tile visualizations and search results.
+- `AppStateService` persists and restores per-view camera state and split-view options.
+- `MapDataService` supplies tile visualizations and receives camera-related updates (for example focus or zoom-to-feature).
+- `FeatureSearchService` and `JumpTargetService` deliver search markers and jump targets that the view renders or focuses.
+- `CoordinatesService` and `RightClickMenuService` use the same events to drive coordinates panels and context menus.
+
+### Styles (styledata/*)
+
+```mermaid
+flowchart LR
+  StylePanel[StyleComponent<br>style dialog]
+  StyleSvc[StyleService<br>style manager]
+  State[AppStateService<br>style state]
+  MapSvc[MapDataService<br>tiles]
+  Core[WASM core<br>FeatureLayerStyle]
+  Backend[Backend<br>config.json and styles]
+
+  StylePanel --> StyleSvc
+  StylePanel --> State
+
+  StyleSvc --> Core
+  StyleSvc --> Backend
+  StyleSvc --> MapSvc
+  State --> StyleSvc
+```
+
+This group is responsible for turning YAML style sheets into runtime style objects:
+
+- `StyleService` loads style metadata from `config/config.json`, fetches YAML files, constructs `FeatureLayerStyle` instances, and exposes style options.
+- `StyleComponent` lets users enable or disable styles, tweak options, import or export definitions, and open the embedded editor.
+- `AppStateService` tracks which styles and options are enabled so they can be restored across reloads or encoded in URLs.
+- `MapDataService` listens for style add and remove events and re-renders tiles when styles change.
+- The WASM core parses style YAML into executable style programs.
+- The backend serves `config.json` and the YAML files referenced within it.
+
+### Search (search/*)
+
+```mermaid
+flowchart LR
+  SearchPanel[SearchPanelComponent<br>command palette]
+  FeatureSearch[FeatureSearchComponent<br>search dialog]
+  SearchSvc[FeatureSearchService<br>workers and results]
+  JumpSvc[JumpTargetService<br>jump targets]
+  MapSvc[MapDataService<br>tiles]
+  State[AppStateService<br>search state]
+  Workers[Workers<br>search.worker.ts]
+  Core[WASM core<br>TileLayerParser and search]
+  Backend[Backend<br>/tiles and /locate]
+
+  SearchPanel --> SearchSvc
+  SearchPanel --> JumpSvc
+  SearchPanel --> State
+  FeatureSearch --> SearchSvc
+
+  SearchSvc --> MapSvc
+  SearchSvc --> State
+  SearchSvc --> Workers
+  Workers --> Core
+  SearchSvc --> Backend
+```
+
+From the perspective of this group:
+
+- `SearchPanelComponent` implements the command palette UX and hands off parsing and execution to `FeatureSearchService` and `JumpTargetService`.
+- `FeatureSearchComponent` provides the dedicated search dialog including diagnostics and tracing.
+- `FeatureSearchService` orchestrates search jobs and completion requests across tiles and workers, and publishes aggregated results.
+- `JumpTargetService` offers additional jump targets (tile IDs, feature IDs, SourceData) on top of the palette.
+- `MapDataService` supplies tile blobs and field dictionaries to search workers.
+- `AppStateService` records the currently active search and keeps history in sync with URLs.
+- `search.worker.ts` drives the WASM `TileLayerParser` and `FeatureLayerSearch` functions in isolation.
+- The backend is used both as a tile source for search and as the `/locate` endpoint when resolving external references.
+
+### Inspection and SourceData (inspection/*)
+
+```mermaid
+flowchart LR
+  InspectPanel[InspectionPanelComponent<br>feature panels]
+  InspectTree[Inspection tree<br>tree view]
+  SourcePanel[SourceDataPanelComponent<br>SourceData view]
+  State[AppStateService<br>selection state]
+  MapSvc[MapDataService<br>tiles and SourceData]
+  Core[WASM core<br>inspection and SourceData]
+  Backend[Backend<br>/tiles SourceData]
+
+  InspectPanel --> InspectTree
+  InspectPanel --> State
+  InspectTree --> State
+
+  State --> MapSvc
+  MapSvc --> InspectPanel
+  MapSvc --> SourcePanel
+  SourcePanel --> Core
+  MapSvc --> Backend
+```
+
+Here the focus is on selection and inspection:
+
+- `InspectionPanelComponent` manages inspection panels, including pinning, sizes, highlight colors, and SourceData panels.
+- The inspection tree UI renders feature attributes, relations, and links to related features or SourceData.
+- `AppStateService` encodes inspection panels (features and SourceData) so they can be restored from URLs and local storage.
+- `MapDataService` translates `TileFeatureId` selections into `FeatureWrapper`s, drives selection and hover highlights, and fetches SourceData tiles.
+- The WASM core builds inspection-friendly representations for features and SourceData layers.
+- The backend serves SourceData over `/tiles` for layers of type SourceData.
 
 ## Tile Cache and Loading Sequence
 
