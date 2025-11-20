@@ -46,6 +46,11 @@
                                 "output": "/"
                             },
                             {
+                                "glob": "**/*.js",
+                                "input": "config",
+                                "output": "/config"
+                            },
+                            {
                                 "glob": "VERSION",
                                 "input": ".",
                                 "output": "/bundle/"
@@ -62,11 +67,6 @@
                             },
                             {
                                 "glob": "LICENSE*",
-                                "input": "node_modules/material-icons",
-                                "output": "/bundle/licenses/icons/material-icons"
-                            },
-                            {
-                                "glob": "LICENSE*",
                                 "input": "node_modules/material-symbols",
                                 "output": "/bundle/licenses/icons/material-symbols"
                             }
@@ -74,7 +74,6 @@
                         "styles": [
                             "node_modules/primeicons/primeicons.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
-                            "node_modules/material-icons/iconfont/material-icons.css",
                             "node_modules/material-symbols/index.css",
                             "app/styles.scss"
                         ],
@@ -118,6 +117,11 @@
                                     "output": "/"
                                 },
                                 {
+                                    "glob": "**/*.js",
+                                    "input": "config",
+                                    "output": "/config"
+                                },
+                                {
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
@@ -131,11 +135,6 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/@fontsource/inter",
                                     "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/material-icons",
-                                    "output": "/bundle/licenses/icons/material-icons"
                                 },
                                 {
                                     "glob": "LICENSE*",
@@ -186,10 +185,10 @@
                             "tsConfig": "tsconfig.spec.json",
                             "browser": "app/main.ts",
                             "fileReplacements": [
-                                {
-                                    "replace": "app/environments/environment.ts",
-                                    "with": "app/environments/environment.ts"
-                                }
+                              {
+                                "replace": "app/integrations/cesium.ts",
+                                "with": "app/integrations/cesium.test.ts"
+                              }
                             ]
                         },
                         "visualization-only": {
@@ -229,6 +228,11 @@
                                     "output": "/"
                                 },
                                 {
+                                    "glob": "**/*.js",
+                                    "input": "config",
+                                    "output": "/config"
+                                },
+                                {
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
@@ -242,11 +246,6 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/@fontsource/inter",
                                     "output": "/bundle/licenses/fonts/inter"
-                                },
-                                {
-                                    "glob": "LICENSE*",
-                                    "input": "node_modules/material-icons",
-                                    "output": "/bundle/licenses/icons/material-icons"
                                 },
                                 {
                                     "glob": "LICENSE*",
@@ -266,14 +265,6 @@
                                 {
                                     "replace": "app/environments/environment.ts",
                                     "with": "app/environments/environment.visualization-only.ts"
-                                }
-                            ]
-                        },
-                        "test": {
-                            "fileReplacements": [
-                                {
-                                    "replace": "app/integrations/cesium.ts",
-                                    "with": "app/integrations/cesium.test.ts"
                                 }
                             ]
                         },
@@ -327,6 +318,15 @@
                         "runner": "vitest",
                         "tsConfig": "tsconfig.spec.json",
                         "buildTarget": "erdblick:build:test",
+                        "codeCoverage": true,
+                        "codeCoverageReporters": [
+                            "text-summary",
+                            "html",
+                            "lcov"
+                        ],
+                        "codeCoverageExclude": [
+                            "bundle/cesium/**"
+                        ],
                         "exclude": [
                             "app/app.component.spec.ts"
                         ],

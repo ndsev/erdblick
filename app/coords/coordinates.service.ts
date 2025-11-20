@@ -28,7 +28,7 @@ export class CoordinatesService {
                         let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
                         if (jumpTargetsConfig !== undefined) {
                             // Using string interpolation so webpack can trace imports from the location
-                            import(`../../config/${jumpTargetsConfig}.js`).then((plugin) => {
+                            import(`/config/${jumpTargetsConfig}.js`).then((plugin) => {
                                 const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
                                     this.auxiliaryCoordinatesFun = getAuxCoordinates;

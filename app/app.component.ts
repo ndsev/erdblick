@@ -102,14 +102,15 @@ export class AppComponent {
                         let distribVersions = data["extensionModules"]["distribVersions"];
                         if (distribVersions !== undefined) {
                             // Using string interpolation so webpack can trace imports from the location
-                            import(`../config/${distribVersions}.js`).then(function (plugin) {
-                                return plugin.default() as Array<Versions>;
-                            }).then((versions: Array<Versions>) => {
-                                this.distributionVersions = versions;
-                            }).catch((error) => {
-                                console.error(error);
-                                this.getBasicVersion();
-                            });
+                            import(`/config/${distribVersions}.js`)
+                                .then((plugin) => plugin.default() as Array<Versions>)
+                                .then((versions: Array<Versions>) => {
+                                    this.distributionVersions = versions;
+                                })
+                                .catch((error) => {
+                                    console.error(error);
+                                    this.getBasicVersion();
+                                });
                             return;
                         } else {
                             this.getBasicVersion();

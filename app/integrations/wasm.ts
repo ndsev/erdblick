@@ -79,17 +79,30 @@ export function logFreeMemory() {
 // Provide a minimal safe default stub for tests and environments
 // where the WASM library isn't initialized. This avoids import-time
 // crashes when unit tests are collected before vi.mock takes effect.
-const __isVitest = (() => {
+const __isUnitTestEnv = (() => {
     try {
-        // Vitest sets a global marker and also import.meta.vitest
-        if (typeof globalThis !== 'undefined' && (globalThis as any).__VITEST__) return true;
-        // @ts-ignore
-        if (typeof import.meta !== 'undefined' && (import.meta as any).vitest) return true;
-    } catch {}
+        if (typeof globalThis !== 'undefined') {
+            if ((globalThis as any).__VITEST__ || (globalThis as any).vitest) {
+                return true;
+            }
+            const proc = (globalThis as any).process;
+            if (proc?.env) {
+                if (proc.env['VITEST']) return true;
+                if (proc.env['NODE_ENV'] === 'test') return true;
+                if (proc.env['NG_TEST']) return true;
+            }
+        }
+
+        if (typeof import.meta !== 'undefined' && (import.meta as any).vitest) {
+            return true;
+        }
+    } catch (e) {
+        console.error(e);
+    }
     return false;
 })();
 
-if (!coreLib && __isVitest) {
+function createTestCoreLibStub() {
     const HEAPU8 = new Uint8Array(1024 * 1024);
     class SharedArrayStub {
         private len: number;
@@ -99,24 +112,103 @@ if (!coreLib && __isVitest) {
         delete() {}
     }
 
+    class TileLayerParserStub {
+        getFieldDictOffsets() { return [0]; }
+        reset() {}
+        setDataSourceInfo(_info: any) {}
+    }
+
+    class PrimitiveCollectionStub {
+        private destroyed = false;
+        id = 'primitive-collection';
+        destroy() { this.destroyed = true; }
+        isDestroyed() { return this.destroyed; }
+    }
+
+    class FeatureLayerVisualizationStub {
+        private pc: any;
+
+        constructor(
+            public viewIndex: number,
+            public mapTileKey: string,
+            public style: any,
+            public options: any,
+            public pointMergeService: any,
+            public highlightMode: any,
+            public featureIdSubset: any,
+        ) {
+            this.pc = new PrimitiveCollectionStub();
+        }
+
+        addTileFeatureLayer(_layer: any) {}
+        run() {}
+        externalReferences() { return []; }
+        mergedPointFeatures() { return {}; }
+        primitiveCollection() { return this.pc; }
+        processResolvedExternalReferences(_responses: any) {}
+        delete() {}
+    }
+
+    const ValueType = {
+        NULL: { value: 0 },
+        ARRAY: { value: 1 << 0 },
+        NUMBER: { value: 1 << 1 },
+        STRING: { value: 1 << 2 },
+    };
+
     // Very small subset used by unit tests.
-    const stub: any = {
+    return {
         HEAPU8,
         SharedUint8Array: SharedArrayStub,
         setExceptionHandler: (_: any) => {},
+        TileLayerParser: TileLayerParserStub,
+        FeatureLayerVisualization: FeatureLayerVisualizationStub,
+        ValueType,
+        SourceDataAddressFormat: {
+            BIT_RANGE: 0,
+            INDEX_RANGE: 1,
+        },
         getTileIdFromPosition: (_x: number, _y: number, _l: number) => 100n,
         getTilePosition: (_: bigint) => ({ x: 10, y: 10 }),
         getTileNeighbor: (id: bigint, dx: number, dy: number) => id + BigInt(dx + dy * 2),
         getTileLevel: (_: bigint) => 10,
         getTileBox: (_: bigint) => [0, 0, 1, 1],
+        getTileIds: (_viewport: any, level: number, limit: number) => {
+            const count = Math.min(limit, 4);
+            return Array.from({length: count}, (_, i) => BigInt(level * 10 + i));
+        },
+        getNumTileIds: (_viewport: any, _level: number) => 4,
+        getTileFeatureLayerKey: (mapId: string, layerId: string, tileId: bigint) => {
+            return `${mapId}/${layerId}/${tileId.toString()}`;
+        },
+        getSourceDataLayerKey: (mapId: string, layerId: string, tileId: bigint) => {
+            return `${mapId}/${layerId}/${tileId.toString()}`;
+        },
+        getTilePriorityById: (_viewport: any, tileId: bigint) => Number(tileId % 1000n),
         parseMapTileKey: (key: string) => {
-            // Accept both 'map:layer:tile' and 'map/layer/tile' formats.
             const parts = key.includes(':') ? key.split(':') : key.split('/');
             const [mapId, layerId, tileId] = [parts[0] ?? '', parts[1] ?? '', parts[2] ?? '0'];
             return [mapId, layerId, BigInt(String(tileId).replace(/[^0-9-]/g, '') || '0')];
         },
-        HighlightMode: { NO_HIGHLIGHT: { value: 0 }, SELECTION_HIGHLIGHT: { value: 1 }, HOVER_HIGHLIGHT: { value: 2 } },
+        validateSimfilQuery: (_query: string) => true,
+        HighlightMode: {
+            NO_HIGHLIGHT: { value: 0 },
+            SELECTION_HIGHLIGHT: { value: 1 },
+            HOVER_HIGHLIGHT: { value: 2 }
+        },
         GeomType: { POINT: 0, LINESTRING: 1, POLYGON: 2 },
     };
-    coreLib = stub as ErdblickCore_;
+}
+
+let __testStubInstalled = false;
+
+export function installCoreLibTestStub(overrides: Record<string, any> = {}) {
+    const stub = Object.assign(createTestCoreLibStub(), overrides);
+    coreLib = stub as any;
+    __testStubInstalled = true;
+    return coreLib;
+}
+
+if (!coreLib && __isUnitTestEnv) {
+    installCoreLibTestStub();
 }

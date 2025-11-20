@@ -58,7 +58,7 @@ export class JumpTargetService {
                         let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
                         if (jumpTargetsConfig !== undefined) {
                             // Using string interpolation so webpack can trace imports from the location
-                            import(`../../config/${jumpTargetsConfig}.js`).then(function (plugin) {
+                            import(`/config/${jumpTargetsConfig}.js`).then(function (plugin) {
                                 return plugin.default() as Array<SearchTarget>;
                             }).then((jumpTargets: Array<SearchTarget>) => {
                                 this.extJumpTargets = jumpTargets;
@@ -120,7 +120,7 @@ export class JumpTargetService {
     }
 
     validateMapgetTileId(value: string) {
-        return value.length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
+        return value.trim().length > 0 && !/\s/g.test(value.trim()) && !isNaN(+value.trim());
     }
 
     getInspectTileSourceDataTarget() {

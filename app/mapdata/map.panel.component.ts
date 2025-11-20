@@ -87,7 +87,7 @@ import {Rectangle} from "../integrations/cesium";
                                 <ng-template let-node pTemplate="Group">
                                     <div class="font-bold white-space-nowrap"
                                          style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                        <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
                                               (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
                                             more_vert
                                         </span>
@@ -109,7 +109,7 @@ import {Rectangle} from "../integrations/cesium";
                                             appendTo="body"/>
                                     <div class="flex-container">
                                     <span class="checkbox-entry">
-                                        <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                        <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
                                               (click)="showLayersToggleMenu($event, index, node.id, '')">
                                                 more_vert
                                         </span>
@@ -127,7 +127,7 @@ import {Rectangle} from "../integrations/cesium";
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0"
                                                   *ngIf="flatCoverage(node).length">
-                                            <span class="material-icons"
+                                            <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                         </p-button>
                                         <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
@@ -136,7 +136,7 @@ import {Rectangle} from "../integrations/cesium";
                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                   tabindex="0"
                                                   [disabled]="!metadataMenusEntries.get(node.id)?.length">
-                                            <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">
+                                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                 data_object
                                             </span>
                                         </p-button>
@@ -148,7 +148,7 @@ import {Rectangle} from "../integrations/cesium";
                                     <div *ngIf="node.type != 'SourceData'" class="flex-container">
                                         <div class="font-bold white-space-nowrap"
                                              style="display: flex; align-items: center;">
-                                            <span onEnterClick class="material-icons menu-toggler" tabindex="0"
+                                            <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
                                                   (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
                                                 more_vert
                                             </span>
@@ -170,7 +170,7 @@ import {Rectangle} from "../integrations/cesium";
                                                       [styleClass]="node.viewConfig[index].tileBorders ? 'p-button-success' : 'p-button-primary'"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
-                                            <span class="material-icons"
+                                            <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">
                                                 {{ node.viewConfig[index].tileBorders ? 'select_all' : 'deselect' }}
                                             </span>
@@ -180,7 +180,7 @@ import {Rectangle} from "../integrations/cesium";
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                       [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                       tabindex="0">
-                                            <span class="material-icons"
+                                            <span class="material-symbols-outlined"
                                                   style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                             </p-button>
                                             <p-inputNumber [(ngModel)]="node.viewConfig[index].level"
@@ -203,7 +203,7 @@ import {Rectangle} from "../integrations/cesium";
                                 <!-- Template for boolean style option nodes -->
                                 <ng-template let-node pTemplate="Bool">
                                     <div style="display: flex; align-items: center;">
-                                        <span onEnterClick class="material-icons menu-toggler"
+                                        <span onEnterClick class="material-symbols-outlined menu-toggler"
                                               (click)="$event.stopPropagation()"
                                               tabindex="0">
                                             more_vert
@@ -248,7 +248,7 @@ import {Rectangle} from "../integrations/cesium";
                       style="font-size: 1.2em; margin: 0 auto;">
                     stacks
                 </span>
-                <span *ngIf="layerDialogVisible" class="material-icons"
+                <span *ngIf="layerDialogVisible" class="material-symbols-outlined"
                       style="font-size: 1.2em; margin: 0 auto;">
                     close
                 </span>

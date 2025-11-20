@@ -15,5 +15,11 @@ export default defineConfig({
             'ci/**',
             'app/app.component.spec.ts'
         ],
+        coverage: {
+            enabled: true,
+            provider: 'v8',
+            reporter: ['text-summary', 'html', 'lcov'],
+            reportsDirectory: 'coverage',
+        },
     },
 });
