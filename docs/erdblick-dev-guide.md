@@ -42,7 +42,7 @@ Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari 
 
 ## Component Overview
 
-At a high level, erdblick consists of an Angular shell, a Cesium-based map view, and a WebAssembly core that understands map tiles and evaluates styles and search queries. The Lucidchart diagram in `erdblick-components.svg` captures this structure; the following mermaid sketch mirrors the same relationships in text form and expands them to show the main components and services:
+At a high level, erdblick consists of an Angular shell, a Cesium-based map view, and a WebAssembly core that understands map tiles and evaluates styles and search queries:
 
 ```mermaid
 flowchart LR
@@ -268,7 +268,7 @@ Here the focus is on selection and inspection:
 
 ## Tile Cache and Loading Sequence
 
-The tile pipeline starts with the camera position, computes which tiles should be visible, streams those tiles from the backend, and converts them into Cesium primitives once the data arrives. The existing Lucidchart diagram in `erdblick-loading-sequence.svg` depicts the full sequence; this mermaid version focuses on the main hand-offs and the abort logic:
+The tile pipeline starts with the camera position, computes which tiles should be visible, streams those tiles from the backend, and converts them into Cesium primitives once the data arrives:
 
 ```mermaid
 sequenceDiagram
@@ -398,16 +398,16 @@ The erdblick core is compiled to WASM without C++ exception support. Enabling na
 
 Aside from in-process exceptions, a few error classes originate from IO or backend behavior:
 
-- **TileLayerStream parsing errors** – malformed chunk headers or frames result in console errors from the `Fetch` helper or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
-- **Style sheet parsing errors** – YAML or Simfil issues in style sheets are caught by `StyleService.parseWasmStyle`, which logs the problem and records an error marker for the affected style. Execution-time errors inside rules generally surface as WASM exceptions while rendering and appear in the browser console.
-- **Tile and style performance anomalies** – tiles collect statistics such as parse time, size, and render times per style. The statistics dialog aggregates these so you can spot cases where a particular map layer or style slows rendering or produces suspiciously empty tiles.
-- **Backend or connection loss** – network errors from `fetch` (for `/sources`, `/tiles`, `/locate`, or `/config`) are logged by `Fetch.handleError`. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
+- **TileLayerStream parsing errors** - malformed chunk headers or frames result in console errors from the `Fetch` helper or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
+- **Style sheet parsing errors** - YAML or Simfil issues in style sheets are caught by `StyleService.parseWasmStyle`, which logs the problem and records an error marker for the affected style. Execution-time errors inside rules generally surface as WASM exceptions while rendering and appear in the browser console.
+- **Tile and style performance anomalies** - tiles collect statistics such as parse time, size, and render times per style. The statistics dialog aggregates these so you can spot cases where a particular map layer or style slows rendering or produces suspiciously empty tiles.
+- **Backend or connection loss** - network errors from `fetch` (for `/sources`, `/tiles`, `/locate`, or `/config`) are logged by `Fetch.handleError`. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
 
 In general, treat the browser console and the statistics dialog as complementary tools: the console tells you what failed, the stats dialog tells you which tiles and styles were affected or unusually slow.
 
-## Feature Search
+## Feature Search/Query completion
 
-Feature search combines a main-thread service with a pool of web workers that parse tiles and evaluate Simfil expressions. The earlier Lucidchart sketch is mirrored by the following mermaid sequence diagram, which also shows job groups and completion:
+Feature search combines a main-thread service with a pool of web workers:
 
 ```mermaid
 sequenceDiagram
@@ -514,11 +514,20 @@ If you change how selection is encoded or how tiles are keyed, make sure to keep
 
 When working on erdblick, it pays to combine browser tooling, WASM helpers, and the built-in statistics overlays. A few patterns tend to work well:
 
-- **Browser JS debugger** – use breakpoints in Angular components and services, and enable “Pause on exceptions” for tricky cases. Workspace mappings (for example in Chrome) let you debug TypeScript instead of bundled JS.
-- **Network debugger** – inspect `/sources`, `/tiles`, `/locate`, and `/config` requests and responses. This is often the quickest way to decide whether a bug lives in the backend, the parser, or the renderer.
-- **Statistics dialog and overlays** – the statistics dialog aggregates per-tile metrics (tile counts, parse times, render times per style) and combined with tile borders makes it straightforward to spot missing tiles or expensive styles.
-- **WASM diagnostics** – in a debug build of `erdblick-core`, you can enable leak checks and inspect memory usage via the functions bound in `bindings.cpp` (`getTotalMemory`, `getFreeMemory`, `enableLeakCheck`, `reportMemoryLeaks`). These are available through `coreLib` once the WASM module is loaded.
-- **Unit tests** – the C++ core ships with tests under `libs/core`, and the Angular application has Vitest tests configured via `vitest.config.ts`. For changes that affect tile parsing, styling, or search semantics, extending the C++ tests often provides clearer feedback than reproducing issues through the UI alone.
+- **Browser JS debugger** - use breakpoints in Angular components and services, and enable “Pause on exceptions” for tricky cases. Workspace mappings (for example in Chrome) let you debug TypeScript instead of bundled JS.
+- **Network debugger** - inspect `/sources`, `/tiles`, `/locate`, and `/config` requests and responses. This is often the quickest way to decide whether a bug lives in the backend, the parser, or the renderer.
+- **Statistics dialog and overlays** - the statistics dialog aggregates per-tile metrics (tile counts, parse times, render times per style) and combined with tile borders makes it straightforward to spot missing tiles or expensive styles.
+- **WASM diagnostics** - in a debug build of `erdblick-core`, you can enable leak checks and inspect memory usage via the functions bound in `bindings.cpp` (`getTotalMemory`, `getFreeMemory`, `enableLeakCheck`, `reportMemoryLeaks`). These are available through `coreLib` once the WASM module is loaded.
+- **Unit tests** - the C++ core ships with tests under `libs/core`, and the Angular application has Vitest tests configured via `vitest.config.ts`. For changes that affect tile parsing, styling, or search semantics, extending the C++ tests often provides clearer feedback than reproducing issues through the UI alone.
+- **C++ Debugging in the browser:**
+  For reading DWARF debug information from a WASM source, install the following
+  [plug-in](https://chrome.google.com/webstore/detail/cc%20%20-devtools-support-dwa/pdcpmagijalfljmkmjngeonclgbbannb) to your browser.
+  After installation, make sure the browser can access your source files (i.e a sandbox like flatpak may prevent access). Make sure you are using a _debug-build_ of erdblick!
+  The build scripts `./ci/10_linux_build.sh` and `./ci/20_linux_rebuild.sh` accept an optional cmake-preset ("release" or "debug") argument for setting the build type.
+  ![chrome_debugging_files](chrome_debugging_files.png)
+
+C++ sources are available under the root node `file://` in the inspector view.
+Debugging in Firefox is currently unsupported.
 
 When debugging complex scenarios (for example, rendering issues that involve both styling and tiles), it is usually helpful to:
 
