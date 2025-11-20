@@ -23,6 +23,12 @@ jobs:
       - name: Initialize Git LFS
         run: git lfs install
 
+      - name: Compile
+        run: |
+          mkdir build-test && cd build-test
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
+          cmake --build .
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -41,12 +47,6 @@ jobs:
         with:
           name: ui-coverage
           path: coverage
-
-      - name: Compile
-        run: |
-          mkdir build-test && cd build-test
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
-          cmake --build .
 
       - name: Run Tests
         run: |
