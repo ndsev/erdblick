@@ -193,7 +193,9 @@ describe('JumpTargetService', () => {
         service.targetValueSubject.next('12345 m1 layerA');
         const target = service.getInspectTileSourceDataTarget();
 
-        target.execute && target.execute('12345 m1 layerA');
+        if (target.execute) {
+            target.execute('12345 m1 layerA');
+        }
 
         expect(coreLib.getSourceDataLayerKey).toHaveBeenCalledWith('m1', 'LAYER-ID', 12345n);
         expect(stateService.setSelection).toHaveBeenCalledWith({
