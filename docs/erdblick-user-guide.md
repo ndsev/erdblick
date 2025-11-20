@@ -1,43 +1,16 @@
 # Erdblick User Guide
 
-- Setup Guide (erdblick-setup.md)
-  - Basic Setup with pypi mapget
-  - Simple mapget.yaml with GeoJSON Data Source
-    (TODO: We need to migrate the GeoJSON Data Source from mapget-live-cpp to mapget)
-- Basic UI Layout Guide (erdblick-ui-basics.md)
-  - Map Config Panel, Compass, Coordinate View, Main Menu
-  - Settings
-- Search Guide (erdblick-search.md)
-  - Feature Search with simfil
-  - Jump-to-Feature Actions
-  - Jump-to-Tile/Coordinate Actions
-  - SourceDataInspection Actions
-  - TODO: How are we gonna have a simfil reference here, as simfil is integrated via mapviewer repo, not the erdblick repo??
-- Style System Guide (erdblick-stylesystem.md)
-  - Style Options in Tree
-  - Style Sheet Dialog
-  - Style Sheet Editor/Language
-- Split-Screen Usage Guide (erdblick-split.md)
-- Inspection Guide (erdblick-inspection.md)
-  - Single Selection, Focus, Folding
-  - Multi-Selection, Pinning
-  - Highlight Color
-  - GeoJson Export
-  - SourceData Inspection
-- SourceData Inspection Guide (erdblick-sourcedata.md)
-- URL Guide (erdblick-url.md)
-- Troubleshooting Guide (erdblick-troubleshooting.md)
-  - Performance Hints
-    - Activate as few maps as possible
-    - Ensure maps have advertised coverage
-    - Use a Chromium-based browser
-    - Check out the stats dialog
-  - I cannot see any data...
-    - Ensure viewport in right place
-      - Use zoom-to-coverage of available
-    - Ensure map layer is activated incl. style options
-    - Activate tile borders to see whether tiles are empty
-    - Use right-click SourceData Inspection Action
-    - Settings Reset
-- DataSource Editor Guide (erdblick-datasource-editor.md)
+This is the entry point for all erdblick end-user documentation. Each section links to a dedicated Markdown file so topics stay focused and easy to maintain.
 
+- [Setup Guide](erdblick-setup.md) – Download/build options, serving erdblick with `mapget`, configuration overrides, and browser prerequisites.
+- [Basic UI Layout Guide](erdblick-ui-basics.md) – Tour of panels, navigation controls, inspector slots, and toolbar actions.
+- [Search Guide](erdblick-search.md) – Jump-to targets, feature search expressions, history, and troubleshooting.
+- [Style System Guide](erdblick-stylesystem.md) – Managing styles in the UI, YAML structure, expression context, and debugging tips.
+- [Split-Screen Usage Guide](erdblick-split.md) – Opening the second viewport, synchronization modes, and comparison workflows.
+- [Inspection Guide](erdblick-inspection.md) – Working with multi-panel inspection, filters, GeoJSON export, and SourceData links.
+- [SourceData Inspection Guide](erdblick-sourcedata.md) – Opening blobs from the map, from inspector links, or via search commands.
+- [URL Guide](erdblick-url.md) – How erdblick encodes state in URLs, visualization-only parameters, and sharing best practices.
+- [Troubleshooting Guide](erdblick-troubleshooting.md) – Performance tuning, empty view fixes, style resets, and logging instructions.
+- [DataSource Editor Guide](erdblick-datasource-editor.md) – Enabling the experimental editor, validating changes, and handling auto-restarts.
+
+Each file doubles as a snippet source for downstream documentation portals, which keeps the erdblick material authoritative in one place.
