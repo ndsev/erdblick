@@ -101,8 +101,9 @@ export class AppComponent {
                     if (data && data["extensionModules"] && data["extensionModules"]["distribVersions"]) {
                         let distribVersions = data["extensionModules"]["distribVersions"];
                         if (distribVersions !== undefined) {
-                            // Using string interpolation so webpack can trace imports from the location
-                            import(`/config/${distribVersions}.js`)
+                            const distribVersionsPath = `/config/${distribVersions}.js`;
+                            // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
+                            import(/* @vite-ignore */ distribVersionsPath)
                                 .then((plugin) => plugin.default() as Array<Versions>)
                                 .then((versions: Array<Versions>) => {
                                     this.distributionVersions = versions;

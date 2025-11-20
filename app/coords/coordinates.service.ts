@@ -27,8 +27,9 @@ export class CoordinatesService {
                     if (data && data["extensionModules"] && data["extensionModules"]["jumpTargets"]) {
                         let jumpTargetsConfig = data["extensionModules"]["jumpTargets"];
                         if (jumpTargetsConfig !== undefined) {
-                            // Using string interpolation so webpack can trace imports from the location
-                            import(`/config/${jumpTargetsConfig}.js`).then((plugin) => {
+                            const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
+                            // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
+                            import(/* @vite-ignore */ jumpTargetsPath).then((plugin) => {
                                 const { getAuxCoordinates, getAuxTileIds } = plugin;
                                 if (getAuxCoordinates) {
                                     this.auxiliaryCoordinatesFun = getAuxCoordinates;
