@@ -45,160 +45,38 @@ Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari 
 At a high level, erdblick consists of an Angular shell, a Cesium-based map view, and a WebAssembly core that understands map tiles and evaluates styles and search queries. The Lucidchart diagram in `erdblick-components.svg` captures this structure; the following mermaid sketch mirrors the same relationships in text form and expands them to show the main components and services:
 
 ```mermaid
----
-config:
-  look: handDrawn
-  layout: elk
-  flowchart:
-    htmlLabels: false
-    padding: 5
----
+flowchart LR
+  AppShell[App shell<br>AppComponent]
+  Views[Views<br>mapview/*]
+  MapData[Map data<br>mapdata/*]
+  Styles[Styles<br>styledata/*]
+  Search[Search<br>search/*]
+  Inspect[Inspection<br>inspection/*]
+  Shared[Shared state<br>shared/*]
+  Core[Core WASM<br>libs/core]
+  Backend[Backend<br>mapget-compatible]
 
-flowchart TB
-  %% app root
-  subgraph app_root[app root]
-    App[AppComponent<br>application shell]
-  end
+  AppShell --> Views
+  AppShell --> MapData
+  AppShell --> Styles
+  AppShell --> Search
+  AppShell --> Inspect
 
-  %% mapview/*
-  subgraph mapview_dir[mapview/*]
-    MapViewComp[MapViewComponent<br>view container]
-    MapViewModel[MapView<br>camera and interaction]
-    ViewUI[ErdblickViewUIComponent<br>view overlay controls]
-  end
+  Views --> Shared
+  MapData --> Shared
+  Styles --> Shared
+  Search --> Shared
+  Inspect --> Shared
 
-  %% mapdata/*
-  subgraph mapdata_dir[mapdata/*]
-    MapPanel[MapPanelComponent<br>maps and layers]
-    MapSvc[MapDataService<br>tiles cache and highlights]
-  end
+  MapData --> Core
+  Styles --> Core
+  Search --> Core
 
-  %% search/*
-  subgraph search_dir[search/*]
-    SearchPanel[SearchPanelComponent<br>command palette]
-    FeatureSearch[FeatureSearchComponent<br>Simfil search dialog]
-    SearchSvc[FeatureSearchService<br>workers and results]
-    JumpSvc[JumpTargetService<br>jump targets]
-  end
+  MapData --> Backend
+  Search --> Backend
 
-  %% inspection/*
-  subgraph inspection_dir[inspection/*]
-    InspectPanel[InspectionPanelComponent<br>feature inspection]
-    SourceDataPanel[SourceDataPanelComponent<br>SourceData inspection]
-  end
-
-  %% coords/*
-  subgraph coords_dir[coords/*]
-    CoordsPanel[CoordinatesPanelComponent<br>cursor coordinates]
-    CoordSvc[CoordinatesService<br>camera coordinates]
-  end
-
-  %% styledata/*
-  subgraph style_dir[styledata/*]
-    StylePanel[StyleComponent<br>styles and editor]
-    StyleSvc[StyleService<br>styles and options]
-  end
-
-  %% auxiliaries/*
-  subgraph auxiliaries_dir[auxiliaries/*]
-    Prefs[PreferencesComponent<br>limits and resets]
-    Stats[StatsDialogComponent<br>tile statistics]
-    Datasources[DatasourcesComponent<br>DataSource editor]
-  end
-
-  %% shared/*
-  subgraph shared_dir[shared/*]
-    State[AppStateService<br>shared state and URL]
-    Keyboard[KeyboardService<br>shortcuts]
-    InfoSvc[InfoMessageService<br>toasts and alerts]
-    EditorSvc[EditorService<br>code editor wrappers]
-  end
-
-  %% Cesium integration
-  subgraph view_layer[Cesium integration]
-    CesiumViewer[Cesium Viewer<br>scene and primitives]
-  end
-
-  %% WASM core libs/core
-  subgraph core_dir[libs/core erdblick core]
-    Parser[TileLayerParser<br>tile decoding]
-    StyleClass[FeatureLayerStyle<br>style sheets]
-    VisualizationCore[FeatureLayerVisualization<br>tile rendering]
-    SearchCore[FeatureLayerSearch<br>feature search]
-    FeatureClass[Feature<br>feature model]
-    TileLayer[TileFeatureLayer<br>tile layer model]
-    SourceLayer[TileSourceDataLayer<br>SourceData tiles]
-    ViewportCore[Viewport<br>tile id calculation]
-  end
-
-  Backend[/Backend<br>/sources /tiles /config /locate/]
-
-  %% Shell wiring
-  App --> MapViewComp
-  App --> MapPanel
-  App --> SearchPanel
-  App --> InspectPanel
-  App --> StylePanel
-  App --> Prefs
-  App --> CoordsPanel
-  App --> Stats
-  App --> Datasources
-
-  MapViewComp --> ViewUI
-  MapViewComp --> MapViewModel
-  MapViewModel --> CesiumViewer
-
-  %% Panels to services
-  MapPanel --> MapSvc
-  MapPanel --> State
-  StylePanel --> StyleSvc
-  StylePanel --> MapSvc
-  SearchPanel --> SearchSvc
-  SearchPanel --> JumpSvc
-  SearchPanel --> State
-  FeatureSearch --> SearchSvc
-  InspectPanel --> MapSvc
-  InspectPanel --> State
-  SourceDataPanel --> MapSvc
-  Prefs --> State
-  Prefs --> StyleSvc
-  Prefs --> MapSvc
-  CoordsPanel --> CoordSvc
-  Stats --> MapSvc
-  Datasources --> MapSvc
-
-  %% View and shared services
-  MapViewModel <-->|camera state| State
-  MapViewModel --> MapSvc
-  MapViewModel --> SearchSvc
-  MapViewModel --> JumpSvc
-  MapViewModel --> CoordSvc
-  MapViewModel --> Keyboard
-
-  %% Services and core or backend
-  MapSvc --> Parser
-  MapSvc --> ViewportCore
-  MapSvc --> TileLayer
-  MapSvc --> SourceLayer
-  MapSvc --> FeatureClass
-  MapSvc --> Backend
-  StyleSvc --> StyleClass
-  StyleSvc --> VisualizationCore
-  SearchSvc --> Parser
-  SearchSvc --> SearchCore
-  SearchSvc --> Backend
-  MapSvc --> VisualizationCore
-
-  %% Color coding
-  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
-  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
-  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
-
-  class App,MapViewComp,MapViewModel,ViewUI,MapPanel,SearchPanel,FeatureSearch,InspectPanel,SourceDataPanel,CoordsPanel,StylePanel,Prefs,Stats,Datasources ui;
-  class State,MapSvc,SearchSvc,JumpSvc,CoordSvc,StyleSvc,Keyboard,InfoSvc,EditorSvc service;
-  class Parser,StyleClass,VisualizationCore,SearchCore,FeatureClass,TileLayer,SourceLayer,ViewportCore wasm;
-  class Backend backend;
+  MapData <---> Styles
+  MapData <---> Inspect
 ```
 
 In code, the main responsibilities are:
@@ -217,8 +95,10 @@ The overview diagram above shows how these pieces line up at a coarse level. The
 
 ```mermaid
 flowchart LR
-  MapPanel[MapPanelComponent<br>maps and layers]
-  MapSvc[MapDataService<br>tiles and visualizations]
+  subgraph mapdata_dir[mapdata/*]
+    MapPanel[MapPanelComponent<br>maps and layers]
+    MapSvc[MapDataService<br>tiles and visualizations]
+  end
   State[AppStateService<br>shared state]
   StyleSvc[StyleService<br>styles]
   Core[WASM core<br>TileLayerParser]
@@ -250,9 +130,11 @@ This view focuses on the tile pipeline and the map tree:
 
 ```mermaid
 flowchart LR
-  MapViewComp[MapViewComponent<br>Angular wrapper]
-  MapViewModel[MapView<br>Cesium glue]
-  CesiumViewer[Cesium Viewer<br>scene]
+  subgraph mapview_dir[mapview/*]
+    MapViewComp[MapViewComponent<br>Angular wrapper]
+    MapViewModel[MapView<br>Cesium glue]
+    CesiumViewer[Cesium Viewer<br>scene]
+  end
   State[AppStateService<br>shared state]
   MapSvc[MapDataService<br>tiles]
   SearchSvc[FeatureSearchService<br>search results]
@@ -284,8 +166,10 @@ Here the emphasis is on user interaction and camera control:
 
 ```mermaid
 flowchart LR
-  StylePanel[StyleComponent<br>style dialog]
-  StyleSvc[StyleService<br>style manager]
+  subgraph styledata_dir[styledata/*]
+    StylePanel[StyleComponent<br>style dialog]
+    StyleSvc[StyleService<br>style manager]
+  end
   State[AppStateService<br>style state]
   MapSvc[MapDataService<br>tiles]
   Core[WASM core<br>FeatureLayerStyle]
@@ -313,10 +197,12 @@ This group is responsible for turning YAML style sheets into runtime style objec
 
 ```mermaid
 flowchart LR
-  SearchPanel[SearchPanelComponent<br>command palette]
-  FeatureSearch[FeatureSearchComponent<br>search dialog]
-  SearchSvc[FeatureSearchService<br>workers and results]
-  JumpSvc[JumpTargetService<br>jump targets]
+  subgraph search_dir[search/*]
+    SearchPanel[SearchPanelComponent<br>command palette]
+    FeatureSearch[FeatureSearchComponent<br>search dialog]
+    SearchSvc[FeatureSearchService<br>workers and results]
+    JumpSvc[JumpTargetService<br>jump targets]
+  end
   MapSvc[MapDataService<br>tiles]
   State[AppStateService<br>search state]
   Workers[Workers<br>search.worker.ts]
@@ -350,9 +236,11 @@ From the perspective of this group:
 
 ```mermaid
 flowchart LR
-  InspectPanel[InspectionPanelComponent<br>feature panels]
-  InspectTree[Inspection tree<br>tree view]
-  SourcePanel[SourceDataPanelComponent<br>SourceData view]
+  subgraph inspection_dir[inspection/*]
+    InspectPanel[InspectionPanelComponent<br>feature panels]
+    InspectTree[Inspection tree<br>tree view]
+    SourcePanel[SourceDataPanelComponent<br>SourceData view]
+  end
   State[AppStateService<br>selection state]
   MapSvc[MapDataService<br>tiles and SourceData]
   Core[WASM core<br>inspection and SourceData]
@@ -424,17 +312,6 @@ sequenceDiagram
   Note over MapSvc: processTileStream and processVisualizationTasks<br>run in short time slices and reschedule via setTimeout<br>so parsing and rendering work does not block the UI thread
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
-
-  %% Color coding
-  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
-  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
-  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
-
-  class View,State ui;
-  class MapSvc,FetchTiles,FetchAbort service;
-  class Core wasm;
-  class Backend backend;
 ```
 
 In `MapDataService` this flow is implemented roughly as follows:
@@ -486,19 +363,6 @@ sequenceDiagram
 
   TileVis->>View: add PrimitiveCollection to<br>Cesium viewer primitives
   TileVis->>View: update TileBoxVisualization<br>for low detail tile boxes
-
-  %% Color coding
-  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
-  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
-  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
-  classDef util fill:#e0f7fa,stroke:#00838f,stroke-width:1px;
-
-  class View ui;
-  class MapSvc,PointMerge service;
-  class TileVis util;
-  class Core wasm;
-  class Backend backend;
 ```
 
 In `visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
@@ -589,15 +453,6 @@ sequenceDiagram
   Search->>Jobs: mark completion task as complete
   Jobs-->>Search: completion group done
   Search-->>UI: merged candidate list<br>for autocompletion popup
-
-  %% Color coding
-  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
-  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
-
-  class UI ui;
-  class Search,Jobs,MapSvc,Worker service;
-  class Core wasm;
 ```
 
 A few implementation details matter for contributors:
@@ -644,17 +499,6 @@ sequenceDiagram
   MapSvc->>Backend: request SourceData tile<br>from /tiles for layer
   Backend-->>MapSvc: SourceData tile payload
   MapSvc-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
-
-  %% Color coding
-  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
-  classDef cache fill:#f1f8e9,stroke:#558b2f,stroke-width:1px;
-  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
-
-  class View,Search,Inspect,SourcePanel ui;
-  class State,MapSvc service;
-  class Tiles cache;
-  class Backend backend;
 ```
 
 Key points to understand:
