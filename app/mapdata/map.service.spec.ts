@@ -319,15 +319,14 @@ describe('MapDataService', () => {
 
         await service.update();
 
-        // expect(destructionSpy).toHaveBeenCalledWith(disabledVisu);
-        // expect(viewStates[0].visualizedTileLayers.has('disabled-style')).toBe(true);
-        // expect(viewStates[0].visualizedTileLayers['disabled-style'].length).toBe(0);
-        // expect(viewStates[0].visualizedTileLayers.has('enabled-style')).toBe(true);
-        // expect(viewStates[0].visualizedTileLayers['enabled-style'].length).toBe(1);
-        //
-        // expect(enabledVisu.showTileBorder).toBe(false);
-        // expect(enabledVisu.isHighDetail).toBe(false);
-        // expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
+        expect(destructionSpy).toHaveBeenCalledWith(disabledVisu);
+        expect(viewStates[0].visualizedTileLayers.has('disabled-style')).toBe(false);
+        expect(viewStates[0].visualizedTileLayers.has('disabled-style')).toBe(false);
+        expect(viewStates[0].visualizedTileLayers.has('enabled-style')).toBe(true);
+
+        expect(enabledVisu.showTileBorder).toBe(true);
+        expect(enabledVisu.isHighDetail).toBe(false);
+        expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
     it('builds a tiles fetch request body based on selection tile requests', async () => {
