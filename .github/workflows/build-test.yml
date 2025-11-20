@@ -23,6 +23,25 @@ jobs:
       - name: Initialize Git LFS
         run: git lfs install
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install UI dependencies
+        run: npm ci
+
+      - name: Run Angular unit tests (with coverage)
+        run: npm run test -- --watch=false
+
+      - name: Upload coverage artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-coverage
+          path: coverage
+
       - name: Compile
         run: |
           mkdir build-test && cd build-test
