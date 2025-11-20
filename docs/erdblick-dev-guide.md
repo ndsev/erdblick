@@ -1,115 +1,537 @@
 # Erdblick Development Guide
 
-This document shall provide you with some in-depth insights regarding the inner
-workings of erdblick. It is not a user guide. Please check [here](TODO-INSERT-LINK)
-if you are looking for that!
+Erdblick is a Cesium-based Angular application backed by a WebAssembly core for tile decoding, styling, and feature search. This guide explains the internal architecture and the main data flows for contributors working on the UI or the C++ core. If you need usage instructions instead of implementation details, start with the [Erdblick User Guide](erdblick-user-guide.md).
 
-We will start off with a component overview, and explain their relationships.
-This will also allow us to pinpoint various complexity hotspots. These are
-then explained in the following sections.
+We begin with a component overview to show how the Angular app, the WASM core, Cesium, and a mapget-compatible backend fit together. Afterwards, we zoom into the tile streaming and rendering pipelines, error handling, feature search, selection, and debugging strategies.
 
 ## Development Setup
 
-The easiest way to develop erdblick is by using a UI which can handle both
-C++ and Typescript/Angular. We have great experience using CLion for this
-task, but other more lightweight text editors such as VSCode or Sublime
-might also do great for you. For debug sources in the browser, make
-sure to set `NG_DEVELOP=true` in your environment before calling the `./ci/...`
-build scripts.
+For frontend work, you mainly interact with the Angular app under `app/`; for core changes, you also rebuild the C++ library under `libs/core`. A typical setup looks like this:
 
-We noticed, that Chrome does usually deliver the best performance for erdblick.
-But for both for development and usage, we are also using Firefox, Edge and occasionally Safari as well.
-So use a browser of your choice but be prepared to switch to Chrome if you
-notice severe performance degradation during your debug sessions.
+- Install Node.js LTS and npm (or pnpm).
+- Install a C++ toolchain and CMake if you plan to touch the WASM core.
+- Use an IDE that can handle both C++ and TypeScript (CLion and VS Code both work well).
+
+To rebuild the Angular UI, run:
+
+```bash
+./build-ui.bash .
+```
+
+Set `NG_DEVELOP=true` in your environment before running the build if you want source maps and verbose stack traces instead of a fully minified bundle. For tight development loops you can also start the Angular dev server:
+
+```bash
+npm install
+npm start
+```
+
+This serves the UI with hot reload and uses whatever core artifacts are already present under `build/libs/core`.
+
+When you change the C++ core (`libs/core`), rebuild the WASM module with the CI helper scripts:
+
+```bash
+cd ci
+./00_linux_setup.bash     # one-time Emscripten bootstrap
+./10_linux_build.bash     # initial configure
+./20_linux_rebuild.bash   # incremental rebuild (debug/release via presets)
+```
+
+These scripts compile `erdblick-core` to a single-file WASM/JS bundle consumed by `app/integrations/wasm.ts`. The Angular `AppModule` wires everything together via the `initializeServices` app initializer.
+
+Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari are all supported. For serious profiling or debugging, it is worth checking problematic scenarios in Chrome once to rule out renderer-specific issues.
 
 ## Component Overview
 
-(Extend existing diagram)
+At a high level, erdblick consists of an Angular shell, a Cesium-based map view, and a WebAssembly core that understands map tiles and evaluates styles and search queries. The Lucidchart diagram in `erdblick-components.svg` captures this structure; the following mermaid sketch mirrors the same relationships in text form and expands them to show the main components and services:
 
-(Component explanations)
+```mermaid
+---
+config:
+  look: handDrawn
+  layout: elk
+  flowchart:
+    htmlLabels: false
+    padding: 5
+---
 
-## Tile Loading Sequence
+flowchart TB
+  %% app root
+  subgraph app_root[app root]
+    App[AppComponent<br>application shell]
+  end
 
-(Exhaustive sequence diagram and explanation)
+  %% mapview/*
+  subgraph mapview_dir[mapview/*]
+    MapViewComp[MapViewComponent<br>view container]
+    MapViewModel[MapView<br>camera and interaction]
+    ViewUI[ErdblickViewUIComponent<br>view overlay controls]
+  end
+
+  %% mapdata/*
+  subgraph mapdata_dir[mapdata/*]
+    MapPanel[MapPanelComponent<br>maps and layers]
+    MapSvc[MapDataService<br>tiles cache and highlights]
+  end
+
+  %% search/*
+  subgraph search_dir[search/*]
+    SearchPanel[SearchPanelComponent<br>command palette]
+    FeatureSearch[FeatureSearchComponent<br>Simfil search dialog]
+    SearchSvc[FeatureSearchService<br>workers and results]
+    JumpSvc[JumpTargetService<br>jump targets]
+  end
+
+  %% inspection/*
+  subgraph inspection_dir[inspection/*]
+    InspectPanel[InspectionPanelComponent<br>feature inspection]
+    SourceDataPanel[SourceDataPanelComponent<br>SourceData inspection]
+  end
+
+  %% coords/*
+  subgraph coords_dir[coords/*]
+    CoordsPanel[CoordinatesPanelComponent<br>cursor coordinates]
+    CoordSvc[CoordinatesService<br>camera coordinates]
+  end
+
+  %% styledata/*
+  subgraph style_dir[styledata/*]
+    StylePanel[StyleComponent<br>styles and editor]
+    StyleSvc[StyleService<br>styles and options]
+  end
+
+  %% auxiliaries/*
+  subgraph auxiliaries_dir[auxiliaries/*]
+    Prefs[PreferencesComponent<br>limits and resets]
+    Stats[StatsDialogComponent<br>tile statistics]
+    Datasources[DatasourcesComponent<br>DataSource editor]
+  end
+
+  %% shared/*
+  subgraph shared_dir[shared/*]
+    State[AppStateService<br>shared state and URL]
+    Keyboard[KeyboardService<br>shortcuts]
+    InfoSvc[InfoMessageService<br>toasts and alerts]
+    EditorSvc[EditorService<br>code editor wrappers]
+  end
+
+  %% Cesium integration
+  subgraph view_layer[Cesium integration]
+    CesiumViewer[Cesium Viewer<br>scene and primitives]
+  end
+
+  %% WASM core libs/core
+  subgraph core_dir[libs/core erdblick core]
+    Parser[TileLayerParser<br>tile decoding]
+    StyleClass[FeatureLayerStyle<br>style sheets]
+    VisualizationCore[FeatureLayerVisualization<br>tile rendering]
+    SearchCore[FeatureLayerSearch<br>feature search]
+    FeatureClass[Feature<br>feature model]
+    TileLayer[TileFeatureLayer<br>tile layer model]
+    SourceLayer[TileSourceDataLayer<br>SourceData tiles]
+    ViewportCore[Viewport<br>tile id calculation]
+  end
+
+  Backend[/Backend<br>/sources /tiles /config /locate/]
+
+  %% Shell wiring
+  App --> MapViewComp
+  App --> MapPanel
+  App --> SearchPanel
+  App --> InspectPanel
+  App --> StylePanel
+  App --> Prefs
+  App --> CoordsPanel
+  App --> Stats
+  App --> Datasources
+
+  MapViewComp --> ViewUI
+  MapViewComp --> MapViewModel
+  MapViewModel --> CesiumViewer
+
+  %% Panels to services
+  MapPanel --> MapSvc
+  MapPanel --> State
+  StylePanel --> StyleSvc
+  StylePanel --> MapSvc
+  SearchPanel --> SearchSvc
+  SearchPanel --> JumpSvc
+  SearchPanel --> State
+  FeatureSearch --> SearchSvc
+  InspectPanel --> MapSvc
+  InspectPanel --> State
+  SourceDataPanel --> MapSvc
+  Prefs --> State
+  Prefs --> StyleSvc
+  Prefs --> MapSvc
+  CoordsPanel --> CoordSvc
+  Stats --> MapSvc
+  Datasources --> MapSvc
+
+  %% View and shared services
+  MapViewModel <-->|camera state| State
+  MapViewModel --> MapSvc
+  MapViewModel --> SearchSvc
+  MapViewModel --> JumpSvc
+  MapViewModel --> CoordSvc
+  MapViewModel --> Keyboard
+
+  %% Services and core or backend
+  MapSvc --> Parser
+  MapSvc --> ViewportCore
+  MapSvc --> TileLayer
+  MapSvc --> SourceLayer
+  MapSvc --> FeatureClass
+  MapSvc --> Backend
+  StyleSvc --> StyleClass
+  StyleSvc --> VisualizationCore
+  SearchSvc --> Parser
+  SearchSvc --> SearchCore
+  SearchSvc --> Backend
+  MapSvc --> VisualizationCore
+
+  %% Color coding
+  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
+  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
+  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
+
+  class App,MapViewComp,MapViewModel,ViewUI,MapPanel,SearchPanel,FeatureSearch,InspectPanel,SourceDataPanel,CoordsPanel,StylePanel,Prefs,Stats,Datasources ui;
+  class State,MapSvc,SearchSvc,JumpSvc,CoordSvc,StyleSvc,Keyboard,InfoSvc,EditorSvc service;
+  class Parser,StyleClass,VisualizationCore,SearchCore,FeatureClass,TileLayer,SourceLayer,ViewportCore wasm;
+  class Backend backend;
+```
+
+In code, the main responsibilities are:
+
+- `AppComponent` and the PrimeNG-based panels present the UI (maps & layers, styles, search, inspection, preferences, statistics, DataSource editor).
+- `MapViewComponent` and `MapView` encapsulate the Cesium viewer per pane (2D/3D), read camera changes, and forward interaction events to services.
+- `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
+- `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover/selection highlights.
+- `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
+- `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
+- A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor.
+
+The rest of this guide walks from the backend up through the tile cache, renderer, and tools that sit on top.
+
+## Tile Cache and Loading Sequence
+
+The tile pipeline starts with the camera position, computes which tiles should be visible, streams those tiles from the backend, and converts them into Cesium primitives once the data arrives. The existing Lucidchart diagram in `erdblick-loading-sequence.svg` depicts the full sequence; this mermaid version focuses on the main hand-offs and the abort logic:
+
+```mermaid
+sequenceDiagram
+  participant View as MapView
+  participant State as AppStateService
+  participant MapSvc as MapDataService
+  participant FetchTiles as Fetch tiles
+  participant FetchAbort as Fetch abort
+  participant Core as WASM tile helpers
+  participant Backend as Backend tiles endpoints
+
+  View->>State: cameraChanged<br>viewport written
+  State->>MapSvc: viewport state change<br>for focused view
+  MapSvc->>Core: getTileIds for viewport
+  Core-->>MapSvc: visible tile ids<br>with priority order
+
+  Note right of MapSvc: MapDataService compares visible tiles<br>with loaded tiles per view and style<br>and decides which tiles to keep or drop
+
+  alt tile stream already running
+    MapSvc->>FetchAbort: create abort request<br>with client id and tile hints
+    FetchAbort->>Backend: POST /abort
+    Backend-->>FetchAbort: confirm abort of<br>previous tile stream
+    FetchAbort-->>MapSvc: done and clear currentFetchAbort
+  end
+
+  MapSvc->>FetchTiles: create tile request body<br>with requested map tile keys
+  FetchTiles->>Backend: POST /tiles
+  Backend-->>FetchTiles: VTLV tile stream
+
+  loop for each received chunk
+    FetchTiles-->>MapSvc: buffer chunk with type<br>and payload bytes
+    alt fields chunk
+      MapSvc->>Core: readFieldDictUpdate for<br>field dictionary changes
+    else features chunk
+      MapSvc->>Core: readTileFeatureLayer for<br>feature layer payload
+      Core-->>MapSvc: TileFeatureLayer metadata<br>and feature data
+      MapSvc->>MapSvc: update loadedTileLayers<br>and viewVisualizationState
+    end
+  end
+
+  Note over MapSvc: processTileStream and processVisualizationTasks<br>run in short time slices and reschedule via setTimeout<br>so parsing and rendering work does not block the UI thread
+
+  MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
+
+  %% Color coding
+  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
+  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
+  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
+
+  class View,State ui;
+  class MapSvc,FetchTiles,FetchAbort service;
+  class Core wasm;
+  class Backend backend;
+```
+
+In `MapDataService` this flow is implemented roughly as follows:
+
+- `update()` computes the current viewport, calls `coreLib.getTileIds` to determine which tile IDs should be present, and compares this against `loadedTileLayers` to decide which tiles to request or drop per view.
+- For tile data, `MapDataService` uses `Fetch` with `withChunkProcessing()` to POST a list of requested tiles to `/tiles`. The backend replies with a tile-layer stream encoded as version–type–length–value frames, which `Fetch.handleChunkedResponse` decodes.
+- `CHUNK_TYPE_FIELDS` frames carry dictionary updates and are passed directly to `TileLayerParser.readFieldDictUpdate`.
+- `CHUNK_TYPE_FEATURES` frames hold compressed tile payloads. `MapDataService.addTileFeatureLayer` uses the parser to construct `FeatureTile` objects, updates `loadedTileLayers`, and marks affected `TileVisualization` instances as dirty.
+- For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
+
+Tile metadata such as legal notices and scalar fields is also extracted through the parser and stored alongside `MapLayerTree` so it can be surfaced in the Maps & Layers panel and legal information dialogs.
 
 ## Rendering
 
-(Sequence Diagram of TileVisualization)
+Once tiles and styles are available, erdblick turns them into Cesium primitives through a compact rendering pipeline. The diagram in `erdblick-rendering-sequence.svg` shows the full detail; the following mermaid sequence diagram mirrors the central part and highlights the role of the WASM renderer and the point merge service:
 
-- Style Sheets, FeatureLayerVisualization, TileVisualization
-- (Recursive) Relation Visualization
-- Feature Representation (incl feature IDs)
-- Merged Point Features
+```mermaid
+sequenceDiagram
+  participant MapSvc as MapDataService
+  participant View as MapView
+  participant TileVis as TileVisualization
+  participant Core as FeatureLayerVisualization
+  participant PointMerge as PointMergeService
+  participant Backend as Backend locate endpoint
 
-## Exceptions and (Missing) Error Handling
+  MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances
+  View->>TileVis: render with Cesium viewer
 
-One weak point of the current architecture is error handling.
-There are several types of errors, which are handled in different
-ways. But you will find that most of these error types are
-not yet handled in a user-friendly way. In the following, there
-is an overview of different error types, and a description of
-how such an error may be spotted.
+  Note right of TileVis: Decide low detail tile box<br>or high detail rendering based<br>on detail flags and tile contents
+
+  TileVis->>Core: create FeatureLayerVisualization<br>with style id and style options
+  TileVis->>Core: addTileFeatureLayer for feature tile
+  Core->>Core: run style rules and Simfil filters
+
+  Note right of Core: For each feature and relation<br>FeatureLayerVisualization evaluates filters<br>selects geometry and builds Cesium primitives<br>through cesium interface helper classes
+
+  Core-->>TileVis: externalReferences list
+  alt external references present
+    TileVis->>Backend: POST /locate with<br>type and external id parts
+    Backend-->>TileVis: resolved map tile keys
+    TileVis->>Core: addTileFeatureLayer for<br>auxiliary tiles
+    TileVis->>Core: processResolvedExternalReferences
+  end
+
+  Core-->>TileVis: primitiveCollection and<br>mergedPointFeatures
+
+  TileVis->>PointMerge: insert mergedPointFeatures<br>for map layer style id
+  PointMerge-->>View: render finished corner tiles<br>for merged points
+
+  TileVis->>View: add PrimitiveCollection to<br>Cesium viewer primitives
+  TileVis->>View: update TileBoxVisualization<br>for low detail tile boxes
+
+  %% Color coding
+  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
+  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
+  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
+  classDef util fill:#e0f7fa,stroke:#00838f,stroke-width:1px;
+
+  class View ui;
+  class MapSvc,PointMerge service;
+  class TileVis util;
+  class Core wasm;
+  class Backend backend;
+```
+
+In `visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
+
+- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed.
+- `coreLib.FeatureLayerVisualization` turns tile feature layers into Cesium primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
+- For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into Cesium primitives held by `MergedPointsTile`.
+- When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.
+
+Cesium itself remains a pure rendering dependency: it receives `PrimitiveCollection` instances and billboards, plus camera instructions, but it is unaware of map-specific concepts such as features, tiles, or Simfil expressions.
+
+## Exceptions and Error Handling
+
+Error handling is intentionally conservative so that failures in tiles or styles cannot easily crash the UI, but the architecture has some rough edges and gaps and currently leans heavily on console logging.
 
 ### JavaScript Errors
 
-Most UI errors that you will encounter are based on exceptions
-in our Angular frontend code. In this case, ensure that you have
-a development build, e.g. by setting the env `NG_DEVELOP=true`
-when calling `./ci/20_linux_rebuild.bash`.
+Most errors you will hit while developing are plain TypeScript/Angular exceptions, for example in components, services, or PrimeNG integration. For those:
 
-In this case, JS exceptions should be associated with a detailed
-stacktrace in the frontend, and (more or less) straight-forward to debug.
+- Enable development builds by setting `NG_DEVELOP=true` before running the Angular build or dev server. This keeps stack traces readable and preserves source maps.
+- Use the browser’s developer tools console for stack traces. For unhandled promise rejections from services, adding explicit `catch` blocks often makes the origin much easier to track.
+- Keep an eye on `InfoMessageService` toast notifications: some recoverable errors (e.g. missing features during selection) surface there rather than as hard exceptions.
 
 ### WASM Exceptions
 
-Another common source of errors are exceptions which originate
-from the `erdblick-core` WASM library. Here, it is really important
-to note the following:
+The erdblick core is compiled to WASM without C++ exception support. Enabling native C++ exceptions tends to drop the browser out of JIT and severely hurts performance, so error propagation is handled explicitly:
 
-**We are compiling WASM without C++ exception support due to
-performance reasons. C++-Native exception handling consistently
-drops the browser out of JIT, which is very slow.** Due to this
-reason, we currently do the following: Via `bindings.cpp`, we
-install an exception handler, which
+- In `bindings.cpp`, `simfil::ThrowHandler` is wired up via `setExceptionHandler`, which forwards exception type and message into JavaScript. The browser-side handler installed in `integrations/wasm.ts` (`coreLib.setExceptionHandler`) wraps these in JavaScript `Error` objects.
+- Most calls into the core either go through helpers like `uint8ArrayToWasm` (which catch and log exceptions before returning) or are wrapped in explicit try/catch blocks (for example around `FeatureLayerVisualization.run` in `TileVisualization.render`).
+- Search workers wrap their calls to `FeatureLayerSearch` in defensive try/catch blocks and convert failures into `SearchResultForTile` entries with an `error` string. These errors show up alongside search results; structured diagnostics still come from the dedicated diagnostics tasks.
 
-- Cesium Rendering Errors
-- TileLayerStream parsing errors
-- Style Sheet Parsing Errors
-- Style Sheet Execution Errors
-- Tiles with Errors
-- Mapget Connection Loss
+### IO and Streaming Errors
+
+Aside from in-process exceptions, a few error classes originate from IO or backend behavior:
+
+- **TileLayerStream parsing errors** – malformed chunk headers or frames result in console errors from the `Fetch` helper or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
+- **Style sheet parsing errors** – YAML or Simfil issues in style sheets are caught by `StyleService.parseWasmStyle`, which logs the problem and records an error marker for the affected style. Execution-time errors inside rules generally surface as WASM exceptions while rendering and appear in the browser console.
+- **Tile and style performance anomalies** – tiles collect statistics such as parse time, size, and render times per style. The statistics dialog aggregates these so you can spot cases where a particular map layer or style slows rendering or produces suspiciously empty tiles.
+- **Backend or connection loss** – network errors from `fetch` (for `/sources`, `/tiles`, `/locate`, or `/config`) are logged by `Fetch.handleError`. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
+
+In general, treat the browser console and the statistics dialog as complementary tools: the console tells you what failed, the stats dialog tells you which tiles and styles were affected or unusually slow.
 
 ## Feature Search
 
-(Sequence Diagram of SearchService <-> Worker interaction)
+Feature search combines a main-thread service with a pool of web workers that parse tiles and evaluate Simfil expressions. The earlier Lucidchart sketch is mirrored by the following mermaid sequence diagram, which also shows job groups and completion:
 
-- WebWorker Pitfalls
-    - console.log
-    - (de-)serialization overhead
-    - Result batch communication
+```mermaid
+sequenceDiagram
+  participant UI as SearchPanelComponent
+  participant Search as FeatureSearchService
+  participant Jobs as JobGroupManager
+  participant MapSvc as MapDataService
+  participant Worker as search worker pool
+  participant Core as TileLayerParser and FeatureLayerSearch
 
-## Feature and SourceDataLayer Selection
+  UI->>Search: run query
+  Search->>Jobs: create search group<br>with id and query
+  Search->>MapSvc: enumerate loaded tiles<br>and field dictionaries
 
-(Flow Chart Diagram of Feature/SourceDataLayer Selection)
+  loop for each tile
+    Search->>Worker: post SearchWorkerTask<br>with tile blob and group id
+    Jobs->>Jobs: register search task id<br>in job group
+  end
+
+  Worker->>Core: setDataSourceInfo and addFieldDict
+  Worker->>Core: readTileFeatureLayer for tile
+  Worker->>Core: filter query on tile
+  Core-->>Worker: matches traces diagnostics
+  Worker-->>Search: SearchResultForTile<br>with task id and group id
+  Search->>Jobs: mark search task as complete
+
+  Jobs-->>Search: group complete callback<br>when last search task finishes
+
+  Note over Search,Jobs: When the search group completes<br>FeatureSearchService creates a diagnostics group<br>and posts DiagnosticsWorkerTask messages per tile
+
+  UI->>Search: request completions<br>for prefix at caret
+  Search->>Jobs: create completion group<br>for prefix and position
+  Search->>MapSvc: pick tiles for completion<br>from loaded tiles
+
+  loop for each selected tile
+    Search->>Worker: post CompletionWorkerTask<br>with prefix and cursor position
+    Jobs->>Jobs: register completion task id
+  end
+
+  Worker->>Core: FeatureLayerSearch.complete<br>with completion options
+  Core-->>Worker: completion candidates per tile
+  Worker-->>Search: CompletionCandidatesForTile
+  Search->>Jobs: mark completion task as complete
+  Jobs-->>Search: completion group done
+  Search-->>UI: merged candidate list<br>for autocompletion popup
+
+  %% Color coding
+  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
+  classDef wasm fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
+
+  class UI ui;
+  class Search,Jobs,MapSvc,Worker service;
+  class Core wasm;
+```
+
+A few implementation details matter for contributors:
+
+- `FeatureSearchService` owns the worker pool, work queue, and result aggregation logic. It creates up to `navigator.hardwareConcurrency` workers and keeps them hot across searches.
+- Tasks posted to workers carry the serialized tile blob, the current field dictionary blob, and `dataSourceInfo` so that each worker can build a local `TileLayerParser` and `TileFeatureLayer` instance.
+- The quad tree inside `FeatureSearchService` clusters search results into per-tile buckets and computes billboard positions, which are then rendered via Cesium in `MapView`.
+- Completion and diagnostics follow the same structure with `CompletionWorkerTask` and `DiagnosticsWorkerTask` messages; the worker invokes `FeatureLayerSearch.complete` and `FeatureLayerSearch.diagnostics` respectively.
+
+When touching this area, keep web worker pitfalls in mind:
+
+- Avoid heavy `console.log` usage in workers; logging from tight loops can dominate runtime and flood the console.
+- Minimize data passed between main thread and workers; prefer compact binary blobs over large JSON structures.
+- Batch result messages where possible: posting many tiny messages is more expensive than a few aggregated ones.
+
+## Feature and SourceData Layer Selection
+
+Selection in erdblick is driven entirely by tiles and the current style configuration; both feature panels and SourceData panels are different views on the same backing data.
+
+On the UI and service side, the interaction looks as follows:
+
+```mermaid
+sequenceDiagram
+  participant View as MapView
+  participant Search as Search and jumps
+  participant State as AppStateService
+  participant MapSvc as MapDataService
+  participant Tiles as FeatureTile cache
+  participant Inspect as Inspection UI
+  participant SourcePanel as SourceDataPanelComponent
+  participant Backend as Backend tiles SourceData
+
+  View->>MapSvc: setHoveredFeatures<br>TileFeatureId list from pick
+  View->>State: update selection state<br>for click or multi select
+  Search->>State: update selection state<br>from search result or jump
+  State-->>MapSvc: selectionState update<br>panels with TileFeatureId
+
+  MapSvc->>Tiles: loadFeatures helper<br>ensure FeatureTile loaded
+  Tiles-->>MapSvc: FeatureWrapper lists<br>per inspection panel
+  MapSvc-->>Inspect: selectionTopic and hoverTopic<br>panels with FeatureWrapper
+
+  Inspect->>State: setSelection with<br>SelectedSourceData for address
+  State-->>MapSvc: selectionState update<br>panel with SourceData selection
+  MapSvc->>Backend: request SourceData tile<br>from /tiles for layer
+  Backend-->>MapSvc: SourceData tile payload
+  MapSvc-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
+
+  %% Color coding
+  classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+  classDef service fill:#fff3e0,stroke:#ef6c00,stroke-width:1px;
+  classDef cache fill:#f1f8e9,stroke:#558b2f,stroke-width:1px;
+  classDef backend fill:#eeeeee,stroke:#616161,stroke-width:1px;
+
+  class View,Search,Inspect,SourcePanel ui;
+  class State,MapSvc service;
+  class Tiles cache;
+  class Backend backend;
+```
+
+Key points to understand:
+
+- `MapView` translates Cesium pick events into `TileFeatureId` structures (map/layer/tile/feature identifiers) and forwards them to `MapDataService.setHoveredFeatures` or into the selection machinery via `AppStateService`. Jumps and search results use the same identifiers.
+- `MapDataService.loadFeatures` ensures that the relevant tiles are present in `loadedTileLayers`, fetching them if necessary, and wraps them in `FeatureWrapper` objects that expose inspection helpers like `inspectionModel()`.
+- `selectionTopic` and `hoverTopic` hold the current panel models, including pinned state, color, and size. `InspectionContainerComponent` subscribes to them and re-renders the inspection tree and SourceData view accordingly.
+- SourceData is driven by the same tile streaming code but uses `CHUNK_TYPE_SOURCEDATA` and `TileLayerParser.readTileSourceDataLayer` instead of feature-layer parsing. SourceData selection reuses the same map and layer identifiers, so you can jump back and forth between features and their underlying blobs.
+
+If you change how selection is encoded or how tiles are keyed, make sure to keep `AppStateService`, `MapDataService`, and the inspection components in sync; otherwise, URL-based sharing and multi-panel inspection will drift out of alignment.
 
 ## Debugging Strategies
 
-When developing erdblick, there are several tools which will come in handy:
-- **Browser JS Debugger**: The m
-- WASM Debug Mode
-- corelib test
-- ebDebug
-- Browser Network Debugger
-- Browser Profiler
-- Viewport Statistics Dialog
+When working on erdblick, it pays to combine browser tooling, WASM helpers, and the built-in statistics overlays. A few patterns tend to work well:
+
+- **Browser JS debugger** – use breakpoints in Angular components and services, and enable “Pause on exceptions” for tricky cases. Workspace mappings (for example in Chrome) let you debug TypeScript instead of bundled JS.
+- **Network debugger** – inspect `/sources`, `/tiles`, `/locate`, and `/config` requests and responses. This is often the quickest way to decide whether a bug lives in the backend, the parser, or the renderer.
+- **Statistics dialog and overlays** – the statistics dialog aggregates per-tile metrics (tile counts, parse times, render times per style) and combined with tile borders makes it straightforward to spot missing tiles or expensive styles.
+- **WASM diagnostics** – in a debug build of `erdblick-core`, you can enable leak checks and inspect memory usage via the functions bound in `bindings.cpp` (`getTotalMemory`, `getFreeMemory`, `enableLeakCheck`, `reportMemoryLeaks`). These are available through `coreLib` once the WASM module is loaded.
+- **Unit tests** – the C++ core ships with tests under `libs/core`, and the Angular application has Vitest tests configured via `vitest.config.ts`. For changes that affect tile parsing, styling, or search semantics, extending the C++ tests often provides clearer feedback than reproducing issues through the UI alone.
+
+When debugging complex scenarios (for example, rendering issues that involve both styling and tiles), it is usually helpful to:
+
+1. Confirm that the backend returns the expected tile and layer payloads.
+2. Verify that the tile appears in `loadedTileLayers` via `MapDataService` debug logging.
+3. Check whether the style applies (`hasLayerAffinity` and visibility).
+4. Use the statistics dialog to see whether primitives are being generated and rendered.
 
 ## Coding Conventions
 
-Erdblick Developers have the following code style agreements:
+Erdblick follows the surrounding repositories’ conventions while adding a few project-specific preferences.
 
-- For C++ code, we use the style as defined in `.clang-format`.
-- For JS code:
-    - We use `{}` even for one-line ifs.
-    - We prefer early returns over nested conditions.
-    - We use `const` instead of `let` wherever possible, and avoid `var`.
-    - *(Please amend this list!)*
+For C++ code:
+
+- Use the style defined in `.clang-format` in the erdblick tree.
+- Keep bindings in `libs/core/src/bindings.cpp` minimal and focused: push complexity into the core, not into the JavaScript boundary layer.
+
+For TypeScript and JavaScript:
+
+- Use braces (`{}`) even for single-line `if` statements.
+- Prefer early returns over deeply nested conditionals.
+- Use `const` instead of `let` wherever possible and avoid `var`.
+- Keep services cohesive and UI components thin; cross-cutting concerns (keyboard handling, app state, shared dialogs) belong in the `shared/` or `auxiliaries/` services.
+
+These conventions are not exhaustive, but they reflect how the existing code is structured. When in doubt, align with nearby code before introducing a new pattern.
