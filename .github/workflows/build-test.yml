@@ -29,6 +29,30 @@ jobs:
           cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
           cmake --build .
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: "npm"
+
+      - name: Build with Emscripten
+        run: |
+          $GITHUB_WORKSPACE/ci/00_linux_setup.bash
+          $GITHUB_WORKSPACE/ci/10_linux_build.bash
+
+      - name: Install UI dependencies
+        run: npm ci
+
+      - name: Run Angular unit tests (with coverage)
+        run: npm run test -- --watch=false
+
+      - name: Upload coverage artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-coverage
+          path: coverage
+
       - name: Run Tests
         run: |
           cd build-test/test
