@@ -69,6 +69,11 @@
                                 "glob": "LICENSE*",
                                 "input": "node_modules/material-symbols",
                                 "output": "/bundle/licenses/icons/material-symbols"
+                            },
+                            {
+                                "glob": "erdblick-core.wasm",
+                                "input": "build/libs/core",
+                                "output": "/bundle/wasm"
                             }
                         ],
                         "styles": [
@@ -140,6 +145,11 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/material-symbols",
                                     "output": "/bundle/licenses/icons/material-symbols"
+                                },
+                                {
+                                    "glob": "erdblick-core.wasm",
+                                    "input": "build/libs/core",
+                                    "output": "/bundle/wasm"
                                 }
                             ],
                             "optimization": {
@@ -251,6 +261,11 @@
                                     "glob": "LICENSE*",
                                     "input": "node_modules/material-symbols",
                                     "output": "/bundle/licenses/icons/material-symbols"
+                                },
+                                {
+                                    "glob": "erdblick-core.wasm",
+                                    "input": "build/libs/core",
+                                    "output": "/bundle/wasm"
                                 }
                             ],
                             "optimization": {

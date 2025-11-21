@@ -54,24 +54,35 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   list(APPEND ERDBLICK_SOURCE_FILES src/bindings.cpp)
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
+  target_compile_options(erdblick-core PRIVATE -msimd128)
+  set_property(TARGET erdblick-core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   # For Address Sanitization, uncomment the next line and
   #  add sanitize-address to the LINK_FLAGS.
   # target_compile_options(erdblick-core PRIVATE -fsanitize=address)
   # -fsanitize=address \
-  set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "\
+  set(erdblick_link_flags "\
     --bind \
-    --profiling \
     --emit-tsd erdblick-core.d.ts \
+    -O3 \
+    -msimd128 \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
     -s EXPORT_NAME='\"libErdblickCore\"' \
     -s WASM_BIGINT=1 \
+    -s LEGALIZE_JS_FFI=0 \
     -s JS_MATH=0 \
     -s ALLOW_MEMORY_GROWTH=1 \
-    -s SINGLE_FILE=1 \
+    -s FILESYSTEM=0 \
     -s EXPORTED_RUNTIME_METHODS=HEAPU8 \
+    -s ASSERTIONS=0 \
+    -s SAFE_HEAP=0 \
+    -s STACK_OVERFLOW_CHECK=0 \
   ")
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    string(APPEND erdblick_link_flags " --profiling")
+  endif()
+  set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "${erdblick_link_flags}")
 else()
   add_library(erdblick-core ${ERDBLICK_SOURCE_FILES})
 endif()

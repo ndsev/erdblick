@@ -7,10 +7,15 @@ export interface ErdblickCore_ extends ErdblickCore {
 // Keep as any to allow safe default stub assignment pre-initialization in tests.
 export let coreLib: any;
 
+// Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
+const wasmAssetPath = '/bundle/wasm/erdblick-core.wasm';
+
 export async function initializeLibrary(): Promise<void> {
     if (coreLib)
         return;
-    const lib = await MainModuleFactory();
+    const lib = await MainModuleFactory({
+        locateFile: (path: string) => path.endsWith('.wasm') ? wasmAssetPath : path,
+    });
     coreLib = lib as ErdblickCore_;
     coreLib.setExceptionHandler((excType: string, message_1: string) => {
         throw new Error(`${excType}: ${message_1}`);
