@@ -337,10 +337,12 @@
                         "codeCoverageReporters": [
                             "text-summary",
                             "html",
-                            "lcov"
+                            "lcov",
+                            "json-summary"
                         ],
                         "codeCoverageExclude": [
-                            "bundle/cesium/**"
+                            "**/bundle/cesium/**",
+                            "**/dist/**/bundle/cesium/**"
                         ],
                         "exclude": [
                             "app/app.component.spec.ts"
