@@ -1,5 +1,11 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject, Subject} from 'rxjs';
+import {initializeLibrary} from "../integrations/wasm";
+
+beforeAll(async () => {
+    await initializeLibrary();
+    ({MapDataService: MapDataServiceCtor} = await import('./map.service'));
+});
 
 // Stub Fetch implementation to capture request bodies without network access.
 const fetchInstances: any[] = [];
@@ -121,10 +127,6 @@ vi.mock('./features.model', () => {
 type MapDataServiceCtorType = typeof import('./map.service').MapDataService;
 let MapDataServiceCtor: MapDataServiceCtorType;
 
-beforeAll(async () => {
-    ({MapDataService: MapDataServiceCtor} = await import('./map.service'));
-});
-
 class StyleServiceStub {
     styles = new Map<string, any>();
     styleRemovedForId = new Subject<string>();
@@ -221,9 +223,21 @@ describe('MapDataService', () => {
         // Ensure we have one view state.
         stateService.numViewsState.next(1);
 
+        // Use a non-empty viewport so the WASM helper
+        // coreLib.getTileIds(...) can actually return tile IDs.
+        const viewStates = (service as any).viewVisualizationState as any[];
+        viewStates[0].viewport = {
+            south: -45,
+            west: -90,
+            width: 90,
+            height: 90,
+            camPosLon: 0,
+            camPosLat: 0,
+            orientation: 0,
+        };
+
         await service.update();
 
-        const viewStates = (service as any).viewVisualizationState as any[];
         expect(viewStates.length).toBe(1);
         const state = viewStates[0];
 

@@ -25,24 +25,6 @@ vi.mock('@angular/router', () => {
     };
 });
 
-vi.mock('../integrations/cesium', () => {
-    class Cartographic {
-        constructor(
-            public longitude: number,
-            public latitude: number,
-            public height: number,
-        ) {}
-    }
-
-    const CesiumMath = {
-        toDegrees(value: number) {
-            return value * (180 / Math.PI);
-        },
-    };
-
-    return { Cartographic, CesiumMath };
-});
-
 vi.mock('../inspection/inspection.service', () => ({
     SelectedSourceData: class {},
 }));

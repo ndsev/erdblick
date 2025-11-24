@@ -65,6 +65,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
     --emit-tsd erdblick-core.d.ts \
     -O3 \
     -msimd128 \
+    -s SINGLE_FILE=1 \
     -s ENVIRONMENT=web \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \

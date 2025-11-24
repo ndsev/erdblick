@@ -1,51 +1,8 @@
-import {describe, expect, it, vi} from 'vitest';
+import {beforeAll, describe, expect, it, vi} from 'vitest';
+import {initializeLibrary} from '../integrations/wasm';
 
-vi.mock('../integrations/cesium', () => {
-    class PointPrimitiveCollection {
-        length = 0;
-        add(_params: any) {
-            this.length++;
-            return _params;
-        }
-    }
-
-    class LabelCollection {
-        length = 0;
-        add(_params: any) {
-            this.length++;
-            return _params;
-        }
-    }
-
-    class BillboardCollection {
-        length = 0;
-        add(_params: any) {
-            this.length++;
-            return _params;
-        }
-    }
-
-    class Viewer {
-        scene = {
-            primitives: {
-                add: vi.fn(),
-                remove: vi.fn(),
-            },
-        };
-        entities = {
-            remove: vi.fn(),
-        };
-    }
-
-    class Entity {}
-
-    return {
-        PointPrimitiveCollection,
-        LabelCollection,
-        BillboardCollection,
-        Viewer,
-        Entity,
-    };
+beforeAll(async () => {
+    await initializeLibrary();
 });
 
 import {MergedPointsTile, PointMergeService} from './pointmerge.service';

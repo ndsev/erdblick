@@ -5,4 +5,12 @@
 // angular.json and is never part of the production bundle.
 import type * as CesiumType from "cesium";
 import * as Cesium from "cesium";
+
+// Expose Cesium on the global object as well so the WASM core, which
+// looks up classes like `Cesium.ArcType` via the global namespace,
+// can interoperate correctly in tests.
+if (!(globalThis as any).Cesium) {
+    (globalThis as any).Cesium = Cesium;
+}
+
 export {Cesium, CesiumType};

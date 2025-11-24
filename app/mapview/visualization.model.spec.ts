@@ -1,81 +1,11 @@
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-
-vi.mock('../integrations/cesium', () => {
-    class PrimitiveCollection {
-        add(primitive: any) {
-            return primitive;
-        }
-        remove(_primitive: any) {
-            return true;
-        }
-    }
-
-    class Rectangle {
-        static fromDegrees(..._args: any[]) {
-            return {};
-        }
-    }
-
-    class Color {
-        static YELLOW = {withAlpha: (_a: number) => ({})};
-        static AQUA = {withAlpha: (_a: number) => ({})};
-        withAlpha(_a: number) {
-            return {};
-        }
-    }
-
-    class ColorGeometryInstanceAttribute {
-        static fromColor(_c: any) {
-            return {lastColor: _c};
-        }
-
-        static toValue(color: any, attribute: any) {
-            if (attribute) {
-                attribute.lastColor = color;
-            }
-            return attribute ?? {lastColor: color};
-        }
-    }
-
-    class GeometryInstance {
-        constructor(public options: any) {}
-    }
-
-    class PerInstanceColorAppearance {
-        constructor(public options: any) {}
-    }
-
-    class Primitive {
-        constructor(public options: any) {}
-    }
-
-    class RectangleOutlineGeometry {
-        constructor(public options: any) {}
-        static createGeometry(_g: any) {
-            return {};
-        }
-    }
-
-    class Viewer {
-        scene = {
-            primitives: new PrimitiveCollection(),
-        };
-    }
-
-    return {
-        Color,
-        PrimitiveCollection,
-        Rectangle,
-        Viewer,
-        ColorGeometryInstanceAttribute,
-        GeometryInstance,
-        PerInstanceColorAppearance,
-        Primitive,
-        RectangleOutlineGeometry,
-    };
-});
-import {coreLib} from '../integrations/wasm';
+import {beforeAll, describe, expect, it, vi} from 'vitest';
+import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../integrations/wasm';
+import {FeatureTile} from '../mapdata/features.model';
 import {TileVisualization} from './visualization.model';
+
+beforeAll(async () => {
+    await initializeLibrary();
+});
 
 describe('TileVisualization', () => {
 
@@ -92,17 +22,16 @@ describe('TileVisualization', () => {
         } as any;
     };
 
-    const createTile = (overrides: Partial<any> = {}) => ({
-        mapTileKey: 'm1/layerA/1',
-        mapName: 'm1',
-        layerName: 'layerA',
-        tileId: 1n,
-        numFeatures: 5,
-        preventCulling: false,
-        stats: new Map<string, number[]>(),
-        peekAsync: (cb: (layer: any) => Promise<any>) => cb({}),
-        ...overrides,
-    });
+    const createTile = (overrides: Partial<FeatureTile> = {}) => {
+        const parser = new coreLib.TileLayerParser();
+        const blob = uint8ArrayFromWasm((buffer: any) => coreLib.generateTestTile(buffer, parser));
+        if (!blob) {
+            throw new Error('Failed to generate test tile blob');
+        }
+        const tile = new FeatureTile(parser, blob, false);
+        Object.assign(tile, overrides);
+        return tile;
+    };
 
     const createPointMergeService = () => ({
         makeMapViewLayerStyleId: vi.fn().mockReturnValue('rule'),
@@ -110,11 +39,11 @@ describe('TileVisualization', () => {
         remove: vi.fn().mockReturnValue([]),
     });
 
-    const createStyle = (overrides: Partial<any> = {}) => ({
-        name: () => 'TestStyle',
-        isDeleted: () => false,
-        ...overrides,
-    });
+    const createStyle = (overrides: Partial<{isDeleted: () => boolean}> = {}) => {
+        const style = coreLib.generateTestStyle();
+        (style as any).isDeleted = overrides.isDeleted ?? (() => false);
+        return style as any;
+    };
 
     it('renders a high-detail visualization and records statistics', async () => {
         const tile = createTile();
@@ -129,7 +58,7 @@ describe('TileVisualization', () => {
             () => null,
             style as any,
             true,
-            (coreLib as any).HighlightMode.NO_HIGHLIGHT,
+            coreLib.HighlightMode.NO_HIGHLIGHT,
             undefined,
             false,
         );
@@ -159,7 +88,7 @@ describe('TileVisualization', () => {
             () => null,
             style as any,
             false,
-            (coreLib as any).HighlightMode.NO_HIGHLIGHT,
+            coreLib.HighlightMode.NO_HIGHLIGHT,
             undefined,
             true,
         );

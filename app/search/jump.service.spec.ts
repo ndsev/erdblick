@@ -1,22 +1,10 @@
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {of, Subject} from 'rxjs';
+import {coreLib, initializeLibrary} from '../integrations/wasm';
+import {JumpTargetService} from './jump.service';
 
-vi.mock('../integrations/cesium', () => {
-    class Cartographic {
-        constructor(
-            public longitude: number,
-            public latitude: number,
-            public height: number,
-        ) {}
-
-        static fromDegrees(lon: number, lat: number) {
-            return new Cartographic(lon, lat, 0);
-        }
-    }
-
-    class Rectangle {}
-
-    return {Cartographic, Rectangle};
+beforeAll(async () => {
+    await initializeLibrary();
 });
 
 vi.mock('/config/jump_plugin.js', () => ({
@@ -32,17 +20,6 @@ vi.mock('/config/jump_plugin.js', () => ({
         },
     ]),
 }));
-
-import {coreLib, installCoreLibTestStub} from '../integrations/wasm';
-import {JumpTargetService} from './jump.service';
-
-installCoreLibTestStub();
-const validateSimfilQueryMock = vi.fn();
-const sourceDataLayerKeyMock = vi.fn(
-    (mapId: string, sourceLayerId: string, tileId: bigint) => `${mapId}/${sourceLayerId}/${tileId.toString()}`,
-);
-(coreLib as any).validateSimfilQuery = validateSimfilQueryMock;
-(coreLib as any).getSourceDataLayerKey = sourceDataLayerKeyMock;
 
 class HttpClientStub {
     get = vi.fn();
@@ -104,10 +81,6 @@ const createService = (config: any = {}) => {
 };
 
 describe('JumpTargetService', () => {
-    beforeEach(() => {
-        validateSimfilQueryMock.mockReset();
-        sourceDataLayerKeyMock.mockReset();
-    });
 
     it('loads jump-target plugin and merges its targets into jumpTargets', async () => {
         const config = {
@@ -197,9 +170,9 @@ describe('JumpTargetService', () => {
             target.execute('12345 m1 layerA');
         }
 
-        expect(coreLib.getSourceDataLayerKey).toHaveBeenCalledWith('m1', 'LAYER-ID', 12345n);
+        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 12345n)).toBe("SourceData:m1:LAYER-ID:3039");
         expect(stateService.setSelection).toHaveBeenCalledWith({
-            mapTileKey: 'm1/LAYER-ID/12345',
+            mapTileKey: 'SourceData:m1:LAYER-ID:3039',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
     });
@@ -240,12 +213,12 @@ describe('JumpTargetService', () => {
 
         const highlightSpy = vi.spyOn(service, 'highlightByJumpTarget').mockResolvedValue(undefined as any);
 
-        await service.highlightByJumpTargetFilter('m1', 'feature-2', (coreLib as any).HighlightMode.SELECTION_HIGHLIGHT);
+        await service.highlightByJumpTargetFilter('m1', 'feature-2', coreLib.HighlightMode.SELECTION_HIGHLIGHT);
 
         expect(highlightSpy).toHaveBeenCalledWith(
             actions[1],
             'm1',
-            (coreLib as any).HighlightMode.SELECTION_HIGHLIGHT,
+            coreLib.HighlightMode.SELECTION_HIGHLIGHT,
             undefined,
         );
     });
