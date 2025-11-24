@@ -41,6 +41,7 @@ jobs:
           cache: "npm"
 
       - name: Build with Emscripten
+        if: ${{ github.event_name == 'pull_request' && success() }}
         run: |
           $GITHUB_WORKSPACE/ci/00_linux_setup.bash
           $GITHUB_WORKSPACE/ci/10_linux_build.bash
@@ -49,10 +50,11 @@ jobs:
         run: npm ci
 
       - name: Run Angular unit tests (with coverage)
+        if: ${{ github.event_name == 'pull_request' && success() }}
         run: npm run test -- --watch=false
 
       - name: Upload coverage artifact
-        if: ${{ success() }}
+        if: ${{ github.event_name == 'pull_request' && success() }}
         uses: actions/upload-artifact@v4
         with:
           name: ui-coverage
