@@ -1,28 +1,4 @@
-// This file allows us to use ESM-style imports in the
-// rest of the erdblick code, while relying on the global
-// Cesium UMD bundle included in index.html. Importing the
-// runtime module would pull in CommonJS dependencies from
-// @cesium/* and trigger optimization bailouts.
-//
-// We therefore only use type information from the "cesium"
-// package and resolve the runtime instance from the global
-// UMD bundle via globalThis.Cesium. The following import
-// provides full typings without causing a runtime import
-// or bundling.
-import type * as CesiumType from "cesium";
-
-function getCesiumRuntime(): typeof CesiumType {
-    const cesium = (globalThis as any).Cesium as typeof CesiumType | undefined;
-    if (!cesium) {
-        throw new Error(
-            "[Cesium integration] globalThis.Cesium is not available. " +
-            "Ensure the Cesium UMD bundle Cesiumis loaded before Angular bootstraps."
-        );
-    }
-    return cesium;
-}
-
-const Cesium = getCesiumRuntime();
+import {Cesium, CesiumType} from './cesium.prod';
 
 // Add aliases for any required types. Wherever the type
 // has a static function, such as Cartesian3.fromDegrees,
@@ -114,7 +90,5 @@ export const ColorMaterialProperty = Cesium.ColorMaterialProperty;
 export type JulianDate = CesiumType.JulianDate;
 export const JulianDate = Cesium.JulianDate;
 
-
-// Math is a namespace.
-
+// `Math` is a namespace.
 export const CesiumMath = Cesium.Math;

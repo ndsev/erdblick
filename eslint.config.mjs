@@ -60,7 +60,7 @@ export default [
         },
     },
     {
-        files: ["app/integrations/cesium.ts", "app/integrations/cesium.test.ts"],
+        files: ["app/integrations/cesium.prod.ts", "app/integrations/cesium.test.ts"],
 
         rules: {
             "no-restricted-imports": "off",

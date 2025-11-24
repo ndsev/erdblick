@@ -76,7 +76,9 @@ jobs:
             const total = summary.total;
             const format = (metric) => `${metric.pct.toFixed(1)}% (${metric.covered}/${metric.total})`;
 
+            const marker = '<!-- ui-coverage-report -->';
             const body = [
+              marker,
               '## Vitest coverage',
               '',
               `- Lines: ${format(total.lines)}`,
@@ -88,11 +90,30 @@ jobs:
             ].join('\n');
 
             try {
-              await github.rest.issues.createComment({
-                ...context.repo,
-                issue_number: context.issue.number,
-                body
-              });
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  per_page: 100
+                }
+              );
+
+              const existing = comments.find((comment) => comment.body?.includes(marker));
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  ...context.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  body
+                });
+              }
             } catch (error) {
               core.warning(`Skipping coverage comment (token likely lacks permission): ${error.message}`);
             }

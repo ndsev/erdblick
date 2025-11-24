@@ -196,7 +196,7 @@
                             "browser": "app/main.ts",
                             "fileReplacements": [
                               {
-                                "replace": "app/integrations/cesium.ts",
+                                "replace": "app/integrations/cesium.prod.ts",
                                 "with": "app/integrations/cesium.test.ts"
                               }
                             ]
