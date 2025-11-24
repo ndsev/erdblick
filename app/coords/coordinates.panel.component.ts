@@ -19,7 +19,7 @@ interface PanelOption {
         <div class="coordinates-container">
             <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
+                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
             <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
@@ -57,7 +57,7 @@ interface PanelOption {
             </p-card>
             <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button" styleClass="p-button-primary"
                       (click)="focusOnMarker(markerPosition)" label="" pTooltip="Focus on marker" tooltipPosition="bottom">
-                <span class="material-icons" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
+                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
         </div>
     `,

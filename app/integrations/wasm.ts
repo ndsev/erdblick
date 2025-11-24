@@ -4,16 +4,32 @@ export interface ErdblickCore_ extends ErdblickCore {
     HEAPU8: Uint8Array
 }
 
-export let coreLib: ErdblickCore_;
+export let coreLib: any;
 
+// Shared initialization promise so multiple callers can await library readiness safely.
+let __initializingPromise: Promise<void> | null = null;
+
+// Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
 export async function initializeLibrary(): Promise<void> {
-    if (coreLib)
+    // If the real library has already been initialized, simply reuse the existing instance.
+    if (coreLib) {
         return;
-    const lib = await MainModuleFactory();
-    coreLib = lib as ErdblickCore_;
-    coreLib.setExceptionHandler((excType: string, message_1: string) => {
-        throw new Error(`${excType}: ${message_1}`);
-    });
+    }
+
+    if (!__initializingPromise) {
+        __initializingPromise = (async () => {
+            const lib = await MainModuleFactory({
+                print: (msg: string) => console.log(msg),
+                printErr: (msg: string) => console.error(msg),
+            });
+            coreLib = lib as ErdblickCore_;
+            coreLib.setExceptionHandler((excType: string, message_1: string) => {
+                throw new Error(`${excType}: ${message_1}`);
+            });
+        })();
+    }
+
+    await __initializingPromise;
 }
 
 /**
