@@ -56,6 +56,26 @@ Not sure how to do that? Start off with a simple `pip install mapget` and then f
 mapget serve -w <path-to-unpacked-erdblick>
 ```
 
+## Integration Tests
+
+Browser-based integration tests are implemented with Playwright and assume that the Emscripten build
+has completed successfully (so the WASM core and `static/browser` bundle are available).
+
+To run them locally:
+
+```bash
+./ci/10_linux_build.bash             # build core + UI
+npm install                          # install dev dependencies (incl. Playwright)
+npx playwright install --with-deps   # install Playwright browsers (once)
+pip install mapget                   # install the latest mapget package
+run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
+```
+
+The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
+ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path). 
+If the sample Tropico datasource (`cpp-sample-http-datasource`) is not available, 
+`/sources` may be empty and Tropico-specific tests will be reported as skipped while generic backend and debug-tile tests still run.
+
 ## Styling System
 
 Erdblick styles are defined as *YAML*-files, which must have a `rules` key that contains an array of

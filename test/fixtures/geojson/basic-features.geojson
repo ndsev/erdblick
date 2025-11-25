@@ -1,0 +1,53 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "feature-point-1",
+            "properties": {
+                "name": "Test Point 1",
+                "category": "point"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [11.57549, 48.13743]
+            }
+        },
+        {
+            "type": "Feature",
+            "id": "feature-line-1",
+            "properties": {
+                "name": "Test Line 1",
+                "category": "line"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [11.5740, 48.1370],
+                    [11.5765, 48.1380]
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "id": "feature-polygon-1",
+            "properties": {
+                "name": "Test Polygon 1",
+                "category": "polygon"
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [11.5745, 48.1368],
+                        [11.5768, 48.1368],
+                        [11.5768, 48.1383],
+                        [11.5745, 48.1383],
+                        [11.5745, 48.1368]
+                    ]
+                ]
+            }
+        }
+    ]
+}
+
