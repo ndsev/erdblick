@@ -4,14 +4,16 @@
 #   mapget --config test/mapget-integration.yaml serve ...
 #
 # The `sources` list can be extended with deterministic test datasources
-# (e.g. DataSourceProcess using the cpp-sample-http-datasource example)
-# without changing the Playwright harness.
+# (e.g. additional DataSourceProcess entries) without changing the
+# Playwright harness.
 
 sources:
-  # HTTP datasource example using the cpp-sample-http-datasource from mapget.
-  # This assumes that the `cpp-sample-http-datasource` binary is on PATH
-  # (or runnable via the shell used to start `mapget`). If it is not
-  # available, mapget will log an error and simply expose no sources; the
-  # Playwright tests that depend on Tropico will detect this and skip.
+  # Python example datasource from the vendored mapget repo.
+  # This assumes that a `python` executable is available and that the
+  # `mapget` Python package can be imported (for example via
+  # `pip install mapget` in the active environment). If the script cannot
+  # be started, mapget will log an error and simply expose no sources; the
+  # Playwright tests that depend on this datasource will detect its absence
+  # from `/sources` and skip.
   - type: DataSourceProcess
-    cmd: cpp-sample-http-datasource
+    cmd: python build/_deps/mapget-src/examples/python/datasource.py

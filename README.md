@@ -73,8 +73,11 @@ run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapg
 
 The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
 ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path). 
-If the sample Tropico datasource (`cpp-sample-http-datasource`) is not available, 
-`/sources` may be empty and Tropico-specific tests will be reported as skipped while generic backend and debug-tile tests still run.
+The default integration setup uses the Python example datasource from the vendored `mapget` repo
+(`build/_deps/mapget-src/examples/python/datasource.py`) via a `DataSourceProcess` entry in
+`test/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
+`mapget` Python package is missing), `/sources` may be empty and datasource-dependent tests will be
+reported as skipped while generic backend and debug-tile tests still run.
 
 ## Styling System
 

@@ -1,13 +1,13 @@
 import { expect, test } from '../fixtures/test';
-import { requireTropicoSource } from '../utils/backend-helpers';
+import { requireTestMapSource } from '../utils/backend-helpers';
 import { enableMapLayer, navigateToRoot } from '../utils/ui-helpers';
 
-test.describe('Simfil feature search over Tropico', () => {
+test.describe('Simfil feature search over Python datasource', () => {
     test('valid simfil query returns search results', async ({ page, request }) => {
-        await requireTropicoSource(request);
+        await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'Tropico', 'WayLayer');
+        await enableMapLayer(page, 'TestMap', 'WayLayer');
 
         const searchInput = page.locator('textarea[placeholder="Search"]');
         await searchInput.click();
@@ -22,7 +22,7 @@ test.describe('Simfil feature search over Tropico', () => {
             hasText: 'Search Loaded Features'
         }).first();
         await expect(searchLoadedFeatures).toBeVisible();
-        await searchInput.fill('properties.main_ingredient');
+        await searchInput.fill('properties.isBridge == false');
         await searchInput.focus();
         await page.keyboard.press('Enter');
 

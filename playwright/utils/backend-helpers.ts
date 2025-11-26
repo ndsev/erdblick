@@ -8,17 +8,16 @@ export async function getSources(request: APIRequestContext): Promise<any[]> {
     return Array.isArray(body) ? body : [];
 }
 
-export async function requireTropicoSource(request: APIRequestContext): Promise<any | null> {
+export async function requireTestMapSource(request: APIRequestContext): Promise<any | null> {
     const sources = await getSources(request);
-    const tropico = sources.find(
-        (s: any) => s && s.mapId === 'Tropico' && s.layers && s.layers.WayLayer
+    const testMap = sources.find(
+        (s: any) => s && s.mapId === 'TestMap' && s.layers && s.layers.WayLayer
     );
 
-    if (!tropico) {
-        test.skip('Tropico HTTP sample datasource is not available in /sources');
+    if (!testMap) {
+        test.skip('Python example datasource (TestMap/WayLayer) is not available in /sources');
         return null;
     }
 
-    return tropico;
+    return testMap;
 }
-

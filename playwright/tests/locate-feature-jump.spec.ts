@@ -1,13 +1,13 @@
 import { expect, test } from '../fixtures/test';
-import { requireTropicoSource } from '../utils/backend-helpers';
+import { requireTestMapSource } from '../utils/backend-helpers';
 import { enableMapLayer, navigateToRoot } from '../utils/ui-helpers';
 
 test.describe('Feature jump /locate integration', () => {
     test('selecting a search result posts /locate', async ({ page, request }) => {
-        await requireTropicoSource(request);
+        await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'Tropico', 'WayLayer');
+        await enableMapLayer(page, 'TestMap', 'WayLayer');
 
         const locateRequests: string[] = [];
         page.on('request', (req) => {
@@ -18,7 +18,7 @@ test.describe('Feature jump /locate integration', () => {
 
         const searchInput = page.locator('textarea[placeholder="Search"]');
         await searchInput.click();
-        await searchInput.fill('properties.main_ingredient == "Pepper"');
+        await searchInput.fill('properties.isBridge == false');
 
         const searchMenu = page.locator('.search-menu-dialog');
         await expect(searchMenu).toBeVisible();
