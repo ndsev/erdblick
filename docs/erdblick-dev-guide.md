@@ -1,8 +1,10 @@
 # Erdblick Development Guide
 
-Erdblick is a Cesium-based Angular application backed by a WebAssembly core for tile decoding, styling, and feature search. This guide explains the internal architecture and the main data flows for contributors working on the UI or the C++ core. If you need usage instructions instead of implementation details, start with the [Erdblick User Guide](erdblick-user-guide.md).
+Erdblick is a Cesium-based Angular application backed by a WebAssembly core for tile decoding, styling, and feature search. This guide explains the internal architecture and the main data flows for contributors working on the UI or the C++ core. If you need usage instructions instead of implementation details, start with the [MapViewer User Guide](../../../docs/mv-user.md).
 
-We begin with a component overview to show how the Angular app, the WASM core, Cesium, and a mapget-compatible backend fit together. Afterwards, we zoom into the tile streaming and rendering pipelines, error handling, feature search, selection, and debugging strategies.
+Source code is available at [github.com/ndsev/erdblick](https://github.com/ndsev/erdblick).
+
+We begin with a component overview to show how the Angular app, the WASM core, Cesium, configuration files, and a mapget-compatible backend fit together. Afterwards, we zoom into the tile streaming and rendering pipelines, error handling, feature search, selection, and debugging strategies.
 
 ## Development Setup
 
@@ -42,41 +44,55 @@ Chrome usually offers the best WebGL performance, but Firefox, Edge, and Safari 
 
 ## Component Overview
 
-At a high level, erdblick consists of an Angular shell, a Cesium-based map view, and a WebAssembly core that understands map tiles and evaluates styles and search queries:
+At a high level, erdblick consists of an Angular shell, a Cesium-based map view, a WebAssembly core that understands map tiles and evaluates styles and search queries, and a mapget-compatible backend plus static configuration assets:
 
 ```mermaid
-flowchart LR
-  AppShell[App shell<br>AppComponent]
-  Views[Views<br>mapview/*]
-  MapData[Map data<br>mapdata/*]
-  Styles[Styles<br>styledata/*]
-  Search[Search<br>search/*]
-  Inspect[Inspection<br>inspection/*]
-  Shared[Shared state<br>shared/*]
-  Core[Core WASM<br>libs/core]
-  Backend[Backend<br>mapget-compatible]
+classDiagram
+  class AppShell {
+    Angular shell and panels
+  }
+  class MapView {
+    Cesium-based views
+  }
+  class MapDataService
+  class StyleService
+  class SearchSubsystem
+  class InspectionSubsystem
+  class AppStateService
+  class CoreWasm {
+    libs/core (WASM)
+  }
+  class Backend {
+    mapget-compatible HTTP API
+  }
+  class ConfigFiles {
+    config.json and extensions
+  }
+  class StyleBundles {
+    YAML style sheets
+  }
 
-  AppShell --> Views
-  AppShell --> MapData
-  AppShell --> Styles
-  AppShell --> Search
-  AppShell --> Inspect
+  AppShell --> MapView
+  AppShell --> MapDataService
+  AppShell --> StyleService
+  AppShell --> SearchSubsystem
+  AppShell --> InspectionSubsystem
 
-  Views --> Shared
-  MapData --> Shared
-  Styles --> Shared
-  Search --> Shared
-  Inspect --> Shared
+  MapView --> AppStateService
+  MapDataService --> AppStateService
+  StyleService --> AppStateService
+  SearchSubsystem --> AppStateService
+  InspectionSubsystem --> AppStateService
 
-  MapData --> Core
-  Styles --> Core
-  Search --> Core
+  MapDataService --> CoreWasm
+  StyleService --> CoreWasm
+  SearchSubsystem --> CoreWasm
 
-  MapData --> Backend
-  Search --> Backend
+  MapDataService --> Backend
+  SearchSubsystem --> Backend
 
-  MapData <---> Styles
-  MapData <---> Inspect
+  AppShell --> ConfigFiles
+  StyleService --> StyleBundles
 ```
 
 In code, the main responsibilities are:
@@ -86,8 +102,8 @@ In code, the main responsibilities are:
 - `AppStateService` centralizes state that must be shared between components (viewports, active maps and layers, split view configuration, inspections, URL encoding).
 - `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
 - `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
-- `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
-- A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor.
+- `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
+- A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
 The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
 

@@ -61,6 +61,7 @@ The inspection view is also a convenient starting point for sharing investigatio
 - **URL state** – inspection panels (including pin state, size, and color) are serialized into the browser URL and `localStorage`. Copying the URL allows colleagues to open the same selection layout.
 - **Clipboard** – use the context menu and GeoJSON actions to copy key/value pairs, GeoJSON paths, or full GeoJSON payloads to the clipboard.
 - **GeoJSON export** – export the current selection as a `.geojson` file or open it in a separate tab when you need to share raw data or feed it into external tools.
+- **Browser navigation** – use the browser’s Back and Forward buttons to walk through recent selection states without losing your current panel layout.
 
 ## Tips
 

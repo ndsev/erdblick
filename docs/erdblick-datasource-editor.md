@@ -11,6 +11,7 @@ Before the editor can accept changes, the backend has to expose a configuration 
 - Your backend must expose a `/config` endpoint that returns configuration data and, optionally, a JSON schema. If the endpoint is missing or returns an error, the editor will show a read‑only error message.
 - To allow changes to be persisted, the backend must accept `POST` requests on `/config` and be configured with a writable configuration store (for example a non–read‑only config file or volume).
 - Backends can indicate that editing is disabled by marking the configuration as read‑only. In that case erdblick still displays the configuration, but the **Apply** button is hidden.
+- For mapget-based backends such as the MapViewer, the `/config` behaviour is controlled through the `mapget` section in the shared configuration file. See the [advanced mapget configuration](../../docs/mv-config.md#advanced-mapget-configuration) chapter for details on `allow-post-config` (to enable POST `/config`) and `no-get-config` (to disable GET `/config` in locked-down deployments).
 
 ## Editing Sources
 

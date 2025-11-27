@@ -6,11 +6,15 @@ _[Screenshot placeholder: Browser address bar with a long erdblick URL highlight
 
 ## What Gets Stored in the URL?
 
-- Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll).
-- Active maps, layers, and per-layer settings.
+- Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.
+- Number of map views, which view is focused, view sync flags (position/movement/projection/layers), and 2D/3D projection mode per view.
+- Active maps and the complete layer matrix: which layers are visible in which view, their zoom levels, and whether tile borders are drawn.
+- Base-map settings: OpenStreetMap overlay toggles and opacity per view.
 - Enabled styles plus the values of all style options per map layer and view.
-- Split-view state (second viewport and sync toggles).
-- Search term/history pointer, if a query is active.
+- Inspection state: open panels, pinned vs. unpinned selections, panel sizes and highlight colours, and any active SourceData selection.
+- Search palette state and the last executed query.
+- Tile budget limits from the Preferences dialog (tiles to load vs. tiles to visualise).
+- Coordinate marker enablement and position.
 
 The URL is pruned automatically so it never grows beyond a few kilobytes, even after extended sessions.
 
@@ -33,6 +37,44 @@ Example:
 http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&osm=true&osmOp=30&tll=1024&tvl=256
 ```
 
+## Multi-view state in query parameters
+
+When you enable split view, erdblick still encodes the full layout into the query string. A few points are useful when you inspect or hand-craft URLs:
+
+- The `n` parameter records how many map views are active. A value of `1` means single view, `2` enables split screen.
+- Camera and layer-related parameters are encoded per view. Internally, erdblick uses comma-separated lists for per-layer values and colon-separated groups for per-view values. This allows the same parameter to describe all views at once.
+- View synchronisation flags (position, movement, projection, and layer sync) are part of the state. They decide whether updates from the focused view are propagated to the other view(s).
+- The focused view index is stored so that URL replays preserve which pane responds to keyboard shortcuts and search-based camera moves.
+
+You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
+
+## Style option encoding in the URL
+
+Style option values can vary by stylesheet, map layer, and view. To keep URLs compact, erdblick encodes all option values for a given style into a single query parameter whose name and value are structured strings:
+
+- The **parameter name** has the form  
+  `<short-style-id>~<dash-separated-layer-indices>~<tilde-separated-option-ids>`  
+  where the layer indices refer to positions in the internal `layerNames` array.
+- The **parameter value** is a sequence of `~`-separated bodies, one per option ID. Each body is a `:`-separated list of per-view strings, and each per-view string is a comma-separated list of values for the participating layers.
+
+For example, a style with short ID `NY0X`, affecting three layers and three boolean options might produce a parameter like:
+
+```text
+NY0X~1-2-3~showLanes~showLaneGroups~ADAS=1,0,0:1,0,0~1,1,1:0,0,0~0,0,0:0,0,0
+```
+
+Here:
+
+- `NY0X` identifies the stylesheet.
+- `1-2-3` points at the affected entries in the `layerNames` array.
+- `showLanes~showLaneGroups~ADAS` lists option identifiers.
+- The value encodes, for each option in order, a pair of `view0,view1` arrays:
+  - `1,0,0:1,0,0` – `showLanes` enabled for the first layer in both views, disabled for the others.
+  - `1,1,1:0,0,0` – `showLaneGroups` enabled for all three layers in view 0, disabled in view 1.
+  - `0,0,0:0,0,0` – `ADAS` disabled everywhere.
+
+All option values are stored as `0`/`1` numbers (booleans) or plain numbers/strings, depending on the option type. Unknown layers or styles are ignored when a URL is replayed, so links remain reasonably robust across configuration changes.
+
 ## Sharing Links
 
 To share a particular map configuration with others, first get the view into the desired state and then capture the URL:
@@ -40,6 +82,8 @@ To share a particular map configuration with others, first get the view into the
 1. Configure the map exactly as needed (activate sources, zoom, tweak styles).
 2. Click the link icon at the bottom of the search panel or copy the browser URL directly.
 3. Send the link. Recipients load the same camera, layer, and style state.
+
+The browser’s Back and Forward buttons move between previously visited URL states. Erdblick treats these as full state transitions and hydrates the matching cameras, layer visibility, selections, and style options accordingly.
 
 Keep a few guidelines in mind when preparing URLs for long-term use:
 

@@ -11,14 +11,14 @@ To start working with multiple panes, create and focus views from the Maps & Lay
 1. **Open the Maps & Layers dialog** (click the stacks button or press `M`).
 2. Scroll to the bottom and click **Add View**. The dialog creates a second tab (“Maps Right View”) and erdblick opens another map canvas next to the first one.
 3. The right view can be closed by clicking its `[✕]` icon in the Maps & Layers dialog.
-4. Click inside a view to focus it. The active view shows a blue outline, and keyboard shortcuts (`WASD`, `Q/E`, `Ctrl+K`, `Ctrl+X`, etc.) apply only to that view.
+4. Click inside a view to focus it. The active view shows a blue outline, and keyboard shortcuts (`WASD`, `Q/E`, `Ctrl+K`, etc.) as well as jump actions apply only to that view.
 5. Use `Ctrl+ArrowRight` / `Ctrl+ArrowLeft` to cycle focus across panes without touching the mouse. You can also shift focus by clicking the split view you want to control.
 
 Once multiple views exist, the Maps & Layers dialog displays a collapsible fieldset per view (left/right, or additional entries if you create more). Each fieldset contains the full map tree plus per-layer style overrides, so you can configure sources independently per view.
 
 ## View Sync Controls
 
-Every non-primary view shows a small toggle group in its top-left corner. These switches control how camera and layer state is shared between views:
+The secondary view shows a small toggle group in its top-left corner. These switches control how camera and layer state is shared between views:
 
 - **Position (`pos`)** – keeps all cameras on the same destination and orientation. Moving the focused view moves the others to the same place.
 - **Movement (`mov`)** – mirrors mouse/keyboard movement deltas in real time while preserving each view’s relative offset. When you enable this, erdblick automatically resolves conflicts with position sync.
@@ -50,9 +50,9 @@ _[Screenshot placeholder: Two panes showing different styles, sync toggles highl
 
 When split view does not behave as expected, or you are fine-tuning performance, keep a few practical tips in mind:
 
-- **Statistics** – the stats dialog aggregates data from every view. If performance suffers, lower tile limits per view (Preferences dialog) or disable unused styles.
 - **URL/state persistence** – split-view layout, focus, and view-sync toggles are stored in the URL/query params. Copy the browser URL to preserve the current split configuration.
-- **Visualization-only mode** – the sync toolbar and Maps dialog are hidden in visualization-only builds (`environment.visualizationOnly`). Use URL parameters to preconfigure both panes instead.
+- **Visualization-only mode** – the sync toolbar and Maps dialog are hidden in visualization-only builds. Use URL parameters to preconfigure both panes instead.
 - **Focus issues** – if a view stops reacting to keyboard input, click inside it or use `Ctrl+Arrow` to move focus. The blue border always indicates the target view.
+- **Statistics** – the stats dialog aggregates data from every view. If performance suffers, lower tile limits per view (Preferences dialog) or disable unused styles.
 
 With these controls dialed in, you can treat split view as a full comparison workstation: compare sources, styles, projections, or even separate experiments—all without juggling multiple browser windows.
