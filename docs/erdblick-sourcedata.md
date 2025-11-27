@@ -14,6 +14,7 @@ You can reach the SourceData inspector from several different entry points, depe
    ```text
    37443649601549 "Road 4 Test Data" "SourceData-road.layer.RoadLayer-1"
    ```
+4. **Map-level metadata** – in the Maps & Layers panel, use the metadata actions for a map to open SourceData directly on service- and module-level blobs such as `ServiceDefinition`, `SpatialExtent`, or registry metadata.
 
 ![Shortcut from inspector to SourceData](../../../docs/goto-sourcedata.svg)
 
@@ -25,6 +26,7 @@ Once the panel is open, the tree view and filter controls make it easier to zero
 
 - Use the filter box to highlight field names or values (supports case-insensitive search).
 - Expand nodes to see value, type, and offsets.
+- When SourceData is opened from a feature attribute link, the corresponding region in the map is highlighted (typically as a green polygon or tile footprint). This region reflects the validity or spatial extent of the selected attribute or blob.
 
 ## Tips for Efficient Debugging
 
@@ -33,3 +35,4 @@ A few SourceData habits pay off quickly when you debug tricky encoding or backen
 - Enable tile borders and the statistics dialog when chasing missing tiles; copy the tile ID from the statistics view and feed it into SourceData.
 - Combine with split view: keep SourceData open on one side while you inspect features on the other.
 - Document interesting blobs by copying the current erdblick URL; it encodes the selected map, tile, and layer so colleagues can open the same view.
+- Use the browser’s Back and Forward buttons to walk through previously inspected SourceData states without losing the current layout.

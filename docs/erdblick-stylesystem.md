@@ -8,9 +8,8 @@ _[Screenshot placeholder: Styles dialog showing built-in styles, per-layer toggl
 
 Most day-to-day style work happens directly inside the Styles dialog, where you can toggle, edit, and reset style sheets without touching files on disk:
 
-1. **Open the Styles dialog** via the burger menu → **Styles** or the hover menu next to the layers button.
-2. **Activate/deactivate style sheets** to control which rules run. Disabled styles stop evaluating Simfil expressions and free CPU/GPU resources.
-3. **Toggle per-style options** (check boxes defined under the `options` key). Each option becomes a boolean variable available to the rules.
+1. **Open the Styles dialog** via the quick action menu → **Styles**.
+2. **Activate/deactivate style sheets** to control which rules run.
 4. **Use the style editor** (pencil icon) for live editing:
    - Syntax-highlighting with validation messages for YAML errors.
    - Auto-complete based on the current schema.
@@ -19,28 +18,13 @@ Most day-to-day style work happens directly inside the Styles dialog, where you 
 
 In addition to these global switches, the **Maps & Layers** panel exposes per-layer toggles for style options (`StyleOptionNode`s). That means you can enable a debug overlay for one layer while keeping the same style disabled elsewhere, or run separate combinations in split view.
 
-## Configuring Styles on Disk
-
-To control which style sheets are available in a given deployment, configure them on disk before starting erdblick:
-
-- Place `.yaml` files under `config/styles` before building erdblick or before launching the bundle.
-- List each file in `config/config.json`:
-  ```json
-  {
-    "styles": [
-      { "url": "styles/default.yaml" },
-      { "url": "styles/debug.yaml" }
-    ]
-  }
-  ```
-- Containerized deployments can mount their own directories over the bundle’s `config/styles` path (for example by binding a host directory to `/srv/erdblick/config/styles` or the equivalent location in your image).
-- Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.
-
 ## Style Sheet Anatomy
 
-At the top level, a style sheet is usually split into two sections: a list of rendering `rules` and an optional set of `options` that expose toggles in the UI:
+At the top level, a style sheet is usually split into two sections: a list of rendering `rules` and an optional set of `options` that expose toggles in the UI for each layer the style sheet applies to:
 
 ```yaml
+name: Subgroup/DefaultStyle 
+layer: Road|Lane
 rules:
   - type: LaneGroup
     geometry: [line]
@@ -53,6 +37,8 @@ options:
     default: true
 ```
 
+- `name` – Mandatory. Free to set. May contain slash-separated grouping.
+- `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
 
@@ -173,8 +159,24 @@ When you move beyond basic coloring and start visualizing relations or labels, a
 When a style behaves strangely or slows the map down, approach debugging in small, focused steps:
 
 - **Statistics dialog** – check tile counts and timing values to see whether an expensive style is the bottleneck.
-- **Tile borders** – enable the built-in tile border style to verify coverage and to debug bounding boxes referenced by your rules.
 - **Incremental testing** – start with a simple rule (`type: .*`) and gradually add filters or expressions. Complex `first-of` chains and nested wildcards can quickly impact frame time.
 - **Validation** – the style editor displays syntax errors immediately. When editing outside the UI, run the style through `yamllint` or similar tools before deploying.
 
-For in-depth examples, take a look at the Style sources through the style dialog. They demonstrate relation visualization, attribute overlays, highlight rules, and various performance tricks (point merging, distance-based fades, etc.).
+For in-depth examples, take a look at the Style sources through the style dialog. They demonstrate relation visualization, attribute overlays, highlight rules, point merging, distance-based fades, etc.
+
+## Configuring Styles on Disk
+
+To control which style sheets are available in a given deployment, configure them on disk before starting erdblick:
+
+- Place `.yaml` files under `config/styles` before building erdblick or before launching the bundle.
+- List each file in `config/config.json`:
+  ```json
+  {
+    "styles": [
+      { "url": "styles/default.yaml" },
+      { "url": "styles/debug.yaml" }
+    ]
+  }
+  ```
+- Containerized deployments can mount their own directories over the bundle’s `config/styles` path (for example by binding a host directory to `/app/erdblick/bundle/styles` or the equivalent location in your image).
+- Imported styles added through the UI are stored in the browser’s `localStorage`, so remember to export the YAML if you want to reuse the edits elsewhere.

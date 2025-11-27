@@ -1,5 +1,6 @@
 # Search Guide
 
+<!-- --8<-- [start:overview] -->
 Erdblick's search palette unifies jump targets, utility actions, and the Simfil-based feature search. Open it with `Ctrl+K` or by clicking the magnifier icon; the textarea expands into a command palette whenever the dialog is visible.
 
 ![Search UI overview](erdblick_ui_search.svg)
@@ -16,9 +17,11 @@ _[Screenshot placeholder: Search panel showing valid/invalid jump targets and au
 6. **Context hand-offs** – right-click SourceData actions, map coverage buttons, and other tools push pre-filled queries into the palette so you can continue workflows without retyping.
 
 The palette closes automatically when you click the map or another control, but search history and partially typed queries are preserved until you clear them.
+<!-- --8<-- [end:overview] -->
 
 ## Built-in Jump and Utility Targets
 
+<!-- --8<-- [start:jump-targets] -->
 | Action | Input syntax | Result |
 | --- | --- | --- |
 | **Search Loaded Features** | Any valid [Simfil](https://github.com/ndsev/simfil/blob/main/docs/simfil-language.md) expression | Runs the feature search across every tile currently loaded in all open views. Syntax errors are shown inline before you execute the query. |
@@ -28,28 +31,35 @@ The palette closes automatically when you click the map or another control, but 
 | **Open WGS84 Lat-Lon in Google Maps** | Same patterns as “WGS84 Lat-Lon” | Opens a new Google Maps tab centered on the parsed coordinates and drops a marker in erdblick. |
 | **Open WGS84 Lat-Lon in OpenStreetMap** | Same patterns as “WGS84 Lat-Lon” | Opens OpenStreetMap in a new tab (zoom 16) and marks the same position in erdblick. |
 | **Inspect Tile Layer Source Data** | `<tileId> ["Map Id"] ["Source Layer"]`<br/>Quotes are optional; escape spaces with `\ ` | Opens the SourceData inspector for the chosen tile/layer. The validator checks that the map ID exists and that the layer matches a known SourceData entry. |
+| **Feature ID Jump** | `FeatureType key1=value1 key2=value2 ...` | Locates a specific feature by its identifier fields, pans the active view to the match, and highlights it. Only feature types advertised by the loaded maps are offered. |
 
 All coordinate targets accept decimal or degree-minute-second formats. When you include a zoom level, erdblick converts the coordinates into a tile rectangle before animating the camera.
+<!-- --8<-- [end:jump-targets] -->
 
 ### Feature Jump Targets
 
-In addition to the static entries above, erdblick exposes per-feature actions based on the map data loaded in the client:
+<!-- --8<-- [start:feature-jumps] -->
+In addition to the static entries above, erdblick exposes per-feature actions based on the map data loaded in the client. These show up as **Feature ID Jump** targets specific to each feature type:
 
 - Start your query with a feature type prefix (e.g. `LaneGroup`) followed by the ID parts defined in that type’s schema. Tokens may be separated by spaces, commas, dots, or semicolons.
 - The palette lists every compatible feature type, showing the required key/value pairs. Hovering over an invalid entry reveals parser errors such as “Expecting I32”.
 - If the feature type is offered by multiple maps, erdblick prompts you to pick the target map before it asks the backend to locate and highlight the feature.
 - Successful jumps move the camera in the currently focused view and select (or hover-highlight) the located feature.
+<!-- --8<-- [end:feature-jumps] -->
 
 ## SourceData Integration
 
+<!-- --8<-- [start:sourcedata] -->
 Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 
 - The map’s right-click menu can pre-fill the last inspected tile ID and map ID into the palette. Selecting the “Inspect Tile Layer Source Data” entry reopens the inspector with the correct layer highlighted.
 - When you copy tile information from the SourceData panel, it uses the same quoting rules, so you can paste the string straight into the search input.
+<!-- --8<-- [end:sourcedata] -->
 
 ## Feature Search (Simfil)
 
-Running the **Search Loaded Features** action opens the dedicated search dialog. Key capabilities:
+<!-- --8<-- [start:feature-search] -->
+Running the **Search Loaded Features** action allows searching the loaded features deeply by their attributes, geometry and relations. Key capabilities:
 
 - **Scope** – searches span every tile currently loaded (or scheduled for loading) in each view. Increase the “Max tiles to load/visualize” limits in Preferences if you need to cover a broader area before launching a search.
 - **Workers and progress** – queries run inside web workers. Progress shows “processed tiles / scheduled tiles”, so you immediately see whether you have enough data loaded. The map overlay drops temporary markers with a configurable highlight color.
@@ -61,11 +71,13 @@ Running the **Search Loaded Features** action opens the dedicated search dialog.
 - **Traces tab** – optionally lists instrumented Simfil operators (name, call count, total microseconds). Use it to spot expensive clauses before rewriting a filter.
 - **Performance stats** – elapsed time, tile counts, and cluster pin tiers are tracked for each search run, so you can compare queries and tune performance.
 
-Because the search iterates over loaded tiles, it will not “page in” additional data. If a query returns too few matches, pan/zoom to the desired area, increase tile limits, or run the search from both split-view panes.
+Because the search iterates over loaded tiles, it will not “page in” additional data. If a query returns too few matches, pan/zoom to the desired area, [increase tile limits in the Preferences dialog](erdblick-ui-basics.md#preferences-and-resets), or run the search from both split-view panes.
 
 _[Screenshot placeholder: Feature search dialog showing progress bar, grouping chips, and diagnostics/traces tabs.]_
+<!-- --8<-- [end:feature-search] -->
 
 ## Crafting feature queries
+<!-- --8<-- [start:crafting] -->
 When you compose Simfil expressions, it helps to start from the data that erdblick actually sees:
 
 - Use the inspection column to explore a feature and right-click an attribute to choose **Copy GeoJSON path**. The copied path matches the structure Simfil operates on in feature search.
@@ -74,25 +86,31 @@ When you compose Simfil expressions, it helps to start from the data that erdbli
 - Use the GeoJSON actions in the inspector to download sample features as `.geojson` if you want to experiment with queries outside erdblick.
 
 For the full set of operators and syntax rules, refer to the Simfil language guide linked above.
+<!-- --8<-- [end:crafting] -->
 
 ## Autocompletion and Inline Diagnostics
 
+<!-- --8<-- [start:assist] -->
 The search dialog offers live assistance while you type so that you can refine expressions without repeatedly guessing and rerunning queries:
 
 - **Autocompletion** uses the search worker to inspect the tile dictionaries and offer context-aware path suggestions. Results appear next to the caret, show the candidate text plus a kind/hint, and disappear as soon as you click elsewhere.
 - **Validation** happens before you execute a Simfil search. The parser diagnostics that appear beneath the “Search Loaded Features” entry help you fix obvious syntax issues before you run a long search.
+<!-- --8<-- [end:assist] -->
 
 ## History, Focus, and Map Selection Behavior
 
+<!-- --8<-- [start:behavior] -->
 Once you have a few searches under your belt, erdblick keeps enough context to make repeated use convenient and predictable:
 
 - Search history entries live in `localStorage`. You can re-run them with a click or delete individual rows via the ✕ button.
 - When multiple maps expose the same feature type, erdblick opens a small map-selection dialog before it locates the feature.
 - All camera moves target the currently focused view. Press `Ctrl+Left/Right` to switch focus in split view before running a jump.
 - The palette closes when you click outside, except when the click lands on another UI component such as a checkbox or dropdown to avoid interrupting edits.
+<!-- --8<-- [end:behavior] -->
 
 ## Troubleshooting
 
+<!-- --8<-- [start:troubleshooting] -->
 If the search palette behaves unexpectedly or seems unresponsive, walk through these common failure modes first:
 
 - **No jump targets light up** – check the inline warnings. Coordinate targets expect two numbers (plus an optional zoom). Mapget tile IDs must be numeric. SourceData jumps require at least a tile ID; map and layer names are optional but validated.
@@ -101,3 +119,4 @@ If the search palette behaves unexpectedly or seems unresponsive, walk through t
 - **Feature jump shows multiple maps** – this is expected when several maps offer the same feature type. Select the desired map from the prompt or cancel to abort the jump.
 
 With these tools in place, the search palette doubles as both a navigation console and the entry point for deep Simfil investigations—all without leaving the browser.
+<!-- --8<-- [end:troubleshooting] -->
