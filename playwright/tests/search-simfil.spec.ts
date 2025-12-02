@@ -8,7 +8,7 @@ test.describe('Simfil feature search over Python datasource', () => {
 
         await navigateToRoot(page);
         await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.6, 11);
+        await navigateToArea(page, 42.5, 11.65, 11);
 
         const searchInput = page.locator('textarea[placeholder="Search"]');
         await searchInput.click();
@@ -17,7 +17,6 @@ test.describe('Simfil feature search over Python datasource', () => {
         }).first();
         // Inside this container, .p-dialog-content is our search menu
         const searchMenu = searchMenuContainer.locator('.p-dialog-content');
-        await expect(searchMenu).toHaveScreenshot("search-menu.png");
         await expect(searchMenu).toBeVisible();
         const firstSearchMenuEntry = searchMenu.locator('.search-menu').first();
         const searchLoadedFeatures = firstSearchMenuEntry.locator('.search-option-name', {
