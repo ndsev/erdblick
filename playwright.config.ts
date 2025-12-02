@@ -3,7 +3,8 @@ import { defineConfig } from '@playwright/test';
 const baseURL = process.env.EB_APP_URL || 'http://localhost:9000';
 
 export default defineConfig({
-    testDir: './playwright/tests',
+    testDir: './playwright',
+    snapshotDir: './playwright/reference',
     timeout: 60000,
     expect: {
         timeout: 10000
@@ -38,4 +39,3 @@ export default defineConfig({
     globalTeardown: './playwright/global-teardown.ts',
     workers: process.env.CI ? 2 : undefined
 });
-

@@ -47,13 +47,13 @@ async function clickSearchResultLeaf(page: Page, index: number): Promise<void> {
     const featureSearch = page.locator('.feature-search-dialog').first();
     const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
     const tree = featureSearchContent.locator('.p-tree').first();
-    const leafNodes = tree.locator('.p-tree-node-content');
+    const leafNodes = tree.locator('.p-tree-node-leaf');
     const count = await leafNodes.count();
     if (count === 0) {
         throw new Error('Expected at least one search result leaf node');
     }
-    const targetIndex = Math.min(index, count - 1);
-    await leafNodes.nth(targetIndex).click();
+    const resultButton = leafNodes.nth(index).locator('.p-tree-node-content').first();
+    await resultButton.click();
 }
 
 test.describe('Inspection panels over TestMap/WayLayer', () => {
