@@ -22,18 +22,35 @@ export async function waitForAppReady(page: Page): Promise<void> {
 }
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
-    const layersButton = page.locator('.layers-button');
-    await layersButton.click();
+    const layersButton = page.locator('.layers-button').locator('.p-button');
+    await layersButton.click({ force: true });
 
-    const dialog = page.locator('.map-layer-dialog');
+    const dialog = page.locator('.map-layer-dialog').locator('.p-dialog-content');
     await expect(dialog).toBeVisible();
+    await dialog.click();
 
-    const mapLabelLocator = dialog.locator('label', { hasText: mapLabel }).first();
-    await expect(mapLabelLocator).toBeVisible();
-    await mapLabelLocator.click();
+    const layerNode = dialog.locator(`[data-id="${mapLabel}/${layerLabel}"]`).first();
+    await expect(layerNode).toBeVisible();
 
-    const layerLabelLocator = dialog.locator('label', { hasText: layerLabel }).first();
-    await expect(layerLabelLocator).toBeVisible();
-    await layerLabelLocator.click();
+    const layerCheckboxInput = layerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
+    await expect(layerCheckboxInput).toBeVisible();
+    await layerCheckboxInput.check();
 }
 
+export async function navigateToArea(page: Page, lon: number, lat: number, level: number): Promise<void> {
+    const searchInput = page.locator('textarea[placeholder="Search"]');
+    await searchInput.click();
+    await searchInput.fill(`${lon} ${lat} ${level}`);
+    const searchMenuContainer = page.locator('.resizable-container').filter({
+        has: page.locator('.search-menu-dialog')
+    }).first();
+
+    // Inside this container, .p-dialog-content is our search menu
+    const searchMenu = searchMenuContainer.locator('.p-dialog-content');
+    await expect(searchMenu).toBeVisible();
+    const jumpToWGS84 = searchMenu.locator('.search-menu', {
+        hasText: 'WGS84 Lon-Lat Coordinates'
+    }).first();
+    await expect(jumpToWGS84).toBeVisible();
+    await jumpToWGS84.click();
+}

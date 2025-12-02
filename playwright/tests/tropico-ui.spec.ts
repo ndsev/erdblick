@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
-import { enableMapLayer, navigateToRoot } from '../utils/ui-helpers';
+import {enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
 
 test.describe('Python example datasource integration', () => {
     test('TestMap/WayLayer appears in /sources and triggers tile requests', async ({ page, request }) => {
@@ -19,6 +19,7 @@ test.describe('Python example datasource integration', () => {
         });
 
         await enableMapLayer(page, 'TestMap', 'WayLayer');
+        await navigateToArea(page, 42.5, 11.6, 11);
 
         await expect.poll(() => tileRequests.length, {
             timeout: 15000

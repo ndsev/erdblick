@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
-import { enableMapLayer, navigateToRoot } from '../utils/ui-helpers';
+import {enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
 
 test.describe('Simfil feature search over Python datasource', () => {
     test('valid simfil query returns search results', async ({ page, request }) => {
@@ -8,6 +8,7 @@ test.describe('Simfil feature search over Python datasource', () => {
 
         await navigateToRoot(page);
         await enableMapLayer(page, 'TestMap', 'WayLayer');
+        await navigateToArea(page, 42.5, 11.6, 11);
 
         const searchInput = page.locator('textarea[placeholder="Search"]');
         await searchInput.click();
@@ -16,13 +17,14 @@ test.describe('Simfil feature search over Python datasource', () => {
         }).first();
         // Inside this container, .p-dialog-content is our search menu
         const searchMenu = searchMenuContainer.locator('.p-dialog-content');
+        await expect(searchMenu).toHaveScreenshot("search-menu.png");
         await expect(searchMenu).toBeVisible();
         const firstSearchMenuEntry = searchMenu.locator('.search-menu').first();
         const searchLoadedFeatures = firstSearchMenuEntry.locator('.search-option-name', {
             hasText: 'Search Loaded Features'
         }).first();
         await expect(searchLoadedFeatures).toBeVisible();
-        await searchInput.fill('properties.isBridge == false');
+        await searchInput.fill('**.name');
         await searchInput.focus();
         await page.keyboard.press('Enter');
 
@@ -42,7 +44,7 @@ test.describe('Simfil feature search over Python datasource', () => {
             const value = parseInt(text || '0', 10);
             return Number.isNaN(value) ? 0 : value;
         }, {
-            timeout: 20000
+            timeout: 10000
         }).toBeGreaterThan(0);
 
         // Verify that empty-tree message is not present for a successful search
