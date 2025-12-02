@@ -42,9 +42,9 @@ All coordinate targets accept decimal or degree-minute-second formats. When you 
 In addition to the static entries above, erdblick exposes per-feature actions based on the map data loaded in the client. These show up as **Feature ID Jump** targets specific to each feature type:
 
 - Start your query with a feature type prefix (e.g. `LaneGroup`) followed by the ID parts defined in that type’s schema. Tokens may be separated by spaces, commas, dots, or semicolons.
-- The palette lists every compatible feature type, showing the required key/value pairs. Hovering over an invalid entry reveals parser errors such as “Expecting I32”.
+- The palette lists every compatible feature type, showing the required key/value pairs. An invalid entry reveals parser errors such as “Expecting I32”.
 - If the feature type is offered by multiple maps, erdblick prompts you to pick the target map before it asks the backend to locate and highlight the feature.
-- Successful jumps move the camera in the currently focused view and select (or hover-highlight) the located feature.
+- Successful jumps move the camera in the currently focused view and select the located feature.
 <!-- --8<-- [end:feature-jumps] -->
 
 ## SourceData Integration

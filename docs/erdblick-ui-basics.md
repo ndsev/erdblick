@@ -42,7 +42,7 @@ Click the stacks icon (or press `M`) to open or hide the Maps & Layers dialog it
 Use the `Maps & Layers` panel to:
 
 - Turn maps and their feature layers on or off.
-- Use the **focus icon** to focus on a map or layer; the zooms to the coverage area advertised by the backend.
+- Use the **focus icon** to focus on a map or layer; clicking it zooms to the coverage area advertised by the backend.
 - Adjust **per-layer style options** using the checkboxes rendered beneath each layer. These options come from the active style sheets and only affect the selected layer and view.
 - Use the **sync layers** button (circular arrows next to each view tab) to clone the current visibility, zoom level, tile-border flag, and all per-layer style option values across every compatible layer. When layer synchronization is enabled in split view, those settings propagate to the opposite pane as well.
 - Control the background map with the OSM overlay toggle and opacity slider shown per view.
