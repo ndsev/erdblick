@@ -61,15 +61,14 @@ The inspection view is also a convenient starting point for sharing investigatio
 - **URL state** – inspection panels (including pin state, size, and color) are serialized into the browser URL and `localStorage`. Copying the URL allows colleagues to open the same selection layout.
 - **Clipboard** – use the context menu and GeoJSON actions to copy key/value pairs, GeoJSON paths, or full GeoJSON payloads to the clipboard.
 - **GeoJSON export** – export the current selection as a `.geojson` file or open it in a separate tab when you need to share raw data or feed it into external tools.
-- **Browser navigation** – use the browser’s Back and Forward buttons to walk through recent selection states without losing your current panel layout.
+- **Browser navigation** – use the browser’s Back and Forward buttons to walk through recent selection states.
 
 ## Tips
 
 A few small habits make inspection sessions more efficient and easier to revisit later:
 
 - Use the color picker to assign meaning (e.g., red for problematic features, green for expected results).
-- Hover the panel header to see tooltips summarizing the selection (feature ID, map, tile).
 - If panels stop updating, close unpinned panels or use the “Clear” button for viewer properties and search history in the Preferences dialog to reset local state.
-- Combine inspection with split view: pin a reference feature in the right pane while exploring related features on the left.
+- Combine inspection with split view: pin a reference feature and keep it in focus in the right pane while exploring related features on the left.
 
 Between multi-panel support, hover-aware trees, and one-click SourceData jump-ins, the inspection UI gives you everything you need to audit features without leaving the browser.
