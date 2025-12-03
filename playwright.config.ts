@@ -14,8 +14,8 @@ export default defineConfig({
         baseURL,
         headless: true,
         viewport: {
-            width: 1280,
-            height: 720
+            width: 1920,
+            height: 1080
         },
         actionTimeout: 20000,
         navigationTimeout: 30000,
