@@ -42,7 +42,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                         <ng-template let-node pTemplate="Style">
                             <div class="flex-container">
                                 <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
-                                    <span onEnterClick class="material-icons menu-toggler"
+                                    <span onEnterClick class="material-symbols-outlined menu-toggler"
                                           (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                         more_vert
                                     </span>

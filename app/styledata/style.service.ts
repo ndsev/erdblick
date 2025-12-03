@@ -92,28 +92,32 @@ export class StyleService {
     async initializeStyles(): Promise<void> {
         try {
             const data: any = await firstValueFrom(this.httpClient.get("config.json", {responseType: "json"}));
-            if (!data || !data.styles) {
-                throw new Error("Missing style configuration in config.json.");
-            }
+            const configuredStyles = Array.isArray(data?.styles) ? [...data.styles] as StyleConfigEntry[] : [];
+            this.styleUrls = [];
 
-            this.styleUrls = [...data["styles"]] as [StyleConfigEntry];
-            this.styleUrls.forEach((styleEntry: StyleConfigEntry) => {
-                if (!styleEntry.url.startsWith("http") && !styleEntry.url.startsWith("bundle")) {
-                    styleEntry.url = `bundle/styles/${styleEntry.url}`;
-                }
-            });
+            if (!configuredStyles.length) {
+                console.warn("No style configuration found in config.json. Skipping builtin style initialization.");
+            } else {
+                this.styleUrls = configuredStyles.map((entry: StyleConfigEntry) => {
+                    const normalized: StyleConfigEntry = {...entry};
+                    if (!normalized.url.startsWith("http") && !normalized.url.startsWith("bundle")) {
+                        normalized.url = `bundle/styles/${normalized.url}`;
+                    }
+                    return normalized;
+                });
 
-            const styleHashes = this.loadStyleHashes();
-            const dataMap = await this.fetchStylesYamlSources(this.styleUrls);
-            for (const [styleUrl, styleString] of dataMap) {
-                const styleId = this.initializeStyle(styleString, styleUrl);
-                if (!styleId) {
-                    continue;
+                const styleHashes = this.loadStyleHashes();
+                const dataMap = await this.fetchStylesYamlSources(this.styleUrls);
+                for (const [styleUrl, styleString] of dataMap) {
+                    const styleId = this.initializeStyle(styleString, styleUrl);
+                    if (!styleId) {
+                        continue;
+                    }
+                    this.builtinStylesCount++;
+                    this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
                 }
-                this.builtinStylesCount++;
-                this.compareStyleHashes(this.styles.get(styleId)!, styleHashes);
+                this.loadModifiedBuiltinStyles();
             }
-            this.loadModifiedBuiltinStyles();
         } catch (error) {
             console.error(`Error while initializing styles: ${error}`);
         }
@@ -219,15 +223,16 @@ export class StyleService {
 
         try {
             const result= await this.fetchStylesYamlSources([{id: style.id, url: style.url}]);
-            if (!result.has(styleId)) {
+            if (!result.has(style.url)) {
                 return;
             }
-            const styleString = result.get(styleId)!;
+            const styleString = result.get(style.url)!;
             const newStyleId = this.initializeStyle(styleString, style.url, styleId);
             if (!newStyleId) {
                 return;
             }
             this.reapplyStyle(newStyleId);
+            this.saveModifiedBuiltinStyles();
         } catch (error) {
             console.error('Style retrieval failed:', error);
         }

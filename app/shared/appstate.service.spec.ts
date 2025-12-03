@@ -2,6 +2,13 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
 vi.mock('@angular/router', () => {
+    class NavigationStart {
+        constructor(
+            public id: number,
+            public url: string,
+        ) {}
+    }
+
     class NavigationEnd {
         constructor(
             public id: number,
@@ -11,28 +18,11 @@ vi.mock('@angular/router', () => {
     }
 
     return {
+        NavigationStart,
         NavigationEnd,
         Router: class {},
         Params: {} as any,
     };
-});
-
-vi.mock('../integrations/cesium', () => {
-    class Cartographic {
-        constructor(
-            public longitude: number,
-            public latitude: number,
-            public height: number,
-        ) {}
-    }
-
-    const CesiumMath = {
-        toDegrees(value: number) {
-            return value * (180 / Math.PI);
-        },
-    };
-
-    return { Cartographic, CesiumMath };
 });
 
 vi.mock('../inspection/inspection.service', () => ({
@@ -49,6 +39,7 @@ vi.mock('../mapdata/map.model', () => ({
 }));
 
 import type { Event, Router } from '@angular/router';
+import { NavigationEnd } from '@angular/router';
 import { Cartographic } from '../integrations/cesium';
 import { AppStateService } from './appstate.service';
 
@@ -98,7 +89,11 @@ describe('AppStateService', () => {
 
     it('hydrates URL state on startup and persists subsequent changes', async () => {
         const routerStub = createRouterStub({ m: '1' });
-        const service = new AppStateService(routerStub as unknown as Router);
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        // Trigger initial hydration (service wires up after first NavigationEnd)
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(true);
 
@@ -121,7 +116,8 @@ describe('AppStateService', () => {
 
     it('converts views to degrees when setting a camera view', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router);
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         const destination = new Cartographic(Math.PI / 2, Math.PI / 4, 500);
         const orientation = { heading: 1, pitch: 2, roll: 3 };
@@ -138,7 +134,12 @@ describe('AppStateService', () => {
 
     it('stores style parameters as URL state-friendly payloads', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router);
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        // Trigger initial hydration (service wires up after first NavigationEnd)
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
 
         // Prepare one layer so style options can be encoded
         service.layerNamesState.next(['m1/layerA']);
@@ -171,7 +172,8 @@ describe('AppStateService', () => {
 
     it('initializes layer config with fallback values when first requested', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router);
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         const config = service.mapLayerConfig('m1', 'layerA', false, 9);
 
@@ -189,7 +191,8 @@ describe('AppStateService', () => {
 
     it('persists layer config updates across mapLayerConfig calls', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router);
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         // Prime internal state so indices exist before updating.
         service.mapLayerConfig('m2', 'layerB');

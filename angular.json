@@ -15,11 +15,11 @@
             "prefix": "",
             "architect": {
                 "build": {
-                    "builder": "@angular-builders/custom-webpack:browser",
+                    "builder": "@angular/build:application",
                     "options": {
                         "outputPath": "static",
                         "index": "app/index.html",
-                        "main": "app/main.ts",
+                        "browser": "app/main.ts",
                         "polyfills": [
                             "zone.js"
                         ],
@@ -46,6 +46,11 @@
                                 "output": "/"
                             },
                             {
+                                "glob": "**/*.js",
+                                "input": "config",
+                                "output": "/config"
+                            },
+                            {
                                 "glob": "VERSION",
                                 "input": ".",
                                 "output": "/bundle/"
@@ -62,26 +67,22 @@
                             },
                             {
                                 "glob": "LICENSE*",
-                                "input": "node_modules/material-icons",
-                                "output": "/bundle/licenses/icons/material-icons"
-                            },
-                            {
-                                "glob": "LICENSE*",
                                 "input": "node_modules/material-symbols",
                                 "output": "/bundle/licenses/icons/material-symbols"
+                            },
+                            {
+                                "glob": "erdblick-core.wasm",
+                                "input": "build/libs/core",
+                                "output": "/bundle/wasm"
                             }
                         ],
                         "styles": [
                             "node_modules/primeicons/primeicons.css",
                             "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
-                            "node_modules/material-icons/iconfont/material-icons.css",
                             "node_modules/material-symbols/index.css",
                             "app/styles.scss"
                         ],
                         "scripts": [],
-                        "customWebpackConfig": {
-                            "path": "./webpack.config.js"
-                        },
                         "webWorkerTsConfig": "tsconfig.worker.json"
                     },
                     "configurations": {
@@ -121,6 +122,11 @@
                                     "output": "/"
                                 },
                                 {
+                                    "glob": "**/*.js",
+                                    "input": "config",
+                                    "output": "/config"
+                                },
+                                {
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
@@ -137,22 +143,20 @@
                                 },
                                 {
                                     "glob": "LICENSE*",
-                                    "input": "node_modules/material-icons",
-                                    "output": "/bundle/licenses/icons/material-icons"
-                                },
-                                {
-                                    "glob": "LICENSE*",
                                     "input": "node_modules/material-symbols",
                                     "output": "/bundle/licenses/icons/material-symbols"
+                                },
+                                {
+                                    "glob": "erdblick-core.wasm",
+                                    "input": "build/libs/core",
+                                    "output": "/bundle/wasm"
                                 }
                             ],
-                            "buildOptimizer": true,
                             "optimization": {
                                 "scripts": true,
                                 "styles": true,
                                 "fonts": true
                             },
-                            "vendorChunk": false,
                             "extractLicenses": false,
                             "sourceMap": false,
                             "namedChunks": false,
@@ -164,13 +168,11 @@
                             ]
                         },
                         "development": {
-                            "buildOptimizer": false,
                             "optimization": {
                                 "scripts": false,
                                 "styles": false,
                                 "fonts": false
                             },
-                            "vendorChunk": true,
                             "extractLicenses": false,
                             "sourceMap": true,
                             "namedChunks": true,
@@ -179,6 +181,24 @@
                                     "replace": "app/environments/environment.ts",
                                     "with": "app/environments/environment.ts"
                                 }
+                            ]
+                        },
+                        "test": {
+                            "optimization": {
+                                "scripts": false,
+                                "styles": false,
+                                "fonts": false
+                            },
+                            "extractLicenses": false,
+                            "sourceMap": true,
+                            "namedChunks": true,
+                            "tsConfig": "tsconfig.spec.json",
+                            "browser": "app/main.ts",
+                            "fileReplacements": [
+                              {
+                                "replace": "app/integrations/cesium.prod.ts",
+                                "with": "app/integrations/cesium.test.ts"
+                              }
                             ]
                         },
                         "visualization-only": {
@@ -218,6 +238,11 @@
                                     "output": "/"
                                 },
                                 {
+                                    "glob": "**/*.js",
+                                    "input": "config",
+                                    "output": "/config"
+                                },
+                                {
                                     "glob": "VERSION",
                                     "input": ".",
                                     "output": "/bundle/"
@@ -234,22 +259,20 @@
                                 },
                                 {
                                     "glob": "LICENSE*",
-                                    "input": "node_modules/material-icons",
-                                    "output": "/bundle/licenses/icons/material-icons"
-                                },
-                                {
-                                    "glob": "LICENSE*",
                                     "input": "node_modules/material-symbols",
                                     "output": "/bundle/licenses/icons/material-symbols"
+                                },
+                                {
+                                    "glob": "erdblick-core.wasm",
+                                    "input": "build/libs/core",
+                                    "output": "/bundle/wasm"
                                 }
                             ],
-                            "buildOptimizer": true,
                             "optimization": {
                                 "scripts": true,
                                 "styles": true,
                                 "fonts": true
                             },
-                            "vendorChunk": false,
                             "extractLicenses": false,
                             "sourceMap": false,
                             "namedChunks": false,
@@ -262,13 +285,11 @@
                         },
                         "visualization-only-dev": {
                             "outputPath": "static-visualization-only",
-                            "buildOptimizer": false,
                             "optimization": {
                                 "scripts": false,
                                 "styles": false,
                                 "fonts": false
                             },
-                            "vendorChunk": true,
                             "extractLicenses": false,
                             "sourceMap": true,
                             "namedChunks": true,
@@ -283,43 +304,52 @@
                     "defaultConfiguration": "production"
                 },
                 "serve": {
-                    "builder": "@angular-builders/custom-webpack:dev-server",
+                    "builder": "@angular/build:dev-server",
                     "configurations": {
                         "production": {
-                            "browserTarget": "erdblick:build:production"
+                            "buildTarget": "erdblick:build:production"
                         },
                         "development": {
-                            "browserTarget": "erdblick:build:development"
+                            "buildTarget": "erdblick:build:development"
                         },
                         "visualization-only": {
-                            "browserTarget": "erdblick:build:visualization-only"
+                            "buildTarget": "erdblick:build:visualization-only"
                         },
                         "visualization-only-dev": {
-                            "browserTarget": "erdblick:build:visualization-only-dev"
+                            "buildTarget": "erdblick:build:visualization-only-dev"
                         }
                     },
                     "defaultConfiguration": "development"
                 },
                 "extract-i18n": {
-                    "builder": "@angular-builders/custom-webpack:extract-i18n",
+                    "builder": "@angular/build:extract-i18n",
                     "options": {
-                        "browserTarget": "erdblick:build"
+                        "buildTarget": "erdblick:build"
                     }
                 },
                 "test": {
-                    "builder": "@angular-builders/custom-webpack:karma",
+                    "builder": "@angular/build:unit-test",
                     "options": {
-                        "polyfills": [
-                            "zone.js",
-                            "zone.js/testing"
-                        ],
+                        "runner": "vitest",
                         "tsConfig": "tsconfig.spec.json",
-                        "assets": [],
-                        "styles": [
-                            "app/styles.scss"
+                        "buildTarget": "erdblick:build:test",
+                        "codeCoverage": true,
+                        "codeCoverageReporters": [
+                            "text-summary",
+                            "html",
+                            "lcov",
+                            "json-summary"
                         ],
-                        "scripts": [],
-                        "webWorkerTsConfig": "tsconfig.worker.json"
+                        "codeCoverageExclude": [
+                            "**/bundle/cesium/**",
+                            "**/dist/**/bundle/cesium/**"
+                        ],
+                        "exclude": [
+                            "app/app.component.spec.ts"
+                        ],
+                        "reporters": [
+                            "verbose"
+                        ]
                     }
                 }
             }

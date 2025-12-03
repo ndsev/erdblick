@@ -2,18 +2,17 @@ import {Component, QueryList, signal, ViewChildren} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
 import {map} from "rxjs";
 import {MapViewComponent} from "./view.component";
-import {SplitterResizeEndEvent} from "primeng/splitter";
 import {KeyboardService} from "../shared/keyboard.service";
 import {environment} from "../environments/environment";
 
 @Component({
     selector: 'mapview-container',
     template: `
-        <ng-container *ngIf="viewModel$ | async as vm">
+        @if (viewModel$ | async; as vm) { 
             @if (vm.panelCount > 0) {
-                <!--
-                  TODO: Get rid of this, think about using https://github.com/angular-split/angular-split.
-                  Unfortunately, the prime-ng splitter seems to be badly maintained (see https://github.com/primefaces/primeng/issues/13300) -->
+                <!-- TODO: Get rid of this, think about using https://github.com/angular-split/angular-split.
+                      Unfortunately, the prime-ng splitter seems to be badly maintained 
+                      (see https://github.com/primefaces/primeng/issues/13300) -->
                 @for (v of [version()]; track v) {
                     <p-splitter [panelSizes]="vm.panelSizes" class="mb-8">
                         @for (idx of vm.viewIndices; track idx) {
@@ -24,7 +23,7 @@ import {environment} from "../environments/environment";
                     </p-splitter>
                 }
             }
-        </ng-container>
+        }
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
