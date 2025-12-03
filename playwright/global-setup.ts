@@ -1,5 +1,5 @@
-import type { FullConfig } from '@playwright/test';
-import { spawn } from 'child_process';
+import type {FullConfig} from '@playwright/test';
+import {spawn} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
@@ -56,17 +56,16 @@ async function waitForSources(baseURL: string, timeoutMs: number): Promise<void>
 }
 
 async function globalSetup(config: FullConfig): Promise<void> {
-    const configDir = config.configDir ?? process.cwd();
-    const projectRoot = configDir;
-    const port = process.env.EB_APP_PORT || '9000';
-    const baseURL = process.env.EB_APP_URL || `http://localhost:${port}`;
+    const projectRoot = process.cwd();
+    const port = process.env["EB_APP_PORT"] || '9000';
+    const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
 
     const mapgetConfigPath = path.join(projectRoot, 'test', 'mapget-integration.yaml');
     if (!fs.existsSync(mapgetConfigPath)) {
         throw new Error(`Expected mapget config at ${mapgetConfigPath}`);
     }
 
-    const mapgetExecutable = process.env.MAPGET_BIN || 'mapget';
+    const mapgetExecutable = process.env["MAPGET_BIN"] || 'mapget';
     const args = [
         '--config',
         mapgetConfigPath,
