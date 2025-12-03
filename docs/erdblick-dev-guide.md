@@ -63,6 +63,7 @@ classDiagram
     libs/core (WASM)
   }
   class Backend {
+    <<interface>>
     mapget-compatible HTTP API
   }
   class ConfigFiles {

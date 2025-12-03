@@ -2,6 +2,9 @@
 
 Erdblick centers its UI around a single Cesium map canvas with docked utility panels. This section explains the controls that erdblick users rely on most often.
 
+!!! note "Focus on the layout before advanced features"
+    If you are new to the viewer, first get comfortable with the overall layout and basic navigation. The search, inspection, and SourceData features build directly on the concepts introduced in this guide.
+
 ![UI overview](erdblick_ui_overview.svg)
 
 ## Layout at a Glance
@@ -42,11 +45,19 @@ Click the stacks icon (or press `M`) to open or hide the Maps & Layers dialog it
 Use the `Maps & Layers` panel to:
 
 - Turn maps and their feature layers on or off.
-- Use the **focus icon** to focus on a map or layer; clicking it zooms to the coverage area advertised by the backend.
-- Adjust **per-layer style options** using the checkboxes rendered beneath each layer. These options come from the active style sheets and only affect the selected layer and view.
-- Use the **sync layers** button (circular arrows next to each view tab) to clone the current visibility, zoom level, tile-border flag, and all per-layer style option values across every compatible layer. When layer synchronization is enabled in split view, those settings propagate to the opposite pane as well.
-- Control the background map with the OSM overlay toggle and opacity slider shown per view.
-- Inspect **service metadata** for each datasource: use the menu which appears when clicking the `{}`-Button which appears to the right of the map name.
+- Use the **Focus Icon** to focus on a map or layer; clicking it zooms to the coverage area advertised by the backend.
+- Adjust **per-layer Style Options** using the checkboxes rendered beneath each layer. These options come from the active style sheets and only affect the selected layer and view.
+- Use the **Sync Layers** button (circular arrows next to each view tab) to clone the current visibility, zoom level, tile-border flag, and all per-layer style option values across every compatible layer. When layer synchronization is enabled in split view, those settings propagate to the opposite pane as well.
+- Control the **Background Map** with the OSM overlay toggle and opacity slider shown per view.
+- Inspect **Service Metadata** for each datasource: use the menu which appears when clicking the `{}`-Button which appears to the right of the map name.
+- Enable **Tile Borders** by clicking the respective button when hovering over a map layer node.
+- Change the **Tile Level** which is loaded for a particular layer, the controls appear when hovering over the layer node.
+
+!!! note "Map Grouping is controlled by mapviewer.yaml"
+    Slash-separated group names in the `mapId` can be used to nest related maps
+    in the map layer tree. E.g. `NDS.Live/Europe` will put the `Europe` map and its
+    layers under the `NDS.Live` parent group node. Note: Whole map groups can also
+    be turned on or off using the checkbox in the tree.
 
 Finally, at the bottom of the dialog, the `Add View` button may be used to open a [Split View](erdblick-split.md) for map comparison/side-by-side navigation.
 
