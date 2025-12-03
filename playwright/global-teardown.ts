@@ -8,7 +8,7 @@ interface GlobalState {
 }
 
 async function globalTeardown(config: FullConfig): Promise<void> {
-    const configDir = config.configDir ?? process.cwd();
+    const configDir = process.cwd();
     const statePath = path.join(configDir, 'playwright', '.cache', 'global-state.json');
 
     if (!fs.existsSync(statePath)) {
