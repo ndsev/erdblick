@@ -8,7 +8,7 @@ test.describe('Simfil feature search over Python datasource', () => {
 
         await navigateToRoot(page);
         await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.65, 11);
+        await navigateToArea(page, 42.5, 11.615, 13);
 
         const searchInput = page.locator('textarea[placeholder="Search"]');
         await searchInput.click();

@@ -1,5 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
+import {test} from "../fixtures/test";
+import {requireTestMapSource} from "./backend-helpers";
 
 export async function navigateToRoot(page: Page): Promise<void> {
     await page.goto('/');
@@ -76,4 +78,53 @@ export async function addComparisonView(page: Page): Promise<void> {
 
     const secondViewCanvas = page.locator('#mapViewContainer-1 canvas').first();
     await expect(secondViewCanvas).toBeVisible();
+}
+
+export async function runFeatureSearch(page: Page, query: string): Promise<void> {
+    const searchInput = page.locator('textarea[placeholder="Search"]');
+    await searchInput.click();
+
+    const searchMenuContainer = page.locator('.resizable-container').filter({
+        has: page.locator('.search-menu-dialog')
+    }).first();
+    const searchMenu = searchMenuContainer.locator('.p-dialog-content');
+    await expect(searchMenu).toBeVisible();
+
+    const searchLoadedFeatures = searchMenu.locator('.search-menu .search-option-name', {
+        hasText: 'Search Loaded Features'
+    }).first();
+    await expect(searchLoadedFeatures).toBeVisible();
+
+    await searchInput.fill(query);
+    await searchInput.focus();
+    await page.keyboard.press('Enter');
+
+    const featureSearch = page.locator('.feature-search-dialog').first();
+    const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
+    await expect(featureSearchContent).toBeVisible();
+
+    const resultsBadge = featureSearchContent.locator('.p-badge').first();
+    await expect.poll(async () => {
+        const text = await resultsBadge.innerText();
+        const value = parseInt(text || '0', 10);
+        return Number.isNaN(value) ? 0 : value;
+    }, {
+        timeout: 10000
+    }).toBeGreaterThan(0);
+
+    const emptyMessage = featureSearchContent.locator('.p-tree-empty-message');
+    await expect(emptyMessage).toHaveCount(0);
+}
+
+export async function clickSearchResultLeaf(page: Page, index: number): Promise<void> {
+    const featureSearch = page.locator('.feature-search-dialog').first();
+    const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
+    const tree = featureSearchContent.locator('.p-tree').first();
+    const leafNodes = tree.locator('.p-tree-node-leaf');
+    const count = await leafNodes.count();
+    if (count === 0) {
+        throw new Error('Expected at least one search result leaf node');
+    }
+    const resultButton = leafNodes.nth(index).locator('.p-tree-node-content').first();
+    await resultButton.click();
 }

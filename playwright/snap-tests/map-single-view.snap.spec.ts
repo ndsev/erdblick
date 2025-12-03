@@ -8,7 +8,7 @@ test.describe('Snapshot – single map view', () => {
 
         await navigateToRoot(page);
         await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.65, 11);
+        await navigateToArea(page, 42.5, 11.615, 13);
         await waitForAppReady(page);
 
         const mapContainer = page.locator('#mapViewContainer-0');

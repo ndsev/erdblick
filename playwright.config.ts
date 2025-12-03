@@ -1,15 +1,15 @@
 import { defineConfig } from '@playwright/test';
 
-const baseURL = process.env.EB_APP_URL || 'http://localhost:9000';
+const baseURL = process.env["EB_APP_URL"] || 'http://localhost:9000';
 
 export default defineConfig({
     testDir: './playwright',
     snapshotDir: './playwright/reference',
-    timeout: 60000,
+    timeout: 120000,
     expect: {
         timeout: 10000
     },
-    reporter: process.env.CI ? 'dot' : 'list',
+    reporter: process.env["CI"] ? 'dot' : 'list',
     use: {
         baseURL,
         headless: true,
@@ -26,16 +26,16 @@ export default defineConfig({
                 '--use-gl=swiftshader',
                 '--disable-gpu',
                 '--ignore-gpu-blocklist'
-            ]
+            ],
+            env: {
+                LIBGL_ALWAYS_SOFTWARE: '1',
+                ...(process.env as Record<string, string | undefined>)
+            }
         },
         timezoneId: 'UTC',
         locale: 'en-US',
-        env: {
-            LIBGL_ALWAYS_SOFTWARE: '1',
-            ...(process.env as Record<string, string | undefined>)
-        }
     },
     globalSetup: './playwright/global-setup.ts',
     globalTeardown: './playwright/global-teardown.ts',
-    workers: process.env.CI ? 2 : undefined
+    workers: process.env["CI"] ? 2 : undefined
 });

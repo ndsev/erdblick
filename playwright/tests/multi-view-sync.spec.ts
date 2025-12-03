@@ -47,7 +47,7 @@ test.describe('Multi-view synchronisation', () => {
         const secondViewCanvas = page.locator('#mapViewContainer-1 canvas').first();
         await expect(secondViewCanvas).toBeVisible();
 
-        await navigateToArea(page, 42.5, 11.615, 10);
+        await navigateToArea(page, 42.5, 11.615, 13);
 
         await expect.poll(async () => {
             const [p0, p1] = await Promise.all([
@@ -67,7 +67,7 @@ test.describe('Multi-view synchronisation', () => {
     test('navigation controls move both views when position sync is enabled', async ({ page, request }) => {
         await setupTwoViewsWithPositionSync(page, request);
 
-        await navigateToArea(page, 42.5, 11.615, 10);
+        await navigateToArea(page, 42.5, 11.615, 13);
 
         const before0 = await getCameraPosition(page, 0);
         const before1 = await getCameraPosition(page, 1);

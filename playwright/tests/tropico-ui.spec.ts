@@ -19,7 +19,7 @@ test.describe('Python example datasource integration', () => {
         });
 
         await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.615, 10);
+        await navigateToArea(page, 42.5, 11.65, 10);
 
         await expect.poll(() => tileRequests.length, {
             timeout: 15000
