@@ -6,74 +6,7 @@ import {BehaviorSubject, Subscription} from "rxjs";
 import {Dialog} from "primeng/dialog";
 import {EditorService} from "../shared/editor.service";
 import {JSONSchema7} from "json-schema";
-import {FormGroup} from '@angular/forms';
-import {FormlyFormOptions, FormlyFieldConfig, FieldType, FieldArrayType} from '@ngx-formly/core';
-import {FormlyJsonschema} from '@ngx-formly/core/json-schema';
 import {MapDataService} from "../mapdata/map.service";
-
-@Component({
-    selector: 'formly-multi-schema-type',
-    template: `
-    <div class="card mb-3">
-      <div class="card-body">
-        <legend *ngIf="props.label">{{ props.label }}</legend>
-        <p *ngIf="props.description">{{ props.description }}</p>
-        <div class="alert alert-danger" role="alert" *ngIf="showError && formControl.errors">
-          <formly-validation-message [field]="field"></formly-validation-message>
-        </div>
-        <formly-field *ngFor="let f of field.fieldGroup" [field]="f"></formly-field>
-      </div>
-    </div>
-  `,
-    standalone: false
-})
-export class MultiSchemaTypeComponent extends FieldType {}
-
-@Component({
-    selector: 'formly-object-type',
-    template: `
-    <div class="mb-3">
-      <legend *ngIf="props.label">{{ props.label }}</legend>
-      <p *ngIf="props.description">{{ props.description }}</p>
-      <div class="alert alert-danger" role="alert" *ngIf="showError && formControl.errors">
-        <formly-validation-message [field]="field"></formly-validation-message>
-      </div>
-      <formly-field *ngFor="let f of field.fieldGroup" [field]="f"></formly-field>
-    </div>
-  `,
-    standalone: false
-})
-export class ObjectTypeComponent extends FieldType {}
-
-@Component({
-    selector: 'formly-array-type',
-    template: `
-    <div class="mb-3">
-        <p-fieldset class="ds-fieldset" [legend]="props.label">
-            <p *ngIf="props.description">{{ props.description }}</p>
-    
-            <div class="alert alert-danger" role="alert" *ngIf="showError && formControl.errors">
-                <formly-validation-message [field]="field"></formly-validation-message>
-            </div>
-    
-            <div *ngFor="let field of field.fieldGroup; let i = index" class="row align-items-start">
-                <div style="display: flex; flex-direction: row; gap: 0.5em;">
-                    <div *ngIf="field.props?.['removable'] !== false" class="col-2 text-right">
-                        <p-button class="btn btn-danger" type="button" (click)="remove(i)">-</p-button>
-                    </div>
-                    <formly-field class="p-col" [field]="field"></formly-field>
-                </div>
-                <p-divider></p-divider>
-            </div>
-            <div class="d-flex flex-row-reverse">
-                <p-button class="btn btn-primary" type="button" (click)="add()">+</p-button>
-            </div>
-        </p-fieldset>
-    </div>
-  `,
-    standalone: false
-})
-export class ArrayTypeComponent extends FieldArrayType {}
 
 @Component({
     selector: 'datasources',
@@ -126,17 +59,14 @@ export class DatasourcesComponent {
     datasourceWasModified: boolean = false;
     wasModified: boolean = false;
     dataSourcesConfig: string = "";
-    form: FormGroup | undefined;
     model: any = {};
-    options!: FormlyFormOptions;
-    fields!: FormlyFieldConfig[];
     schema: JSONSchema7 = {};
     loading = false;
     errorMessage: string = "";
     readOnly = true;
     dataSourcesConfigJson: BehaviorSubject<any> = new BehaviorSubject<any>({});
 
-    @ViewChild('formElement') formElement!: HTMLFormElement;
+    // @ViewChild('formElement') formElement!: HTMLFormElement;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
 
     private editedConfigSourceSubscription: Subscription = new Subscription();
@@ -144,7 +74,6 @@ export class DatasourcesComponent {
 
     constructor(private messageService: InfoMessageService,
                 public stateService: AppStateService,
-                private formlyJsonSchema: FormlyJsonschema,
                 public editorService: EditorService,
                 private http: HttpClient,
                 private mapService: MapDataService) {
@@ -157,9 +86,6 @@ export class DatasourcesComponent {
                 this.editorService.readOnly = config.hasOwnProperty("readOnly") ? config["readOnly"] : true;
                 this.editorService.editableData = `${this.dataSourcesConfig}\n\n\n\n\n`;
                 this.editorService.datasourcesEditorVisible = true;
-                this.form = new FormGroup({});
-                this.options = {};
-                this.fields = [this.formlyJsonSchema.toFieldConfig(this.schema)];
                 this.loading = false;
                 this.editorService.updateEditorState.next(true);
             }
