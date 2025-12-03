@@ -1,0 +1,112 @@
+name: build-test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Git authentication for GitHub
+        run: |
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install build dependencies (ninja, git-lfs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build git-lfs
+
+      - name: Initialize Git LFS
+        run: git lfs install
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: "npm"
+
+      - name: Build with Emscripten
+        run: |
+          $GITHUB_WORKSPACE/ci/00_linux_setup.bash
+          $GITHUB_WORKSPACE/ci/10_linux_build.bash
+
+      - name: Install UI dependencies
+        run: npm ci
+
+      - name: Run Angular unit tests (with coverage)
+        run: npm run test -- --watch=false
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-coverage
+          path: coverage
+
+      - name: Comment PR with coverage summary
+        # Skip forks where the GITHUB_TOKEN cannot write to issues/comments
+        if: ${{ github.event.pull_request.head.repo.fork == false }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const summaryPath = path.join(process.env.GITHUB_WORKSPACE, 'coverage', 'coverage-summary.json');
+            if (!fs.existsSync(summaryPath)) {
+              core.warning(`Coverage summary not found at ${summaryPath}`);
+              return;
+            }
+
+            const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+            const total = summary.total;
+            const format = (metric) => `${metric.pct.toFixed(1)}% (${metric.covered}/${metric.total})`;
+
+            const marker = '<!-- ui-coverage-report -->';
+            const body = [
+              marker,
+              '## Vitest coverage',
+              '',
+              `- Lines: ${format(total.lines)}`,
+              `- Statements: ${format(total.statements)}`,
+              `- Functions: ${format(total.functions)}`,
+              `- Branches: ${format(total.branches)}`,
+              '',
+              `Artifact: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            ].join('\n');
+
+            try {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  per_page: 100
+                }
+              );
+
+              const coverageComments = comments.filter((comment) => comment.body?.includes(marker));
+
+              for (const comment of coverageComments) {
+                await github.rest.issues.deleteComment({
+                  ...context.repo,
+                  comment_id: comment.id
+                });
+              }
+
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            } catch (error) {
+              core.warning(`Skipping coverage comment (token likely lacks permission): ${error.message}`);
+            }
