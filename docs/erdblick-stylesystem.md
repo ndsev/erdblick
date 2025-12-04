@@ -146,6 +146,19 @@ options:
 
 Per-layer overrides in the Maps & Layers panel map directly to these options. Behind the scenes, erdblick stores the values per `mapId/layerId/styleId` combination, which lets you run different variants across split views or specific layers without cloning the entire style file.
 
+## Attribute Validity Visualization
+
+Attribute validities (for example positional or range validities) are exposed through the dedicated `Attributes` style sheet:
+
+- Enable the `Attributes` style in the Styles dialog to make validity overlays available.
+- Use the style’s options (for example “Position Validity”, “Range Validity”) to control which validity classes are rendered.
+- Combine the style with feature selection: by default, validity overlays are drawn only for selected features, keeping the scene readable.
+
+!!! warning "Use global validity overlays sparingly"
+    Enabling validity visualization for all features in a large viewport can be expensive. Start with selection-based overlays and narrow attribute filters, then only widen the scope when you are sure that performance remains acceptable.
+
+SourceData panels and the inspection tree mirror the same validity information; the overlays are intended as a visual aid, not as the sole source of truth.
+
 ## Relations, Labels, and Source Data References
 
 When you move beyond basic coloring and start visualizing relations or labels, a few patterns make styles easier to reason about:

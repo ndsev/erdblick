@@ -23,9 +23,11 @@ _[Screenshot placeholder: zoomed-in callouts for quick menu buttons and the burg
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
 
 - **Mouse**: left drag pans, middle-drag tilts, right drag zooms, scroll zooms.
-- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses the search field, and `M` toggles the Maps & Layers panel.
+- **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses the search field, `Ctrl+J` zooms to the currently selected feature, and `M` toggles the Maps & Layers panel.
 - **Compass widget**: click to reset heading or drag to rotate.
 - **Map focus buttons**: use the focus icons in the Maps & Layers panel to jump directly to the coverage area advertised for a map or layer instead of manually panning and zooming.
+
+Erdblick can render the scene either in a perspective 3D view with terrain and elevation-aware features, or in a 2D Web Mercator projection similar to common web map services. Switch between 2D and 3D using the projection controls in the Maps & Layers dialog. Use 3D when you want a faithful spatial representation including heights, and 2D when you compare datasets without elevation or align overlays such as OSM with ground-level geometry.
 
 ## Main Button Menu and Quick Actions
 
@@ -98,6 +100,8 @@ Read the [Inspection Guide](erdblick-inspection.md) for feature-focused workflow
 - Jump-to actions (coordinates, tiles, feature identifiers, SourceData shortcuts).
 - Feature search queries with Simfil expressions.
 - Search history with inline remove buttons so you can re-run prior inputs or tidy the list.
+
+When a feature is selected, `Ctrl+J` zooms the active view to that feature’s extent without changing the currently active search entry.
 
 The dedicated [Search Guide](erdblick-search.md) documents every action plus language tips.
 
