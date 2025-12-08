@@ -26,6 +26,31 @@ interface Versions {
         <stats-dialog *ngIf="!appModeService.isVisualizationOnly"></stats-dialog>
         <legal-dialog></legal-dialog>
         <style-panel></style-panel>
+        <div id="survey" [class]="{'hidden': isSurveyHidden}">
+            <span class="survey-tree" style="font-size: 1.75em" (click)="triggerFireworks()">🎄</span>
+            <a href="">Happy holidays!<br>Take part in our 2026 survey now<br>to help make MapViewer even better!</a>
+            <span class="material-symbols-outlined" (click)="dismissSurvey($event)">
+                close
+            </span>
+            <div *ngIf="showFireworks" class="survey-fireworks">
+                <span class="firework f1"></span>
+                <span class="firework f2"></span>
+                <span class="firework f3"></span>
+                <span class="firework f4"></span>
+                <span class="firework f5"></span>
+                <span class="firework f6"></span>
+                <span class="firework f7"></span>
+                <span class="firework f8"></span>
+                <span class="firework f9"></span>
+                <span class="firework f10"></span>
+                <span class="firework f11"></span>
+                <span class="firework f12"></span>
+                <span class="firework f13"></span>
+                <span class="firework f14"></span>
+                <span class="firework f15"></span>
+                <span class="firework f16"></span>
+            </div>
+        </div>
         <div id="info">
             <div *ngIf="copyright.length" id="copyright-info" (click)="openLegalInfo()">
                 {{ copyright }}
@@ -64,7 +89,135 @@ interface Versions {
         .dialog-content {
             margin-bottom: 0.5em;
         }
-        
+
+        #survey .survey-tree {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+
+        #survey .survey-fireworks {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        #survey .firework {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #ffeeb2;
+            opacity: 0;
+            animation: survey-firework 800ms ease-out forwards;
+        }
+
+        #survey .firework.f1 {
+            top: 10%;
+            left: 8%;
+        }
+
+        #survey .firework.f2 {
+            top: 25%;
+            left: 45%;
+            background-color: #ffb6b6;
+        }
+
+        #survey .firework.f3 {
+            top: 20%;
+            left: 88%;
+            background-color: #91d9ff;
+        }
+
+        #survey .firework.f4 {
+            top: 60%;
+            left: 18%;
+            background-color: #ffef9c;
+        }
+
+        #survey .firework.f5 {
+            top: 75%;
+            left: 55%;
+            background-color: #ffabab;
+        }
+
+        #survey .firework.f6 {
+            top: 65%;
+            left: 92%;
+            background-color: #66ccff;
+        }
+
+        #survey .firework.f7 {
+            top: 5%;
+            left: 30%;
+            background-color: #ffcc00;
+        }
+
+        #survey .firework.f8 {
+            top: 35%;
+            left: 5%;
+            background-color: #ff6666;
+        }
+
+        #survey .firework.f9 {
+            top: 10%;
+            left: 60%;
+            background-color: #66ccff;
+        }
+
+        #survey .firework.f10 {
+            top: 45%;
+            left: 38%;
+            background-color: #ffcc00;
+        }
+
+        #survey .firework.f11 {
+            top: 55%;
+            left: 72%;
+            background-color: #ff6666;
+        }
+
+        #survey .firework.f12 {
+            top: 80%;
+            left: 10%;
+            background-color: #66ccff;
+        }
+
+        #survey .firework.f13 {
+            top: 85%;
+            left: 40%;
+            background-color: #ffeeb3;
+        }
+
+        #survey .firework.f14 {
+            top: 82%;
+            left: 75%;
+            background-color: #ffbfbf;
+        }
+
+        #survey .firework.f15 {
+            top: 30%;
+            left: 25%;
+            background-color: #bde9ff;
+        }
+
+        #survey .firework.f16 {
+            top: 50%;
+            left: 90%;
+            background-color: #fff0b6;
+        }
+
+        @keyframes survey-firework {
+            0% {
+                transform: scale(0.2);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1.4);
+                opacity: 0;
+            }
+        }
+
         @media only screen and (max-width: 56em) {
             .elevated {
                 bottom: 3.5em;
@@ -81,6 +234,8 @@ export class AppComponent {
     copyright: string = "";
     distributionVersions: Array<Versions> = [];
     distributionVersionsDialogVisible: boolean = false;
+    isSurveyHidden: boolean = false;
+    showFireworks: boolean = false;
 
     constructor(private httpClient: HttpClient,
                 public mapService: MapDataService,
@@ -153,5 +308,17 @@ export class AppComponent {
             data => {
                 this.erdblickVersion = `${this.title} ${data.toString()}`;
             });
+    }
+
+    dismissSurvey(event: any) {
+        event.stopPropagation();
+        this.isSurveyHidden = true;
+    }
+
+    triggerFireworks() {
+        this.showFireworks = true;
+        window.setTimeout(() => {
+            this.showFireworks = false;
+        }, 600);
     }
 }
