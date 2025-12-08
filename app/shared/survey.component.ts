@@ -3,10 +3,11 @@ import {HttpClient} from "@angular/common/http";
 
 interface SurveyConfig {
     id: string;
+    link: string;
+    linkHtml: string;
     start?: string;
     end?: string;
     emoji?: string;
-    linkHtml?: string;
     background?: string;
 }
 
@@ -18,7 +19,7 @@ interface SurveyConfig {
             <span class="survey-icon" style="font-size: 1.75em" (click)="triggerFireworks()">
                 {{ surveyEmoji }}
             </span>
-                <a href="" [innerHTML]="surveyLinkHtml"></a>
+                <a [href]="surveyHref" [innerHTML]="surveyLinkHtml"></a>
                 <span class="material-symbols-outlined" (click)="dismissSurvey($event)">
                 close
             </span>
@@ -53,6 +54,7 @@ export class SurveyComponent {
     isSurveyHidden: boolean = false;
     showFireworks: boolean = false;
     surveyEmoji: string = "";
+    surveyHref: string = "";
     surveyLinkHtml: string = "";
     backgroundColor: string = "blueviolet";
     private fireworksAnimating: boolean = false;
@@ -143,12 +145,11 @@ export class SurveyComponent {
         }
 
         this.surveyEnabled = true;
+        this.surveyHref = activeSurvey.link;
+        this.surveyLinkHtml = activeSurvey.linkHtml;
 
         if (typeof activeSurvey.emoji === 'string' && activeSurvey.emoji.length) {
             this.surveyEmoji = activeSurvey.emoji;
-        }
-        if (typeof activeSurvey.linkHtml === 'string' && activeSurvey.linkHtml.length) {
-            this.surveyLinkHtml = activeSurvey.linkHtml;
         }
         if (typeof activeSurvey.background === 'string' && activeSurvey.background.length) {
             this.backgroundColor = activeSurvey.background;
