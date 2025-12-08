@@ -1,5 +1,15 @@
 {
   "styles": [
     {"id":  "Default Style", "url": "default-style.yaml"}
+  ],
+  "surveys": [
+    {
+      "id": "holidays-2025",
+      "start": "2025-12-08",
+      "end": "2026-01-18",
+      "emoji": "\uD83C\uDF84",
+      "linkHtml": "Happy holidays!<br>Take part in our 2026 survey now<br>to help make MapViewer even better!",
+      "background": "forestgreen"
+    }
   ]
 }

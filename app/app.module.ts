@@ -89,6 +89,7 @@ import {InspectionContainerComponent} from "./inspection/inspection.container.co
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
+import {SurveyComponent} from "./shared/survey.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -146,7 +147,8 @@ export const initializeServices = () => {
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,
-        InspectionTreeComponent
+        InspectionTreeComponent,
+        SurveyComponent
     ],
     bootstrap: [
         AppComponent

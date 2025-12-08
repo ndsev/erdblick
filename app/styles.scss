@@ -219,7 +219,6 @@ map-view {
   bottom: 2.5em;
   left: calc(50% - 12em);
   width: 24em;
-  background-color: forestgreen;
   color: white;
   height: 4em;
   padding: 0.25em;
@@ -236,11 +235,134 @@ map-view {
 
   span, a {
     cursor: pointer;
+    user-select: none;
   }
 
   a {
     color: white;
     text-decoration: none;
+  }
+
+  .survey-fireworks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .firework {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: gold;
+    opacity: 0;
+    animation: survey-firework 800ms ease-out forwards;
+  }
+
+  .firework.f1 {
+    top: 10%;
+    left: 8%;
+  }
+
+  .firework.f2 {
+    top: 25%;
+    left: 45%;
+    background-color: deeppink;
+  }
+
+  .firework.f3 {
+    top: 20%;
+    left: 88%;
+    background-color: aqua;
+  }
+
+  .firework.f4 {
+    top: 60%;
+    left: 18%;
+    background-color: lemonchiffon;
+  }
+
+  .firework.f5 {
+    top: 75%;
+    left: 55%;
+    background-color: magenta;
+  }
+
+  .firework.f6 {
+    top: 65%;
+    left: 92%;
+    background-color: aquamarine;
+  }
+
+  .firework.f7 {
+    top: 5%;
+    left: 30%;
+    background-color: gold;
+  }
+
+  .firework.f8 {
+    top: 35%;
+    left: 5%;
+    background-color: tomato;
+  }
+
+  .firework.f9 {
+    top: 10%;
+    left: 60%;
+    background-color: aqua;
+  }
+
+  .firework.f10 {
+    top: 45%;
+    left: 38%;
+    background-color: lemonchiffon;
+  }
+
+  .firework.f11 {
+    top: 55%;
+    left: 72%;
+    background-color: deeppink;
+  }
+
+  .firework.f12 {
+    top: 80%;
+    left: 10%;
+    background-color: aquamarine;
+  }
+
+  .firework.f13 {
+    top: 85%;
+    left: 40%;
+    background-color: gold;
+  }
+
+  .firework.f14 {
+    top: 82%;
+    left: 75%;
+    background-color: tomato;
+  }
+
+  .firework.f15 {
+    top: 30%;
+    left: 25%;
+    background-color: aqua;
+  }
+
+  .firework.f16 {
+    top: 50%;
+    left: 90%;
+    background-color: lemonchiffon;
+  }
+
+  @keyframes survey-firework {
+    0% {
+      transform: scale(0.2);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1.4);
+      opacity: 0;
+    }
   }
 }
 
