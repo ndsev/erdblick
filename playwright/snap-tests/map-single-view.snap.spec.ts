@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
-import { enableMapLayer, navigateToArea, navigateToRoot, waitForAppReady } from '../utils/ui-helpers';
+import { enableMapLayer, navigateToArea, navigateToRoot } from '../utils/ui-helpers';
 
 test.describe('Snapshot – single map view', () => {
     test('TestMap/WayLayer single-view layout', async ({ page, request }) => {
@@ -9,7 +9,6 @@ test.describe('Snapshot – single map view', () => {
         await navigateToRoot(page);
         await enableMapLayer(page, 'TestMap', 'WayLayer');
         await navigateToArea(page, 42.5, 11.615, 13);
-        await waitForAppReady(page);
 
         const mapContainer = page.locator('#mapViewContainer-0');
         await expect(mapContainer).toBeVisible();

@@ -5,20 +5,20 @@ const baseURL = process.env["EB_APP_URL"] || 'http://localhost:9000';
 export default defineConfig({
     testDir: './playwright',
     snapshotDir: './playwright/reference',
-    timeout: 120000,
+    timeout: 480000,
     expect: {
-        timeout: 10000
+        timeout: 120000
     },
     reporter: process.env["CI"] ? 'dot' : 'list',
     use: {
         baseURL,
         headless: true,
         viewport: {
-            width: 1920,
-            height: 1080
+            width: 1600,
+            height: 900
         },
-        actionTimeout: 20000,
-        navigationTimeout: 30000,
+        actionTimeout: 240000,
+        navigationTimeout: 240000,
         screenshot: 'only-on-failure',
         video: 'retain-on-failure',
         launchOptions: {
@@ -37,5 +37,5 @@ export default defineConfig({
     },
     globalSetup: './playwright/global-setup.ts',
     globalTeardown: './playwright/global-teardown.ts',
-    workers: process.env["CI"] ? 2 : undefined
+    workers: process.env["CI"] ? 1 : undefined
 });

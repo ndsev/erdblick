@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/test';
-import { navigateToRoot, waitForAppReady } from '../utils/ui-helpers';
+import { navigateToRoot } from '../utils/ui-helpers';
 
 test.describe('Debug tile integration', () => {
     test('boots application and hides global spinner', async ({ page }) => {
@@ -22,9 +22,6 @@ test.describe('Debug tile integration', () => {
                 throw new Error('window.ebDebug is not available');
             }
         });
-
-        // Allow some time for Cesium and the WASM core to render the tile.
-        await waitForAppReady(page);
 
         const mapContainer = page.locator('#mapViewContainer-0 canvas');
         await expect(mapContainer.first()).toBeVisible();

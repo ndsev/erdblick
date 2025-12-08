@@ -26,7 +26,6 @@ test.describe('Snapshot – multi-view sync layout', () => {
         await positionToggle.click();
 
         await navigateToArea(page, 42.5, 11.615, 13);
-        await waitForAppReady(page);
 
         const mapContainer = page.locator('mapview-container');
         await expect(mapContainer).toBeVisible();
