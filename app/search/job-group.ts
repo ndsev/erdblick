@@ -8,7 +8,10 @@ export class JobGroup {
     readonly query: string;
 
     private tasks: Map<string, WorkerTask> = new Map();
-    private completedTasks: Set<string> = new Set();
+    private pending: WorkerTask[] = [];
+    private inProgress: Set<string> = new Set<string>();
+    private completed: Set<string> = new Set<string>();
+
     private onCompleteCallback?: (group: JobGroup) => void;
     private onTaskCompleteCallback?: (taskId: string, result: any) => void;
     
@@ -23,29 +26,30 @@ export class JobGroup {
 
     addTask(taskId: string, task: WorkerTask): void {
         this.tasks.set(taskId, task);
+        this.pending.push(task);
     }
 
     completeTask(taskId: string, result?: any): void {
-        if (this.tasks.has(taskId) && !this.completedTasks.has(taskId)) {
-            this.completedTasks.add(taskId);
-            
-            if (this.onTaskCompleteCallback) {
-                this.onTaskCompleteCallback(taskId, result);
-            }
-            
-            if (this.isComplete() && this.onCompleteCallback) {
-                this.onCompleteCallback(this);
-            }
+        if (!this.tasks.has(taskId)) {
+            return;
+        }
+
+        this.inProgress.delete(taskId);
+        this.completed.add(taskId);
+
+        console.log(`Task complete: ${taskId}`)
+        if (this.onTaskCompleteCallback) {
+            this.onTaskCompleteCallback(taskId, result);
+        }
+
+        if (this.isComplete() && this.onCompleteCallback) {
+            console.log(`Group complete: ${this.id}`)
+            this.onCompleteCallback(this);
         }
     }
 
     isComplete(): boolean {
-        return this.tasks.size > 0 && this.completedTasks.size === this.tasks.size;
-    }
-
-    getProgress(): number {
-        if (this.tasks.size === 0) return 0;
-        return (this.completedTasks.size / this.tasks.size) * 100;
+        return !this.pending.length && !this.inProgress.size;
     }
 
     getTaskCount(): number {
@@ -53,7 +57,11 @@ export class JobGroup {
     }
 
     getCompletedCount(): number {
-        return this.completedTasks.size;
+        return this.completed.size;
+    }
+
+    percentDone(): number {
+        return this.getTaskCount() ? this.getCompletedCount() / this.getTaskCount() * 100. : 0.;
     }
 
     onComplete(callback: (group: JobGroup) => void): void {
@@ -73,16 +81,22 @@ export class JobGroup {
         return this.tasks;
     }
 
-    getCompletedTasks(): ReadonlySet<string> {
-        return this.completedTasks;
-    }
-
-    cancel(): void {
+    clear(): void {
         this.tasks.clear();
-        this.completedTasks.clear();
+        this.completed.clear();
         this.onCompleteCallback = undefined;
         this.onTaskCompleteCallback = undefined;
         this.diagnostics.length = 0;
+    }
+
+    cancel() {
+        if (this.pending.length) {
+            this.pending = [];
+            if (this.isComplete() && this.onCompleteCallback) {
+                console.log(`Group complete (canceled): ${this.id}`)
+                this.onCompleteCallback(this);
+            }
+        }
     }
 
     addDiagnostics(diagnostics: Uint8Array): void {
@@ -91,6 +105,14 @@ export class JobGroup {
 
     getDiagnostics(): ReadonlyArray<Uint8Array> {
         return this.diagnostics;
+    }
+
+    takeTask(): WorkerTask|undefined {
+        const result = this.pending.shift();
+        if (result) {
+            this.inProgress.add(result.taskId);
+        }
+        return result;
     }
 }
 
@@ -104,15 +126,19 @@ export class JobGroupManager {
         return group;
     }
 
+    addGroup(group: JobGroup) {
+        this.groups.set(group.id, group)
+    }
+
     getGroup(groupId: string): JobGroup | undefined {
         return this.groups.get(groupId);
     }
 
-    addTaskToGroup(groupId: string, taskId: string, task: WorkerTask): boolean {
-        const group = this.groups.get(groupId);
+    addTask(task: WorkerTask): boolean {
+        const group = this.groups.get(task.groupId);
         if (group) {
-            group.addTask(taskId, task);
-            this.taskToGroup.set(taskId, groupId);
+            group.addTask(task.taskId, task);
+            this.taskToGroup.set(task.taskId, task.groupId);
             return true;
         }
         return false;
@@ -142,7 +168,7 @@ export class JobGroupManager {
             for (const taskId of group.getTasks().keys()) {
                 this.taskToGroup.delete(taskId);
             }
-            group.cancel();
+            group.clear();
             this.groups.delete(groupId);
         }
     }

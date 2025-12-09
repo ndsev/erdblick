@@ -9,8 +9,8 @@ export interface SearchWorkerTask {
     query: string;
     dataSourceInfo: Uint8Array;
     nodeId: string;
-    taskId?: string;
-    groupId?: string;
+    taskId: string;
+    groupId: string;
 }
 
 export interface CompletionWorkerTask {
@@ -22,8 +22,8 @@ export interface CompletionWorkerTask {
     point: number; // Cursor position to complete at
     nodeId: string;
     limit: number | undefined;
-    taskId?: string;
-    groupId?: string;
+    taskId: string;
+    groupId: string;
 }
 
 export interface DiagnosticsWorkerTask {
@@ -34,8 +34,8 @@ export interface DiagnosticsWorkerTask {
     nodeId: string;
     query: string;
     diagnostics: Array<Uint8Array>; // List of diagnostic data
-    taskId?: string;
-    groupId?: string;
+    taskId: string;
+    groupId: string;
 }
 
 export interface SearchResultPosition {
