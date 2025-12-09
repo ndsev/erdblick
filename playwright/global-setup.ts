@@ -12,7 +12,6 @@ interface GlobalState {
 async function waitForSources(baseURL: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
         const ok = await new Promise<boolean>((resolve) => {
             try {

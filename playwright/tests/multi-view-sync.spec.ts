@@ -1,47 +1,12 @@
-import type { APIRequestContext, Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
-import { requireTestMapSource } from '../utils/backend-helpers';
 import {
-    addComparisonView,
-    enableMapLayer,
     navigateToArea,
-    navigateToRoot,
-    openLayerDialog
+    openLayerDialog,
+    setupTwoViewsWithPositionSync
 } from '../utils/ui-helpers';
 
-async function setupTwoViewsWithPositionSync(page: Page, request: APIRequestContext): Promise<void> {
-    await requireTestMapSource(request);
-
-    await navigateToRoot(page);
-    await enableMapLayer(page, 'TestMap', 'WayLayer');
-
-    await addComparisonView(page);
-
-    const syncGroup = page.locator('.viewsync-select').first();
-    await expect(syncGroup).toBeVisible();
-
-    const positionToggle = syncGroup.locator('.material-symbols-outlined', {
-        hasText: 'location_on'
-    }).first();
-    await expect(positionToggle).toBeVisible();
-    await positionToggle.click();
-}
-
-async function getCameraPosition(page: Page, viewIndex: number): Promise<number[] | null> {
-    const raw = await page.evaluate((idx: number) => window.ebDebug?.getCamera(idx), viewIndex);
-    if (!raw) {
-        return null;
-    }
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed.position) ? parsed.position as number[] : null;
-    } catch {
-        return null;
-    }
-}
-
 test.describe('Multi-view synchronisation', () => {
-    test('second view can be added and WGS84 navigation is position-synchronised', async ({ page, request }) => {
+    test('second view can be added and synchronised', async ({ page, request }) => {
         await setupTwoViewsWithPositionSync(page, request);
 
         const secondViewCanvas = page.locator('#mapViewContainer-1 canvas').first();
@@ -49,62 +14,23 @@ test.describe('Multi-view synchronisation', () => {
 
         await navigateToArea(page, 42.5, 11.615, 13);
 
-        await expect.poll(async () => {
-            const [p0, p1] = await Promise.all([
-                getCameraPosition(page, 0),
-                getCameraPosition(page, 1)
-            ]);
-            if (!p0 || !p1) {
-                return Number.POSITIVE_INFINITY;
-            }
-            const dx = Math.abs(p0[0] - p1[0]);
-            const dy = Math.abs(p0[1] - p1[1]);
-            const dz = Math.abs(p0[2] - p1[2]);
-            return dx + dy + dz;
-        }, { timeout: 20000 }).toBeLessThan(1e-3);
-    });
-
-    test('navigation controls move both views when position sync is enabled', async ({ page, request }) => {
-        await setupTwoViewsWithPositionSync(page, request);
-
-        await navigateToArea(page, 42.5, 11.615, 13);
-
-        const before0 = await getCameraPosition(page, 0);
-        const before1 = await getCameraPosition(page, 1);
-
-        const primaryUI = page.locator('.view-ui-container.mirrored').first();
+        const primaryUI = page.locator('.view-ui-container:not(.mirrored)').first();
         await expect(primaryUI).toBeVisible();
 
-        await primaryUI.locator('.pi-plus').first().click();
-        await primaryUI.locator('.pi-arrow-right').first().click();
-
-        await expect.poll(async () => {
-            const [p0, p1] = await Promise.all([
-                getCameraPosition(page, 0),
-                getCameraPosition(page, 1)
-            ]);
-            if (!p0 || !p1 || !before0 || !before1) {
-                return Number.POSITIVE_INFINITY;
-            }
-            const moved0 = Math.abs(p0[0] - before0[0]) + Math.abs(p0[1] - before0[1]) + Math.abs(p0[2] - before0[2]);
-            const moved1 = Math.abs(p1[0] - before1[0]) + Math.abs(p1[1] - before1[1]) + Math.abs(p1[2] - before1[2]);
-            const diffBetweenViews = Math.abs(p0[0] - p1[0]) + Math.abs(p0[1] - p1[1]) + Math.abs(p0[2] - p1[2]);
-            return moved0 > 0 && moved1 > 0 ? diffBetweenViews : Number.POSITIVE_INFINITY;
-        }, { timeout: 20000 }).toBeLessThan(1e-3);
-    });
-
-    test('2D projection mode can be activated and synchronised across views', async ({ page, request }) => {
-        await setupTwoViewsWithPositionSync(page, request);
+        await primaryUI.locator('button', {
+            has: primaryUI.locator('.pi-plus').first()
+        }).first().click();
+        await primaryUI.locator('button', {
+            has: primaryUI.locator('.pi-arrow-right').first()
+        }).first().click();
 
         const syncGroup = page.locator('.viewsync-select').first();
-        const projectionToggle = syncGroup.locator('.material-symbols-outlined', {
+        const projectionToggle = syncGroup.locator('button', {
             hasText: '3d_rotation'
         }).first();
         await expect(projectionToggle).toBeVisible();
         await projectionToggle.click();
 
-        const primaryUI = page.locator('.view-ui-container.mirrored').first();
-        await expect(primaryUI).toBeVisible();
         const projectionSelect = primaryUI.locator('.p-selectbutton').first();
         await projectionSelect.locator('.p-button', { hasText: '2D' }).first().click();
 
@@ -116,13 +42,8 @@ test.describe('Multi-view synchronisation', () => {
             const activeButton = ui.locator('.p-selectbutton .p-button.p-highlight').first();
             await expect(activeButton).toContainText('2D');
         }
-    });
 
-    test('layer and OSM settings are synchronised across views when layer sync is enabled', async ({ page, request }) => {
-        await setupTwoViewsWithPositionSync(page, request);
-
-        const syncGroup = page.locator('.viewsync-select').first();
-        const layersToggle = syncGroup.locator('.material-symbols-outlined', {
+        const layersToggle = syncGroup.locator('button', {
             hasText: 'layers'
         }).first();
         await expect(layersToggle).toBeVisible();

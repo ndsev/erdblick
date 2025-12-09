@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type {APIRequestContext, Page} from '@playwright/test';
 import { expect } from '@playwright/test';
 import {test} from "../fixtures/test";
 import {requireTestMapSource} from "./backend-helpers";
@@ -119,4 +119,35 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
     }
     const resultButton = leafNodes.nth(index).locator('.p-tree-node-content').first();
     await resultButton.click();
+}
+
+export async function setupTwoViewsWithPositionSync(page: Page, request: APIRequestContext): Promise<void> {
+    await requireTestMapSource(request);
+
+    await navigateToRoot(page);
+    await enableMapLayer(page, 'TestMap', 'WayLayer');
+
+    await addComparisonView(page);
+
+    const syncGroup = page.locator('.viewsync-select').first();
+    await expect(syncGroup).toBeVisible();
+
+    const positionToggle = syncGroup.locator('.material-symbols-outlined', {
+        hasText: 'location_on'
+    }).first();
+    await expect(positionToggle).toBeVisible();
+    await positionToggle.click();
+}
+
+export async function getCameraPosition(page: Page, viewIndex: number): Promise<number[] | null> {
+    const raw = await page.evaluate((idx: number) => window.ebDebug?.getCamera(idx), viewIndex);
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed.position) ? parsed.position as number[] : null;
+    } catch {
+        return null;
+    }
 }
