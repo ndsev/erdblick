@@ -1,6 +1,6 @@
 import { test as base } from '@playwright/test';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 declare global {
     interface Window {
@@ -10,6 +10,23 @@ declare global {
             getCamera: (viewIndex: number) => string | undefined;
         };
     }
+}
+
+function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
+    if (!entries || (Array.isArray(entries) && entries.length === 0)) {
+        return;
+    }
+
+    const outDir = path.join(process.cwd(), 'coverage', 'playwright');
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const outFile = path.join(outDir, `v8-${kind}-coverage.ndjson`);
+    const lines =
+        (entries as unknown[])
+            .map((entry) => JSON.stringify(entry))
+            .join('\n') + '\n';
+
+    fs.appendFileSync(outFile, lines, { encoding: 'utf8' });
 }
 
 export const test = base.extend({
@@ -92,23 +109,11 @@ export const test = base.extend({
             await use(page);
         } finally {
             if (supportsCoverage) {
-                const [jsCoverage, cssCoverage] = await Promise.all([
-                    page.coverage.stopJSCoverage(),
-                    page.coverage.stopCSSCoverage(),
-                ]);
+                const jsCoverage = await page.coverage.stopJSCoverage();
+                const cssCoverage = await page.coverage.stopCSSCoverage();
 
-                const outDir = path.join(process.cwd(), 'coverage', 'playwright', 'raw');
-                await fs.mkdir(outDir, { recursive: true });
-
-                const baseName = testInfo.testId.replace(/[^\w-]/g, '_');
-                await fs.writeFile(
-                    path.join(outDir, `${baseName}-js.json`),
-                    JSON.stringify(jsCoverage),
-                );
-                await fs.writeFile(
-                    path.join(outDir, `${baseName}-css.json`),
-                    JSON.stringify(cssCoverage),
-                );
+                appendCoverage(jsCoverage, 'js');
+                appendCoverage(cssCoverage, 'css');
             }
         }
     }

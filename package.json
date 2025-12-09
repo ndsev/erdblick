@@ -57,7 +57,6 @@
     "jsdom": "^27.3.0",
     "less": "^4.4.2",
     "playwright": "^1.57.0",
-    "v8-to-istanbul": "^9.3.0",
     "typescript": "~5.9.3",
     "vitest": "^3.2.4"
   }
