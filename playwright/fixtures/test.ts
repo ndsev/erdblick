@@ -1,5 +1,6 @@
 import { test as base } from '@playwright/test';
-import { addJsCoverage } from '../utils/coverage';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 declare global {
     interface Window {
@@ -12,7 +13,7 @@ declare global {
 }
 
 export const test = base.extend({
-    page: async ({ page }, use) => {
+    page: async ({ page }, use, testInfo) => {
         // Mock /locate responses for deterministic integration tests.
         // The backend Python datasource does not currently implement
         // a locate() handler, so mapget would otherwise return an
@@ -82,14 +83,32 @@ export const test = base.extend({
             await page.coverage.startJSCoverage({
                 resetOnNavigation: false
             });
+            await page.coverage.startCSSCoverage({
+                resetOnNavigation: false
+            });
         }
 
         try {
             await use(page);
         } finally {
             if (supportsCoverage) {
-                const coverage = await page.coverage.stopJSCoverage();
-                await addJsCoverage(coverage);
+                const [jsCoverage, cssCoverage] = await Promise.all([
+                    page.coverage.stopJSCoverage(),
+                    page.coverage.stopCSSCoverage(),
+                ]);
+
+                const outDir = path.join(process.cwd(), 'coverage', 'playwright', 'raw');
+                await fs.mkdir(outDir, { recursive: true });
+
+                const baseName = testInfo.testId.replace(/[^\w-]/g, '_');
+                await fs.writeFile(
+                    path.join(outDir, `${baseName}-js.json`),
+                    JSON.stringify(jsCoverage),
+                );
+                await fs.writeFile(
+                    path.join(outDir, `${baseName}-css.json`),
+                    JSON.stringify(cssCoverage),
+                );
             }
         }
     }

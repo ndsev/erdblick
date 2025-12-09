@@ -4,7 +4,7 @@ import {test} from "../fixtures/test";
 import {requireTestMapSource} from "./backend-helpers";
 
 export async function navigateToRoot(page: Page): Promise<void> {
-    await page.goto('/');
+    await page.goto('/?osm=0');
     await waitForAppReady(page);
 }
 
