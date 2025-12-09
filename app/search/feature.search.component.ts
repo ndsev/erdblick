@@ -195,8 +195,7 @@ export class FeatureSearchComponent {
             if (searchState.isComplete()) {
                 this.searchResultReady();
                 this.canPauseStopSearch = false;
-            }
-            else {
+            } else {
                 this.resultsStatus = "Loading...";
                 this.canPauseStopSearch = true;
             }
@@ -244,16 +243,17 @@ export class FeatureSearchComponent {
     }
 
     toggleSearchPaused() {
-        if (this.canPauseStopSearch) {
-            if (this.isSearchPaused) {
-                this.searchService.resume();
-                this.isSearchPaused = false;
-            } else {
-                this.searchService.pause();
-                this.results = this.searchService.searchResults;
-                this.recalculateResultsByGroups();
-                this.isSearchPaused = true;
-            }
+        if (!this.canPauseStopSearch) {
+            return;
+        }
+        if (this.isSearchPaused) {
+            this.searchService.resume();
+            this.isSearchPaused = false;
+        } else {
+            this.searchService.pause();
+            this.results = this.searchService.searchResults;
+            this.recalculateResultsByGroups();
+            this.isSearchPaused = true;
         }
     }
 

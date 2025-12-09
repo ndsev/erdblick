@@ -89,7 +89,7 @@ export class JobGroup {
         this.diagnostics.length = 0;
     }
 
-    cancel() {
+    stop() {
         if (this.pending.length) {
             this.pending = [];
             if (this.isComplete() && this.onCompleteCallback) {

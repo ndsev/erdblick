@@ -316,27 +316,10 @@ export class FeatureSearchService {
                         break;
                 }
 
-                const nextTask = this.getNextTask();
-                if (nextTask) {
-                    this.scheduleTask(worker, nextTask, i);
-                }
+                this.scheduleNextTask(i);
             };
         }
     }
-
-    private getNextTask(): WorkerTask | undefined {
-        if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
-            return this.currentSearch.takeTask();
-        }
-        if (this.diagnosticsQueue.length) {
-            return this.diagnosticsQueue.shift();
-        }
-        if (this.currentCompletion && !this.currentCompletion.isComplete()) {
-            return this.currentCompletion.takeTask();
-        }
-        return undefined;
-    }
-
 
     private createCustomPin(text: string): string {
         const canvas = document.createElement('canvas');
@@ -392,12 +375,9 @@ export class FeatureSearchService {
         this.jobGroupManager.addGroup(this.currentSearch);
 
         // Set up completion callback to trigger diagnostics after
-        // all tasks of the group are done. Ignore if a newer search supersedes this one.
+        // all tasks of the group are done. Note: This will only ever
+        // be called if a search truly finishes (is not superseded by a newer one).
         this.currentSearch.onComplete((group: JobGroup) => {
-            if (this.currentSearch?.id !== group.id) {
-                console.log(`Ignoring onComplete for outdated job group ${group.id}`)
-                return;
-            }
             console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
             this.startDiagnosticsForCompletedSearch(group.query, group.id);
         });
@@ -443,10 +423,7 @@ export class FeatureSearchService {
             if (this.workerBusy[index]) {
                 return;
             }
-            const task = this.getNextTask();
-            if (task) {
-                this.scheduleTask(worker, task, index);
-            }
+            this.scheduleNextTask(index);
         });
     }
 
@@ -473,7 +450,7 @@ export class FeatureSearchService {
         if (!this.currentSearch) {
             return;
         }
-        this.currentSearch.cancel();
+        this.currentSearch.stop();
         this.endTime = Date.now();
         this.timeElapsed = this.formatTime(this.endTime - this.startTime);
         this.currentSearch.paused = false;
@@ -560,11 +537,13 @@ export class FeatureSearchService {
 
     public clearCurrentCompletion() {
         // Remove all pending completion tasks
-        this.currentCompletion?.cancel();
+        this.currentCompletion?.stop();
         this.currentCompletion = null;
     }
 
     public completeQuery(query: string, point: number | undefined) {
+        this.clearCurrentCompletion();
+
         // Create completion job group
         const completionGroup = this.jobGroupManager.createGroup('completion', query, this.generateTaskGroupId());
         this.currentCompletion = completionGroup
@@ -637,15 +616,18 @@ export class FeatureSearchService {
     }
 
     private addSearchResult(tileResult: SearchResultForTile) {
-        if (!this.currentSearch)
+        if (!this.currentSearch) {
             return;
+        }
 
         // Ignore results that are not related to the ongoing query.
-        if (tileResult.groupId !== this.currentSearch?.id)
+        if (tileResult.groupId !== this.currentSearch.id) {
             return;
+        }
 
-        if (tileResult.error)
+        if (tileResult.error) {
             this.errors.add(tileResult.error);
+        }
 
         // Add trace results
         for (let [key, trace] of Object.entries(tileResult.traces || {})) {
@@ -658,7 +640,7 @@ export class FeatureSearchService {
         }
 
         // Add diagnostics to the current search group
-        if (tileResult.diagnostics && this.currentSearch) {
+        if (tileResult.diagnostics) {
             this.currentSearch.addDiagnostics(tileResult.diagnostics);
         }
 
@@ -691,10 +673,24 @@ export class FeatureSearchService {
         this.progress.next(this.currentSearch);
     }
 
-    private scheduleTask(worker: Worker, task: WorkerTask, workerIndex: number) {
-        console.debug(`Scheduling task id=${task.taskId || 'null'} group=${task.groupId || 'null'}`);
+    private scheduleNextTask(workerIndex: number) {
+        let nextTask = undefined;
+        if (this.currentSearch && !this.currentSearch.isComplete() && !this.currentSearch.paused) {
+            nextTask = this.currentSearch.takeTask();
+        }
+        else if (this.diagnosticsQueue.length) {
+            nextTask = this.diagnosticsQueue.shift();
+        }
+        else if (this.currentCompletion && !this.currentCompletion.isComplete()) {
+            nextTask = this.currentCompletion.takeTask();
+        }
+
+        if (!nextTask) {
+            return;
+        }
+        console.debug(`Scheduling task id=${nextTask.taskId || 'null'} group=${nextTask.groupId || 'null'}`);
         this.workerBusy[workerIndex] = true;
-        worker.postMessage(task);
+        this.workers[workerIndex].postMessage(nextTask);
     }
 
     updatePointColor() {
