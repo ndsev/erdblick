@@ -1,4 +1,5 @@
 import { test as base } from '@playwright/test';
+import { addJsCoverage } from '../utils/coverage';
 
 declare global {
     interface Window {
@@ -73,7 +74,24 @@ export const test = base.extend({
             });
         });
 
-        await use(page);
+        const browser = page.context().browser();
+        const browserName = browser?.browserType().name();
+        const supportsCoverage = browserName === 'chromium';
+
+        if (supportsCoverage) {
+            await page.coverage.startJSCoverage({
+                resetOnNavigation: false
+            });
+        }
+
+        try {
+            await use(page);
+        } finally {
+            if (supportsCoverage) {
+                const coverage = await page.coverage.stopJSCoverage();
+                await addJsCoverage(coverage);
+            }
+        }
     }
 });
 
