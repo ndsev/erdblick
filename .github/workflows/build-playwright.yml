@@ -45,11 +45,13 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      - name: Set up Python venv with mapget
-        run: |
-          python3 -m venv venv
-          ./venv/bin/pip install --upgrade pip
-          ./venv/bin/pip install mapget
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up  mapget
+        run: pip install mapget
 
       - name: Run Playwright integration tests (with coverage)
         run: ./run-integration-with-venv-mapget.sh
