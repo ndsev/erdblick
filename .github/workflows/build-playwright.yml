@@ -51,10 +51,14 @@ jobs:
           python-version: '3.12'
 
       - name: Set up  mapget
-        run: pip install mapget
+        run: |
+          python3 -m venv venv
+          ./venv/bin/pip install mapget
 
       - name: Run Playwright integration tests (with coverage)
-        run: ./run-integration-with-venv-mapget.sh
+        run: |
+          source ./venv/bin/activate
+          ./run-integration-with-venv-mapget.sh
 
       - name: Upload Playwright coverage artifact
         uses: actions/upload-artifact@v4
