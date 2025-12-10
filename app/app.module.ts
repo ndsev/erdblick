@@ -89,7 +89,7 @@ import {InspectionContainerComponent} from "./inspection/inspection.container.co
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
-import {SurveyComponent} from "./shared/survey.component";
+import {SurveyComponent} from "./auxiliaries/survey.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
