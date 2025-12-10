@@ -16,4 +16,4 @@ sources:
   # Playwright tests that depend on this datasource will detect its absence
   # from `/sources` and skip.
   - type: DataSourceProcess
-    cmd: python build/_deps/mapget-src/examples/python/datasource.py
+    cmd: python test/datasource.py

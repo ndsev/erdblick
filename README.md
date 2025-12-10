@@ -40,7 +40,7 @@ To run them locally:
 npm install                          # install dev dependencies (incl. Playwright)
 npx playwright install --with-deps   # install Playwright browsers (once)
 pip install mapget                   # install the latest mapget package
-run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
+./ci/run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
 ```
 
 The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
