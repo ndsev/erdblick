@@ -60,6 +60,12 @@ jobs:
           source ./venv/bin/activate
           $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
 
+      - name: Upload Playwright test result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-result
+          path: test-results
+
       - name: Upload Playwright coverage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -129,3 +135,4 @@ jobs:
               });
             } catch (error) {
               core.warning(`Skipping coverage comment (token likely lacks permission): ${error.message}`);
+            }
