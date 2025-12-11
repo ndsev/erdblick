@@ -2,7 +2,7 @@
 
 Erdblick visualizes every feature through YAML-defined style sheets. This guide explains how to manage styles in the UI, how the YAML schema works, and which rule fields are available for advanced styling.
 
-_[Screenshot placeholder: Styles dialog showing built-in styles, per-layer toggles, and the editor button.]_
+![erdblick UI](screenshots/style-controls.png)
 
 ## Managing Styles in the UI
 
@@ -167,15 +167,71 @@ When you move beyond basic coloring and start visualizing relations or labels, a
 - **Labels**: to keep labels legible, consider combining `label-text-expression` with `scale-by-distance`. When stacking multiple labels, adjust `label-eye-offset` to avoid z-fighting.
 - **Source references**: rules inherit the same hover/selection colors used in the inspector. If you need a dedicated highlight color, create a `mode: selection` rule with the desired `color`/`opacity`.
 
-## Debugging and Performance Tips
+## Performance Considerations
 
-When a style behaves strangely or slows the map down, approach debugging in small, focused steps:
+Style filters can significantly impact performance. While wildcards (`*` and `**`) are convenient for accessing nested properties, they require checking multiple paths for each feature. Since filters are applied to thousands of features with complex attribute structures, inefficient filters can slow down the mapviewer considerably. This is particularly important for `first-of` filters, which evaluate sub-rules sequentially until finding a match.
 
-- **Statistics dialog** – check tile counts and timing values to see whether an expensive style is the bottleneck.
-- **Incremental testing** – start with a simple rule (`type: .*`) and gradually add filters or expressions. Complex `first-of` chains and nested wildcards can quickly impact frame time.
-- **Validation** – the style editor displays syntax errors immediately. When editing outside the UI, run the style through `yamllint` or similar tools before deploying.
+Consider this example of a road speed heatmap, which demonstrates two common performance pitfalls:
 
-For in-depth examples, take a look at the Style sources through the style dialog. They demonstrate relation visualization, attribute overlays, highlight rules, point merging, distance-based fades, etc.
+1. It uses `first-of` filters, which means each feature must be checked against multiple filter conditions until a match is found. As explained in the erdblick documentation, `first-of` evaluates each sub-rule in order until one matches, making it important to optimize these filter checks. The order of rules matters - place the most frequently matching rules first to avoid unnecessary evaluations of subsequent rules.
+
+2. It uses wildcards (`**`) which require expanding and checking multiple possible paths in the data structure. This is particularly inefficient when combined with `first-of` since each wildcard expansion needs to happen for every filter check until a match occurs.
+
+![Average speed heatmap visualization](average_speed_heatmap.png){width=800}
+
+Here's how an inefficient style config may look like:
+
+```yaml
+  - type: Road
+    geometry: [line]
+    filter: "showHeatMap == true"
+    width: 10
+    offset: [0,1,0]
+    first-of:
+      - filter: "**.averageSpeed <= 20"
+        color: "#0045f1"
+
+      - filter: "**.averageSpeed <= 40"
+        color: "#8cf6f4"
+
+      - filter: "**.averageSpeed > 40"
+        color: "#c01f1f"
+```
+
+This can be optimized in two ways:
+
+1. Using full paths instead of wildcards eliminates the need to search through multiple possible paths
+2. Ordering the rules by likelihood - in this example, we assume speeds > 40 are most common in our map data, so we check that condition first to avoid unnecessary evaluations of the other rules
+
+Here's how an optimized style config may look like:
+
+```yaml
+  - type: Road
+    geometry: [line]
+    filter: "showHeatMap == true"
+    width: 10
+    offset: [0,1,0]
+    # Use full path and order by likelihood (if applicable)
+    first-of:
+      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed > 40"
+        color: "#c01f1f"
+
+      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed <= 20"
+        color: "#0045f1"
+
+      - filter: "properties.layer.RoadCharacteristicsLayer.AVERAGE_SPEED.attributeValue.averageSpeed <= 40"
+        color: "#8cf6f4"
+```
+
+Key performance considerations:
+
+* Using full paths instead of wildcards (`**`) reduces the number of evaluations needed
+* Each wildcard expansion requires checking multiple paths, which can significantly impact performance
+* The impact becomes more noticeable with complex filters or when many features are visible
+* The feature inspector provides a convenient "Copy Path" functionality - simply inspect a feature that has the property you're interested in, navigate to and click on the relevant text, then select "Copy Path" to get the exact path to use in your styles
+* This copied path can be directly used in style configurations instead of wildcards for better performance
+
+While wildcards are convenient for exploration and quick prototyping, using explicit paths is recommended for production configurations, especially when dealing with large datasets or complex styling rules.
 
 ## Configuring Styles on Disk
 

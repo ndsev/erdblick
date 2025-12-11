@@ -2,7 +2,7 @@
 
 The SourceData inspector lets you read raw blobs which are the underlying data of the visible features. Use it to debug encoding issues or verify backend responses.
 
-![SourceData inspector](../../../docs/sourcedata-inspector.svg)
+![SourceData inspector](screenshots/sourcedata-inspection.svg)
 
 ## Ways to Open SourceData
 
@@ -16,7 +16,7 @@ You can reach the SourceData inspector from several different entry points, depe
    ```
 4. **Map-level metadata** – in the Maps & Layers panel, use the metadata actions for a map to open SourceData directly on service- and module-level blobs such as `ServiceDefinition`, `SpatialExtent`, or registry metadata.
 
-![Shortcut from inspector to SourceData](../../../docs/goto-sourcedata.svg)
+![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.svg)
 
 _[Screenshot placeholder: Context menu path that opens the SourceData inspector.]_
 

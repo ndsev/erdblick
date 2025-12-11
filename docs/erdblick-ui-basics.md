@@ -5,7 +5,7 @@ Erdblick centers its UI around a single Cesium map canvas with docked utility pa
 !!! note "Focus on the layout before advanced features"
     If you are new to the viewer, first get comfortable with the overall layout and basic navigation. The search, inspection, and SourceData features build directly on the concepts introduced in this guide.
 
-![UI overview](erdblick_ui_overview.svg)
+![erdblick UI](screenshots/layout.png)
 
 ## Layout at a Glance
 
@@ -16,8 +16,6 @@ Erdblick centers its UI around a single Cesium map canvas with docked utility pa
 5. **Inspector area** – collapsible column that can host up to three inspection panels.
 6. **Status indicators** – tile and performance statistics plus a coordinate readout.
 
-_[Screenshot placeholder: zoomed-in callouts for quick menu buttons and the burger menu.]_
-
 ## Navigating the Map
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
@@ -25,9 +23,15 @@ You can move around the map using a mix of mouse gestures, keyboard shortcuts, a
 - **Mouse**: left drag pans, middle-drag tilts, right drag zooms, scroll zooms.
 - **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses the search field, `Ctrl+J` zooms to the currently selected feature, and `M` toggles the Maps & Layers panel.
 - **Compass widget**: click to reset heading or drag to rotate.
-- **Map focus buttons**: use the focus icons in the Maps & Layers panel to jump directly to the coverage area advertised for a map or layer instead of manually panning and zooming.
-
-Erdblick can render the scene either in a perspective 3D view with terrain and elevation-aware features, or in a 2D Web Mercator projection similar to common web map services. Switch between 2D and 3D using the projection controls in the Maps & Layers dialog. Use 3D when you want a faithful spatial representation including heights, and 2D when you compare datasets without elevation or align overlays such as OSM with ground-level geometry.
+- **Camera control buttons**: Use the arrow and plus/minus-buttons over the compass to zoom or pan with simple clicks.
+- **Perspective control buttons**: The `2D`/`3D` toggle under the buttons may be used to switch the view perspective:
+  - **3D Mode**: Full 3D visualization with feature height information. Any features with elevation data are displayed at their actual heights. This mode provides the most accurate spatial representation but can make it challenging to compare features at different elevations with each other or flat overlays like OpenStreetMap.
+  - **2D Mode**: Applies a Web Mercator projection (similar to Google Maps) where all features are projected onto a flat surface. This mode is ideal when:
+      - Comparing data sources with and without height information.
+      - Working with overlays (like OSM) that need to align with 3D features.
+      - Focusing on horizontal spatial relationships without elevation complexity.
+- **Map focus buttons**: use the focus icons in the `Maps & Layers` panel to jump directly to the coverage area advertised for a map or layer instead of manually panning and zooming.
+- In [Split View](erdblick-split.md), all camera moves target the currently focused view. Normally this is the view which you most recently interacted with, marked with a blue frame. Press `Ctrl+Left/Right` to switch focus in split view explicitly.
 
 ## Main Button Menu and Quick Actions
 
@@ -63,7 +67,7 @@ Use the `Maps & Layers` panel to:
 
 Finally, at the bottom of the dialog, the `Add View` button may be used to open a [Split View](erdblick-split.md) for map comparison/side-by-side navigation.
 
-_[Screenshot placeholder: Panel showing multiple maps toggled plus the focus (coverage) button highlighted.]_
+![erdblick UI](screenshots/maps-and-layers.png)
 
 ## Coordinate panel and markers
 
@@ -113,4 +117,4 @@ Open the Preferences dialog from the quick menu:
 - Allow unlimited inspected features when you need more than three inspection panels.
 - Clear stored viewer properties, search history, and style overrides if the UI behaves unexpectedly.
 
-_[Screenshot placeholder: Preferences dialog showing tile limit sliders and reset buttons.]_
+![erdblick UI](screenshots/preferences.png)

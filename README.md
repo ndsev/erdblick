@@ -2,6 +2,8 @@
 
 `erdblick` is a Cesium-based map UI that connects to [`mapget`](https://github.com/ndsev/mapget) servers, renders NDS.Live and GeoJSON tiles, and exposes live style editing plus advanced inspection tools. MapViewer ships with erdblick pre-integrated, but the UI also runs as a standalone bundle.
 
+![erdblick UI](docs/screenshots/erdblick.png)
+
 ## Documentation
 
 - [Erdblick User Guide](docs/erdblick-user-guide.md) – setup, UI basics, search, inspection, split view, troubleshooting, and more.
@@ -58,9 +60,3 @@ reported as skipped while generic backend and debug-tile tests still run.
 - Import/export buttons store styles in browser `localStorage` for quick experimentation.
 
 Read the [Style System Guide](docs/erdblick-stylesystem.md) for the complete YAML reference and GUI walkthrough.
-
-## Screenshots
-
-![erdblick UI](docs/erdblick.png)
-
-Additional callouts and placeholders live alongside the dedicated guide files so test reference screenshots stay in sync with the docs.

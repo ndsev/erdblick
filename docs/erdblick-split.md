@@ -2,7 +2,7 @@
 
 Erdblick can render multiple independent map views side-by-side. Each view runs its own Cesium instance, has its own camera state, and can synchronize with its neighbors through the built-in view-sync controls. This guide explains how to add/remove views, focus a specific pane, and make the synchronization options work for you.
 
-![Split view UI](erdblick_ui_split.svg)
+![Split view UI](screenshots/split.png)
 
 ## Opening, Closing, and Focusing Views
 

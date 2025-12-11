@@ -2,7 +2,7 @@
 
 The DataSource editor is an optional panel that talks to the backend’s `/config` endpoint. When the backend exposes a configuration schema and model for its data sources, erdblick can fetch that schema and push edits back without leaving the browser. Use it for exploratory sessions or when you need to adjust a configuration on a running server.
 
-_[Screenshot placeholder: DataSource editor panel showing a SmartLayerTileService entry.]_
+![erdblick UI](screenshots/datasource-editor.png)
 
 ## Prerequisites and Permissions
 

@@ -1,8 +1,8 @@
-# Inspection Guide
+# Feature Inspection Guide
 
 The inspection column is the fastest way to understand what you just clicked on: every selection opens a panel with a full tree of attributes, relations, and validity information. Erdblick remembers your panels, sizes, colors, and pinning preferences across sessions.
 
-![Selection UI](erdblick_ui_sel.svg)
+![erdblick UI](screenshots/feature-inspection-multi.png)
 
 ## Building a Selection
 
@@ -28,9 +28,9 @@ Once you have more than one selection, the panel column becomes a small workspac
 
 When you pin multiple panels, use different highlight colors (color picker in the header) to keep them visually distinct on the map.
 
-_[Screenshot placeholder: Three panels with different colors; pin states highlighted.]_
-
 ## Understanding the Tree
+
+![erdblick UI](screenshots/feature-inspection-details.png)
 
 Each panel renders a tree view of the selected feature or features:
 
@@ -41,8 +41,6 @@ Each panel renders a tree view of the selected feature or features:
 - **GeoJSON view** – the GeoJSON actions menu exports the entire panel selection as a GeoJSON FeatureCollection. The context menu on individual values also offers a “Copy GeoJSON path” entry, which matches how the data is seen by Simfil in feature search.
 
 Null values are collapsed by default, so the tree keeps noisy attributes out of your way. Arrays flatten into comma-separated lists with numeric precision trimmed to eight decimal places for readability.
-
-_[Screenshot placeholder: Tree table showing features/attributes/relations, filter applied.]_
 
 ## SourceData Panels
 

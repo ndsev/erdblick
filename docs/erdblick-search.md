@@ -1,11 +1,10 @@
 # Search Guide
 
+![erdblick UI](screenshots/search-pallette.png)
+![erdblick UI](screenshots/search-in-progress.png)
+
 <!-- --8<-- [start:overview] -->
 Erdblick's search palette unifies jump targets, utility actions, and the Simfil-based feature search. Open it with `Ctrl+K` or by clicking the magnifier icon; the textarea expands into a command palette whenever the dialog is visible.
-
-![Search UI overview](erdblick_ui_search.svg)
-
-_[Screenshot placeholder: Search panel showing valid/invalid jump targets and autocompletion popup.]_
 
 ## Working With the Palette
 
@@ -73,10 +72,10 @@ Running the **Search Loaded Features** action allows searching the loaded featur
 
 Because the search iterates over loaded tiles, it will not “page in” additional data. If a query returns too few matches, pan/zoom to the desired area, [increase tile limits in the Preferences dialog](erdblick-ui-basics.md#preferences-and-resets), or run the search from both split-view panes.
 
-_[Screenshot placeholder: Feature search dialog showing progress bar, grouping chips, and diagnostics/traces tabs.]_
 <!-- --8<-- [end:feature-search] -->
 
 ## Crafting feature queries
+
 <!-- --8<-- [start:crafting] -->
 When you compose Simfil expressions, it helps to start from the data that erdblick actually sees:
 
@@ -88,25 +87,28 @@ When you compose Simfil expressions, it helps to start from the data that erdbli
 For the full set of operators and syntax rules, refer to the Simfil language guide linked above.
 <!-- --8<-- [end:crafting] -->
 
+#### Understanding Feature Paths
+
+To effectively use auto-complete, it's helpful to understand how features are structured. Use the inspection panel's "Copy GeoJSON Path" functionality to explore the exact paths to specific elements in the inspection tree. This gives you insight into the data structure and helps you understand the path syntax.
+
 ## Autocompletion and Inline Diagnostics
 
 <!-- --8<-- [start:assist] -->
 The search dialog offers live assistance while you type so that you can refine expressions without repeatedly guessing and rerunning queries:
 
-- **Autocompletion** uses the search worker to inspect the tile dictionaries and offer context-aware path suggestions. Results appear next to the caret, show the candidate text plus a kind/hint, and disappear as soon as you click elsewhere.
+- **Autocompletion** uses the search worker to inspect the tile data and offer context-aware path suggestions. Results appear next to the caret, show the candidate text plus a kind/hint, and disappear as soon as you click elsewhere.
 - **Validation** happens before you execute a Simfil search. The parser diagnostics that appear beneath the “Search Loaded Features” entry help you fix obvious syntax issues before you run a long search.
+
+When you don't know the exact path to an attribute field:
+
+1. **Start with wildcards**: Type `**.` to filter any node in the feature structure.
+2. **Search by partial name**: `**.speed` might suggest `**.speedLimitKmh`.
+3. **Hint completions**: The auto-complete provides "hint" suggestions for wildcard queries, helping you discover available attributes without memorizing exact paths.
+4. **Efficient shortcuts**: The wildcard `**.speedLimitKmh` is a shortcut for the full path:
+   ```
+   properties.layer.LaneRulesLayer.SPEED_LIMIT_METRIC.attributeValue.speedLimitKmh
+   ```
 <!-- --8<-- [end:assist] -->
-
-## History, Focus, and Map Selection Behavior
-
-<!-- --8<-- [start:behavior] -->
-Once you have a few searches under your belt, erdblick keeps enough context to make repeated use convenient and predictable:
-
-- Search history entries live in `localStorage`. You can re-run them with a click or delete individual rows via the ✕ button.
-- When multiple maps expose the same feature type, erdblick opens a small map-selection dialog before it locates the feature.
-- All camera moves target the currently focused view. Press `Ctrl+Left/Right` to switch focus in split view before running a jump.
-- The palette closes when you click outside, except when the click lands on another UI component such as a checkbox or dropdown to avoid interrupting edits.
-<!-- --8<-- [end:behavior] -->
 
 ## Troubleshooting
 
