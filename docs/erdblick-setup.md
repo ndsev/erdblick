@@ -66,6 +66,7 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
   - `styles`: array of `{ "id": "...", "url": "styles/<file>.yaml" }`.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
+  - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
 
