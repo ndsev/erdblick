@@ -2,8 +2,6 @@
 
 This guide collects the fixes and workarounds that previously lived in scattered README sections. Use it when the UI appears empty, runs slowly, or needs a hard reset.
 
-_[Screenshot placeholder: Statistics dialog highlighting tile counters.]_
-
 ## Nothing Renders
 
 When the map stays blank or appears to render nothing at all, work through these checks in order:

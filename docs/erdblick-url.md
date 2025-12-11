@@ -2,8 +2,6 @@
 
 Erdblick encodes the full UI state inside the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
 
-_[Screenshot placeholder: Browser address bar with a long erdblick URL highlighted.]_
-
 ## What Gets Stored in the URL?
 
 - Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.

@@ -177,7 +177,7 @@ Consider this example of a road speed heatmap, which demonstrates two common per
 
 2. It uses wildcards (`**`) which require expanding and checking multiple possible paths in the data structure. This is particularly inefficient when combined with `first-of` since each wildcard expansion needs to happen for every filter check until a match occurs.
 
-![Average speed heatmap visualization](average_speed_heatmap.png){width=800}
+![Average speed heatmap visualization](average_speed_heatmap.png)
 
 Here's how an inefficient style config may look like:
 
