@@ -870,7 +870,7 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!query) {
             this.completion.visible = false;
             this.completionItems = [];
-            this.searchService.currentCompletionGroup = null;
+            this.searchService.clearCurrentCompletion();
             return;
         }
 

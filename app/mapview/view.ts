@@ -617,7 +617,7 @@ export class MapView {
         )
 
         this.subscriptions.push(
-            this.featureSearchService.resultChanged.subscribe(_ => {
+            this.featureSearchService.progress.subscribe(_ => {
                 this.renderFeatureSearchResultTree(this.zoomLevel.getValue());
             })
         );

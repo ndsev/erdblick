@@ -28,6 +28,29 @@ mapget serve -w ~/tmp/erdblick-dist
 
 Open the printed localhost URL, then configure your mapget backend (via its YAML config or management API) so `/sources` advertises the maps you need. Products such as MapViewer already ship with a prebuilt erdblick bundle under `/app/erdblick`, so those users can skip the build step entirely.
 
+## Integration Tests
+
+Browser-based integration tests are implemented with Playwright and assume that the Emscripten build
+has completed successfully (so the WASM core and `static/browser` bundle are available).
+
+To run them locally:
+
+```bash
+./ci/10_linux_build.bash             # build core + UI
+npm install                          # install dev dependencies (incl. Playwright)
+npx playwright install --with-deps   # install Playwright browsers (once)
+pip install mapget                   # install the latest mapget package
+./ci/run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
+```
+
+The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
+ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path). 
+The default integration setup uses the Python example datasource from the vendored `mapget` repo
+(`build/_deps/mapget-src/examples/python/datasource.py`) via a `DataSourceProcess` entry in
+`test/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
+`mapget` Python package is missing), `/sources` may be empty and datasource-dependent tests will be
+reported as skipped while generic backend and debug-tile tests still run.
+
 ## Styling System
 
 - Styles live in `config/styles/*.yaml` and can be edited inside the UI.

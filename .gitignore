@@ -14,3 +14,5 @@ out-tsc
 config/config.json
 dist
 coverage
+test-results
+playwright/.cache/*
