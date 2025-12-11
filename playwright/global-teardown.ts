@@ -2,6 +2,15 @@ import type { FullConfig } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
+/**
+ * Global Playwright teardown.
+ *
+ * Summarises V8 JavaScript and CSS coverage collected during the test run into
+ * `coverage/playwright/v8-coverage-summary.json` and shuts down the `mapget`
+ * process that was spawned in `global-setup.ts` using the pid stored in
+ * `playwright/.cache/global-state.json`.
+ */
+
 interface GlobalState {
     mapgetPid: number | null;
     baseURL: string;
@@ -57,8 +66,15 @@ interface Summary {
     combined: CoverageStats;
 }
 
+/**
+ * Loads a newline-delimited JSON (NDJSON) file where each line is a separate
+ * JSON object. Missing files are treated as empty input.
+ *
+ * @param filePath Path to the NDJSON file.
+ */
 function loadNdjson<T>(filePath: string): T[] {
     if (!fs.existsSync(filePath)) {
+        // No coverage file for this kind; treat as empty.
         return [];
     }
 
@@ -70,6 +86,13 @@ function loadNdjson<T>(filePath: string): T[] {
         .map((line) => JSON.parse(line) as T);
 }
 
+/**
+ * Aggregates V8 JavaScript coverage entries into total / used byte counts and
+ * per-script statistics. Coverage is tracked at the character level to obtain
+ * a simple byte-based approximation of usage.
+ *
+ * @param entries Raw V8 JS coverage entries emitted by Chromium.
+ */
 function computeJsStats(entries: V8JSCoverageEntry[]): {
     totalBytes: number;
     usedBytes: number;
@@ -81,12 +104,14 @@ function computeJsStats(entries: V8JSCoverageEntry[]): {
     const byScript: Record<string, CoverageStats> = {};
 
     for (const entry of entries) {
+        // Prefer the original source text when available.
         const source = (entry && (entry.source || entry.text)) || '';
         const len = source.length;
         if (!len) {
             continue;
         }
 
+        // Track per-character coverage information.
         const covered = new Uint8Array(len);
         const functions = Array.isArray(entry.functions) ? entry.functions : [];
 
@@ -95,6 +120,7 @@ function computeJsStats(entries: V8JSCoverageEntry[]): {
                 ? [...fn.ranges]
                 : [];
 
+            // Sort by range length so later ranges can overwrite earlier ones.
             ranges.sort((a, b) => {
                 const aStart = a.startOffset ?? a.start ?? 0;
                 const aEnd = a.endOffset ?? a.end ?? aStart;
@@ -110,6 +136,7 @@ function computeJsStats(entries: V8JSCoverageEntry[]): {
                     continue;
                 }
 
+                // Clamp coverage ranges to the source length.
                 const start = Math.max(
                     0,
                     Math.min(len, r.startOffset ?? r.start ?? 0)
@@ -126,6 +153,7 @@ function computeJsStats(entries: V8JSCoverageEntry[]): {
             }
         }
 
+        // Count characters that were executed at least once.
         let used = 0;
         for (let i = 0; i < len; i++) {
             if (covered[i]) {
@@ -165,12 +193,14 @@ function computeCssStats(entries: V8CSSCoverageEntry[]): {
     const byStylesheet: Record<string, CoverageStats> = {};
 
     for (const entry of entries) {
+        // CSS coverage only exposes `text` and ranges.
         const text = (entry && entry.text) || '';
         const len = text.length;
         if (!len) {
             continue;
         }
 
+        // Track per-character coverage information.
         const covered = new Uint8Array(len);
         const ranges = Array.isArray(entry.ranges) ? entry.ranges : [];
 
@@ -178,6 +208,7 @@ function computeCssStats(entries: V8CSSCoverageEntry[]): {
             if (!r) {
                 continue;
             }
+            // Clamp coverage ranges to the stylesheet length.
             const start = Math.max(
                 0,
                 Math.min(len, r.start ?? r.startOffset ?? 0)
@@ -219,6 +250,11 @@ function computeCssStats(entries: V8CSSCoverageEntry[]): {
     };
 }
 
+/**
+ * Reads previously appended V8 JS and CSS coverage NDJSON files from
+ * `coverage/playwright`, computes high-level statistics, and writes a compact
+ * JSON summary for inspection or CI reporting.
+ */
 function writeV8CoverageSummary(): void {
     const repoRoot = process.cwd();
     const covDir = path.join(repoRoot, 'coverage', 'playwright');
@@ -230,6 +266,7 @@ function writeV8CoverageSummary(): void {
         path.join(covDir, 'v8-css-coverage.ndjson')
     );
 
+    // If no coverage was collected at all, do not emit a summary.
     if (!jsEntries.length && !cssEntries.length) {
         return;
     }
@@ -251,6 +288,7 @@ function writeV8CoverageSummary(): void {
     };
 
     fs.mkdirSync(covDir, { recursive: true });
+    // Persist a compact summary that can be inspected by humans or CI.
     fs.writeFileSync(
         path.join(covDir, 'v8-coverage-summary.json'),
         JSON.stringify(summary, null, 2),
@@ -260,6 +298,8 @@ function writeV8CoverageSummary(): void {
 
 async function globalTeardown(config: FullConfig): Promise<void> {
     try {
+        // Coverage summary generation is best-effort; ignore failures so tests
+        // do not fail purely due to coverage post-processing.
         writeV8CoverageSummary();
     } catch {
         // ignore coverage summary failures
@@ -273,6 +313,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
         'global-state.json'
     );
 
+    // If there is no state file, there is no `mapget` process to terminate.
     if (!fs.existsSync(statePath)) {
         return;
     }
@@ -287,6 +328,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
 
     if (state && state.mapgetPid) {
         try {
+            // Best-effort termination of the `mapget` process started in setup.
             process.kill(state.mapgetPid);
         } catch {
             // ignore if already exited

@@ -61,10 +61,12 @@ jobs:
           $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
 
       - name: Upload Playwright test result artifact
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-result
+          name: playwright-results
           path: test-results
+          if-no-files-found: ignore
 
       - name: Upload Playwright coverage artifact
         uses: actions/upload-artifact@v4
