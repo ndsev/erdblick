@@ -1,105 +1,94 @@
-// This file allows us to use ESM-Style Imports in the
-// rest of the erdblick code. However, we instruct webpack to ignore
-// the cesium import. Instead, Cesium is provided via its
-// non-ESM distribution, because it has inline workers.
-// See: https://github.com/CesiumGS/cesium/pull/11519
-// In index.js, we have the Cesium.js import, so Cesium is
-// available as a global variable.
-
-import * as Cesium from "cesium";
+import {Cesium, CesiumType} from './cesium.prod';
 
 // Add aliases for any required types. Wherever the type
 // has a static function, such as Cartesian3.fromDegrees,
 // it must also be exported as a const.
-
-export type  Cartesian2 = Cesium.Cartesian2;
+export type  Cartesian2 = CesiumType.Cartesian2;
 export const Cartesian2 = Cesium.Cartesian2;
-export type  Cartesian3 = Cesium.Cartesian3;
+export type  Cartesian3 = CesiumType.Cartesian3;
 export const Cartesian3 = Cesium.Cartesian3;
-export type  Cartographic = Cesium.Cartographic;
+export type  Cartographic = CesiumType.Cartographic;
 export const Cartographic = Cesium.Cartographic;
-export type  Matrix3 = Cesium.Matrix3;
+export type  Matrix3 = CesiumType.Matrix3;
 export const Matrix3 = Cesium.Matrix3;
-export type  Color = Cesium.Color;
+export type  Color = CesiumType.Color;
 export const Color = Cesium.Color;
-export type GeometryInstance = Cesium.GeometryInstance;
+export type GeometryInstance = CesiumType.GeometryInstance;
 export const GeometryInstance = Cesium.GeometryInstance;
-export type PerInstanceColorAppearance = Cesium.PerInstanceColorAppearance;
+export type PerInstanceColorAppearance = CesiumType.PerInstanceColorAppearance;
 export const PerInstanceColorAppearance = Cesium.PerInstanceColorAppearance;
-export type Primitive = Cesium.Primitive;
+export type Primitive = CesiumType.Primitive;
 export const Primitive = Cesium.Primitive;
-export type RectangleGeometry = Cesium.RectangleGeometry;
+export type RectangleGeometry = CesiumType.RectangleGeometry;
 export const RectangleGeometry = Cesium.RectangleGeometry;
-export type RectangleOutlineGeometry = Cesium.RectangleOutlineGeometry;
+export type RectangleOutlineGeometry = CesiumType.RectangleOutlineGeometry;
 export const RectangleOutlineGeometry = Cesium.RectangleOutlineGeometry;
-export type  ColorGeometryInstanceAttribute = Cesium.ColorGeometryInstanceAttribute;
+export type  ColorGeometryInstanceAttribute = CesiumType.ColorGeometryInstanceAttribute;
 export const ColorGeometryInstanceAttribute = Cesium.ColorGeometryInstanceAttribute;
-export type  ImageryLayer = Cesium.ImageryLayer;
+export type  ImageryLayer = CesiumType.ImageryLayer;
 export const ImageryLayer = Cesium.ImageryLayer;
-export type  ScreenSpaceEventHandler = Cesium.ScreenSpaceEventHandler;
+export type  ScreenSpaceEventHandler = CesiumType.ScreenSpaceEventHandler;
 export const ScreenSpaceEventHandler = Cesium.ScreenSpaceEventHandler;
-export type  ScreenSpaceEventType = Cesium.ScreenSpaceEventType;
+export type  ScreenSpaceEventType = CesiumType.ScreenSpaceEventType;
 export const ScreenSpaceEventType = Cesium.ScreenSpaceEventType;
-export type  UrlTemplateImageryProvider = Cesium.UrlTemplateImageryProvider;
+export type  UrlTemplateImageryProvider = CesiumType.UrlTemplateImageryProvider;
 export const UrlTemplateImageryProvider = Cesium.UrlTemplateImageryProvider;
-export type  Rectangle = Cesium.Rectangle;
+export type  Rectangle = CesiumType.Rectangle;
 export const Rectangle = Cesium.Rectangle;
-export type  HeightReference = Cesium.HeightReference;
+export type  HeightReference = CesiumType.HeightReference;
 export const HeightReference = Cesium.HeightReference;
-export type  LabelStyle = Cesium.LabelStyle;
+export type  LabelStyle = CesiumType.LabelStyle;
 export const LabelStyle = Cesium.LabelStyle;
-export type  VerticalOrigin = Cesium.VerticalOrigin;
+export type  VerticalOrigin = CesiumType.VerticalOrigin;
 export const VerticalOrigin = Cesium.VerticalOrigin;
-export type  HorizontalOrigin = Cesium.HorizontalOrigin;
+export type  HorizontalOrigin = CesiumType.HorizontalOrigin;
 export const HorizontalOrigin = Cesium.HorizontalOrigin;
-export type  DistanceDisplayCondition = Cesium.DistanceDisplayCondition;
+export type  DistanceDisplayCondition = CesiumType.DistanceDisplayCondition;
 export const DistanceDisplayCondition = Cesium.DistanceDisplayCondition;
-export type  CallbackProperty = Cesium.CallbackProperty;
+export type  CallbackProperty = CesiumType.CallbackProperty;
 export const CallbackProperty = Cesium.CallbackProperty;
-export type  Viewer = Cesium.Viewer;
+export type  Viewer = CesiumType.Viewer;
 export const Viewer = Cesium.Viewer;
-export type  PrimitiveCollection = Cesium.PrimitiveCollection;
+export type  PrimitiveCollection = CesiumType.PrimitiveCollection;
 export const PrimitiveCollection = Cesium.PrimitiveCollection;
-export type  PointPrimitiveCollection = Cesium.PointPrimitiveCollection;
+export type  PointPrimitiveCollection = CesiumType.PointPrimitiveCollection;
 export const PointPrimitiveCollection = Cesium.PointPrimitiveCollection;
-export type  LabelCollection = Cesium.LabelCollection;
+export type  LabelCollection = CesiumType.LabelCollection;
 export const LabelCollection = Cesium.LabelCollection;
-export type  BillboardCollection = Cesium.BillboardCollection;
+export type  BillboardCollection = CesiumType.BillboardCollection;
 export const BillboardCollection = Cesium.BillboardCollection;
-export type  Billboard = Cesium.Billboard;
+export type  Billboard = CesiumType.Billboard;
 export const Billboard = Cesium.Billboard;
 export const defined = Cesium.defined;
-export type  PinBuilder = Cesium.PinBuilder;
-export type  Entity = Cesium.Entity;
+export type  PinBuilder = CesiumType.PinBuilder;
+export type  Entity = CesiumType.Entity;
 export const Entity = Cesium.Entity;
-export type  EntityConstructorOptions = Cesium.Entity.ConstructorOptions;
-export type  Camera = Cesium.Camera;
+export type  EntityConstructorOptions = CesiumType.Entity.ConstructorOptions;
+export type  Camera = CesiumType.Camera;
 export const Camera = Cesium.Camera;
-export type  Scene = Cesium.Scene;
+export type  Scene = CesiumType.Scene;
 export const Scene = Cesium.Scene;
-export type HeadingPitchRange = Cesium.HeadingPitchRange;
+export type HeadingPitchRange = CesiumType.HeadingPitchRange;
 export const HeadingPitchRange = Cesium.HeadingPitchRange;
-export type BoundingSphere = Cesium.BoundingSphere;
+export type BoundingSphere = CesiumType.BoundingSphere;
 export const BoundingSphere = Cesium.BoundingSphere;
-export type SceneMode = Cesium.SceneMode;
+export type SceneMode = CesiumType.SceneMode;
 export const SceneMode = Cesium.SceneMode;
-export type  WebMercatorProjection = Cesium.WebMercatorProjection;
+export type  WebMercatorProjection = CesiumType.WebMercatorProjection;
 export const WebMercatorProjection = Cesium.WebMercatorProjection;
-export type  GeographicProjection = Cesium.GeographicProjection;
+export type  GeographicProjection = CesiumType.GeographicProjection;
 export const GeographicProjection = Cesium.GeographicProjection;
-export type  Ellipsoid = Cesium.Ellipsoid;
+export type  Ellipsoid = CesiumType.Ellipsoid;
 export const Ellipsoid = Cesium.Ellipsoid;
-export type PerspectiveFrustum = Cesium.PerspectiveFrustum;
+export type PerspectiveFrustum = CesiumType.PerspectiveFrustum;
 export const PerspectiveFrustum = Cesium.PerspectiveFrustum;
-export type KeyboardEventModifier = Cesium.KeyboardEventModifier;
+export type KeyboardEventModifier = CesiumType.KeyboardEventModifier;
 export const KeyboardEventModifier = Cesium.KeyboardEventModifier;
 export const EasingFunction = Cesium.EasingFunction;
-export type ColorMaterialProperty = Cesium.ColorMaterialProperty;
+export type ColorMaterialProperty = CesiumType.ColorMaterialProperty;
 export const ColorMaterialProperty = Cesium.ColorMaterialProperty;
-export type JulianDate = Cesium.JulianDate;
+export type JulianDate = CesiumType.JulianDate;
 export const JulianDate = Cesium.JulianDate;
 
-
-// Math is a namespace.
-
+// `Math` is a namespace.
 export const CesiumMath = Cesium.Math;

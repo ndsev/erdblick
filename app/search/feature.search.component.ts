@@ -22,12 +22,12 @@ import {Scroller} from "primeng/scroller";
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
                     <p-progressBar [value]="percentDone">
-                        <ng-template pTemplate="content" let-percentDone>
-                            <span>{{ searchService.doneTiles }} / {{ searchService.totalTiles }} tiles</span>
+                        <ng-template pTemplate="content">
+                            <span>{{ doneTiles }} / {{ totalTiles }} tiles</span>
                         </ng-template>
                     </p-progressBar>
                 </div>
-                <p-button (click)="pauseSearch()"
+                <p-button (click)="toggleSearchPaused()"
                           [icon]="isSearchPaused ? 'pi pi-play-circle' : 'pi pi-pause-circle'"
                           label=""
                           [disabled]="!canPauseStopSearch" tooltipPosition="bottom"
@@ -152,6 +152,8 @@ export class FeatureSearchComponent {
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
     percentDone: number = 0;
+    totalTiles: number = 0;
+    doneTiles: number = 0;
     isSearchPaused: boolean = false;
     canPauseStopSearch: boolean = false;
     results: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
@@ -181,19 +183,21 @@ export class FeatureSearchComponent {
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
                 private infoMessageService: InfoMessageService) {
-        this.searchService.isFeatureSearchActive.subscribe(isActive => {
-            this.isPanelVisible = true;
-            if (isActive) {
+        this.searchService.progress.subscribe(searchState => {
+            if (!searchState) {
                 this.resultsTree = [];
-                this.showFilter = false;
-                this.resultsStatus = "Loading...";
-                this.canPauseStopSearch = isActive;
+                return;
             }
-        });
-        this.searchService.progress.subscribe(value => {
-            this.percentDone = value;
-            if (value >= 100) {
+            this.isPanelVisible = true;
+            this.percentDone = searchState.percentDone();
+            this.totalTiles = searchState.getTaskCount();
+            this.doneTiles = searchState.getCompletedCount();
+            if (searchState.isComplete()) {
                 this.searchResultReady();
+                this.canPauseStopSearch = false;
+            } else {
+                this.resultsStatus = "Loading...";
+                this.canPauseStopSearch = true;
             }
         });
         this.searchService.diagnosticsMessages.subscribe(value => {
@@ -238,19 +242,18 @@ export class FeatureSearchComponent {
         }
     }
 
-    pauseSearch() {
-        if (this.canPauseStopSearch) {
-            if (this.isSearchPaused && this.searchService.currentSearchGroup) {
-                const query = this.searchService.currentSearchGroup?.query;
-                console.log(`Resuming query '${query}'`);
-                this.isSearchPaused = false;
-                this.searchService.run(query, true);
-            } else {
-                this.searchService.pause();
-                this.results = this.searchService.searchResults;
-                this.recalculateResultsByGroups();
-                this.isSearchPaused = true;
-            }
+    toggleSearchPaused() {
+        if (!this.canPauseStopSearch) {
+            return;
+        }
+        if (this.isSearchPaused) {
+            this.searchService.resume();
+            this.isSearchPaused = false;
+        } else {
+            this.searchService.pause();
+            this.results = this.searchService.searchResults;
+            this.recalculateResultsByGroups();
+            this.isSearchPaused = true;
         }
     }
 
@@ -273,7 +276,6 @@ export class FeatureSearchComponent {
     onHide(_: any) {
         this.traces = [];
         this.diagnostics = [];
-        this.percentDone = 0;
         this.isSearchPaused = false;
         this.canPauseStopSearch = false;
         this.results = [];

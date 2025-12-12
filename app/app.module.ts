@@ -13,7 +13,6 @@ import {BadgeModule} from "primeng/badge";
 import {TreeModule} from "primeng/tree";
 import {MessageModule} from "primeng/message";
 import {AccordionModule} from "primeng/accordion";
-import {OverlayPanelModule} from "primeng/overlaypanel";
 import {DividerModule} from "primeng/divider";
 import {PanelMenuModule} from "primeng/panelmenu";
 import {TreeTableModule} from "primeng/treetable";
@@ -21,11 +20,10 @@ import {ToastModule} from "primeng/toast";
 import {MessageService} from "primeng/api";
 import {InputNumberModule} from "primeng/inputnumber";
 import {FieldsetModule} from "primeng/fieldset";
-import {AlertDialogComponent, InfoMessageService} from "./shared/info.service";
+import {InfoMessageService} from "./shared/info.service";
 import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
 import {MapDataService} from "./mapdata/map.service";
-import {InputSwitchModule} from "primeng/inputswitch";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
@@ -61,17 +59,9 @@ import {TabsModule} from "primeng/tabs";
 import {OnEnterClickDirective} from "./shared/keyboard.service";
 import {SelectModule} from 'primeng/select';
 import {AutoCompleteModule} from 'primeng/autocomplete';
-import {
-    ArrayTypeComponent,
-    DatasourcesComponent,
-    MultiSchemaTypeComponent,
-    ObjectTypeComponent
-} from "./auxiliaries/datasources.component";
+import {DatasourcesComponent} from "./auxiliaries/datasources.component";
 import {EditorService} from "./shared/editor.service";
-import {FormlyFieldConfig, FormlyModule} from "@ngx-formly/core";
 import {ReactiveFormsModule} from '@angular/forms';
-import {FormlyPrimeNGModule} from "@ngx-formly/primeng";
-
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
@@ -99,6 +89,7 @@ import {InspectionContainerComponent} from "./inspection/inspection.container.co
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
+import {SurveyComponent} from "./auxiliaries/survey.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -117,51 +108,6 @@ export const ErdblickTheme = definePreset(Aura, {
         }
     }
 });
-
-
-export function minItemsValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should NOT have fewer than ${field.props?.['minItems']} items`;
-}
-
-export function maxItemsValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should NOT have more than ${field.props?.['maxItems']} items`;
-}
-
-export function minLengthValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should NOT be shorter than ${field.props?.minLength} characters`;
-}
-
-export function maxLengthValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should NOT be longer than ${field.props?.maxLength} characters`;
-}
-
-export function minValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be >= ${field.props?.min}`;
-}
-
-export function maxValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be <= ${field.props?.max}`;
-}
-
-export function multipleOfValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be multiple of ${field.props?.step}`;
-}
-
-export function exclusiveMinimumValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be > ${field.props?.step}`;
-}
-
-export function exclusiveMaximumValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be < ${field.props?.step}`;
-}
-
-export function constValidationMessage(error: any, field: FormlyFieldConfig) {
-    return `should be equal to constant "${field.props?.['const']}"`;
-}
-
-export function typeValidationMessage({ schemaType }: any) {
-    return `should be "${schemaType[0]}".`;
-}
 
 export const initializeServices = () => {
     const styleService = inject(StyleService);
@@ -188,12 +134,8 @@ export const initializeServices = () => {
         EditorComponent,
         CoordinatesPanelComponent,
         FeatureSearchComponent,
-        AlertDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
-        ArrayTypeComponent,
-        ObjectTypeComponent,
-        MultiSchemaTypeComponent,
         HighlightSearch,
         HighlightRegion,
         TreeTableFilterPatchDirective,
@@ -205,35 +147,13 @@ export const initializeServices = () => {
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,
-        InspectionTreeComponent
+        InspectionTreeComponent,
+        SurveyComponent
     ],
     bootstrap: [
         AppComponent
     ],
     imports: [
-        FormlyModule.forRoot({
-            validationMessages: [
-                {name: 'required', message: 'This field is required'},
-                {name: 'type', message: typeValidationMessage},
-                {name: 'minLength', message: minLengthValidationMessage},
-                {name: 'maxLength', message: maxLengthValidationMessage},
-                {name: 'min', message: minValidationMessage},
-                {name: 'max', message: maxValidationMessage},
-                {name: 'multipleOf', message: multipleOfValidationMessage},
-                {name: 'exclusiveMinimum', message: exclusiveMinimumValidationMessage},
-                {name: 'exclusiveMaximum', message: exclusiveMaximumValidationMessage},
-                {name: 'minItems', message: minItemsValidationMessage},
-                {name: 'maxItems', message: maxItemsValidationMessage},
-                {name: 'uniqueItems', message: 'should NOT have duplicate items'},
-                {name: 'const', message: constValidationMessage},
-                {name: 'enum', message: `must be equal to one of the allowed values`},
-            ],
-            types: [
-                {name: 'array', component: ArrayTypeComponent},
-                {name: 'object', component: ObjectTypeComponent},
-                {name: 'multischema', component: MultiSchemaTypeComponent}
-            ],
-        }),
         BrowserModule,
         BrowserAnimationsModule,
         AnimateOnScroll,
@@ -245,7 +165,6 @@ export const initializeServices = () => {
         BadgeModule,
         TreeModule,
         AccordionModule,
-        OverlayPanelModule,
         DividerModule,
         TabsModule,
         PanelMenuModule,
@@ -253,7 +172,6 @@ export const initializeServices = () => {
         ToastModule,
         InputNumberModule,
         FieldsetModule,
-        InputSwitchModule,
         SliderModule,
         FileUploadModule,
         CheckboxModule,
@@ -272,7 +190,6 @@ export const initializeServices = () => {
         SelectModule,
         AutoCompleteModule,
         ReactiveFormsModule,
-        FormlyPrimeNGModule,
         ProgressBarModule,
         ButtonModule,
         TooltipModule,

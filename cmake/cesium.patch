@@ -1,3 +1,4 @@
+diff --git a/extern/draco/src/draco/io/file_utils.h b/extern/draco/src/draco/io/file_utils.h
 index c928fdf..cf6a63b 100644
 --- a/extern/draco/src/draco/io/file_utils.h
 +++ b/extern/draco/src/draco/io/file_utils.h

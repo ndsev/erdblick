@@ -1,0 +1,19 @@
+# Integration config for mapget when running erdblick Playwright tests.
+#
+# This file is loaded by the Playwright global setup via:
+#   mapget --config test/mapget-integration.yaml serve ...
+#
+# The `sources` list can be extended with deterministic test datasources
+# (e.g. additional DataSourceProcess entries) without changing the
+# Playwright harness.
+
+sources:
+  # Python example datasource from the vendored mapget repo.
+  # This assumes that a `python` executable is available and that the
+  # `mapget` Python package can be imported (for example via
+  # `pip install mapget` in the active environment). If the script cannot
+  # be started, mapget will log an error and simply expose no sources; the
+  # Playwright tests that depend on this datasource will detect its absence
+  # from `/sources` and skip.
+  - type: DataSourceProcess
+    cmd: python test/datasource.py

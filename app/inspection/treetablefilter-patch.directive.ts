@@ -20,37 +20,34 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
     constructor(private tt: TreeTable) {}
 
     ngAfterContentInit() {
-        this.tt.findFilteredNodes = (node: TreeTableNode<any>, paramsWithoutNode: any): boolean => {
+        this.tt.findFilteredNodes = (node: TreeTableNode, paramsWithoutNode: any): true | undefined => {
             console.assert(paramsWithoutNode.isStrictMode);
-            if (node) {
-                let matched = false;
-                if (node.children) {
-                    const children = node.children.map(node => { return { ...node }; });
-                    node.children = [];
+            if (!node || !node.children) {
+                return;
+            }
 
-                    let hadMatchingLeaf = false;
-                    for (const childNode of children) {
-                        if (this.tt.isFilterMatched(childNode, paramsWithoutNode)) {
-                            matched = true;
-                            hadMatchingLeaf = hadMatchingLeaf || this.tt.isNodeLeaf(childNode);
+            let matched = false;
+            const children = node.children.map(node => { return { ...node }; });
+            node.children = [];
 
-                            node.children.push(childNode);
-                        }
-                    }
+            let hadMatchingLeaf = false;
+            for (const childNode of children) {
+                if (this.tt.isFilterMatched(childNode, paramsWithoutNode)) {
+                    matched = true;
+                    hadMatchingLeaf = hadMatchingLeaf || this.tt.isNodeLeaf(childNode);
 
-                    // If we had a matching leaf node, add all leaf nodes.
-                    // Since we are in strict mode, if no child matched, add all
-                    if (hadMatchingLeaf || !matched) {
-                        node.children = children;
-                    }
-                }
-
-                if (matched) {
-                    node.expanded = true;
-                    return true;
+                    node.children.push(childNode);
                 }
             }
-            return false;
+
+            // If we had a matching leaf node, add all leaf nodes.
+            // Since we are in strict mode, if no child matched, add all
+            if (hadMatchingLeaf || !matched) {
+                node.children = children;
+            }
+
+            node.expanded = matched;
+            return matched ? matched : undefined;
         }
     }
 }

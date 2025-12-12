@@ -193,7 +193,7 @@ describe('StyleState', () => {
         expect(v.get(k('Bavaria/Island6/Lane', 'NY0X', 'showLaneGroups'))).toEqual(['1', '0']);
     });
 
-    it('throws on serialization if a value has fewer entries than views', () => {
+    it('omits options with fewer entries than views', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane'];
         createLayerAndViewStates(pool, layers, 2);
@@ -202,7 +202,9 @@ describe('StyleState', () => {
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
         styles.next(new Map([[k, [true]]]));
 
-        expect(() => styles.serialize(true)).toThrowError(/Expected length: 2/);
+        const encoded = styles.serialize(true)!;
+        // Underfilled values are skipped; no params produced for this style/option
+        expect(Object.keys(encoded).length).toBe(0);
     });
 
     it('slices extra per-view values beyond the current number of views', () => {

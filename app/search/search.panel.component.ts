@@ -9,7 +9,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {debounceTime, distinctUntilChanged, map, of, skip, startWith, Subject, switchMap, timer} from "rxjs";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {FeatureSearchService} from "./feature.search.service";
-import getCaretCoordinates from "textarea-caret";
+import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
 
@@ -870,7 +870,7 @@ export class SearchPanelComponent implements AfterViewInit {
         if (!query) {
             this.completion.visible = false;
             this.completionItems = [];
-            this.searchService.currentCompletionGroup = null;
+            this.searchService.clearCurrentCompletion();
             return;
         }
 
