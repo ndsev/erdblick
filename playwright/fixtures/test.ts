@@ -1,6 +1,7 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { TEST_LAYER_NAME, TEST_MAP_NAME } from '../utils/test-params';
 
 /**
  * Shared Playwright fixtures used across end-to-end tests.
@@ -72,71 +73,77 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
  *   the results into NDJSON files once each test completes.
  */
 export const test = base.extend({
-    page: async ({ page }, use, testInfo) => {
-        // Mock /locate responses for deterministic integration tests.
-        // The backend Python datasource does not currently implement
-        // a locate() handler, so mapget would otherwise return an
-        // empty response. For UI flows that depend on /locate
-        // (inspection panels, jump targets), we synthesize responses
-        // that point to a stable TestMap/WayLayer tile key.
-        await page.route('**/locate', async (route) => {
-            const request = route.request();
-            if (request.method() !== 'POST') {
-                // Non-POST requests are passed through unchanged.
-                await route.continue();
-                return;
-            }
+    page: async ({ page }, use) => {
+        const backendBinary = process.env["MAPGET_BIN"];
+        const usingMapviewerBinary = !!backendBinary && ['mapviewer', 'mapviewer.exe'].includes(path.basename(backendBinary).toLowerCase());
+        const shouldMockLocate = !usingMapviewerBinary;
 
-            let body: any;
-            try {
-                body = request.postDataJSON();
-            } catch {
-                // If the body is not JSON, leave the request untouched.
-                await route.continue();
-                return;
-            }
+        if (shouldMockLocate) {
+            // Mock /locate responses for deterministic integration tests.
+            // The backend Python datasource does not currently implement
+            // a locate() handler, so mapget would otherwise return an
+            // empty response. For UI flows that depend on /locate
+            // (inspection panels, jump targets), we synthesize responses
+            // that point to a stable TestMap/WayLayer tile key.
+            await page.route('**/locate', async (route) => {
+                const request = route.request();
+                if (request.method() !== 'POST') {
+                    // Non-POST requests are passed through unchanged.
+                    await route.continue();
+                    return;
+                }
 
-            // Expect shape { requests: [{ mapId, typeId, featureId: [...] }, ...] }.
-            const requests = Array.isArray(body?.requests) ? body.requests : null;
-            if (!requests || requests.length === 0) {
-                // No locate requests to satisfy; fall back to default handling.
-                await route.continue();
-                return;
-            }
+                let body: any;
+                try {
+                    body = request.postDataJSON();
+                } catch {
+                    // If the body is not JSON, leave the request untouched.
+                    await route.continue();
+                    return;
+                }
 
-            // Only handle "feature locate" requests that carry a flat featureId array.
-            if (!Array.isArray(requests[0]?.featureId)) {
-                await route.continue();
-                return;
-            }
+                // Expect shape { requests: [{ mapId, typeId, featureId: [...] }, ...] }.
+                const requests = Array.isArray(body?.requests) ? body.requests : null;
+                if (!requests || requests.length === 0) {
+                    // No locate requests to satisfy; fall back to default handling.
+                    await route.continue();
+                    return;
+                }
 
-            const responses = requests.map((req: any) => {
-                const mapId = typeof req.mapId === 'string' ? req.mapId : 'TestMap';
-                const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
-                const featureId = Array.isArray(req.featureId) ? req.featureId : [];
+                // Only handle "feature locate" requests that carry a flat featureId array.
+                if (!Array.isArray(requests[0]?.featureId)) {
+                    await route.continue();
+                    return;
+                }
 
-                // Use a fixed tile id for all located features. The Python
-                // datasource generates the same synthetic grid of roads in
-                // every tile, so any tile id is acceptable as long as the
-                // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
-                const numericTileId = 1;
-                const hexTileId = numericTileId.toString(16);
-                const tileKey = `Features:${mapId}:WayLayer:${hexTileId}`;
+                const responses = requests.map((req: any) => {
+                    const mapId = typeof req.mapId === 'string' ? req.mapId : TEST_MAP_NAME;
+                    const typeId = typeof req.typeId === 'string' ? req.typeId : 'Way';
+                    const featureId = Array.isArray(req.featureId) ? req.featureId : [];
 
-                // Each locate request yields a single synthetic location result.
-                return [{
-                    tileId: tileKey,
-                    typeId,
-                    featureId
-                }];
+                    // Use a fixed tile id for all located features. The Python
+                    // datasource generates the same synthetic grid of roads in
+                    // every tile, so any tile id is acceptable as long as the
+                    // key matches coreLib.getTileFeatureLayerKey(mapId, layerId, tileId).
+                    const numericTileId = 1;
+                    const hexTileId = numericTileId.toString(16);
+                    const tileKey = `Features:${mapId}:${TEST_LAYER_NAME}:${hexTileId}`;
+
+                    // Each locate request yields a single synthetic location result.
+                    return [{
+                        tileId: tileKey,
+                        typeId,
+                        featureId
+                    }];
+                });
+
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ responses })
+                });
             });
-
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({ responses })
-            });
-        });
+        }
 
         const browser = page.context().browser();
         const browserName = browser?.browserType().name();

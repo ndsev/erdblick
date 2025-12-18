@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
+import { TEST_LAYER_NAME, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
 import {
     enableMapLayer,
     navigateToArea,
@@ -21,8 +22,8 @@ test.describe('Snapshot – inspection panel', () => {
         await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await enableMapLayer(page, TEST_MAP_NAME, TEST_LAYER_NAME);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         await runFeatureSearch(page, '**.name');
         await clickSearchResultLeaf(page, 0);

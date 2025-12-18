@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
+import { TEST_LAYER_NAME, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
 import {
     clickSearchResultLeaf,
     enableMapLayer,
@@ -23,8 +24,8 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await enableMapLayer(page, TEST_MAP_NAME, TEST_LAYER_NAME);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         // Run a feature search and select the first result.
         await runFeatureSearch(page, '**.name');
@@ -39,11 +40,11 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
 
         // Validate that the inspected feature belongs to TestMap / WayLayer.
         const mapIdRow = treeBody.locator('tr', {
-            hasText: 'TestMap'
+            hasText: TEST_MAP_NAME
         }).first();
         await expect(mapIdRow).toHaveCount(1);
         const layerIdRow = treeBody.locator('tr', {
-            hasText: 'WayLayer'
+            hasText: TEST_LAYER_NAME
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 

@@ -1,6 +1,7 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
-import { enableMapLayer, navigateToArea, navigateToRoot } from '../utils/ui-helpers';
+import { TEST_LAYER_NAME, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
+import {enableMapLayer, navigateToArea, navigateToRoot} from '../utils/ui-helpers';
 
 /**
  * Integration tests for the Python example datasource.
@@ -21,14 +22,14 @@ test.describe('Python example datasource integration', () => {
         page.on('request', (req) => {
             if (req.url().endsWith('/tiles') && req.method() === 'POST') {
                 const body = req.postData();
-                if (body && body.includes('"mapId":"TestMap"')) {
+                if (body && body.includes(`\"mapId\":\"${TEST_MAP_NAME}\"`)) {
                     tileRequests.push(req.url());
                 }
             }
         });
 
-        await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.65, 10);
+        await enableMapLayer(page, TEST_MAP_NAME, TEST_LAYER_NAME);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         // Eventually the UI should have issued at least one TestMap tile request.
         await expect.poll(() => tileRequests.length, {

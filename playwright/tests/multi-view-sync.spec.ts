@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/test';
+import { TEST_MAP_LAYER_DATA_ID, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
 import {
     navigateToArea,
     setupTwoViewsWithPositionSync
@@ -19,8 +20,8 @@ test.describe('Multi-view synchronisation', () => {
         const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
         const leftTab = dialog.getByTestId('map-tab-0');
         const rightTab = dialog.getByTestId('map-tab-1');
-        const leftLayerNode = leftTab.locator('[data-id="TestMap/WayLayer"]').first();
-        const rightLayerNode = rightTab.locator('[data-id="TestMap/WayLayer"]').first();
+        const leftLayerNode = leftTab.locator(`[data-id="${TEST_MAP_LAYER_DATA_ID}"]`).first();
+        const rightLayerNode = rightTab.locator(`[data-id="${TEST_MAP_LAYER_DATA_ID}"]`).first();
         await expect(leftLayerNode).toBeVisible();
         await expect(rightLayerNode).toBeVisible();
 
@@ -32,7 +33,7 @@ test.describe('Multi-view synchronisation', () => {
         const secondViewCanvas = page.getByTestId('mapViewContainer-1').locator('canvas').first();
         await expect(secondViewCanvas).toBeVisible();
 
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         const rightUiControls = page.getByTestId('view-ui-container-1');
         await expect(rightUiControls).toBeVisible();
@@ -49,7 +50,7 @@ test.describe('Multi-view synchronisation', () => {
         await expect(projectionToggle).toBeVisible();
         await projectionToggle.click();
 
-        const projectionSelect = rightUiControls.getByTestId('scene-mode-toggle');
+        const projectionSelect = rightUiControls.locator('.p-selectbutton').first();
         await projectionSelect.getByText('2D').first().click();
 
         // Both UIs should now show the same projection mode.
@@ -67,11 +68,11 @@ test.describe('Multi-view synchronisation', () => {
 
         const leftLayerCheckbox = leftLayerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
         await expect(leftLayerCheckbox).toBeChecked();
-        // Turning off the left TestMap layer should also disable it on the right.
+        // Turning off the left map layer should also disable it on the right.
         await leftLayerCheckbox.click();
 
-        const leftMapNode = leftTab.locator('[data-id="TestMap"]').first();
-        const rightMapNode = rightTab.locator('[data-id="TestMap"]').first();
+        const leftMapNode = leftTab.locator(`[data-id="${TEST_MAP_NAME}"]`).first();
+        const rightMapNode = rightTab.locator(`[data-id="${TEST_MAP_NAME}"]`).first();
         await expect.poll(async () => {
             const left = await leftMapNode.isChecked();
             const right = await rightMapNode.isChecked();

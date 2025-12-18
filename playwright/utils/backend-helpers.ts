@@ -1,5 +1,6 @@
 import type {APIRequestContext} from '@playwright/test';
 import {expect} from '../fixtures/test';
+import { TEST_LAYER_NAME, TEST_MAP_NAME } from './test-params';
 
 /**
  * Helper utilities for talking to the `mapget` backend directly via the
@@ -25,6 +26,36 @@ export async function getSources(request: APIRequestContext): Promise<any[]> {
     return Array.isArray(body) ? body : [];
 }
 
+function hasLayerEntry(source: any, layerId: string): boolean {
+    if (!source || !source.layers) {
+        return false;
+    }
+    const layers = source.layers as any;
+    if (typeof layers === 'object' && layers !== null) {
+        if (layers[layerId]) {
+            return true;
+        }
+        try {
+            return Object.values(layers).some((layer: any) => layer && layer.layerId === layerId);
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
+/**
+ * Asserts that a source entry for the requested map/layer exists in `/sources`
+ * and returns it.
+ */
+export async function requireMapSource(request: APIRequestContext, mapId: string, layerId: string): Promise<any | null> {
+    const sources = await getSources(request);
+    const found =
+        sources.find((s: any) => s && s.mapId === mapId && hasLayerEntry(s, layerId)) ?? null;
+    expect(found, `Expected /sources to contain ${mapId}/${layerId}`).toBeTruthy();
+    return found;
+}
+
 /**
  * Looks up the synthetic `TestMap` sources entry in `/sources` output and
  * returns it, or `null` when it cannot be found.
@@ -33,9 +64,5 @@ export async function getSources(request: APIRequestContext): Promise<any[]> {
  * environments before interacting with the UI.
  */
 export async function requireTestMapSource(request: APIRequestContext): Promise<any | null> {
-    const sources = await getSources(request);
-    // Locate the synthetic Python example datasource entry.
-    return sources.find(
-        (s: any) => s && s.mapId === 'TestMap' && s.layers && s.layers.WayLayer
-    );
+    return requireMapSource(request, TEST_MAP_NAME, TEST_LAYER_NAME);
 }

@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/test';
+import { TEST_VIEW_POSITION } from '../utils/test-params';
 import {
     navigateToArea,
     setupTwoViewsWithPositionSync
@@ -15,7 +16,7 @@ import {
 test.describe('Snapshot – multi-view sync layout', () => {
     test('two views with position sync enabled', async ({ page, request }) => {
         await setupTwoViewsWithPositionSync(page, request);
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         // The map view container should present both synchronised views.
         const mapContainer = page.getByTestId('mapview-container');
