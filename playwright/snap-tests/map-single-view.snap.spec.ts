@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import { requireTestMapSource } from '../utils/backend-helpers';
+import { TEST_LAYER_NAME, TEST_MAP_NAME, TEST_VIEW_POSITION } from '../utils/test-params';
 import { enableMapLayer, navigateToArea, navigateToRoot } from '../utils/ui-helpers';
 
 /**
@@ -15,8 +16,8 @@ test.describe('Snapshot – single map view', () => {
         await requireTestMapSource(request);
 
         await navigateToRoot(page);
-        await enableMapLayer(page, 'TestMap', 'WayLayer');
-        await navigateToArea(page, 42.5, 11.615, 13);
+        await enableMapLayer(page, TEST_MAP_NAME, TEST_LAYER_NAME);
+        await navigateToArea(page, ...TEST_VIEW_POSITION);
 
         // Capture the rendered single-view map container for comparison.
         const mapContainer = page.getByTestId('mapViewContainer-0');

@@ -1,7 +1,8 @@
-import type {APIRequestContext, Page} from '@playwright/test';
+import type {APIRequestContext, Locator, Page} from '@playwright/test';
 import { expect } from '@playwright/test';
 import {test} from '../fixtures/test';
-import {requireTestMapSource} from './backend-helpers';
+import {requireMapSource} from './backend-helpers';
+import { TEST_LAYER_NAME, TEST_MAP_NAME } from './test-params';
 
 /**
  * High-level UI helpers for driving the Angular app in Playwright tests.
@@ -15,6 +16,8 @@ export async function navigateToRoot(page: Page): Promise<void> {
     // Disable OSM by default to make visual assertions more stable.
     await page.goto('/?osm=0');
     await waitForAppReady(page);
+    await disableUiAnimations(page);
+    await dismissSurveyIfPresent(page);
 }
 
 export async function waitForAppReady(page: Page): Promise<void> {
@@ -23,6 +26,88 @@ export async function waitForAppReady(page: Page): Promise<void> {
         state: 'hidden',
         timeout: 30000
     });
+}
+
+export async function disableUiAnimations(page: Page): Promise<void> {
+    await page.addStyleTag({
+        content: `
+            *,
+            *::before,
+            *::after {
+                transition: none !important;
+                animation: none !important;
+                caret-color: transparent !important;
+            }
+        `
+    });
+}
+
+export async function dismissSurveyIfPresent(page: Page): Promise<void> {
+    const survey = page.locator('#survey').first();
+    if (await survey.count() === 0) {
+        return;
+    }
+
+    // The banner is time-based (config.json start/end). Dismiss it when present so
+    // snapshots remain stable across dates.
+    const closeButton = survey.locator('.material-symbols-outlined', { hasText: 'close' }).first();
+    try {
+        if (await closeButton.isVisible({ timeout: 500 })) {
+            await closeButton.click({ timeout: 500 });
+        }
+    } catch {
+        // Ignore flakiness if the banner disappears mid-test.
+    }
+}
+
+export async function revealPrefButtons(page: Page): Promise<void> {
+    const layersButton = page.locator('.layers-button').first();
+    await expect(layersButton).toBeVisible();
+    await layersButton.hover();
+
+    const prefButtons = page.locator('.pref-buttons-container').first();
+    await expect(prefButtons).toBeVisible();
+}
+
+export async function clickPrefButton(page: Page, label: string): Promise<void> {
+    await revealPrefButtons(page);
+    const button = page.locator('.pref-buttons-container .pref-button-subcontainer', { hasText: label }).first();
+    await expect(button).toBeVisible();
+    await button.click();
+}
+
+export async function openPreferencesDialog(page: Page): Promise<Locator> {
+    await clickPrefButton(page, 'Preferences');
+    const dialog = page.locator('.pref-dialog').filter({ hasText: 'Max Tiles to Load:' }).first();
+    await expect(dialog).toBeVisible();
+    return dialog;
+}
+
+export async function openStylesDialog(page: Page): Promise<Locator> {
+    await clickPrefButton(page, 'Styles');
+    const dialog = page.locator('.styles-dialog').first();
+    await expect(dialog).toBeVisible();
+    return dialog;
+}
+
+export async function openDatasourcesDialog(page: Page): Promise<Locator> {
+    await clickPrefButton(page, 'Datasources');
+    const dialog = page.locator('.datasource-dialog').first();
+    await expect(dialog).toBeVisible();
+    return dialog;
+}
+
+export async function openSearchPalette(page: Page, query: string): Promise<Locator> {
+    const searchInput = page.locator('textarea[placeholder="Search"]').first();
+    await expect(searchInput).toBeVisible();
+    await searchInput.click();
+    await searchInput.fill(query);
+
+    const searchMenuContainer = page.locator('.resizable-container').filter({
+        has: page.locator('.search-menu-dialog')
+    }).first();
+    await expect(searchMenuContainer).toBeVisible();
+    return searchMenuContainer;
 }
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
@@ -141,17 +226,22 @@ export async function clickSearchResultLeaf(page: Page, index: number): Promise<
 }
 
 /**
- * Prepares a two-view layout with the `TestMap/WayLayer` enabled and position
- * synchronisation toggled on.
+ * Prepares a two-view layout with the requested map layer enabled and
+ * position synchronisation toggled on.
  *
  * This encapsulates the relatively verbose UI sequence into a single call so
  * multi-view tests stay readable.
  */
-export async function setupTwoViewsWithPositionSync(page: Page, request: APIRequestContext): Promise<void> {
-    await requireTestMapSource(request);
+export async function setupTwoViewsWithPositionSync(
+    page: Page,
+    request: APIRequestContext,
+    mapLabel: string = TEST_MAP_NAME,
+    layerLabel: string = TEST_LAYER_NAME
+): Promise<void> {
+    await requireMapSource(request, mapLabel, layerLabel);
 
     await navigateToRoot(page);
-    await enableMapLayer(page, 'TestMap', 'WayLayer');
+    await enableMapLayer(page, mapLabel, layerLabel);
 
     await addComparisonView(page);
 
