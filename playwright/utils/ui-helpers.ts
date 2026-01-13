@@ -61,7 +61,7 @@ export async function dismissSurveyIfPresent(page: Page): Promise<void> {
 }
 
 export async function revealPrefButtons(page: Page): Promise<void> {
-    const layersButton = page.locator('.layers-button').first();
+    const layersButton = page.locator('.layers-button').first().locator('button').first();
     await expect(layersButton).toBeVisible();
     await layersButton.hover();
 
@@ -78,21 +78,21 @@ export async function clickPrefButton(page: Page, label: string): Promise<void> 
 
 export async function openPreferencesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Preferences');
-    const dialog = page.locator('.pref-dialog').filter({ hasText: 'Max Tiles to Load:' }).first();
+    const dialog = page.locator('.pref-dialog').first().locator('.p-dialog').first();
     await expect(dialog).toBeVisible();
     return dialog;
 }
 
 export async function openStylesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Styles');
-    const dialog = page.locator('.styles-dialog').first();
+    const dialog = page.locator('.styles-dialog').first().locator('.p-dialog').first();
     await expect(dialog).toBeVisible();
     return dialog;
 }
 
 export async function openDatasourcesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Datasources');
-    const dialog = page.locator('.datasource-dialog').first();
+    const dialog = page.locator('div').filter({ hasText: /^DataSource Configuration Editor$/ }).first();
     await expect(dialog).toBeVisible();
     return dialog;
 }

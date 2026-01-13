@@ -906,12 +906,64 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    private seedNewViewState(viewIndex: number, sourceViewIndex: number): void {
+        const camState = this.cameraViewDataState.getValue(sourceViewIndex);
+        this.cameraViewDataState.next(viewIndex, {
+            destination: {...camState.destination},
+            orientation: {...camState.orientation}
+        });
+
+        this.mode2dState.next(viewIndex, this.mode2dState.getValue(sourceViewIndex));
+        this.osmEnabledState.next(viewIndex, this.osmEnabledState.getValue(sourceViewIndex));
+        this.osmOpacityState.next(viewIndex, this.osmOpacityState.getValue(sourceViewIndex));
+        this.layerSyncOptionsState.next(viewIndex, this.layerSyncOptionsState.getValue(sourceViewIndex));
+
+        this.layerVisibilityState.next(viewIndex, [...this.layerVisibilityState.getValue(sourceViewIndex)]);
+        this.layerTileBordersState.next(viewIndex, [...this.layerTileBordersState.getValue(sourceViewIndex)]);
+        this.layerZoomLevelState.next(viewIndex, [...this.layerZoomLevelState.getValue(sourceViewIndex)]);
+
+        this.seedNewViewStyleOptionValues(viewIndex, sourceViewIndex);
+    }
+
+    private seedNewViewStyleOptionValues(viewIndex: number, sourceViewIndex: number): void {
+        const current = this.stylesState.getValue();
+        if (!current.size) {
+            return;
+        }
+
+        let changed = false;
+        const next = new Map<string, (string|number|boolean)[]>();
+        for (const [key, values] of current.entries()) {
+            const arr = Array.isArray(values) ? [...values] : [];
+            if (arr.length <= viewIndex && sourceViewIndex < arr.length) {
+                const sourceValue = arr[sourceViewIndex];
+                while (arr.length <= viewIndex) {
+                    arr.push(sourceValue);
+                }
+                changed = true;
+            }
+            next.set(key, arr);
+        }
+
+        if (changed) {
+            this.stylesState.next(next);
+        }
+    }
+
     // -----------------
     // Public API below
     // -----------------
 
     get numViews() {return this.numViewsState.getValue();}
-    set numViews(val: number) {this.numViewsState.next(val);};
+    set numViews(val: number) {
+        const previous = this.numViewsState.getValue();
+        if (val > previous && this.isReady && !this.isHydrating) {
+            for (let viewIndex = previous; viewIndex < val; viewIndex++) {
+                this.seedNewViewState(viewIndex, 0);
+            }
+        }
+        this.numViewsState.next(val);
+    };
     get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
     set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
