@@ -283,10 +283,14 @@ export class MapLayerTree {
         let defaultVisibility = true;
         for (const mapOrGroupItem of this.nodes) {
             for (const featureLayer of mapOrGroupItem.allFeatureLayers()) {
+                const defaultLevel = featureLayer.info.zoomLevels.length
+                    ? featureLayer.info.zoomLevels[0]
+                    : undefined;
                 featureLayer.viewConfig = this.stateService.mapLayerConfig(
                     featureLayer.mapId,
                     featureLayer.info.layerId,
-                    defaultVisibility);
+                    defaultVisibility,
+                    defaultLevel);
                 for (const option of featureLayer.children) {
                     option.value = this.stateService.styleOptionValues(
                         featureLayer.mapId,
