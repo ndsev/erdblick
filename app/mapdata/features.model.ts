@@ -22,7 +22,7 @@ export class FeatureTile {
     disposed: boolean;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
-    static statTileSize = "tile-size-kb";
+    static statTileSize = "mapget-tile-size-kb";
     static statParseTime = "parse-time-ms";
 
     /**
