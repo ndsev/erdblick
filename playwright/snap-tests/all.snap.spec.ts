@@ -14,8 +14,7 @@ import {
     openSearchPalette,
     openStylesDialog,
     revealPrefButtons,
-    runFeatureSearch,
-    setupTwoViewsWithPositionSync
+    runFeatureSearch
 } from '../utils/ui-helpers';
 
 async function prepareTestMapView(page: Page, request: APIRequestContext): Promise<void> {
@@ -42,6 +41,7 @@ test.describe('Snapshot – all', () => {
         await openLayerDialog(page);
         const dialog = page.locator('.map-layer-dialog').locator('.p-dialog-content');
         await expect(dialog).toBeVisible();
+        await dialog.click();
         await expect(dialog).toHaveScreenshot('maps-and-layers.png', {
             maxDiffPixelRatio: 0.01
         });
@@ -60,9 +60,9 @@ test.describe('Snapshot – all', () => {
 
         await runFeatureSearch(page, '**.name');
         const featureSearch = page.locator('.feature-search-dialog').first();
-        const featureSearchContent = featureSearch.locator('.p-dialog-content').first();
-        await expect(featureSearchContent).toBeVisible();
-        await expect(featureSearchContent).toHaveScreenshot('search-in-progress.png', {
+        const featureSearchDialog = featureSearch.locator('.p-dialog').first();
+        await expect(featureSearchDialog).toBeVisible();
+        await expect(featureSearchDialog).toHaveScreenshot('search-in-progress.png', {
             maxDiffPixelRatio: 0.01
         });
 
@@ -86,6 +86,10 @@ test.describe('Snapshot – all', () => {
         await expect(pinIcon).toBeVisible();
         await pinIcon.click();
         await clickSearchResultLeaf(page, 1);
+        const featureSearchHeader = featureSearchDialog.locator('.p-dialog-header').first();
+        await expect(featureSearchHeader).toBeVisible();
+        const closeButtonHeader = featureSearchHeader.locator('button').first();
+        await closeButtonHeader.click();
         await expect(inspectionContainer).toBeVisible();
         await expect(inspectionContainer.locator('.inspect-panel')).toHaveCount(2);
         await expect(inspectionContainer).toHaveScreenshot('feature-inspection-multi.png', {
@@ -98,7 +102,7 @@ test.describe('Snapshot – all', () => {
         });
 
         const stylesDialog = await openStylesDialog(page);
-        await expect(stylesDialog).toHaveScreenshot('style-controls.png', {
+        await expect(stylesDialog).toHaveScreenshot('style-dialog.png', {
             maxDiffPixelRatio: 0.01
         });
         const editStyleButton = stylesDialog.locator('.tree-node-controls > p-button:nth-child(2)').first();
