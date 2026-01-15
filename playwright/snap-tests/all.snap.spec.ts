@@ -91,10 +91,15 @@ test.describe('Snapshot – all', () => {
         const closeButtonHeader = featureSearchHeader.locator('button').first();
         await closeButtonHeader.click();
         await expect(inspectionContainer).toBeVisible();
-        await expect(inspectionContainer.locator('.inspect-panel')).toHaveCount(2);
+        const inspectPanels = inspectionContainer.locator('.inspect-panel');
+        await expect(inspectPanels).toHaveCount(2);
         await expect(inspectionContainer).toHaveScreenshot('feature-inspection-multi.png', {
             maxDiffPixelRatio: 0.01
         });
+        const secondAccordionHeader = inspectPanels.locator('nth=1').locator('.p-button-danger').first();
+        await secondAccordionHeader.click();
+        const firstAccordionHeader = inspectPanels.locator('nth=0').locator('.p-button-danger').first();
+        await firstAccordionHeader.click();
 
         const datasourceDialog = await openDatasourcesDialog(page);
         await expect(datasourceDialog).toHaveScreenshot('datasource-editor.png', {
@@ -107,6 +112,10 @@ test.describe('Snapshot – all', () => {
         });
         const editStyleButton = stylesDialog.locator('.tree-node-controls > p-button:nth-child(2)').first();
         await editStyleButton.click();
+        const stylesHeader = stylesDialog.locator('.p-dialog-header').first();
+        await expect(stylesHeader).toBeVisible();
+        const closeButtonStyles = stylesHeader.locator('button').first();
+        await closeButtonStyles.click();
         const editorDialog = page.locator('div').filter({ hasText: /^Style Editor$/ }).first();
         await expect(editorDialog).toBeVisible();
         await expect(editorDialog).toHaveScreenshot('style-controls.png', {
@@ -118,10 +127,14 @@ test.describe('Snapshot – all', () => {
         await expect(mapContainerTwoViews).toBeVisible();
         const syncGroup = page.locator('.viewsync-select').first();
         await expect(syncGroup).toBeVisible();
+        await expect(syncGroup).toHaveScreenshot('view-sync-controls.png', {
+            maxDiffPixelRatio: 0.01
+        });
         const positionToggle = syncGroup.locator('.material-symbols-outlined', {
             hasText: 'location_on'
         }).first();
         await expect(positionToggle).toBeVisible();
+        await positionToggle.click();
         const mapContainerSync = page.locator('mapview-container').first();
         await expect(mapContainerSync).toBeVisible();
         await expect(mapContainerSync).toHaveScreenshot('map-multiview-sync.png', {
