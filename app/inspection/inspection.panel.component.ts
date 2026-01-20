@@ -18,12 +18,14 @@ interface SourceLayerMenuItem {
                 <p-accordion-header>
                     <div class="inspector-title">
                         <span>
-                            @if (panel().sourceData !== undefined) {
+                            @if (panel().sourceData === undefined && panel().features.length > 0) {
+                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
+                                               (mousedown)="$event.stopPropagation()"
+                                               (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
+                                </p-colorpicker>
+                            } @else {
                                 <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
                                           (mousedown)="$event.stopPropagation()"/>
-                            } @else {
-                                <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()"
-                                               (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)"/>
                             }
                             <span class="title" [pTooltip]="title" tooltipPosition="bottom">
                                 {{ title }}
@@ -39,19 +41,11 @@ interface SourceLayerMenuItem {
                         </span>
                         <span>
                             <p-button icon="" (click)="undock($event)" (mousedown)="$event.stopPropagation()">
-                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">eject</span>
+                                <span class="material-symbols-outlined"
+                                      style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>
-                            <p-button icon="" (click)="togglePinnedState($event)"
-                                      [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
-                                      (mousedown)="$event.stopPropagation()">
-                                @if (panel().pinned) {
-                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep</span>
-                                } @else {
-                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
-                                }
-                            </p-button>
-                            <p-button icon="pi pi-times" styleClass="p-button-danger"
-                                      (click)="unsetPanel()" (mousedown)="$event.stopPropagation()"/>
+                            <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"
+                                      (mousedown)="$event.stopPropagation()"/>
                         </span>
                     </div>
                 </p-accordion-header>
@@ -206,11 +200,6 @@ export class InspectionPanelComponent implements AfterViewInit {
     onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
-    }
-
-    togglePinnedState(event: MouseEvent) {
-        event.stopPropagation();
-        this.stateService.setInspectionPanelPinnedState(this.panel().id, !this.panel().pinned);
     }
 
     unsetPanel() {

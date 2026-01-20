@@ -1,5 +1,5 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
-import {Subscription} from "rxjs";
+import {map, Subscription, timer} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
@@ -23,7 +23,16 @@ import {environment} from "../environments/environment";
                 </a>
             </ng-template>
             <ng-template #end>
-                Clickable VERSION
+                <div style="display: flex; flex-direction: row; gap: 0.25em">
+                    <span class="material-symbols-outlined">
+                        {{ loader_icon$ | async }}
+                    </span>
+                    <span class="material-symbols-outlined" style="color: var(--p-button-danger-background)">
+                        warning
+                    </span>
+                    <div>Clickable COPYRIGHT</div>
+                    <div>Clickable VERSION</div>
+                </div>
             </ng-template>
         </p-menubar>
         <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
@@ -250,6 +259,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
+    readonly loader_icons = ["", "clock_loader_10", "clock_loader_20", "clock_loader_40", "clock_loader_60", "clock_loader_80", "clock_loader_90"];
+
+    readonly loader_icon$ = timer(0, 500).pipe(
+        map(i => this.loader_icons.length ? this.loader_icons[i % this.loader_icons.length] : '')
+    );
+
 
     controlsDialogVisible = false;
     stylesDialogVisible = false;
@@ -318,6 +333,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
         }));
+
     }
 
     ngOnInit() {

@@ -155,7 +155,7 @@ export const initializeServices = () => {
         InspectionContainerComponent,
         InspectionTreeComponent,
         DockableLayoutComponent,
-        InspectionPanelDialogComponent
+        InspectionPanelDialogComponent,
         SurveyComponent
     ],
     bootstrap: [

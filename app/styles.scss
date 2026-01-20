@@ -103,8 +103,9 @@ mapview-container {
   left: 0;
   z-index: 9000 !important;
   width: 100%;
+  height: 2em;
 
-  .p-menubar {
+  .p-menubar-root-list {
     padding: 0 0 0 15em;
     border-top-left-radius: 0;
     border-top-right-radius: 0;

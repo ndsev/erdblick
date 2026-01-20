@@ -1,4 +1,4 @@
-import {Component, ViewChild} from "@angular/core";
+import {Component, HostListener, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
@@ -19,15 +19,16 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
     selector: 'style-panel',
     template: `
         <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
-                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles>
-            <ng-container *ngIf="styleService.styleGroups | async as styleGroups">
-                <div *ngIf="!styleService.builtinStylesCount && !styleService.importedStylesCount">
-                    No styles loaded.
-                </div>
-                <div class="styles-container">
-                    <p-tree [value]="styleGroups">
-                        <!-- Group Node Template -->
-                        <ng-template let-node pTemplate="Group">
+                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false">
+            @if (styleService.styleGroups | async; as styleGroups) {
+                <ng-container>
+                    @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
+                        <div>No styles loaded.</div>
+                    }
+                    <div class="styles-container">
+                        <p-tree [value]="styleGroups">
+                            <!-- Group Node Template -->
+                            <ng-template let-node pTemplate="Group">
                             <span>
                                 <p-checkbox [ngModel]="node.visible"
                                             (click)="$event.stopPropagation()"
@@ -37,16 +38,16 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                                             [name]="node.id" tabindex="0"/>
                                 <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                             </span>
-                        </ng-template>
-                        <!-- Style Node Template -->
-                        <ng-template let-node pTemplate="Style">
-                            <div class="flex-container">
-                                <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
+                            </ng-template>
+                            <!-- Style Node Template -->
+                            <ng-template let-node pTemplate="Style">
+                                <div class="flex-container">
+                                    <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
                                     <span onEnterClick class="material-symbols-outlined menu-toggler"
                                           (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
                                         more_vert
                                     </span>
-                                    <span>
+                                        <span>
                                         <p-checkbox [(ngModel)]="node.visible"
                                                     (click)="$event.stopPropagation()"
                                                     (ngModelChange)="applyStyleConfig(node.id)"
@@ -56,48 +57,54 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                                         <label [for]="node.id"
                                                style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
                                     </span>
+                                    </div>
+                                    <div class="tree-node-controls">
+                                        @if (node.imported) {
+                                            <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                      icon="pi pi-trash"
+                                                      label="" pTooltip="Remove style"
+                                                      tooltipPosition="bottom" tabindex="0">
+                                            </p-button>
+                                        } @else {
+                                            <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                      icon="pi pi-refresh"
+                                                      label="" pTooltip="Reload style from storage"
+                                                      tooltipPosition="bottom" tabindex="0">
+                                            </p-button>
+                                        }
+                                        <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                  icon="pi pi-file-edit"
+                                                  label="" pTooltip="Edit style"
+                                                  tooltipPosition="bottom" tabindex="0">
+                                        </p-button>
+                                    </div>
                                 </div>
-                                <div class="tree-node-controls">
-                                    <p-button onEnterClick *ngIf="node.imported" (click)="removeStyle(node.id)"
-                                              icon="pi pi-trash"
-                                              label="" pTooltip="Remove style"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                    <p-button onEnterClick *ngIf="!node.imported" (click)="resetStyle(node.id)"
-                                              icon="pi pi-refresh"
-                                              label="" pTooltip="Reload style from storage"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                    <p-button onEnterClick (click)="showStyleEditor(node.id)"
-                                              icon="pi pi-file-edit"
-                                              label="" pTooltip="Edit style"
-                                              tooltipPosition="bottom" tabindex="0">
-                                    </p-button>
-                                </div>
-                            </div>
-                        </ng-template>
-                        <!-- Bool Node Template -->
-                        <ng-template let-node pTemplate="Bool">
-                            <div style="display: flex; align-items: center;">
+                            </ng-template>
+                            <!-- Bool Node Template -->
+                            <ng-template let-node pTemplate="Bool">
+                                <div style="display: flex; align-items: center;">
                                 <span style="font-style: oblique">
                                     <label [for]="node.styleId + '_' + node.id"
                                            style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
                                 </span>
-                            </div>
-                        </ng-template>
-                        <ng-template let-node pTemplate="String">
-                        </ng-template>
-                    </p-tree>
-                </div>
-            </ng-container>
-            <div *ngIf="styleService.erroredStyleIds.size" class="styles-container">
-                <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                     class="flex-container">
+                                </div>
+                            </ng-template>
+                            <ng-template let-node pTemplate="String">
+                            </ng-template>
+                        </p-tree>
+                    </div>
+                </ng-container>
+            }
+            @if (styleService.erroredStyleIds.size > 0) {
+                <div class="styles-container">
+                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                         class="flex-container">
                 <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
                     {{ message.key }}: {{ message.value }} (see console)
                 </span>
+                    </div>
                 </div>
-            </div>
+            }
             <div class="dialog-controls">
                 <p-button (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
                 <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
@@ -140,7 +147,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                               icon="pi pi-times"></p-button>
                     <div style="display: flex; flex-direction: column; align-content: center; justify-content: center; color: silver; width: 18em; font-size: 1em;">
                         <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
-                        <div>Press <span style="color: grey">Esc</span> to quit without saving</div>
+                        <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -152,20 +159,23 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
                 </div>
             </div>
         </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog appendTo="body">
-            <p>You have already edited the style data. Do you really want to discard the changes?</p>
+        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog [closeOnEscape]="false">
+            <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="discardStyleEdits()" label="Yes"></p-button>
-                <p-button (click)="warningDialog.close($event)" label="No"></p-button>
+                <p-button (click)="applyEditedStyle()" label="Save"></p-button>
+                <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
+                <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
         </p-dialog>
         <p-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
                   (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
-            <div class="updated-styles-container" *ngIf="getUpdatedModifiedStyleIds().length">
-                <p>The following styles were updated in the datasource while their modifications persist in local
-                    memory:</p>
-                <p-chip *ngFor="let styleId of getUpdatedModifiedStyleIds()" [label]="styleId"/>
-            </div>
+            @if (getUpdatedModifiedStyleIds().length > 0) {
+                <div class="updated-styles-container">
+                    <p>The following styles were updated in the datasource while their modifications persist in local
+                        memory:</p>
+                    <p-chip *ngFor="let styleId of getUpdatedModifiedStyleIds()" [label]="styleId"/>
+                </div>
+            }
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
             </div>
@@ -338,14 +348,14 @@ export class StyleComponent {
     }
 
     closeEditorDialog(event: any) {
+        event.stopPropagation();
+        if (this.sourceWasModified) {
+            this.warningDialogVisible = true;
+            return;
+        }
         if (this.editorDialog !== undefined) {
-            if (this.sourceWasModified) {
-                event.stopPropagation();
-                this.warningDialogVisible = true;
-            } else {
-                this.warningDialogVisible = false;
-                this.editorDialog.close(event);
-            }
+            this.warningDialogVisible = false;
+            this.editorDialog.close(event);
         }
         this.editedStyleSourceSubscription.unsubscribe();
         this.savedStyleSourceSubscription.unsubscribe();
@@ -353,7 +363,22 @@ export class StyleComponent {
 
     discardStyleEdits() {
         this.editorService.updateEditorState.next(false);
+        this.sourceWasModified = false;
         this.warningDialogVisible = false;
+    }
+
+    @HostListener('window:keydown', ['$event'])
+    onWindowKeydown(event: KeyboardEvent) {
+        if (event.key !== 'Escape' || !this.editorService.styleEditorVisible) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.warningDialogVisible) {
+            this.warningDialogVisible = false;
+            return;
+        }
+        this.closeEditorDialog(event);
     }
 
     openStyleHelp() {

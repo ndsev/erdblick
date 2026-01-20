@@ -43,9 +43,12 @@ import {Popover} from "primeng/popover";
                 }
             </p-buttonGroup>
         }
-        <p-contextMenu *ngIf="!appModeService.isVisualizationOnly && !isNarrow" [target]="viewer" [model]="menuItems"
-                       (onHide)="onContextMenuHide()" appendTo="body" />
-        <sourcedatadialog *ngIf="!appModeService.isVisualizationOnly"></sourcedatadialog>
+        @if (!appModeService.isVisualizationOnly && !isNarrow) {
+            <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" appendTo="body" />
+        }
+        @if (!appModeService.isVisualizationOnly) {
+            <sourcedatadialog></sourcedatadialog>
+        }
         @defer (when mapView) {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }

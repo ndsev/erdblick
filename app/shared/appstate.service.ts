@@ -734,60 +734,112 @@ export class AppStateService implements OnDestroy {
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
         const allPanels = this.selectionState.getValue();
+        const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
-        // If a panel index was passed, change the SourceData-selection in that panel.
-        if (id !== undefined) {
-            const panelIndex = allPanels.findIndex(panel => panel.id === id);
-            if (panelIndex !== -1) {
-                allPanels[panelIndex].sourceData = sourceDataSelection;
-                this.selectionState.next(allPanels);
-                return id;
-            }
-        }
-        // Filter out features which are already selected. If there are none left, we don't need to do anything.
+        const isClearSourceDataRequest =
+            originPanel !== undefined &&
+            sourceDataSelection === undefined &&
+            originPanel.sourceData !== undefined;
+
+        // Filter out features which are already selected. If there are none left, we don't need to do anything
+        // unless we are explicitly clearing a source data selection.
         if (featureSelection.length) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
-            if (!featureSelection.length) {
+            if (!featureSelection.length && !isClearSourceDataRequest) {
                 this._replaceUrl = true;
                 return;
             }
         }
-        const mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+
+        // Decide whether to reuse the origin panel or spawn a new one based on docking/pinning rules.
+        let targetPanelId: number | undefined = undefined;
+        let mustCreateNewPanel = forceNewPanel;
+        let newPanelUndocked = false;
+        const hasDockedPanel = allPanels.some(panel => !panel.undocked);
+        const hasUndockedPanel = allPanels.some(panel => panel.undocked);
+        const firstUndockedUnpinnedPanel = allPanels.find(panel => panel.undocked && !panel.pinned);
+
+        if (originPanel) {
+            if (isClearSourceDataRequest) {
+                targetPanelId = originPanel.id;
+            } else if (!originPanel.undocked) {
+                mustCreateNewPanel = true;
+            } else if (originPanel.pinned) {
+                mustCreateNewPanel = true;
+                newPanelUndocked = true;
+            } else {
+                targetPanelId = originPanel.id;
+            }
+        } else if (hasDockedPanel) {
+            mustCreateNewPanel = true;
+        } else if (!mustCreateNewPanel && firstUndockedUnpinnedPanel) {
+            targetPanelId = firstUndockedUnpinnedPanel.id;
+        } else if (hasUndockedPanel) {
+            mustCreateNewPanel = true;
+            newPanelUndocked = true;
+        }
+
+        if (originPanel && mustCreateNewPanel && originPanel.undocked) {
+            newPanelUndocked = true;
+        }
+
+        // If no origin-driven decision was made, fall back to existing pinning logic.
+        if (!mustCreateNewPanel && targetPanelId === undefined) {
+            mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+        }
+
+        if (!mustCreateNewPanel && targetPanelId === undefined) {
+            const firstUnpinnedPanel = allPanels.find(panel => !panel.pinned);
+            if (firstUnpinnedPanel) {
+                targetPanelId = firstUnpinnedPanel.id;
+            } else {
+                mustCreateNewPanel = true;
+            }
+        }
+
         if (mustCreateNewPanel) {
             if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
                 this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
                 this._replaceUrl = true;
                 return;
             }
-            id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
-                id: id,
+                id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
                 pinned: false,
                 size: this.defaultInspectionPanelSize,
-                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: false
+                color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
+                undocked: newPanelUndocked
             });
             this.selectionState.next(allPanels);
-            return id;
+            return newId;
         }
-        // Find the first unpinned panel and change the selection there.
-        for (let i = 0; i < allPanels.length; i++) {
-            if (allPanels[i].pinned) {
-                continue;
+
+        if (targetPanelId !== undefined) {
+            const panelIndex = allPanels.findIndex(panel => panel.id === targetPanelId);
+            if (panelIndex === -1) {
+                this._replaceUrl = true;
+                return;
             }
-            id = allPanels[i].id;
-            allPanels[i].features = featureSelection;
-            allPanels[i].sourceData = sourceDataSelection;
-            break;
+            if (sourceDataSelection !== undefined) {
+                allPanels[panelIndex].sourceData = sourceDataSelection;
+            } else {
+                if (featureSelection.length) {
+                    allPanels[panelIndex].features = featureSelection;
+                }
+                allPanels[panelIndex].sourceData = sourceDataSelection;
+            }
+            this.selectionState.next(allPanels);
+            return targetPanelId;
         }
-        this.selectionState.next(allPanels);
-        return id;
+
+        return;
     }
 
     setInspectionPanelSize(id: number, size: [number, number]) {
