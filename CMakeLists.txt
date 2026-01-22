@@ -26,7 +26,7 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "bce03a7b86acd439dec1241ca0fbe251734d651d"
+    GIT_TAG        "v2025.5.1"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
