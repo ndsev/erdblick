@@ -22,10 +22,11 @@ endif()
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
+# TODO: Use next official release of mapget
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "v2025.5.0"
+    GIT_TAG        "v2025.5.1"
     GIT_SHALLOW    ON)
   FetchContent_MakeAvailable(mapget)
 endif()
