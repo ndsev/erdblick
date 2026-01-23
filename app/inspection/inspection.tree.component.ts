@@ -1,4 +1,4 @@
-import {Component, ViewChild, input, OnDestroy, effect} from "@angular/core";
+import {ChangeDetectionStrategy, ChangeDetectorRef, Component, ViewChild, input, OnDestroy, effect, output} from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {TreeTable} from "primeng/treetable";
 import {toObservable} from "@angular/core/rxjs-interop";
@@ -29,6 +29,7 @@ export class FeatureFilterOptions {
 
 @Component({
     selector: 'inspection-tree',
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         <p-treeTable #tt scrollHeight="flex" filterMode="strict"
                      [value]="data"
@@ -49,8 +50,8 @@ export class FeatureFilterOptions {
                         }
                         <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
                                [(ngModel)]="filterString"
-                               (ngModelChange)="filterTree(filterString)"
-                               (input)="filterTree($any($event.target).value)"/>
+                               (ngModelChange)="onFilterInput($event)"
+                               (input)="onFilterInput($any($event.target).value)"/>
                         @if (filterString) {
                             <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
                         }
@@ -112,7 +113,8 @@ export class FeatureFilterOptions {
                                             <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
                                         </span>
                                     }
-                                    @if (rowData.hasOwnProperty("sourceDataReferences") && 
+                                    @if (enableSourceDataNavigation() &&
+                                         rowData.hasOwnProperty("sourceDataReferences") && 
                                          rowData["sourceDataReferences"].length > 0 &&
                                          $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
@@ -138,7 +140,8 @@ export class FeatureFilterOptions {
                                             <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
                                         </span>
                                     }
-                                    @if (rowData.hasOwnProperty("sourceDataReferences") &&
+                                    @if (enableSourceDataNavigation() &&
+                                         rowData.hasOwnProperty("sourceDataReferences") &&
                                          rowData["sourceDataReferences"].length > 0 &&
                                          $index === 0) {
                                         <p-buttonGroup class="source-data-ref-container">
@@ -221,8 +224,11 @@ export class InspectionTreeComponent implements OnDestroy {
     firstHighlightedItemIndex$ = toObservable(this.firstHighlightedItemIndex);
     subscriptions: Subscription[] = [];
     filterOptions = input<FeatureFilterOptions>();
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
     geoJson = input<string>();
     selectedFeatures = input<FeatureWrapper[]>();
+    enableSourceDataNavigation = input<boolean>(true);
 
     filterFields: string[] = [
         "key",
@@ -233,13 +239,18 @@ export class InspectionTreeComponent implements OnDestroy {
         autoHide: false
     };
     filterString = "";
+    private suppressFilterEmit = false;
+    private lastEmittedFilterText = "";
+    private frozen = false;
+    private destroyed = false;
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
     @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
     geoJsonMenuItems: MenuItem[] = [];
 
-    constructor(private clipboardService: ClipboardService,
+    constructor(private cdr: ChangeDetectorRef,
+                private clipboardService: ClipboardService,
                 public mapService: MapDataService,
                 private jumpService: JumpTargetService,
                 private stateService: AppStateService,
@@ -262,17 +273,52 @@ export class InspectionTreeComponent implements OnDestroy {
             this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
                 setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
             }));
+            this.cdr.markForCheck();
+        });
+        effect(() => {
+            const sharedFilter = this.filterText();
+            if (sharedFilter === undefined || sharedFilter === this.filterString) {
+                return;
+            }
+            this.suppressFilterEmit = true;
+            this.filterString = sharedFilter;
+            this.filterTree(sharedFilter);
+            this.lastEmittedFilterText = sharedFilter;
+            this.suppressFilterEmit = false;
+            this.cdr.markForCheck();
         });
     }
 
     ngOnDestroy() {
+        this.destroyed = true;
+        this.unfreeze();
         this.subscriptions.forEach(s => s.unsubscribe());
+    }
+
+    freeze(): void {
+        if (this.frozen || this.destroyed) {
+            return;
+        }
+        this.frozen = true;
+        this.cdr.detach();
+    }
+
+    unfreeze(): void {
+        if (!this.frozen) {
+            return;
+        }
+        this.frozen = false;
+        this.cdr.reattach();
+        if (!this.destroyed) {
+            this.cdr.detectChanges();
+        }
     }
 
     clearFilter() {
         this.filterString = "";
         this.table.filterGlobal("" , 'contains');
         this.data = this.treeData();
+        this.emitFilterChange("");
     }
 
     onKeydown(event: any) {
@@ -376,6 +422,9 @@ export class InspectionTreeComponent implements OnDestroy {
 
     showSourceData(event: Event, sourceDataRef: any) {
         event.stopPropagation();
+        if (!this.enableSourceDataNavigation()) {
+            return;
+        }
         try {
             this.stateService.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
@@ -480,6 +529,13 @@ export class InspectionTreeComponent implements OnDestroy {
         this.table.filterGlobal(query, "contains");
     }
 
+    onFilterInput(filterString: string) {
+        const nextValue = filterString ?? "";
+        this.filterString = nextValue;
+        this.filterTree(nextValue);
+        this.emitFilterChange(nextValue);
+    }
+
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
         nodes.forEach(node => {
             const isTopLevelNode = parent === null;
@@ -495,4 +551,12 @@ export class InspectionTreeComponent implements OnDestroy {
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
+
+    private emitFilterChange(filterString: string) {
+        if (this.suppressFilterEmit || this.lastEmittedFilterText === filterString) {
+            return;
+        }
+        this.lastEmittedFilterText = filterString;
+        this.filterTextChange.emit(filterString);
+    }
 }

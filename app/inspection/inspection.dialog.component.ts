@@ -1,16 +1,23 @@
-import {AfterViewInit, Component, ElementRef, Renderer2, ViewChild, effect, input} from "@angular/core";
+import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
+import {Dialog} from "primeng/dialog";
+import {Popover} from "primeng/popover";
 import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service";
+import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
+import {InspectionTreeComponent} from "./inspection.tree.component";
 
 @Component({
     selector: 'inspection-panel-dialog',
     template: `
-        <p-dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true">
+        <p-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
+                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()">
             @if (panel()) {
                 <ng-template #header>
-                    <div class="inspector-title">
+                    <div class="inspector-title" (pointerdown)="beginDrag()">
                         <span>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
@@ -48,6 +55,14 @@ import {coreLib} from "../integrations/wasm";
                                     }
                                 </p-button>
                             }
+                            @if (panel().sourceData === undefined && panel().features.length > 0) {
+                                <p-button icon="" (click)="openComparePopover($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="Compare" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                </p-button>
+                            }
                             <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"
                                       (mousedown)="$event.stopPropagation()"/>
                         </span>
@@ -71,20 +86,58 @@ import {coreLib} from "../integrations/wasm";
                 </ng-template>
             }
         </p-dialog>
+        <p-popover #comparePopover [baseZIndex]="30000">
+            <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
+                <div class="comparison-popover">
+                    <p-multiSelect [options]="compareOptions"
+                                   [(ngModel)]="selectedCompareIds"
+                                   (onPanelShow)="refreshCompareOptions()"
+                                   optionLabel="label"
+                                   optionValue="value"
+                                   [showClear]="true"
+                                   [selectionLimit]="3"
+                                   placeholder="Compare with..."
+                                   appendTo="body"
+                                   [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
+                    @if (selectedCompareIds.length > 0) {
+                        <div class="comparison-popover-actions">
+                            <p-button label="Apply" (click)="applyComparison($event)"/>
+                        </div>
+                    }
+                </div>
+            </div>
+        </p-popover>
     `,
     styles: [``],
     standalone: false
 })
-export class InspectionPanelDialogComponent {
+export class InspectionPanelDialogComponent implements OnDestroy {
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    dialogIndex = input.required<number>();
     title = "";
     errorMessage: string = "";
     layerMenuItems: { label: string, disabled: boolean, command: () => void }[] = [];
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
+    compareOptions: InspectionComparisonOption[] = [];
+    selectedCompareIds: number[] = [];
+
+    @ViewChild('dialog') dialog?: Dialog;
+    @ViewChild('comparePopover') comparePopover!: Popover;
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
+
+    private detachFocusListener?: () => void;
+    private detachHeaderDownListener?: () => void;
+    private detachDragMoveListener?: () => void;
+    private detachDragUpListener?: () => void;
+    private detachPointerUpListener?: () => void;
+    private dockElement?: HTMLElement;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
-                private renderer: Renderer2) {
+                private renderer: Renderer2,
+                private comparisonService: InspectionComparisonService,
+                private dialogStack: DialogStackService,
+                private dialogLayout: InspectionDialogLayoutService) {
         effect(() => {
             this.updateHeaderFor(this.panel());
         });
@@ -163,5 +216,199 @@ export class InspectionPanelDialogComponent {
     dock(event: MouseEvent) {
         event.stopPropagation();
         this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
+    }
+
+    openComparePopover(event: MouseEvent) {
+        event.stopPropagation();
+        this.refreshCompareOptions();
+        this.comparePopover.toggle(event);
+    }
+
+    refreshCompareOptions() {
+        this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
+        this.selectedCompareIds = this.selectedCompareIds.filter(id =>
+            this.compareOptions.some(option => option.value === id)
+        );
+    }
+
+    applyComparison(event: MouseEvent) {
+        event.stopPropagation();
+        if (!this.selectedCompareIds.length) {
+            return;
+        }
+        this.comparisonService.openComparison(this.panel().id, this.selectedCompareIds);
+        this.selectedCompareIds = [];
+        this.comparePopover.hide();
+    }
+
+    onDialogShow() {
+        this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
+        this.dialogStack.bringToFront(this.dialog);
+        this.bindDialogFocus();
+        this.bindDockDragCue();
+        this.applyInitialPosition();
+    }
+
+    onDialogDragEnd() {
+        this.endDrag();
+        if (this.shouldDock()) {
+            this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
+        }
+        this.storeDialogPosition();
+        this.clearDockCue();
+        this.dialogStack.bringToFront(this.dialog);
+    }
+
+    ngOnDestroy() {
+        this.endDrag();
+        this.detachFocusListener?.();
+        this.detachHeaderDownListener?.();
+        this.detachDragMoveListener?.();
+        this.detachDragUpListener?.();
+        this.clearDockCue();
+    }
+
+    beginDrag(): void {
+        this.inspectionTree?.freeze();
+        this.detachPointerUpListener?.();
+        this.detachPointerUpListener = this.renderer.listen('window', 'pointerup', () => {
+            this.endDrag();
+        });
+    }
+
+    endDrag(): void {
+        this.detachPointerUpListener?.();
+        this.detachPointerUpListener = undefined;
+        this.inspectionTree?.unfreeze();
+    }
+
+    private bindDialogFocus() {
+        if (!this.dialog?.container) {
+            return;
+        }
+        this.detachFocusListener?.();
+        const handler = () => this.dialogStack.bringToFront(this.dialog);
+        this.dialog.container.addEventListener('mousedown', handler, true);
+        this.detachFocusListener = () => {
+            this.dialog?.container?.removeEventListener('mousedown', handler, true);
+        };
+    }
+
+    private bindDockDragCue() {
+        if (!this.dialog?.container) {
+            return;
+        }
+        const header = this.dialog.container.querySelector('.p-dialog-header');
+        if (!header) {
+            return;
+        }
+        this.detachHeaderDownListener?.();
+        this.detachHeaderDownListener = this.renderer.listen(header, 'mousedown', () => {
+            this.detachDragMoveListener?.();
+            this.detachDragUpListener?.();
+            this.detachDragMoveListener = this.renderer.listen('window', 'mousemove', () => {
+                this.updateDockCue();
+            });
+            this.detachDragUpListener = this.renderer.listen('window', 'mouseup', () => {
+                this.clearDockCue();
+                this.detachDragMoveListener?.();
+                this.detachDragUpListener?.();
+                this.detachDragMoveListener = undefined;
+                this.detachDragUpListener = undefined;
+            });
+        });
+    }
+
+    private applyInitialPosition() {
+        if (!this.dialog?.container) {
+            return;
+        }
+        const index = this.dialogIndex();
+        const stored = this.dialogLayout.getPosition(index);
+        const rect = this.dialog.container.getBoundingClientRect();
+        const offsetPx = this.stateService.baseFontSize;
+        const offsetMultiplier = index + 1;
+        const left = stored?.left ?? rect.left + offsetPx * offsetMultiplier;
+        const top = stored?.top ?? rect.top + offsetPx * offsetMultiplier;
+        this.setDialogPosition(left, top);
+        if (!stored) {
+            this.dialogLayout.setPosition(index, {left, top});
+        }
+    }
+
+    private storeDialogPosition() {
+        if (!this.dialog?.container) {
+            return;
+        }
+        const index = this.dialogIndex();
+        const rect = this.dialog.container.getBoundingClientRect();
+        this.dialogLayout.setPosition(index, {left: rect.left, top: rect.top});
+    }
+
+    private setDialogPosition(left: number, top: number) {
+        if (!this.dialog?.container) {
+            return;
+        }
+        this.dialog.container.style.position = 'fixed';
+        this.dialog.container.style.left = `${Math.round(left)}px`;
+        this.dialog.container.style.top = `${Math.round(top)}px`;
+        this.dialog.container.style.margin = '0';
+    }
+
+    private shouldDock(): boolean {
+        if (!this.dialog?.container || !this.dockElement) {
+            return false;
+        }
+        const overlap = this.getDockOverlap();
+        if (!overlap) {
+            return false;
+        }
+        const threshold = this.stateService.baseFontSize * 2;
+        return overlap.width >= threshold && overlap.height > 0;
+    }
+
+    private updateDockCue() {
+        if (!this.dialog?.dragging) {
+            this.clearDockCue();
+            return;
+        }
+        if (this.shouldDock()) {
+            this.setDockCue(true);
+        } else {
+            this.setDockCue(false);
+        }
+    }
+
+    private getDockOverlap(): {width: number, height: number} | undefined {
+        if (!this.dialog?.container || !this.dockElement) {
+            return;
+        }
+        const dialogRect = this.dialog.container.getBoundingClientRect();
+        const dockRect = this.dockElement.getBoundingClientRect();
+        const left = Math.max(dialogRect.left, dockRect.left);
+        const right = Math.min(dialogRect.right, dockRect.right);
+        const top = Math.max(dialogRect.top, dockRect.top);
+        const bottom = Math.min(dialogRect.bottom, dockRect.bottom);
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+        if (!width || !height) {
+            return;
+        }
+        return {width, height};
+    }
+
+    private setDockCue(active: boolean) {
+        if (!this.dockElement) {
+            return;
+        }
+        if (active) {
+            this.renderer.addClass(this.dockElement, 'dock-drop-active');
+        } else {
+            this.renderer.removeClass(this.dockElement, 'dock-drop-active');
+        }
+    }
+
+    private clearDockCue() {
+        this.setDockCue(false);
     }
 }

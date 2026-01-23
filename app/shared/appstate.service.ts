@@ -16,7 +16,7 @@ export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
 export const VIEW_SYNC_LAYERS = "lay";
-export const MAX_NUM_SELECTIONS = 3;
+export const MAX_NUM_SELECTIONS = 25;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_HIGHLIGHT_COLORS = [
@@ -171,7 +171,7 @@ export class AppStateService implements OnDestroy {
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
                     features: [],
-                    pinned: pinState,
+                    pinned: pinState || !undocked,
                     size: size as [number, number],
                     color: color,
                     undocked: undocked
@@ -802,8 +802,8 @@ export class AppStateService implements OnDestroy {
         }
 
         if (mustCreateNewPanel) {
-            if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
+            if (allPanels.length >= MAX_NUM_SELECTIONS) {
+                this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an existing panel to add more.`);
                 this._replaceUrl = true;
                 return;
             }
@@ -812,7 +812,7 @@ export class AppStateService implements OnDestroy {
                 id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: false,
+                pinned: !newPanelUndocked,
                 size: this.defaultInspectionPanelSize,
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
                 undocked: newPanelUndocked
@@ -858,12 +858,6 @@ export class AppStateService implements OnDestroy {
         if (index === -1) {
             return;
         }
-        const maxPinned = MAX_NUM_SELECTIONS - 1;
-        if (isPinned && !this.isNumSelectionsUnlimited &&
-            allPanels.filter(panel => panel.pinned).length >= maxPinned) {
-            this.infoMessageService.showWarning(`To pin more than ${maxPinned} panels, enable unlimited selections in the settings.`);
-            return;
-        }
         allPanels[index].pinned = isPinned;
         this.selectionState.next(allPanels);
     }
@@ -875,6 +869,9 @@ export class AppStateService implements OnDestroy {
             return;
         }
         allPanels[index].undocked = undocked;
+        if (!undocked) {
+            allPanels[index].pinned = true;
+        }
         this.selectionState.next(allPanels);
     }
 

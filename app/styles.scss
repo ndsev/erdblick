@@ -102,8 +102,9 @@ mapview-container {
   top: 0;
   left: 0;
   z-index: 9000 !important;
-  width: 100%;
-  height: 2em;
+  width: calc(100% - 0.35em);
+  height: 2.25em;
+  margin: 0.15em;
 
   .p-menubar-root-list {
     padding: 0 0 0 15em;
@@ -879,6 +880,269 @@ map-view {
   }
 }
 
+.inspection-comparison-dialog {
+  .p-dialog {
+    min-height: 20em;
+    min-width: 25em;
+    width: 75vw;
+    overflow: hidden;
+    max-width: calc(100vw - 5em);
+    max-height: calc(100vh - 5em);
+  }
+
+  .p-dialog-header {
+    padding: 0.25em 0.25em 0 0.25em;
+  }
+
+  .p-dialog-content {
+    min-height: 30em;
+    min-width: 20em;
+    padding: 0.25em;
+
+    .filter-container {
+      display: flex;
+      align-content: center;
+      gap: 0.25em;
+      width: 100%;
+
+      .input-container {
+        width: 100%;
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+
+        .p-button {
+          width: 1.75em;
+          height: 1.75em;
+        }
+
+        .filter-input {
+          height: 1.75em;
+          width: 100%;
+          border-radius: 6px;
+          border: solid 1px var(--p-content-border-color);
+          direction: ltr;
+        }
+      }
+
+      button {
+        width: 1.75em;
+        height: 1.75em;
+      }
+    }
+
+    .resizable-container {
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+
+      .source-data-ref-container {
+        .p-buttongroup {
+          width: fit-content;
+        }
+
+        .p-button {
+          width: 1.2em;
+          height: 1em;
+          padding: 0.1em;
+          margin-top: 0.1em;
+          color: var(--p-primary-contrast-color);
+          background: var(--p-primary-500);
+          border: 1px solid var(--p-primary-500);
+        }
+
+        .p-button-label {
+          font-family: monospace;
+          font-weight: 700;
+          font-size: 1em;
+        }
+
+        span {
+          font-family: monospace;
+        }
+      }
+
+      .p-tree {
+        border: none;
+        padding: 0;
+      }
+
+      .p-treetable-header {
+        padding: 0;
+      }
+
+      .p-treetable-thead {
+        th {
+          padding: 0.25em;
+          font-size: 0.9em;
+        }
+      }
+
+      .p-treetable-tbody {
+        border-collapse: collapse;
+        font-size: 0.9em !important;
+
+        td {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        th {
+          padding: 0 0 0 0.5em;
+          height: 1.5em;
+          border-right: 1px solid var(--p-content-border-color);
+        }
+
+        .p-treetable-toggler {
+          margin: 0;
+          width: 1.25em;
+          height: 1.25em;
+        }
+
+        /* Style used for highlighting individual table rows. */
+        tr.highlight {
+          color: black;
+
+          td {
+            border-color: var(--p-content-border-color);
+            background: var(--p-green-100);
+          }
+        }
+      }
+    }
+  }
+
+  .comparison-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    height: 100%;
+  }
+
+  .comparison-controls {
+    .p-multiselect {
+      width: 100%;
+    }
+  }
+
+  .comparison-grid {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.5em;
+    min-height: 0;
+  }
+
+  .comparison-column {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 0.25em;
+    min-width: 12em;
+  }
+
+  .comparison-column-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .comparison-resizable {
+    width: 100%;
+    min-height: 10em;
+    resize: vertical;
+    overflow: auto;
+  }
+
+  .comparison-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+}
+
+//.inspection-comparison-dialog {
+//  .p-dialog {
+//    min-height: 24em;
+//    min-width: 40em;
+//    width: min(120em, calc(100vw - 5em));
+//    height: min(60em, calc(100vh - 5em));
+//    max-width: calc(100vw - 5em);
+//    max-height: calc(100vh - 5em);
+//  }
+//
+//  .p-dialog-content {
+//    padding: 0.5em;
+//  }
+//
+//  .comparison-content {
+//    display: flex;
+//    flex-direction: column;
+//    gap: 0.5em;
+//    height: 100%;
+//  }
+//
+//  .comparison-controls {
+//    display: flex;
+//    align-items: center;
+//    gap: 0.5em;
+//  }
+//
+//  .comparison-grid {
+//    display: flex;
+//    flex: 1 1 auto;
+//    gap: 0.5em;
+//    min-height: 0;
+//  }
+//
+//  .comparison-column {
+//    display: flex;
+//    flex: 1 1 0;
+//    flex-direction: column;
+//    gap: 0.25em;
+//    min-width: 12em;
+//  }
+//
+//  .comparison-column-title {
+//    font-weight: 600;
+//    overflow: hidden;
+//    text-overflow: ellipsis;
+//    white-space: nowrap;
+//  }
+//
+//  .comparison-resizable {
+//    width: 100%;
+//    min-height: 10em;
+//    resize: vertical;
+//    overflow: auto;
+//  }
+//
+//  .comparison-loading {
+//    display: flex;
+//    align-items: center;
+//    justify-content: center;
+//    height: 100%;
+//  }
+//}
+
+.comparison-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  min-width: 18em;
+
+  .p-multiselect {
+    width: 100%;
+  }
+}
+
+.comparison-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .inspection-container {
   display: flex;
   flex-direction: column;
@@ -1075,15 +1339,17 @@ map-view {
 }
 
 .search-wrapper {
-  padding-top: 0.1em;
-  padding-left: 0.125em;
   position: fixed;
-  top: 0;
-  left: 0;
+  top: 0.35em;
+  left: 0.35em;
   min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);
   z-index: 100;
+
+  &.search-menu-top {
+    z-index: 100002;
+  }
 
   /* Raise when focused/active or expanded to multi-line */
   &:focus-within {
@@ -1100,7 +1366,7 @@ map-view {
   }
 
   .resizable-container {
-    min-width: 22em;
+    min-width: 15em;
     min-height: 0;
     resize: horizontal;
     overflow: auto;
@@ -1132,7 +1398,7 @@ map-view {
 
     textarea.single-line {
       min-height: 1.5em;
-      width: 15em !important;
+      width: 15.5em !important;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
@@ -1331,17 +1597,10 @@ map-view {
 }
 
 .feature-search-dialog {
-  z-index: 9001 !important;
-
-  .p-dialog-mask {
-    z-index: 9001 !important;
-  }
-
   .p-dialog {
     width: 30em;
     min-width: 25em;
     margin: 0 !important;
-    z-index: 9001 !important;
     overflow-x: hidden;
   }
 
@@ -1368,7 +1627,7 @@ map-view {
 
 .maps-close-button {
   position: absolute;
-  top: 2.75em;
+  top: 3em;
   left: 25em;
 
   .p-button {
@@ -1392,9 +1651,9 @@ map-view {
     margin: 0 !important;
     position: absolute;
     bottom: 0;
-    left: 0;
+    left: 0.15em;
     overflow: auto;
-    height: calc(100% - 2em);
+    height: calc(100% - 2.5em);
     z-index: 1000 !important;
   }
 
@@ -2273,6 +2532,10 @@ map-view {
     max-height: calc(100vh - 5em);;
     /* Default lower; elevate when focused/expanded */
     z-index: 100;
+
+    &.search-menu-top {
+      z-index: 100002;
+    }
 
     &:focus-within {
       z-index: 1500;

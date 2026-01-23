@@ -12,6 +12,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -20,7 +21,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 @Component({
     selector: 'search-panel',
     template: `
-        <div class="search-wrapper">
+        <div class="search-wrapper" [ngClass]="{'search-menu-top': searchService.showFeatureSearchDialog}">
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
@@ -58,7 +59,8 @@ interface ExtendedSearchTarget extends SearchTarget {
 
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false">
+                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false"
+                          (onShow)="onSearchMenuShow()">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -256,7 +258,8 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                public searchService: FeatureSearchService) {
+                public searchService: FeatureSearchService,
+                private dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
         this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -376,6 +379,19 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.shrinkTextarea();
             }, 10);
         });
+    }
+
+    onSearchMenuShow() {
+        const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
+        if (mainBar) {
+            this.dialogStack.bringElementToFront(mainBar);
+        }
+        const wrapper = this.dialog?.container?.closest('.search-wrapper') as HTMLElement | null;
+        if (wrapper) {
+            this.dialogStack.bringElementToFront(wrapper);
+            return;
+        }
+        this.dialogStack.bringToFront(this.dialog);
     }
 
     private reloadSearchHistory() {

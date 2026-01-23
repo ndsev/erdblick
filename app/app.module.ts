@@ -87,6 +87,7 @@ import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
+import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
 import {DockableLayoutComponent} from "./dockable.layout.component";
@@ -156,6 +157,7 @@ export const initializeServices = () => {
         InspectionTreeComponent,
         DockableLayoutComponent,
         InspectionPanelDialogComponent,
+        InspectionComparisonDialogComponent,
         SurveyComponent
     ],
     bootstrap: [

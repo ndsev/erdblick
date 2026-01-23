@@ -54,6 +54,11 @@ import {AppStateService} from "./shared/appstate.service";
             /* Hide native resizer */
             resize: none;
         }
+
+        .collapsible-dock.dock-drop-active {
+            box-shadow: inset 0 0 0 2px var(--p-primary-500);
+            background: color-mix(in srgb, var(--p-primary-50) 65%, transparent);
+        }
         
         .collapsed {
             width: 0 !important;

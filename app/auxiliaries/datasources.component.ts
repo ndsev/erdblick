@@ -1,4 +1,4 @@
-import {Component, HostListener, ViewChild} from "@angular/core";
+import {Component, HostListener, OnDestroy, ViewChild} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {InfoMessageService} from "../shared/info.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -7,12 +7,13 @@ import {Dialog} from "primeng/dialog";
 import {EditorService} from "../shared/editor.service";
 import {JSONSchema7} from "json-schema";
 import {MapDataService} from "../mapdata/map.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
     selector: 'datasources',
     template: `
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog (onShow)="loadConfigEditor()" class="editor-dialog datasource-dialog" [closeOnEscape]="false">
+                  #editorDialog (onShow)="onEditorDialogShow()" class="editor-dialog datasource-dialog" [closeOnEscape]="false">
             @if (errorMessage) {
                 <p>{{ errorMessage }}</p>
             }
@@ -67,7 +68,7 @@ import {MapDataService} from "../mapdata/map.service";
     `],
     standalone: false
 })
-export class DatasourcesComponent {
+export class DatasourcesComponent implements OnDestroy {
     warningDialogVisible: boolean = false;
     wasModified: boolean = false;
     dataSourcesConfig: string = "";
@@ -83,12 +84,14 @@ export class DatasourcesComponent {
 
     private editedConfigSourceSubscription: Subscription = new Subscription();
     private savedConfigSourceSubscription: Subscription = new Subscription();
+    private detachFocusListener?: () => void;
 
     constructor(private messageService: InfoMessageService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
                 private http: HttpClient,
-                private mapService: MapDataService) {
+                private mapService: MapDataService,
+                private dialogStack: DialogStackService) {
         this.dataSourcesConfigJson.subscribe((config: any) => {
             if (config && config["schema"] && config["model"]) {
                 this.schema = config["schema"];
@@ -103,6 +106,28 @@ export class DatasourcesComponent {
             }
         });
 
+    }
+
+    ngOnDestroy() {
+        this.detachFocusListener?.();
+    }
+
+    onEditorDialogShow() {
+        this.loadConfigEditor();
+        this.dialogStack.bringToFront(this.editorDialog);
+        this.bindDialogFocus();
+    }
+
+    private bindDialogFocus() {
+        if (!this.editorDialog?.container) {
+            return;
+        }
+        this.detachFocusListener?.();
+        const handler = () => this.dialogStack.bringToFront(this.editorDialog);
+        this.editorDialog.container.addEventListener('mousedown', handler, true);
+        this.detachFocusListener = () => {
+            this.editorDialog?.container?.removeEventListener('mousedown', handler, true);
+        };
     }
 
     loadConfigEditor() {

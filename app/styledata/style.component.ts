@@ -1,4 +1,4 @@
-import {Component, HostListener, ViewChild} from "@angular/core";
+import {Component, HostListener, OnDestroy, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "./style.service";
@@ -13,13 +13,15 @@ import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
 import {filter} from "rxjs/operators";
 import {removeGroupPrefix} from "../mapdata/map.tree.model"
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 
 @Component({
     selector: 'style-panel',
     template: `
         <p-dialog class="styles-dialog" header="Style Sheets" [(visible)]="styleService.stylesDialogVisible"
-                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false">
+                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
+                  (onShow)="onStylesDialogShow()">
             @if (styleService.styleGroups | async; as styleGroups) {
                 <ng-container>
                     @if (!styleService.builtinStylesCount && !styleService.importedStylesCount) {
@@ -136,7 +138,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog" appendTo="body">
+                  class="editor-dialog" appendTo="body" (onShow)="onEditorDialogShow()">
             <editor></editor>
             <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
@@ -189,7 +191,7 @@ import {removeGroupPrefix} from "../mapdata/map.tree.model"
     `],
     standalone: false
 })
-export class StyleComponent {
+export class StyleComponent implements OnDestroy {
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     editedStyleSourceSubscription: Subscription = new Subscription();
@@ -201,7 +203,11 @@ export class StyleComponent {
     toggleMenuItems: MenuItem[] | undefined;
 
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
+    @ViewChild('styles') stylesDialog: Dialog | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
+
+    private detachStylesFocusListener?: () => void;
+    private detachEditorFocusListener?: () => void;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
@@ -209,7 +215,8 @@ export class StyleComponent {
                 private messageService: InfoMessageService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService) {
+                public editorService: EditorService,
+                private dialogStack: DialogStackService) {
 
         // Group visibility is computed in the service; no local map needed.
         this.editorService.editedSaveTriggered.subscribe(_ => this.applyEditedStyle());
@@ -217,6 +224,42 @@ export class StyleComponent {
             this.styleUpdateDialogVisible = this.styleService.styleHashes.values().some(
                 state => state.isUpdated && state.isModified);
         });
+    }
+
+    ngOnDestroy() {
+        this.detachStylesFocusListener?.();
+        this.detachEditorFocusListener?.();
+    }
+
+    onStylesDialogShow() {
+        this.dialogStack.bringToFront(this.stylesDialog);
+        this.bindDialogFocus(this.stylesDialog, 'styles');
+    }
+
+    onEditorDialogShow() {
+        this.dialogStack.bringToFront(this.editorDialog);
+        this.bindDialogFocus(this.editorDialog, 'editor');
+    }
+
+    private bindDialogFocus(dialog: Dialog | undefined, kind: 'styles' | 'editor') {
+        if (!dialog?.container) {
+            return;
+        }
+        if (kind === 'styles') {
+            this.detachStylesFocusListener?.();
+            const handler = () => this.dialogStack.bringToFront(dialog);
+            dialog.container.addEventListener('mousedown', handler, true);
+            this.detachStylesFocusListener = () => {
+                dialog.container?.removeEventListener('mousedown', handler, true);
+            };
+        } else {
+            this.detachEditorFocusListener?.();
+            const handler = () => this.dialogStack.bringToFront(dialog);
+            dialog.container.addEventListener('mousedown', handler, true);
+            this.detachEditorFocusListener = () => {
+                dialog.container?.removeEventListener('mousedown', handler, true);
+            };
+        }
     }
 
     showStylesToggleMenu(event: MouseEvent, styleId: string) {

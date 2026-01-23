@@ -1,8 +1,10 @@
 import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
+import {Popover} from "primeng/popover";
 import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
+import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -44,6 +46,14 @@ interface SourceLayerMenuItem {
                                 <span class="material-symbols-outlined"
                                       style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>
+                            @if (panel().sourceData === undefined && panel().features.length > 0) {
+                                <p-button icon="" (click)="openComparePopover($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="Compare" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                </p-button>
+                            }
                             <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"
                                       (mousedown)="$event.stopPropagation()"/>
                         </span>
@@ -74,6 +84,27 @@ interface SourceLayerMenuItem {
                 </p-accordion-content>
             </p-accordion-panel>
         </p-accordion>
+        <p-popover #comparePopover [baseZIndex]="30000">
+            <div class="comparison-popover">
+                <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
+                    <p-multiSelect [options]="compareOptions"
+                                   [(ngModel)]="selectedCompareIds"
+                                   (onPanelShow)="refreshCompareOptions()"
+                                   optionLabel="label"
+                                   optionValue="value"
+                                   [showClear]="true"
+                                   [selectionLimit]="3"
+                                   placeholder="Compare with..."
+                                   appendTo="body"
+                                   [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
+                    @if (selectedCompareIds.length > 0) {
+                        <div class="comparison-popover-actions">
+                            <p-button label="Apply" (click)="applyComparison($event)"/>
+                        </div>
+                    }
+                </div>
+            </div>
+        </p-popover>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -91,14 +122,18 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     layerMenuItems: SourceLayerMenuItem[] = [];
     selectedLayerItem?: SourceLayerMenuItem;
+    compareOptions: InspectionComparisonOption[] = [];
+    selectedCompareIds: number[] = [];
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
+    @ViewChild('comparePopover') comparePopover!: Popover;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
+                private comparisonService: InspectionComparisonService,
                 private renderer: Renderer2) {
         effect(() => {
             this.title = "";
@@ -209,5 +244,28 @@ export class InspectionPanelComponent implements AfterViewInit {
     undock(event: MouseEvent) {
         event.stopPropagation();
         this.ejectedPanel.emit(this.panel());
+    }
+
+    openComparePopover(event: MouseEvent) {
+        event.stopPropagation();
+        this.refreshCompareOptions();
+        this.comparePopover.toggle(event);
+    }
+
+    refreshCompareOptions() {
+        this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
+        this.selectedCompareIds = this.selectedCompareIds.filter(id =>
+            this.compareOptions.some(option => option.value === id)
+        );
+    }
+
+    applyComparison(event: MouseEvent) {
+        event.stopPropagation();
+        if (!this.selectedCompareIds.length) {
+            return;
+        }
+        this.comparisonService.openComparison(this.panel().id, this.selectedCompareIds);
+        this.selectedCompareIds = [];
+        this.comparePopover.hide();
     }
 }

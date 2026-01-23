@@ -23,7 +23,7 @@ import {environment} from "../environments/environment";
                 </a>
             </ng-template>
             <ng-template #end>
-                <div style="display: flex; flex-direction: row; gap: 0.25em">
+                <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
                     <span class="material-symbols-outlined">
                         {{ loader_icon$ | async }}
                     </span>
@@ -60,11 +60,6 @@ import {environment} from "../environments/environment";
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
-            <div class="button-container">
-                <label>Allow unlimited inspected features <span style="color: var(--p-badge-danger-background)">EXPERIMENTAL!</span>:</label>
-                <p-toggleswitch [(ngModel)]="stateService.isNumSelectionsUnlimited" />
-            </div>
-            <p-divider></p-divider>
             <div class="button-container">
                 <label>Storage for Viewer properties and search history:</label>
                 <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>

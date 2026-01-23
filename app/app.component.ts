@@ -1,4 +1,4 @@
-import {Component, ViewContainerRef} from '@angular/core';
+import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
@@ -6,6 +6,7 @@ import {AppModeService} from "./shared/app-mode.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
+import {DialogStackService} from "./shared/dialog-stack.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -89,22 +90,25 @@ interface SurveyConfig {
     `],
     standalone: false
 })
-export class AppComponent {
+export class AppComponent implements OnDestroy {
 
     title: string = "erdblick";
     erdblickVersion: string = "";
     copyright: string = "";
     distributionVersions: Array<Versions> = [];
     distVersionsDialogVisible: boolean = false;
+    private detachDialogFocusListener?: () => void;
 
     constructor(private httpClient: HttpClient,
                 public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 private viewContainerRef: ViewContainerRef,
-                private infoMessageService: InfoMessageService) {
+                private infoMessageService: InfoMessageService,
+                private dialogStack: DialogStackService) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
+        this.bindDialogFocusStacking();
         window.ebDebug = new ErdblickDebugApi(
             this.mapService,
             this.stateService
@@ -153,8 +157,42 @@ export class AppComponent {
         });
     }
 
+    ngOnDestroy() {
+        this.detachDialogFocusListener?.();
+    }
+
     openLegalInfo() {
         this.stateService.legalInfoDialogVisible = true;
+    }
+
+    private bindDialogFocusStacking() {
+        const handler = (event: MouseEvent) => {
+            const target = event.target as HTMLElement | null;
+            if (!target) {
+                return;
+            }
+            const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
+            if (!dialogElement) {
+                return;
+            }
+            if (dialogElement.closest('.map-layer-dialog')) {
+                return;
+            }
+            if (dialogElement.closest('.search-menu-dialog') || dialogElement.closest('.feature-search-dialog')) {
+                const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
+                if (mainBar) {
+                    this.dialogStack.bringElementToFront(mainBar);
+                }
+                const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
+                this.dialogStack.bringElementToFront(wrapper ?? dialogElement);
+                return;
+            }
+            this.dialogStack.bringElementToFront(dialogElement);
+        };
+        document.addEventListener('mousedown', handler, true);
+        this.detachDialogFocusListener = () => {
+            document.removeEventListener('mousedown', handler, true);
+        };
     }
 
     showExposedVersions() {

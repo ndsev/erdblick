@@ -1,4 +1,4 @@
-import {Component, effect, input} from "@angular/core";
+import {Component, effect, input, output} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
@@ -24,7 +24,9 @@ interface InspectionModelData {
     selector: 'feature-panel',
     template: `
         <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                         [geoJson]="geoJson" [selectedFeatures]="selectedFeatures">
+                         [geoJson]="geoJson" [selectedFeatures]="selectedFeatures"
+                         [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                         [enableSourceDataNavigation]="enableSourceDataNavigation()">
         </inspection-tree>
     `,
     styles: [``],
@@ -33,6 +35,9 @@ interface InspectionModelData {
 export class FeaturePanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    enableSourceDataNavigation = input<boolean>(true);
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [

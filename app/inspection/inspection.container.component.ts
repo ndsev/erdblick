@@ -2,6 +2,7 @@ import {Component} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
+import {InspectionComparisonModel, InspectionComparisonService} from "./inspection-comparison.service";
 
 @Component({
     selector: 'inspection-container',
@@ -13,10 +14,13 @@ import {FeatureWrapper} from "../mapdata/features.model";
                 }
             }
         </div>
-        @for (panel of panels; track panel.id) {
+        @for (panel of panels; track panel.id; let i = $index) {
             @if ((panel.features.length > 0 || panel.sourceData !== undefined) && panel.undocked) {
-                <inspection-panel-dialog [panel]="panel"></inspection-panel-dialog>
+                <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
             }
+        }
+        @for (comparison of comparisons; track comparison.id) {
+            <inspection-comparison-dialog [comparison]="comparison"></inspection-comparison-dialog>
         }
     `,
     styles: [``],
@@ -24,12 +28,17 @@ import {FeatureWrapper} from "../mapdata/features.model";
 })
 export class InspectionContainerComponent {
     panels: InspectionPanelModel<FeatureWrapper>[] = [];
+    comparisons: InspectionComparisonModel[] = [];
 
     constructor(private stateService: AppStateService,
-                private mapService: MapDataService) {
+                private mapService: MapDataService,
+                private comparisonService: InspectionComparisonService) {
         this.mapService.selectionTopic.subscribe(panels => {
             this.panels = panels.toReversed();
             this.stateService.dockOpenState.next(this.panels.length > 0);
+        });
+        this.comparisonService.comparisons.subscribe(comparisons => {
+            this.comparisons = comparisons;
         });
     }
 
