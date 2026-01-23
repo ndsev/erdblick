@@ -5,15 +5,31 @@ export interface InspectionDialogPosition {
     top: number;
 }
 
+export const MAX_INSPECTION_DIALOG_POSITIONS = 25;
+
+interface InspectionDialogSlot {
+    panelId: number;
+    position: InspectionDialogPosition;
+}
+
 @Injectable({providedIn: 'root'})
 export class InspectionDialogLayoutService {
-    private positions: InspectionDialogPosition[] = [];
+    private slots: Array<InspectionDialogSlot | undefined> = new Array(MAX_INSPECTION_DIALOG_POSITIONS);
 
-    getPosition(index: number): InspectionDialogPosition | undefined {
-        return this.positions[index];
+    getPosition(index: number, panelId: number): InspectionDialogPosition | undefined {
+        const slot = this.slots[this.getSlotIndex(index)];
+        if (!slot || slot.panelId !== panelId) {
+            return;
+        }
+        return slot.position;
     }
 
-    setPosition(index: number, position: InspectionDialogPosition) {
-        this.positions[index] = position;
+    setPosition(index: number, panelId: number, position: InspectionDialogPosition) {
+        this.slots[this.getSlotIndex(index)] = {panelId, position};
+    }
+
+    getSlotIndex(index: number): number {
+        const normalized = index % MAX_INSPECTION_DIALOG_POSITIONS;
+        return normalized < 0 ? normalized + MAX_INSPECTION_DIALOG_POSITIONS : normalized;
     }
 }

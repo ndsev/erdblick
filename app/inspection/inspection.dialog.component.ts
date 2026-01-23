@@ -324,15 +324,17 @@ export class InspectionPanelDialogComponent implements OnDestroy {
             return;
         }
         const index = this.dialogIndex();
-        const stored = this.dialogLayout.getPosition(index);
+        const panelId = this.panel().id;
+        const slotIndex = this.dialogLayout.getSlotIndex(index);
+        const stored = this.dialogLayout.getPosition(index, panelId);
         const rect = this.dialog.container.getBoundingClientRect();
         const offsetPx = this.stateService.baseFontSize;
-        const offsetMultiplier = index + 1;
+        const offsetMultiplier = slotIndex + 1;
         const left = stored?.left ?? rect.left + offsetPx * offsetMultiplier;
         const top = stored?.top ?? rect.top + offsetPx * offsetMultiplier;
         this.setDialogPosition(left, top);
         if (!stored) {
-            this.dialogLayout.setPosition(index, {left, top});
+            this.dialogLayout.setPosition(index, panelId, {left, top});
         }
     }
 
@@ -340,9 +342,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!this.dialog?.container) {
             return;
         }
-        const index = this.dialogIndex();
         const rect = this.dialog.container.getBoundingClientRect();
-        this.dialogLayout.setPosition(index, {left: rect.left, top: rect.top});
+        this.dialogLayout.setPosition(this.dialogIndex(), this.panel().id, {left: rect.left, top: rect.top});
     }
 
     private setDialogPosition(left: number, top: number) {

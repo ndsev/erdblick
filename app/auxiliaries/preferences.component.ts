@@ -30,8 +30,20 @@ import {environment} from "../environments/environment";
                     <span class="material-symbols-outlined" style="color: var(--p-button-danger-background)">
                         warning
                     </span>
-                    <div>Clickable COPYRIGHT</div>
-                    <div>Clickable VERSION</div>
+                    @if (copyright.length) {
+                        <div id="copyright-info" (click)="openLegalInfo()">
+                            {{ copyright }}
+                        </div>
+                    }
+                    <div>
+                        @if (!stateService.distributionVersions.getValue().length) {
+                            <span>{{ stateService.erdblickVersion.getValue() }}</span>
+                        } @else {
+                            <span style="cursor: pointer" (click)="showExposedVersions()">
+                                {{ stateService.distributionVersions.getValue()[0].name }}&nbsp;{{ stateService.distributionVersions.getValue()[0].tag }}
+                            </span>
+                        }
+                    </div>
                 </div>
             </ng-template>
         </p-menubar>
@@ -157,6 +169,27 @@ import {environment} from "../environments/environment";
             </div>
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
+        <p-dialog header="Distribution Version Information" [(visible)]="distVersionsDialogVisible"
+                  [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
+            <div class="dialog-content">
+                <p-table [value]="stateService.distributionVersions.getValue()" [tableStyle]="{ 'min-width': '20em' }">
+                    <ng-template #header>
+                        <tr>
+                            <th>Name</th>
+                            <th>Version</th>
+                        </tr>
+                    </ng-template>
+                    <ng-template #body let-version>
+                        <tr>
+                            <td>{{ version.name }}</td>
+                            <td>{{ version.tag }}</td>
+                        </tr>
+                    </ng-template>
+                </p-table>
+            </div>
+            <p-button type="button" label="Close" icon="pi pi-times" (click)="distVersionsDialogVisible = false">
+            </p-button>
+        </p-dialog>
     `,
     styles: [
         `
@@ -252,6 +285,8 @@ import {environment} from "../environments/environment";
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
 
+    distVersionsDialogVisible: boolean = false;
+
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     readonly loader_icons = ["", "clock_loader_10", "clock_loader_20", "clock_loader_40", "clock_loader_60", "clock_loader_80", "clock_loader_90"];
@@ -259,7 +294,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     readonly loader_icon$ = timer(0, 500).pipe(
         map(i => this.loader_icons.length ? this.loader_icons[i % this.loader_icons.length] : '')
     );
-
 
     controlsDialogVisible = false;
     stylesDialogVisible = false;
@@ -317,6 +351,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     };
     private subscriptions: Subscription[] = [];
 
+    copyright: string = "";
+
     constructor(private messageService: InfoMessageService,
                 public mapService: MapDataService,
                 public styleService: StyleService,
@@ -328,7 +364,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
         }));
-
+        this.mapService.legalInformationUpdated.subscribe(_ => {
+            this.copyright = "";
+            let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
+            if (firstSet !== undefined && firstSet.size) {
+                this.copyright = '© '.concat(firstSet.values().next().value as string).slice(0, 14).concat('…');
+            }
+        });
     }
 
     ngOnInit() {
@@ -436,17 +478,25 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
-    openDatasources() {
+    private openDatasources() {
         this.editorService.styleEditorVisible = false;
         this.editorService.datasourcesEditorVisible = true;
     }
 
-    openStylesDialog() {
+    private openStylesDialog() {
         this.styleService.stylesDialogVisible = true;
     }
 
     private showMapsPanel() {
         this.stateService.mapsOpenState.next(true);
+    }
+
+    protected openLegalInfo() {
+        this.stateService.legalInfoDialogVisible = true;
+    }
+
+    protected showExposedVersions() {
+        this.distVersionsDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

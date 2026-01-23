@@ -32,6 +32,11 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
+export interface Versions {
+    name: string;
+    tag: string;
+}
+
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
@@ -378,6 +383,18 @@ export class AppStateService implements OnDestroy {
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly distributionVersions = this.createState<Versions[]>({
+        name: 'distributionVersions',
+        defaultValue: [],
+        schema: z.array(z.record(z.string(), z.string()))
+    });
+
+    readonly erdblickVersion = this.createState<string>({
+        name: 'erdblickVersion',
+        defaultValue: "",
+        schema: z.string()
     });
 
     constructor(private readonly router: Router,
