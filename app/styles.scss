@@ -112,6 +112,7 @@ mapview-container {
     border-top-right-radius: 0;
     background: color-mix(in srgb, var(--p-menubar-background) 70%, transparent);
     height: 2em;
+    gap: 0.5em;
 
     &:hover {
       background: var(--p-menubar-background);
@@ -124,6 +125,7 @@ mapview-container {
     .p-menubar-item-link {
       padding: 0.25em !important;
       font-size: 0.9em;
+      gap: 0.25em;
 
       .material-symbols-outlined {
         font-size: 1.2em;

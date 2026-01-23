@@ -776,11 +776,12 @@ export class AppStateService implements OnDestroy {
             }
         } else if (hasDockedPanel) {
             mustCreateNewPanel = true;
+        } else if (hasUndockedPanel) {
+            // Dock is empty: always create new selections as docked panels.
+            mustCreateNewPanel = true;
+            newPanelUndocked = false;
         } else if (!mustCreateNewPanel && firstUndockedUnpinnedPanel) {
             targetPanelId = firstUndockedUnpinnedPanel.id;
-        } else if (hasUndockedPanel) {
-            mustCreateNewPanel = true;
-            newPanelUndocked = true;
         }
 
         if (originPanel && mustCreateNewPanel && originPanel.undocked) {

@@ -33,6 +33,7 @@ interface SurveyConfig {
             <map-panel></map-panel>
             <stats-dialog></stats-dialog>
             <style-panel></style-panel>
+            <feature-search></feature-search>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
         <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>

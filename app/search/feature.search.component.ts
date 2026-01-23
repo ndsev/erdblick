@@ -6,7 +6,6 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
-import {SearchPanelComponent} from "./search.panel.component";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
@@ -176,7 +175,6 @@ export class FeatureSearchComponent implements OnDestroy {
     resultsStatus: string = "Loading...";
     scrollHeight: string = "28.5em";
 
-    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`?
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
     @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
@@ -187,7 +185,6 @@ export class FeatureSearchComponent implements OnDestroy {
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService) {
         this.searchService.progress.subscribe(searchState => {
@@ -220,7 +217,6 @@ export class FeatureSearchComponent implements OnDestroy {
 
     onDialogShow(event: any) {
         this.syncTreeScrollHeight(event);
-        this.raiseMainBar();
         this.dialogStack.bringToFront(this.featureSearchDialog);
         this.bindDialogFocus();
     }
@@ -231,20 +227,12 @@ export class FeatureSearchComponent implements OnDestroy {
         }
         this.detachFocusListener?.();
         const handler = () => {
-            this.raiseMainBar();
             this.dialogStack.bringToFront(this.featureSearchDialog);
         };
         this.featureSearchDialog.container.addEventListener('mousedown', handler, true);
         this.detachFocusListener = () => {
             this.featureSearchDialog?.container?.removeEventListener('mousedown', handler, true);
         };
-    }
-
-    private raiseMainBar() {
-        const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
-        if (mainBar) {
-            this.dialogStack.bringElementToFront(mainBar);
-        }
     }
 
     searchResultReady() {
@@ -328,7 +316,7 @@ export class FeatureSearchComponent implements OnDestroy {
 
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
-            this.searchPanelComponent.setSearchValue(message.fix);
+            this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
     }
 

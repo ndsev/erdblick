@@ -116,7 +116,6 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </p-dialog>
-        <feature-search [searchPanelComponent]="this"></feature-search>
     `,
     styles: [`
         .item-disabled {
@@ -368,6 +367,8 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
+        this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery));
+
         this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();

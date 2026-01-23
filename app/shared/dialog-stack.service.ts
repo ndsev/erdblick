@@ -4,22 +4,13 @@ import {Dialog} from 'primeng/dialog';
 @Injectable({providedIn: 'root'})
 export class DialogStackService {
     private zIndex = 20000;
-    private readonly topZIndex = 100002;
 
     bringToFront(dialog: Dialog | undefined | null) {
         this.applyZIndex(dialog?.container, dialog?.wrapper);
     }
 
-    bringToTop(dialog: Dialog | undefined | null) {
-        this.applyZIndex(dialog?.container, dialog?.wrapper, this.topZIndex);
-    }
-
     bringElementToFront(element: HTMLElement | null | undefined) {
         this.applyZIndex(element, undefined);
-    }
-
-    bringElementToTop(element: HTMLElement | null | undefined) {
-        this.applyZIndex(element, undefined, this.topZIndex);
     }
 
     private applyZIndex(container?: HTMLElement | null, wrapper?: HTMLElement | null, zIndex?: number) {

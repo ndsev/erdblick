@@ -274,6 +274,8 @@ export class FeatureSearchService {
     private endTime: number = 0;
     public errors: Set<string> = new Set();
 
+    public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
+
     markerGraphics = () => {
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
            <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z"
