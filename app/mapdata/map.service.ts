@@ -1,23 +1,30 @@
 import {Injectable} from "@angular/core";
-import {Fetch} from "./fetch";
+import {HttpClient} from "@angular/common/http";
+import {
+    MapTileRequestStatus,
+    MapTileStreamClient,
+    MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_FEATURES,
+    MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_SOURCEDATA,
+} from "./map-tile-stream-client";
+import type {MapTileStreamStatusPayload} from "./map-tile-stream-client";
 import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileVisualization} from "../mapview/visualization.model";
-import {BehaviorSubject, distinctUntilChanged, skip, Subject} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {AppStateService, InspectionPanelModel, TileFeatureId, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import * as uuid from 'uuid';
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
 import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
 import {deepEquals} from "../shared/app-state";
 
 const infoUrl = "sources";
 const tileUrl = "tiles";
-const abortUrl = "abort";
 
 /**
  * Determine if two lists of feature wrappers have the same features.
@@ -82,9 +89,12 @@ export class MapDataService {
     public loadedTileLayers: Map<string, FeatureTile>;
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
-    private currentFetch: Fetch | null = null;
-    private currentFetchAbort: Fetch | null = null;
-    private currentFetchId: number = 0;
+    private tilesSocket: MapTileStreamClient | null = null;
+    private lastTilesRequestBody: string | null = null;
+    private lastTilesRequestSignature: string | null = null;
+    private tilesStatusHandledSignature: string | null = null;
+    private tilesRequestId: number = 0;
+    private tilesRequestInFlight: boolean = false;
     private tileStreamParsingQueue: [Uint8Array, number][];
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
@@ -110,15 +120,14 @@ export class MapDataService {
     selectionTileRequests: SelectionTileRequest[] = [];
     statsDialogVisible: boolean = false;
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
-    clientId: string = "";
 
     constructor(public styleService: StyleService,
                 public stateService: AppStateService,
+                private httpClient: HttpClient,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
                 private keyboardService: KeyboardService) {
         this.loadedTileLayers = new Map();
-        this.currentFetch = null;
         this.tileStreamParsingQueue = [];
         this.selectionVisualizations = [];
         this.hoverVisualizations = [];
@@ -135,9 +144,6 @@ export class MapDataService {
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number }>();
         this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: Rectangle }>();
 
-        // Unique client ID which ensures that tile fetch requests from this map-service
-        // are de-duplicated on the mapget server.
-        this.clientId = uuid.v4();
 
         this.stateService.numViewsState.subscribe(numViews => {
             const diff = numViews - this.viewVisualizationState.length;
@@ -276,12 +282,12 @@ export class MapDataService {
             }
 
             let [message, messageType] = this.tileStreamParsingQueue.shift()!;
-            if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
+            if (messageType === MAP_TILE_STREAM_TYPE_FIELDS) {
                 uint8ArrayToWasm((wasmBuffer: any) => {
                     this.tileParser!.readFieldDictUpdate(wasmBuffer);
                 }, message);
-            } else if (messageType === Fetch.CHUNK_TYPE_FEATURES) {
-                const tileLayerBlob = message.slice(Fetch.CHUNK_HEADER_SIZE);
+            } else if (messageType === MAP_TILE_STREAM_TYPE_FEATURES) {
+                const tileLayerBlob = message.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 this.addTileFeatureLayer(tileLayerBlob);
             } else {
                 console.error(`Encountered unknown message type ${messageType}!`);
@@ -321,6 +327,80 @@ export class MapDataService {
         // Continue visualizing tiles with a delay.
         const delay = currentQueueLength ? 0 : 10;
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
+    }
+
+    private getTilesSocket(): MapTileStreamClient {
+        if (!this.tilesSocket) {
+            this.tilesSocket = new MapTileStreamClient(tileUrl);
+            this.tilesSocket.onFrame = (message, messageType) => {
+                if (messageType === MAP_TILE_STREAM_TYPE_FIELDS || messageType === MAP_TILE_STREAM_TYPE_FEATURES) {
+                    this.tileStreamParsingQueue.push([message, messageType]);
+                    return;
+                }
+                if (messageType === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
+                    return;
+                }
+                console.warn(`Ignoring unknown /tiles message type ${messageType}.`);
+            };
+            this.tilesSocket.onStatus = (status) => this.handleTilesStatus(status);
+            this.tilesSocket.onClose = () => {
+                this.lastTilesRequestBody = null;
+                this.lastTilesRequestSignature = null;
+                this.tilesStatusHandledSignature = null;
+                this.tilesRequestInFlight = false;
+            };
+            this.tilesSocket.onError = (event) => {
+                console.error("Tile WebSocket error.", event);
+            };
+        }
+        return this.tilesSocket;
+    }
+
+    private handleTilesStatus(status: MapTileStreamStatusPayload) {
+        if (!status || status.type !== "mapget.tiles.status") {
+            return;
+        }
+
+        const requests = status.requests || [];
+        const signature = this.buildTilesRequestSignature(requests);
+        if (this.lastTilesRequestSignature && signature !== this.lastTilesRequestSignature) {
+            return;
+        }
+
+        const statusMessage = status.message || "";
+        if (statusMessage.includes("Replaced by a new /tiles WebSocket request")) {
+            return;
+        }
+
+        if (statusMessage) {
+            console.info("/tiles status:", statusMessage);
+        }
+
+        if (!status.allDone) {
+            return;
+        }
+
+        if (this.tilesStatusHandledSignature === signature) {
+            return;
+        }
+        this.tilesStatusHandledSignature = signature;
+        this.tilesRequestInFlight = false;
+
+        const failures = requests.filter(req =>
+            req.status !== MapTileRequestStatus.Success && req.status !== MapTileRequestStatus.Open);
+        if (!failures.length) {
+            return;
+        }
+
+        const summary = failures
+            .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+            .join(", ");
+        const detail = statusMessage ? ` (${statusMessage})` : "";
+        this.messageService.showError(`Tile request failed: ${summary}${detail}`);
+    }
+
+    private buildTilesRequestSignature(requests: Array<{mapId: string, layerId: string}>) {
+        return JSON.stringify(requests.map(req => [req.mapId, req.layerId]));
     }
 
     private applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number) {
@@ -450,19 +530,21 @@ export class MapDataService {
     }
 
     async reloadDataSources() {
-        await new Fetch(infoUrl)
-            .withBufferCallback((infoBuffer: any) => {
-                uint8ArrayToWasm((wasmBuffer: any) => {
-                    this.tileParser!.setDataSourceInfo(wasmBuffer);
-                    console.log("Loaded data source info.");
-                }, infoBuffer);
-            })
-            .withJsonCallback((result: Array<MapInfoItem>) => {
-                let maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
-                this.maps$.next(new MapLayerTree(maps, this.selectionTopic, this.stateService, this.styleService));
-                this.reapplySyncOptionsForAllViews();
-            })
-            .go();
+        try {
+            const result = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>(infoUrl));
+            const maps = result.filter(m => !m.addOn).map(mapInfo => mapInfo);
+            this.maps$.next(new MapLayerTree(maps, this.selectionTopic, this.stateService, this.styleService));
+            this.reapplySyncOptionsForAllViews();
+
+            const jsonString = JSON.stringify(result);
+            const infoBuffer = new TextEncoder().encode(jsonString);
+            uint8ArrayToWasm((wasmBuffer: any) => {
+                this.tileParser!.setDataSourceInfo(wasmBuffer);
+                console.log("Loaded data source info.");
+            }, infoBuffer);
+        } catch (err) {
+            console.error("Failed to load data source info.", err);
+        }
     }
 
     async update() {
@@ -576,19 +658,6 @@ export class MapDataService {
         });
 
         // Rest of this function: Request non-present required tile layers.
-        // Only do this, if there is no ongoing effort to do so.
-        //  Reason: This is an async function, so multiple "instances" of it
-        //  may be running simultaneously. But we only ever want one function to
-        //  execute the /abort-and-/tiles fetch combo.
-        let myFetchId = ++this.currentFetchId;
-        let abortAwaited = false;
-        if (this.currentFetchAbort) {
-            await this.currentFetchAbort.done;
-            abortAwaited = true;
-            if (myFetchId != this.currentFetchId) {
-                return;
-            }
-        }
 
         let requests = [];
         for (const selectionTileRequest of this.selectionTileRequests) {
@@ -599,11 +668,6 @@ export class MapDataService {
                 .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
                 requests.push(selectionTileRequest.remoteRequest);
-                if (this.currentFetch) {
-                    // Disable the re-fetch filtering logic by setting the old
-                    // fetches' body to null.
-                    this.currentFetch.bodyJson = null;
-                }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
             }
@@ -646,54 +710,46 @@ export class MapDataService {
             }
         }
 
-        let newRequestBody = JSON.stringify({
+        const requestBody = {
             requests: requests,
             stringPoolOffsets: this.tileParser!.getFieldDictOffsets(),
-            clientId: this.clientId
-        });
-        if (this.currentFetch) {
-            // Ensure that the new fetch operation is different from the previous one.
-            if (this.currentFetch.bodyJson === newRequestBody) {
-                return;
-            }
-            // Abort any ongoing requests for this clientId.
-            if (!abortAwaited) {
-                this.currentFetch.abort();
-                this.currentFetchAbort = new Fetch(abortUrl)
-                    .withMethod("POST")
-                    .withBody(JSON.stringify({clientId: this.clientId}));
-                await this.currentFetchAbort.go();
-                this.currentFetchAbort = null;
-            }
-            // Wait for the current Fetch operation to end.
-            await this.currentFetch.done;
-            // Do not proceed with this update, if a newer one was started.
-            if (myFetchId != this.currentFetchId) {
-                return;
-            }
-            this.currentFetch = null;
-            // Clear any unparsed messages from the previous stream.
-            this.tileStreamParsingQueue = [];
-        }
+        };
 
         // Nothing to do if all requests are empty.
         if (requests.length === 0) {
             return;
         }
 
+        const newRequestBody = JSON.stringify(requestBody);
+        const requestSignature = this.buildTilesRequestSignature(requests);
+        const tilesSocket = this.getTilesSocket();
+        const requestId = ++this.tilesRequestId;
+
+        // Ensure that the new request is different from the previous one.
+        if (this.lastTilesRequestBody === newRequestBody && tilesSocket.isOpen() && this.tilesRequestInFlight) {
+            return;
+        }
+
+        this.lastTilesRequestBody = newRequestBody;
+        this.lastTilesRequestSignature = requestSignature;
+        this.tilesStatusHandledSignature = null;
+
         // Make sure that there are no unparsed bytes lingering from the previous response stream.
         this.tileParser!.reset();
+        this.tileStreamParsingQueue = [];
 
-        // Launch the new fetch operation
-        this.currentFetch = new Fetch(tileUrl)
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody(newRequestBody)
-            .withBufferCallback((message: any, messageType: any) => {
-                // Schedule the parsing of the newly arrived tile layer.
-                this.tileStreamParsingQueue.push([message, messageType]);
-            });
-        await this.currentFetch.go();
+        await tilesSocket.connect();
+        if (requestId !== this.tilesRequestId) {
+            return;
+        }
+        this.tilesRequestInFlight = true;
+        try {
+            await tilesSocket.sendRequest(requestBody);
+        } catch (err) {
+            this.tilesRequestInFlight = false;
+            console.error("Failed to send /tiles request.", err);
+            this.messageService.showError("Failed to send /tiles request.");
+        }
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {

@@ -64,7 +64,7 @@ classDiagram
   }
   class Backend {
     <<interface>>
-    mapget-compatible HTTP API
+    mapget-compatible HTTP + WebSocket API
   }
   class ConfigFiles {
     config.json and extensions
@@ -104,7 +104,7 @@ In code, the main responsibilities are:
 - `MapDataService` manages available maps, tile streaming and caching, tile-to-style visualization queues, and hover or selection highlights.
 - `StyleService` loads YAML style sheets from `config/styles`, exposes style options, and anchors the runtime view of styles used by both the map view and the style editor.
 - `erdblick-core` (WASM) exposes tile parsing (`TileLayerParser`, `TileSourceDataParser`), style evaluation (`FeatureLayerStyle`, `FeatureLayerVisualization`), feature search (`FeatureLayerSearch`), and geometry helpers via Emscripten bindings.
-- A mapget-compatible backend provides tiles and metadata over HTTP. Erdblick assumes `/sources`, `/tiles`, `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
+- A mapget-compatible backend provides tiles and metadata over HTTP and WebSocket. Erdblick uses `/sources`, `/tiles` (WebSocket streaming), `/locate`, and optionally `/config` for the DataSource editor. In addition, it serves static assets such as `config/config.json`, style bundles under `config/styles`, and optional extension modules (jump targets, coordinate systems) that are loaded as remote resources by the UI.
 
 The overview diagram above shows how these pieces line up at a coarse level. The following sub-diagrams zoom into individual component groups; later sections then walk from the backend up through the tile cache, renderer, search workers, and inspection tools.
 
@@ -292,8 +292,7 @@ sequenceDiagram
   participant View as MapView
   participant State as AppStateService
   participant MapSvc as MapDataService
-  participant FetchTiles as Fetch tiles
-  participant FetchAbort as Fetch abort
+  participant TilesWS as Tiles WebSocket
   participant Core as WASM tile helpers
   participant Backend as Backend tiles endpoints
 
@@ -304,19 +303,13 @@ sequenceDiagram
 
   Note right of MapSvc: MapDataService compares visible tiles<br>with loaded tiles per view and style<br>and decides which tiles to keep or drop
 
-  alt tile stream already running
-    MapSvc->>FetchAbort: create abort request<br>with client id and tile hints
-    FetchAbort->>Backend: POST /abort
-    Backend-->>FetchAbort: confirm abort of<br>previous tile stream
-    FetchAbort-->>MapSvc: done and clear currentFetchAbort
-  end
+  MapSvc->>TilesWS: open WebSocket /tiles (if needed)
+  MapSvc->>TilesWS: send request JSON<br>with requested map tile keys
+  TilesWS->>Backend: GET /tiles (WebSocket)
+  Backend-->>TilesWS: VTLV tile stream frames
 
-  MapSvc->>FetchTiles: create tile request body<br>with requested map tile keys
-  FetchTiles->>Backend: POST /tiles
-  Backend-->>FetchTiles: VTLV tile stream
-
-  loop for each received chunk
-    FetchTiles-->>MapSvc: buffer chunk with type<br>and payload bytes
+  loop for each received frame
+    TilesWS-->>MapSvc: buffer frame with type<br>and payload bytes
     alt fields chunk
       MapSvc->>Core: readFieldDictUpdate for<br>field dictionary changes
     else features chunk
@@ -334,7 +327,8 @@ sequenceDiagram
 In `MapDataService` this flow is implemented roughly as follows:
 
 - `update()` computes the current viewport, calls `coreLib.getTileIds` to determine which tile IDs should be present, and compares this against `loadedTileLayers` to decide which tiles to request or drop per view.
-- For tile data, `MapDataService` uses `Fetch` with `withChunkProcessing()` to POST a list of requested tiles to `/tiles`. The backend replies with a tile-layer stream encoded as version–type–length–value frames, which `Fetch.handleChunkedResponse` decodes.
+- For tile data, `MapDataService` opens a WebSocket connection to `/tiles` and sends a JSON request message with the map/layer/tile IDs plus the current `stringPoolOffsets`. New requests on the same socket replace any in-flight request.
+- The backend responds with binary WebSocket messages, each carrying one version–type–length–value (VTLV) frame from the tile stream. Status frames (type `Status`) contain JSON that summarizes request completion or errors.
 - `CHUNK_TYPE_FIELDS` frames carry dictionary updates and are passed directly to `TileLayerParser.readFieldDictUpdate`.
 - `CHUNK_TYPE_FEATURES` frames hold compressed tile payloads. `MapDataService.addTileFeatureLayer` uses the parser to construct `FeatureTile` objects, updates `loadedTileLayers`, and marks affected `TileVisualization` instances as dirty.
 - For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
@@ -415,10 +409,10 @@ The erdblick core is compiled to WASM without C++ exception support. Enabling na
 
 Aside from in-process exceptions, a few error classes originate from IO or backend behavior:
 
-- **TileLayerStream parsing errors** - malformed chunk headers or frames result in console errors from the `Fetch` helper or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
+- **TileLayerStream parsing errors** - malformed chunk headers or frames result in console errors from the `MapTileStreamClient` or during the WASM calls it drives. Enabling the statistics dialog helps correlate parse failures with empty tiles or missing features.
 - **Style sheet parsing errors** - YAML or Simfil issues in style sheets are caught by `StyleService.parseWasmStyle`, which logs the problem and records an error marker for the affected style. Execution-time errors inside rules generally surface as WASM exceptions while rendering and appear in the browser console.
 - **Tile and style performance anomalies** - tiles collect statistics such as parse time, size, and render times per style. The statistics dialog aggregates these so you can spot cases where a particular map layer or style slows rendering or produces suspiciously empty tiles.
-- **Backend or connection loss** - network errors from `fetch` (for `/sources`, `/tiles`, `/locate`, or `/config`) are logged by `Fetch.handleError`. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
+- **Backend or connection loss** - network errors from the WebSocket tile stream or `HttpClient` calls (for `/sources`, `/locate`, or `/config`) are logged to the console. Some specific operations (for example selection limits or illegal style renames) additionally surface user-facing messages via `InfoMessageService`, but transport failures themselves are primarily visible in the console today.
 
 In general, treat the browser console and the statistics dialog as complementary tools: the console tells you what failed, the stats dialog tells you which tiles and styles were affected or unusually slow.
 

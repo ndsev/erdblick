@@ -5,7 +5,13 @@ import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {Fetch} from "../mapdata/fetch";
+import {
+    MapTileRequestStatus,
+    MapTileStreamClient,
+    MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_SOURCEDATA,
+} from "../mapdata/map-tile-stream-client";
 import {Column} from "./inspection.tree.component";
 
 @Component({
@@ -75,47 +81,95 @@ export class SourceDataPanelComponent {
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
         const parser = new coreLib.TileLayerParser();
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
-        const newRequestBody = JSON.stringify({
+        const requestBody = {
             requests: [{
                 mapId: mapId,
                 layerId: layerId,
                 tileIds: [Number(tileId)]
             }]
-        });
+        };
 
-        let layer: TileSourceDataLayer | undefined;
-        let fetch = new Fetch("tiles")
-            .withChunkProcessing()
-            .withMethod("POST")
-            .withBody(newRequestBody)
-            .withBufferCallback((message: any, messageType: any) => {
-                if (messageType === Fetch.CHUNK_TYPE_FIELDS) {
-                    uint8ArrayToWasm((wasmBuffer: any) => {
-                        parser.readFieldDictUpdate(wasmBuffer);
-                    }, message);
-                } else if (messageType === Fetch.CHUNK_TYPE_SOURCEDATA) {
-                    const blob = message.slice(Fetch.CHUNK_HEADER_SIZE);
-                    layer = uint8ArrayToWasm((wasmBlob: any) => {
-                        return parser.readTileSourceDataLayer(wasmBlob);
-                    }, blob);
-                } else {
-                    throw new Error(`Unknown message type ${messageType}.`)
+        return new Promise<TileSourceDataLayer>((resolve, reject) => {
+            let layer: TileSourceDataLayer | null = null;
+            let finished = false;
+            let statusMessage = "";
+            const socket = new MapTileStreamClient("tiles");
+
+            const finish = (err?: unknown) => {
+                if (finished) {
+                    return;
                 }
-            });
+                finished = true;
+                socket.close(1000, "done");
 
-        return fetch.go()
-            .then(_ => {
-                if (!layer)
-                    throw new Error(`Unknown error while loading layer.`);
+                if (err) {
+                    if (layer) {
+                        layer.delete();
+                    }
+                    reject(err instanceof Error ? err : new Error(`${err}`));
+                    return;
+                }
+
+                if (!layer) {
+                    reject(new Error(statusMessage || "Unknown error while loading layer."));
+                    return;
+                }
+
                 const error = layer.getError();
                 if (error) {
                     layer.delete();
-                    throw new Error(`Error while loading layer: ${error}`);
+                    reject(new Error(`Error while loading layer: ${error}`));
+                    return;
                 }
-                return layer;
-            }).finally(() => {
-                parser.delete();
-            });
+                resolve(layer);
+            };
+
+            socket.onFrame = (message, messageType) => {
+                if (messageType === MAP_TILE_STREAM_TYPE_FIELDS) {
+                    uint8ArrayToWasm((wasmBuffer: any) => {
+                        parser.readFieldDictUpdate(wasmBuffer);
+                    }, message);
+                    return;
+                }
+                if (messageType === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
+                    const blob = message.slice(MAP_TILE_STREAM_HEADER_SIZE);
+                    layer = uint8ArrayToWasm((wasmBlob: any) => {
+                        return parser.readTileSourceDataLayer(wasmBlob);
+                    }, blob);
+                    return;
+                }
+                console.warn(`Unknown message type ${messageType}.`);
+            };
+
+            socket.onStatus = (status) => {
+                statusMessage = status.message || "";
+                if (!status.allDone) {
+                    return;
+                }
+                const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
+                if (failures.length) {
+                    const summary = failures
+                        .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+                        .join(", ");
+                    finish(new Error(`Tile request failed: ${summary}`));
+                    return;
+                }
+                finish();
+            };
+
+            socket.onError = (event) => {
+                finish(event);
+            };
+            socket.onClose = () => {
+                if (!finished && !layer) {
+                    finish(new Error(statusMessage || "WebSocket closed while loading layer."));
+                }
+            };
+
+            void socket.sendRequest(requestBody).catch(err => finish(err));
+        }).finally(() => {
+            parser.delete();
+        });
     }
 
     /**

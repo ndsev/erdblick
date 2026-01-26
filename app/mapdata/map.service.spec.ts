@@ -1,5 +1,5 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
-import {BehaviorSubject, Subject} from 'rxjs';
+import {BehaviorSubject, of, Subject} from 'rxjs';
 import {initializeLibrary} from "../integrations/wasm";
 
 beforeAll(async () => {
@@ -7,74 +7,54 @@ beforeAll(async () => {
     ({MapDataService: MapDataServiceCtor} = await import('./map.service'));
 });
 
-// Stub Fetch implementation to capture request bodies without network access.
-const fetchInstances: any[] = [];
+// Stub WebSocket implementation to capture request bodies without network access.
+const wsInstances: any[] = [];
 
-const readableStub = () => ({
-    read: vi.fn().mockResolvedValue({done: true, value: undefined}),
-});
-const fetchMock = vi.fn().mockResolvedValue({
-    ok: true,
-    body: {getReader: readableStub},
-    blob: vi.fn(async () => new Blob()),
-    json: vi.fn(async () => ({})),
-});
-vi.stubGlobal('fetch', fetchMock);
+class WebSocketStub {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
 
-vi.mock('./fetch', () => {
-    class FetchStub {
-        static CHUNK_HEADER_SIZE = 11;
-        static CHUNK_TYPE_FIELDS = 1;
-        static CHUNK_TYPE_FEATURES = 2;
-        static CHUNK_TYPE_SOURCEDATA = 3;
-        static CHUNK_TYPE_END_OF_STREAM = 128;
+    CONNECTING = WebSocketStub.CONNECTING;
+    OPEN = WebSocketStub.OPEN;
+    CLOSING = WebSocketStub.CLOSING;
+    CLOSED = WebSocketStub.CLOSED;
 
-        url: string;
-        method: string = 'GET';
-        bodyJson: string | null = null;
-        done: Promise<boolean> = Promise.resolve(true);
-        private _bufferCallback: ((buf: Uint8Array, type: number) => void) | null = null;
+    url: string;
+    readyState: number = WebSocketStub.CONNECTING;
+    bufferedAmount = 0;
+    extensions = '';
+    protocol = '';
+    binaryType = 'arraybuffer';
 
-        constructor(url: string) {
-            this.url = url;
-            fetchInstances.push(this);
-        }
+    onopen: ((event: Event) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onclose: ((event: CloseEvent) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
 
-        withMethod(method: string) {
-            this.method = method;
-            return this;
-        }
+    lastSent: any = null;
 
-        withBody(bodyJson: string) {
-            this.bodyJson = bodyJson;
-            return this;
-        }
-
-        withChunkProcessing() {
-            return this;
-        }
-
-        withBufferCallback(cb: (buf: Uint8Array, type: number) => void) {
-            this._bufferCallback = cb;
-            return this;
-        }
-
-        withJsonCallback(_cb: (json: any) => void) {
-            return this;
-        }
-
-        go() {
-            return Promise.resolve(true);
-        }
-
-        abort() {
-        }
+    constructor(url: string) {
+        this.url = url;
+        wsInstances.push(this);
+        setTimeout(() => {
+            this.readyState = WebSocketStub.OPEN;
+            this.onopen?.(new Event('open'));
+        }, 0);
     }
 
-    return {
-        Fetch: FetchStub,
-    };
-});
+    send(data: any) {
+        this.lastSent = data;
+    }
+
+    close() {
+        this.readyState = WebSocketStub.CLOSED;
+        this.onclose?.(new CloseEvent('close'));
+    }
+}
+
+vi.stubGlobal('WebSocket', WebSocketStub as any);
 
 vi.mock('./features.model', () => {
     class FeatureTileStub {
@@ -180,9 +160,14 @@ class KeyboardServiceStub {
     registerShortcut = vi.fn();
 }
 
+class HttpClientStub {
+    get = vi.fn().mockReturnValue(of([]));
+}
+
 const createMapDataService = () => {
     const styleService = new StyleServiceStub();
     const stateService = new AppStateServiceStub();
+    const httpClient = new HttpClientStub();
     const infoService = new InfoMessageServiceStub();
     const pointMergeService = new PointMergeServiceStub();
     const keyboardService = new KeyboardServiceStub();
@@ -190,6 +175,7 @@ const createMapDataService = () => {
     const service = new MapDataServiceCtor(
         styleService as any,
         stateService as any,
+        httpClient as any,
         infoService as any,
         pointMergeService as any,
         keyboardService as any,
@@ -202,12 +188,12 @@ const createMapDataService = () => {
         setDataSourceInfo: vi.fn(),
     };
 
-    return {service, styleService, stateService, infoService, pointMergeService, keyboardService};
+    return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService};
 };
 
 describe('MapDataService', () => {
     beforeEach(() => {
-        fetchInstances.length = 0;
+        wsInstances.length = 0;
         vi.clearAllMocks();
     });
 
@@ -343,7 +329,7 @@ describe('MapDataService', () => {
         expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
-    it('builds a tiles fetch request body based on selection tile requests', async () => {
+    it('builds a tiles WebSocket request body based on selection tile requests', async () => {
         const {service} = createMapDataService();
 
         const fakeMapTree = {
@@ -376,10 +362,9 @@ describe('MapDataService', () => {
 
         await service.update();
 
-        const tileFetch = fetchInstances.find((f: any) => f.url === 'tiles') ?? (service as any).currentFetch;
-        expect(tileFetch).toBeDefined();
-        const body = JSON.parse(tileFetch.bodyJson!);
-        expect(body.clientId).toBe(service.clientId);
+        const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
+        expect(tileSocket).toBeDefined();
+        const body = JSON.parse(tileSocket.lastSent);
         expect(body.stringPoolOffsets).toEqual([0]);
         expect(body.requests).toEqual([
             {
