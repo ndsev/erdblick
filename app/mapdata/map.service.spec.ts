@@ -65,24 +65,29 @@ vi.mock('./features.model', () => {
         tileId: bigint;
         legalInfo: string | undefined;
         numFeatures: number;
+        error?: string;
         preventCulling: boolean;
         disposed: boolean = false;
+        status?: number;
+        private hasDataFlag: boolean = false;
         stats: Map<string, number[]> = new Map<string, number[]>();
 
-        constructor(parser: any, meta: any, preventCulling: boolean) {
-            const parsed = meta?.mapTileKey || meta?.mapName
+        constructor(parser: any, meta: any, preventCulling: boolean, placeholder?: any) {
+            const parsed = placeholder ?? (meta?.mapTileKey || meta?.mapName
                 ? meta
                 : parser?.readTileLayerMetadata
                     ? parser.readTileLayerMetadata(meta)
-                    : {mapTileKey: '', mapName: '', layerName: '', tileId: 0n, legalInfo: undefined, numFeatures: 0};
+                    : {mapTileKey: '', mapName: '', layerName: '', tileId: 0n, legalInfo: undefined, numFeatures: 0});
             this.mapTileKey = parsed.mapTileKey ?? parsed.id ?? '';
             this.mapName = parsed.mapName ?? '';
             this.layerName = parsed.layerName ?? '';
             this.tileId = parsed.tileId ?? 0n;
             this.legalInfo = parsed.legalInfo;
             this.numFeatures = parsed.numFeatures ?? 0;
+            this.error = parsed.error;
             this.nodeId = '';
             this.preventCulling = preventCulling;
+            this.hasDataFlag = !!meta;
         }
 
         dispose() {
@@ -95,6 +100,10 @@ vi.mock('./features.model', () => {
 
         has(_featureId: string) {
             return true;
+        }
+
+        hasData() {
+            return this.hasDataFlag;
         }
     }
 
@@ -297,7 +306,7 @@ describe('MapDataService', () => {
         const fakeMapTree = {
             allLevels: (_viewIndex: number) => [],
             maps: new Map(),
-            getMapLayerBorderState: vi.fn().mockReturnValue(true),
+            getViewTileBorderState: vi.fn().mockReturnValue(true),
         };
         service.maps$.next(fakeMapTree as any);
 

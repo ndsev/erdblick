@@ -2,6 +2,14 @@ import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
 
+export enum TileLoadState {
+    LoadingQueued = 0,
+    BackendFetching = 1,
+    BackendConverting = 2,
+    RenderingQueued = 3,
+    Error = 4,
+}
+
 /**
  * JS interface of a WASM TileFeatureLayer.
  * The WASM TileFeatureLayer object is stored as a blob when not needed,
@@ -16,10 +24,12 @@ export class FeatureTile {
     tileId: bigint;
     legalInfo: string;
     numFeatures: number;
+    error?: string;
     private parser: TileLayerParser;
     preventCulling: boolean;
-    public readonly tileFeatureLayerBlob: any;
+    public readonly tileFeatureLayerBlob: Uint8Array | null;
     disposed: boolean;
+    status?: TileLoadState;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
     static statTileSize = "mapget-tile-size-kb";
@@ -31,26 +41,51 @@ export class FeatureTile {
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
      */
-    constructor(parser: TileLayerParser, tileFeatureLayerBlob: Uint8Array, preventCulling: boolean) {
-        let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
-            return parser.readTileLayerMetadata(wasmBlob);
-        }, tileFeatureLayerBlob);
-        this.mapTileKey = mapTileMetadata.id;
-        this.nodeId = mapTileMetadata.nodeId;
-        this.mapName = mapTileMetadata.mapName;
-        this.layerName = mapTileMetadata.layerName;
-        this.tileId = mapTileMetadata.tileId;
-        this.legalInfo = mapTileMetadata.legalInfo;
-        this.numFeatures = mapTileMetadata.numFeatures;
-        this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
-        for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
-            this.stats.set(k, [v as number]);
+    constructor(
+        parser: TileLayerParser,
+        tileFeatureLayerBlob: Uint8Array | null,
+        preventCulling: boolean,
+        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: bigint}) {
+        if (tileFeatureLayerBlob) {
+            let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
+                return parser.readTileLayerMetadata(wasmBlob);
+            }, tileFeatureLayerBlob);
+            this.mapTileKey = mapTileMetadata.id;
+            this.nodeId = mapTileMetadata.nodeId;
+            this.mapName = mapTileMetadata.mapName;
+            this.layerName = mapTileMetadata.layerName;
+            this.tileId = mapTileMetadata.tileId;
+            this.legalInfo = mapTileMetadata.legalInfo;
+            if (mapTileMetadata.error) {
+                this.error = mapTileMetadata.error;
+            }
+            this.numFeatures = mapTileMetadata.numFeatures;
+            this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
+            for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
+                this.stats.set(k, [v as number]);
+            }
+            this.stats.set(FeatureTile.statParseTime, []);
+        } else if (placeholder) {
+            this.mapTileKey = placeholder.mapTileKey;
+            this.nodeId = placeholder.nodeId ?? "";
+            this.mapName = placeholder.mapName;
+            this.layerName = placeholder.layerName;
+            this.tileId = placeholder.tileId;
+            this.legalInfo = "";
+            this.numFeatures = 0;
+            this.error = undefined;
+            this.stats.set(FeatureTile.statParseTime, []);
+        } else {
+            throw new Error("FeatureTile requires either tile data or placeholder metadata.");
         }
-        this.stats.set(FeatureTile.statParseTime, []);
         this.parser = parser;
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         this.disposed = false;
+    }
+
+    hasData(): boolean {
+        return !!this.tileFeatureLayerBlob;
     }
 
     /**
@@ -59,6 +94,9 @@ export class FeatureTile {
      * @returns The value returned by the callback.
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
+        if (!this.tileFeatureLayerBlob) {
+            return null;
+        }
         // Deserialize the WASM tileFeatureLayer from the blob.
         let result = uint8ArrayToWasm((bufferToRead: any) => {
             let startTime = performance.now();
@@ -84,6 +122,9 @@ export class FeatureTile {
      * Async version of the above function.
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
+        if (!this.tileFeatureLayerBlob) {
+            return null;
+        }
         // Deserialize the WASM tileFeatureLayer from the blob.
         return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
             let startTime = performance.now();
@@ -118,6 +159,11 @@ export class FeatureTile {
     static async peekMany(tiles: Array<FeatureTile>, cb: any, parsedTiles?: Array<TileFeatureLayer>): Promise<any> {
         // Check if callback is provided
         if (!cb) {
+            return;
+        }
+
+        tiles = tiles.filter(tile => tile.hasData());
+        if (!tiles.length) {
             return;
         }
 

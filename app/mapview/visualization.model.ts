@@ -85,7 +85,7 @@ class TileBoxVisualization {
     refCount: number = 0;
     featureCount: number = 0;
     private readonly id: bigint;
-    private readonly color?: Color;
+    private color?: Color;
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
     private instance: GeometryInstance;
 
@@ -111,6 +111,11 @@ class TileBoxVisualization {
         });
 
         this.id = tile.tileId;
+    }
+
+    setColor(color?: Color) {
+        this.color = color;
+        this.updateOutlineColor();
     }
 
     private getCurrentOutlineColor(): Color {
@@ -209,6 +214,13 @@ export class TileVisualization {
         this.options = options || {};
         this.pointMergeService = pointMergeService;
         this.viewIndex = viewIndex;
+    }
+
+    setBorderColor(color?: Color) {
+        this.specialBorderColour = color;
+        if (this.lowDetailVisu) {
+            this.lowDetailVisu.setColor(color);
+        }
     }
 
     /**

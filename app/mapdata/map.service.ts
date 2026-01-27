@@ -1,15 +1,17 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
+    MapTileLoadState,
     MapTileRequestStatus,
     MapTileStreamClient,
     MAP_TILE_STREAM_HEADER_SIZE,
     MAP_TILE_STREAM_TYPE_FEATURES,
     MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_LOAD_STATE,
     MAP_TILE_STREAM_TYPE_SOURCEDATA,
 } from "./map-tile-stream-client";
-import type {MapTileStreamStatusPayload} from "./map-tile-stream-client";
-import {FeatureTile, FeatureWrapper} from "./features.model";
+import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./map-tile-stream-client";
+import {FeatureTile, FeatureWrapper, TileLoadState} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileVisualization} from "../mapview/visualization.model";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
@@ -20,7 +22,7 @@ import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
-import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
+import {Cartesian3, Viewer, Rectangle, Color} from "../integrations/cesium";
 import {deepEquals} from "../shared/app-state";
 
 const infoUrl = "sources";
@@ -317,6 +319,9 @@ export class MapDataService {
             const viewState = this.viewVisualizationState[nextViewIndexToProcess];
             const entry = viewState.visualizationQueue.shift();
             if (entry !== undefined) {
+                if (entry.tile.status === TileLoadState.RenderingQueued) {
+                    this.clearTileLoadState(entry.tile);
+                }
                 this.tileVisualizationTopic.next(entry);
                 currentQueueLength--;
             }
@@ -343,6 +348,7 @@ export class MapDataService {
                 console.warn(`Ignoring unknown /tiles message type ${messageType}.`);
             };
             this.tilesSocket.onStatus = (status) => this.handleTilesStatus(status);
+            this.tilesSocket.onLoadState = (payload) => this.handleTilesLoadState(payload);
             this.tilesSocket.onClose = () => {
                 this.lastTilesRequestBody = null;
                 this.lastTilesRequestSignature = null;
@@ -399,8 +405,124 @@ export class MapDataService {
         this.messageService.showError(`Tile request failed: ${summary}${detail}`);
     }
 
+    private handleTilesLoadState(payload: MapTileStreamLoadStatePayload) {
+        if (!payload || payload.type !== "mapget.tiles.load-state") {
+            return;
+        }
+
+        const tileId = BigInt(payload.tileId);
+        const tileKey = coreLib.getTileFeatureLayerKey(payload.mapId, payload.layerId, tileId);
+        const tile = this.ensureTilePlaceholder(payload.mapId, payload.layerId, tileId, false);
+        if (!tile || tile.mapTileKey !== tileKey) {
+            return;
+        }
+
+        const state = this.mapLoadStateFromStream(payload.state);
+        if (!state) {
+            return;
+        }
+        this.applyTileLoadState(tile, state);
+    }
+
     private buildTilesRequestSignature(requests: Array<{mapId: string, layerId: string}>) {
         return JSON.stringify(requests.map(req => [req.mapId, req.layerId]));
+    }
+
+    private mapLoadStateFromStream(state: MapTileLoadState): TileLoadState | null {
+        switch (state) {
+            case MapTileLoadState.LoadingQueued:
+                return TileLoadState.LoadingQueued;
+            case MapTileLoadState.BackendFetching:
+                return TileLoadState.BackendFetching;
+            case MapTileLoadState.BackendConverting:
+                return TileLoadState.BackendConverting;
+            default:
+                return null;
+        }
+    }
+
+    private borderColorForStatus(status?: TileLoadState) {
+        if (status === undefined) {
+            return undefined;
+        }
+        switch (status) {
+            case TileLoadState.LoadingQueued:
+                return Color.DIMGRAY;
+            case TileLoadState.BackendFetching:
+                return Color.ORANGE;
+            case TileLoadState.BackendConverting:
+                return Color.GOLD;
+            case TileLoadState.RenderingQueued:
+                return Color.CYAN;
+            case TileLoadState.Error:
+                return Color.RED;
+            default:
+                return undefined;
+        }
+    }
+
+    private applyTileLoadState(tile: FeatureTile, status: TileLoadState) {
+        tile.status = status;
+        const borderColor = this.borderColorForStatus(status);
+        for (const viewState of this.viewVisualizationState) {
+            for (const tileVisus of viewState.visualizedTileLayers.values()) {
+                for (const visu of tileVisus) {
+                    if (visu.tile.mapTileKey !== tile.mapTileKey) {
+                        continue;
+                    }
+                    visu.setBorderColor(borderColor);
+                }
+            }
+        }
+    }
+
+    private clearTileLoadState(tile: FeatureTile) {
+        tile.status = undefined;
+        for (const viewState of this.viewVisualizationState) {
+            for (const tileVisus of viewState.visualizedTileLayers.values()) {
+                for (const visu of tileVisus) {
+                    if (visu.tile.mapTileKey !== tile.mapTileKey) {
+                        continue;
+                    }
+                    visu.setBorderColor(undefined);
+                }
+            }
+        }
+    }
+
+    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: bigint, preventCulling: boolean): FeatureTile | null {
+        if (!this.tileParser) {
+            return null;
+        }
+        const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+        const existing = this.loadedTileLayers.get(tileKey);
+        if (existing) {
+            if (preventCulling) {
+                existing.preventCulling = true;
+            }
+            return existing;
+        }
+
+        const placeholder = new FeatureTile(this.tileParser, null, preventCulling, {
+            mapTileKey: tileKey,
+            mapName: mapId,
+            layerName: layerId,
+            tileId: tileId,
+        });
+        this.applyTileLoadState(placeholder, TileLoadState.LoadingQueued);
+        this.loadedTileLayers.set(tileKey, placeholder);
+        this.statsDialogNeedsUpdate.next();
+
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+            if (!this.viewShowsFeatureTile(viewIndex, placeholder)) {
+                continue;
+            }
+            for (const style of this.styleService.styles.values()) {
+                this.renderTileLayerOnDemand(viewIndex, placeholder, style);
+            }
+        }
+
+        return placeholder;
     }
 
     private applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number) {
@@ -617,7 +739,7 @@ export class MapDataService {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         return false;
                     }
-                    tileVisu.showTileBorder = this.maps.getMapLayerBorderState(viewIndex, mapName, layerName);
+                    tileVisu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                     tileVisu.isHighDetail = state.highDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
                     return true;
                 });
@@ -668,6 +790,13 @@ export class MapDataService {
                 .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
                 requests.push(selectionTileRequest.remoteRequest);
+                for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
+                    this.ensureTilePlaceholder(
+                        selectionTileRequest.remoteRequest.mapId,
+                        selectionTileRequest.remoteRequest.layerId,
+                        BigInt(tileId),
+                        true);
+                }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
             }
@@ -692,9 +821,11 @@ export class MapDataService {
                     }
                     for (let tileId of tileIds!) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
-                        if (!this.loadedTileLayers.has(tileMapLayerKey) && !requestTilesForMapLayerSet.has(tileId)) {
+                        const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
+                        if ((!existingTile || !existingTile.hasData()) && !requestTilesForMapLayerSet.has(tileId)) {
                             requestTilesForMapLayer.push(Number(tileId)); // TODO: Get rid of type casting after new tile ids are available
                             requestTilesForMapLayerSet.add(tileId);
+                            this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
                         }
                     }
                 }
@@ -754,6 +885,15 @@ export class MapDataService {
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
         let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
+        const existingTile = this.loadedTileLayers.get(tileLayer.mapTileKey);
+        if (existingTile) {
+            tileLayer.preventCulling = tileLayer.preventCulling || existingTile.preventCulling;
+        }
+        if (tileLayer.error) {
+            this.applyTileLoadState(tileLayer, TileLoadState.Error);
+        } else {
+            this.applyTileLoadState(tileLayer, TileLoadState.RenderingQueued);
+        }
 
         // Consider, if this tile is needed by a selection tile request.
         let neededBySelection = false;
@@ -860,8 +1000,9 @@ export class MapDataService {
             tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId),
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
-            this.maps.getMapLayerBorderState(viewIndex, mapName, layerName),
+            this.maps.getViewTileBorderState(viewIndex),
             this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId));
+        visu.setBorderColor(this.borderColorForStatus(tileLayer.status));
         viewState.visualizationQueue.push(visu);
         if (viewState.visualizedTileLayers.has(styleId)) {
             viewState.visualizedTileLayers.get(styleId)?.push(visu);
@@ -883,6 +1024,9 @@ export class MapDataService {
     getPrioritisedTiles(viewIndex: number) {
         let tiles = new Array<[number, FeatureTile]>();
         for (const [_, tile] of this.loadedTileLayers) {
+            if (!tile.hasData()) {
+                continue;
+            }
             tiles.push([coreLib.getTilePriorityById(this.viewVisualizationState[viewIndex].viewport, tile.tileId), tile]);
         }
         tiles.sort((a, b) => b[0] - a[0]);
@@ -890,7 +1034,11 @@ export class MapDataService {
     }
 
     getFeatureTile(tileKey: string): FeatureTile | null {
-        return this.loadedTileLayers.get(tileKey) || null;
+        const tile = this.loadedTileLayers.get(tileKey);
+        if (!tile || !tile.hasData()) {
+            return null;
+        }
+        return tile;
     }
 
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
@@ -905,7 +1053,7 @@ export class MapDataService {
             }
 
             let tile = this.loadedTileLayers.get(tileKey);
-            if (tile) {
+            if (tile && tile.hasData()) {
                 result.set(tileKey, tile);
                 continue;
             }
@@ -1080,7 +1228,7 @@ export class MapDataService {
 
     *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
         for (const tile of this.loadedTileLayers.values()) {
-            if (tile.tileId == tileId) {
+            if (tile.tileId == tileId && tile.hasData()) {
                 yield tile;
             }
         }
@@ -1186,8 +1334,15 @@ export class MapDataService {
         this.update().then();
     }
 
-    toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
-        this.maps.toggleLayerTileBorderVisibility(viewIndex, mapId, layerId);
+    toggleViewTileBorderVisibility(viewIndex: number) {
+        const nextState = !this.maps.getViewTileBorderState(viewIndex);
+        this.maps.setViewTileBorderState(viewIndex, nextState);
+        this.syncViewsIfEnabled(viewIndex);
+        this.update().then();
+    }
+
+    setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
+        this.maps.setViewTileBorderState(viewIndex, enabled);
         this.syncViewsIfEnabled(viewIndex);
         this.update().then();
     }

@@ -152,6 +152,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
+        tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,
         *allScalarFields
     };

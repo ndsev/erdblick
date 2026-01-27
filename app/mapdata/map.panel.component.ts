@@ -56,6 +56,16 @@ import {Rectangle} from "../integrations/cesium";
                             </span>
                         </p-button>
                         <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
+                        <p-button onEnterClick (click)="toggleViewTileBorders(index)"
+                                  [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
+                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                  icon="" label="" pTooltip="Toggle tile borders"
+                                  tooltipPosition="bottom" tabindex="0">
+                            <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
+                                {{ tileBordersEnabled[index] ? "border_outer" : "border_clear" }}
+                            </span>
+                        </p-button>
+                        <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                         <div class="osm-controls">
                             <span style="font-size: 0.9em">OSM Overlay:</span>
                         <p-button onEnterClick (click)="toggleOSMOverlay(index)"
@@ -163,18 +173,6 @@ import {Rectangle} from "../integrations/cesium";
                                             </span>
                                         </div>
                                         <div class="tree-node-controls">
-                                            <p-button onEnterClick
-                                                      (click)="toggleTileBorders(index, node.mapId, node.id)"
-                                                      label="" pTooltip="Toggle tile borders"
-                                                      tooltipPosition="bottom"
-                                                      [styleClass]="node.viewConfig[index].tileBorders ? 'p-button-success' : 'p-button-primary'"
-                                                      [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                      tabindex="0">
-                                            <span class="material-symbols-outlined"
-                                                  style="font-size: 1.2em; margin: 0 auto;">
-                                                {{ node.viewConfig[index].tileBorders ? 'select_all' : 'deselect' }}
-                                            </span>
-                                            </p-button>
                                             <p-button onEnterClick *ngIf="node.info.coverage.length"
                                                       (click)="focus($event, index, node.info.coverage)"
                                                       label="" pTooltip="Focus on layer" tooltipPosition="bottom"
@@ -278,6 +276,7 @@ export class MapPanelComponent {
 
     osmEnabled: boolean[] = [true];
     osmOpacityValue: number[] = [30];
+    tileBordersEnabled: boolean[] = [];
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
@@ -314,6 +313,9 @@ export class MapPanelComponent {
                             }))
                     );
                 }
+                const numViews = this.stateService.numViews;
+                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.mapService.maps.getViewTileBorderState(index));
             })
         );
 
@@ -321,10 +323,12 @@ export class MapPanelComponent {
             this.stateService.numViewsState.subscribe(numViews => {
                 this.osmEnabled = [];
                 this.osmOpacityValue = [];
+                this.tileBordersEnabled = [];
                 const viewIndices = Array.from({length: numViews}, (_, i) => i);
                 viewIndices.forEach(viewIndex => {
                     this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
                     this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
+                    this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                 });
                 while (this.mapsCollapsed.length < viewIndices.length) {
                     this.mapsCollapsed.push(false);
@@ -541,8 +545,9 @@ export class MapPanelComponent {
         this.mapService.setMapLayerVisibility(viewIndex, mapName, layerName, state);
     }
 
-    toggleTileBorders(viewIndex: number, mapName: string, layerName: string) {
-        this.mapService.toggleLayerTileBorderVisibility(viewIndex, mapName, layerName);
+    toggleViewTileBorders(viewIndex: number) {
+        this.mapService.toggleViewTileBorderVisibility(viewIndex);
+        this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
     }
 
     onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {

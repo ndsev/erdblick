@@ -11,6 +11,7 @@ export const MAP_TILE_STREAM_TYPE_FIELDS = 1;
 export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
+export const MAP_TILE_STREAM_TYPE_LOAD_STATE = 5;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 
 export interface MapTileStreamStatusRequest {
@@ -28,6 +29,21 @@ export interface MapTileStreamStatusPayload {
     message?: string;
 }
 
+export enum MapTileLoadState {
+    LoadingQueued = 0,
+    BackendFetching = 1,
+    BackendConverting = 2,
+}
+
+export interface MapTileStreamLoadStatePayload {
+    type: string;
+    mapId: string;
+    layerId: string;
+    tileId: number;
+    state: MapTileLoadState;
+    stateText?: string;
+}
+
 export class MapTileStreamClient {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
@@ -35,6 +51,7 @@ export class MapTileStreamClient {
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
+    onLoadState: ((payload: MapTileStreamLoadStatePayload) => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
@@ -172,6 +189,20 @@ export class MapTileStreamClient {
                 }
             } catch (err) {
                 console.error("Failed to parse /tiles status payload:", err);
+            }
+            return;
+        }
+
+        if (type === MAP_TILE_STREAM_TYPE_LOAD_STATE) {
+            const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
+            const payloadText = this.decoder.decode(payloadBytes);
+            try {
+                const payload = JSON.parse(payloadText) as MapTileStreamLoadStatePayload;
+                if (this.onLoadState) {
+                    this.onLoadState(payload);
+                }
+            } catch (err) {
+                console.error("Failed to parse /tiles load-state payload:", err);
             }
             return;
         }

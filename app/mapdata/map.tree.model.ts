@@ -352,17 +352,24 @@ export class MapLayerTree {
         this.configureTreeParameters();
     }
 
-    toggleLayerTileBorderVisibility(viewIndex: number, mapId: string, layerId: string) {
-        const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
-            return;
+    setViewTileBorderState(viewIndex: number, enabled: boolean) {
+        for (const layer of this.allFeatureLayers()) {
+            if (layer.viewConfig.length <= viewIndex) {
+                continue;
+            }
+            layer.viewConfig[viewIndex].tileBorders = enabled;
+            this.stateService.setMapLayerConfig(layer.mapId, layer.id, layer.viewConfig);
         }
-        const layer = mapItem.layers.get(layerId)!;
-        if (layer.viewConfig.length <= viewIndex) {
-            return;
+    }
+
+    getViewTileBorderState(viewIndex: number) {
+        for (const layer of this.allFeatureLayers()) {
+            if (layer.viewConfig.length <= viewIndex) {
+                continue;
+            }
+            return layer.viewConfig[viewIndex].tileBorders;
         }
-        layer.viewConfig[viewIndex].tileBorders = !layer.viewConfig[viewIndex].tileBorders;
-        this.stateService.setMapLayerConfig(mapId, layerId, layer.viewConfig);
+        return false;
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
@@ -403,15 +410,7 @@ export class MapLayerTree {
     }
 
     getMapLayerBorderState(viewIndex: number, mapId: string, layerId: string) {
-        const mapItem = this.maps.get(mapId);
-        if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
-            return false;
-        }
-        const layer = mapItem.layers.get(layerId)!;
-        if (layer.viewConfig.length <= viewIndex) {
-            return false;
-        }
-        return layer.viewConfig[viewIndex].tileBorders;
+        return this.getViewTileBorderState(viewIndex);
     }
 
     getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {

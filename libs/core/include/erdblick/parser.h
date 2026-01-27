@@ -50,6 +50,7 @@ public:
         std::string layerName;
         uint64_t tileId;
         std::string legalInfo;
+        std::string error;
         int32_t numFeatures;
         NativeJsValue scalarFields;
     };
