@@ -26,7 +26,7 @@ interface ComparisonColumn {
                   [modal]="false" [closable]="true" [(visible)]="comparisonService.isComparisonVisible"
                   (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()">
             <ng-template #header>
-                <div class="comparison-dialog-title" (pointerdown)="beginDrag()">Inspection Comparison</div>
+                <div class="title" (pointerdown)="beginDrag()">Inspection Comparison</div>
             </ng-template>
             <ng-template #content>
                 <div class="comparison-content">

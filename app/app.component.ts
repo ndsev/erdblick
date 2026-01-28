@@ -25,6 +25,7 @@ declare let window: DebugWindow;
         }
         <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         <legal-dialog></legal-dialog>
+        <about-dialog></about-dialog>
         <router-outlet></router-outlet>
     `,
     styles: [`
@@ -45,6 +46,9 @@ export class AppComponent implements OnDestroy {
 
     title: string = "erdblick";
     private detachDialogFocusListener?: () => void;
+    private detachDialogDragStartListener?: () => void;
+    private detachDialogDragEndListener?: () => void;
+    private dialogDragActive = false;
 
     constructor(private httpClient: HttpClient,
                 public mapService: MapDataService,
@@ -55,6 +59,7 @@ export class AppComponent implements OnDestroy {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.bindDialogFocusStacking();
+        this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
             this.mapService,
             this.stateService
@@ -98,6 +103,8 @@ export class AppComponent implements OnDestroy {
 
     ngOnDestroy() {
         this.detachDialogFocusListener?.();
+        this.detachDialogDragStartListener?.();
+        this.detachDialogDragEndListener?.();
     }
 
     private bindDialogFocusStacking() {
@@ -107,27 +114,88 @@ export class AppComponent implements OnDestroy {
                 return;
             }
             const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
-            if (!dialogElement) {
-                return;
-            }
-            if (dialogElement.closest('.map-layer-dialog')) {
-                return;
-            }
-            if (dialogElement.closest('.search-menu-dialog') || dialogElement.closest('.feature-search-dialog')) {
-                const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
-                if (mainBar) {
-                    this.dialogStack.bringElementToFront(mainBar);
+            if (dialogElement) {
+                if (dialogElement.closest('.map-layer-dialog')) {
+                    return;
                 }
-                const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
-                this.dialogStack.bringElementToFront(wrapper ?? dialogElement);
+                if (dialogElement.closest('.search-menu-dialog')) {
+                    const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
+                    if (mainBar) {
+                        this.dialogStack.bringElementToFront(mainBar);
+                    }
+                    const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
+                    this.dialogStack.bringElementToFront(wrapper ?? dialogElement);
+                    return;
+                }
+                this.dialogStack.bringElementToFront(dialogElement);
                 return;
             }
-            this.dialogStack.bringElementToFront(dialogElement);
+
+            const mainBar = target.closest('.main-bar') as HTMLElement | null;
+            const searchWrapper = target.closest('.search-wrapper') as HTMLElement | null;
+            if (mainBar) {
+                this.dialogStack.bringElementToFront(mainBar);
+            }
+            if (searchWrapper) {
+                this.dialogStack.bringElementToFront(searchWrapper);
+            }
         };
         document.addEventListener('mousedown', handler, true);
         this.detachDialogFocusListener = () => {
             document.removeEventListener('mousedown', handler, true);
         };
+    }
+
+    private bindDialogDragSelectionGuard() {
+        const handlePointerDown = (event: PointerEvent) => {
+            if (event.button !== 0) {
+                return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (!target) {
+                return;
+            }
+            const header = target.closest('.p-dialog-header') as HTMLElement | null;
+            if (!header) {
+                return;
+            }
+            const dialog = header.closest('.p-dialog') as HTMLElement | null;
+            if (!dialog) {
+                return;
+            }
+            this.setDialogDragSelection(true);
+        };
+
+        const handlePointerEnd = () => {
+            this.setDialogDragSelection(false);
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        window.addEventListener('pointerup', handlePointerEnd, true);
+        window.addEventListener('pointercancel', handlePointerEnd, true);
+        window.addEventListener('blur', handlePointerEnd);
+
+        this.detachDialogDragStartListener = () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true);
+        };
+        this.detachDialogDragEndListener = () => {
+            window.removeEventListener('pointerup', handlePointerEnd, true);
+            window.removeEventListener('pointercancel', handlePointerEnd, true);
+            window.removeEventListener('blur', handlePointerEnd);
+        };
+    }
+
+    private setDialogDragSelection(active: boolean) {
+        if (this.dialogDragActive === active) {
+            return;
+        }
+        this.dialogDragActive = active;
+        if (active) {
+            document.body?.classList.add('dialog-dragging');
+            window.getSelection()?.removeAllRanges();
+            return;
+        }
+        document.body?.classList.remove('dialog-dragging');
     }
 
     getBasicVersion() {

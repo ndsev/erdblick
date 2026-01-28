@@ -71,6 +71,7 @@ import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedatase
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
+import {AboutComponent} from "./auxiliaries/about.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
 import {PopoverModule} from "primeng/popover";
@@ -149,6 +150,7 @@ export const initializeServices = () => {
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
+        AboutComponent,
         ErdblickViewUIComponent,
         StyleComponent,
         MapViewContainerComponent,

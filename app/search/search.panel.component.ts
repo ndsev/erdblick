@@ -59,8 +59,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 
             <div class="resizable-container" #searchcontrols>
                 <p-dialog #actionsdialog class="search-menu-dialog" showHeader="false" [(visible)]="searchService.showFeatureSearchDialog"
-                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false"
-                          (onShow)="onSearchMenuShow()">
+                          [draggable]="false" [resizable]="false" [appendTo]="searchcontrols" [closeOnEscape]="false">
                     <div>
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
                             <div onEnterClick (click)="targetToHistory(item.index)" class="search-option-wrapper"
@@ -380,19 +379,6 @@ export class SearchPanelComponent implements AfterViewInit {
                 this.shrinkTextarea();
             }, 10);
         });
-    }
-
-    onSearchMenuShow() {
-        const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
-        if (mainBar) {
-            this.dialogStack.bringElementToFront(mainBar);
-        }
-        const wrapper = this.dialog?.container?.closest('.search-wrapper') as HTMLElement | null;
-        if (wrapper) {
-            this.dialogStack.bringElementToFront(wrapper);
-            return;
-        }
-        this.dialogStack.bringToFront(this.dialog);
     }
 
     private reloadSearchHistory() {

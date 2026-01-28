@@ -26,6 +26,7 @@ interface InspectionModelData {
         <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                          [geoJson]="geoJson" [selectedFeatures]="selectedFeatures"
                          [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                         [showFilter]="showFilter()"
                          [enableSourceDataNavigation]="enableSourceDataNavigation()">
         </inspection-tree>
     `,
@@ -38,6 +39,7 @@ export class FeaturePanelComponent {
     enableSourceDataNavigation = input<boolean>(true);
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [

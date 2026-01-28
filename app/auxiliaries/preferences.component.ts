@@ -31,19 +31,10 @@ import {environment} from "../environments/environment";
                         warning
                     </span>
                     @if (copyright.length) {
-                        <div id="copyright-info" (click)="openLegalInfo()">
+                        <div class="copyright-info" (click)="openLegalInfo()">
                             {{ copyright }}
                         </div>
                     }
-                    <div>
-                        @if (!stateService.distributionVersions.getValue().length) {
-                            <span>{{ stateService.erdblickVersion.getValue() }}</span>
-                        } @else {
-                            <span style="cursor: pointer" (click)="showExposedVersions()">
-                                {{ stateService.distributionVersions.getValue()[0].name }}&nbsp;{{ stateService.distributionVersions.getValue()[0].tag }}
-                            </span>
-                        }
-                    </div>
                 </div>
             </ng-template>
         </p-menubar>
@@ -169,27 +160,6 @@ import {environment} from "../environments/environment";
             </div>
             <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
-        <p-dialog header="Distribution Version Information" [(visible)]="distVersionsDialogVisible"
-                  [modal]="false" [style]="{'min-height': '10em', 'min-width': '20em'}">
-            <div class="dialog-content">
-                <p-table [value]="stateService.distributionVersions.getValue()" [tableStyle]="{ 'min-width': '20em' }">
-                    <ng-template #header>
-                        <tr>
-                            <th>Name</th>
-                            <th>Version</th>
-                        </tr>
-                    </ng-template>
-                    <ng-template #body let-version>
-                        <tr>
-                            <td>{{ version.name }}</td>
-                            <td>{{ version.tag }}</td>
-                        </tr>
-                    </ng-template>
-                </p-table>
-            </div>
-            <p-button type="button" label="Close" icon="pi pi-times" (click)="distVersionsDialogVisible = false">
-            </p-button>
-        </p-dialog>
     `,
     styles: [
         `
@@ -272,6 +242,13 @@ import {environment} from "../environments/environment";
                 background-color: #ff5722;
                 color: white;
             }
+            
+            .copyright-info {
+                width: 5em;
+                font-size: 0.8em;
+                word-wrap: normal;
+                text-align: end;
+            }
 
             @media only screen and (max-width: 56em) {
                 .elevated {
@@ -284,8 +261,6 @@ import {environment} from "../environments/environment";
     standalone: false
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
-
-    distVersionsDialogVisible: boolean = false;
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
@@ -315,29 +290,46 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             command: () => { this.openStylesDialog(); }
         },
         {
-            name: 'Datasources',
-            icon: 'data_table',
-            command: () => { this.openDatasources(); }
-        },
-        {
-            name: 'Statistics',
-            icon: 'bar_chart_4_bars',
-            command: () => { this.showStatsDialog(); }
-        },
-        {
-            name: 'Controls',
-            icon: 'keyboard',
-            command: () => { this.showControlsDialog(); }
-        },
-        {
-            name: 'Preferences',
+            name: 'Settings',
             icon: 'settings',
-            command: () => { this.showPreferencesDialog(); }
+            items: [
+                {
+                    name: 'Preferences',
+                    icon: 'settings',
+                    command: () => { this.showPreferencesDialog(); },
+                },
+                {
+                    name: 'Datasources',
+                    icon: 'data_table',
+                    command: () => { this.openDatasources(); }
+                },
+                {
+                    name: 'Controls',
+                    icon: 'keyboard',
+                    command: () => { this.showControlsDialog(); }
+                }
+            ]
         },
         {
             name: 'Help',
             icon: 'question_mark',
-            command: () => { this.openHelp(); }
+            items: [
+                {
+                    name: 'Statistics',
+                    icon: 'bar_chart_4_bars',
+                    command: () => { this.showStatsDialog(); }
+                },
+                {
+                    name: 'Help',
+                    icon: 'question_mark',
+                    command: () => { this.openHelp(); }
+                },
+                {
+                    name: 'About',
+                    icon: 'info',
+                    command: () => { this.openAboutDialog(); }
+                }
+            ]
         }
     ];
     private mediaQueryList?: MediaQueryList;
@@ -412,6 +404,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     openHelp() {
         window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
+    }
+
+    openAboutDialog() {
+        this.stateService.aboutDialogVisible = true;
     }
 
     clearURLProperties() {
@@ -493,10 +489,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     protected openLegalInfo() {
         this.stateService.legalInfoDialogVisible = true;
-    }
-
-    protected showExposedVersions() {
-        this.distVersionsDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

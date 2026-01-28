@@ -382,6 +382,8 @@ export class MapView {
                     this.stateService.setSelection(Array.isArray(feature.id) ? feature.id : [feature.id]);
                 }
             } else {
+                // No new feature to select. Unset existing unpinned selections.
+                this.stateService.unsetUnpinnedSelections();
                 this.menuService.tileOutline.next(null);
             }
             // Handle position update after highlighting.

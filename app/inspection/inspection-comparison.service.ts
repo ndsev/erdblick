@@ -42,16 +42,14 @@ export class InspectionComparisonService {
             .map(id => panels.get(id))
             .filter((panel): panel is InspectionPanelModel<FeatureWrapper> => !!panel)
             .map(panel => this.createEntryFromPanel(panel));
-        const next = this.comparisons.getValue().slice();
-        next.push({
-            id: this.nextId++,
+        const existing = this.comparisons.getValue()[0];
+        const id = existing?.id ?? this.nextId++;
+        this.comparisons.next([{
+            id,
             base: baseEntry,
             others: otherEntries
-        });
-        if (next.length > 0) {
-            this.isComparisonVisible = true;
-        }
-        this.comparisons.next(next);
+        }]);
+        this.isComparisonVisible = true;
     }
 
     closeComparison() {

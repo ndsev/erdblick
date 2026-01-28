@@ -35,6 +35,7 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
 export interface Versions {
     name: string;
     tag: string;
+    whatsnew?: string;
 }
 
 export interface TileFeatureId {
@@ -358,6 +359,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly aboutDialogVisibleState = this.createState<boolean>({
+        name: 'aboutDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -612,6 +619,8 @@ export class AppStateService implements OnDestroy {
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
+    get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
+    set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -893,6 +902,35 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    reorderInspectionPanels(dockedDisplayOrder: number[]) {
+        const allPanels = this.selectionState.getValue();
+        const dockedPanels = allPanels.filter(panel => !panel.undocked);
+        if (dockedPanels.length < 2) {
+            return;
+        }
+        const dockedById = new Map(dockedPanels.map(panel => [panel.id, panel]));
+        const normalizedDisplayOrder = dockedDisplayOrder.filter(id => dockedById.has(id));
+        if (normalizedDisplayOrder.length !== dockedPanels.length) {
+            dockedPanels.forEach(panel => {
+                if (!normalizedDisplayOrder.includes(panel.id)) {
+                    normalizedDisplayOrder.push(panel.id);
+                }
+            });
+        }
+        const rawOrder = normalizedDisplayOrder.toReversed();
+        let dockedIndex = 0;
+        const nextPanels = allPanels.map(panel => {
+            if (panel.undocked) {
+                return panel;
+            }
+            const nextId = rawOrder[dockedIndex++];
+            return dockedById.get(nextId)!;
+        });
+        if (!this.panelOrderEquals(allPanels, nextPanels)) {
+            this.selectionState.next(nextPanels);
+        }
+    }
+
     setInspectionPanelColor(id: number, color: string) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
@@ -919,6 +957,18 @@ export class AppStateService implements OnDestroy {
 
     getNumSelections(): number {
         return this.selectionState.getValue().length;
+    }
+
+    private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i].id !== b[i].id) {
+                return false;
+            }
+        }
+        return true;
     }
 
     setMarkerState(enabled: boolean) {

@@ -56,6 +56,18 @@ import {InspectionTreeComponent} from "./inspection.tree.component";
                                 </p-button>
                             }
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
+                                <p-button icon="" (click)="focusOnFeature($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="Focus on feature" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                </p-button>
+                                <p-button icon="" (click)="openGeoJsonMenu($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="GeoJSON actions" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">download</span>
+                                </p-button>
                                 <p-button icon="" (click)="openComparePopover($event)"
                                           (mousedown)="$event.stopPropagation()"
                                           pTooltip="Compare" tooltipPosition="bottom">
@@ -97,11 +109,10 @@ import {InspectionTreeComponent} from "./inspection.tree.component";
                                    [showClear]="true"
                                    [selectionLimit]="3"
                                    placeholder="Compare with..."
-                                   appendTo="body"
                                    [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
                     @if (selectedCompareIds.length > 0) {
                         <div class="comparison-popover-actions">
-                            <p-button label="Apply" (click)="applyComparison($event)"/>
+                            <p-button icon="pi pi-check" label="" (click)="applyComparison($event)"/>
                         </div>
                     }
                 </div>
@@ -211,6 +222,20 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
+    }
+
+    focusOnFeature(event: MouseEvent) {
+        event.stopPropagation();
+        const panel = this.panel();
+        if (!panel.features.length) {
+            return;
+        }
+        this.mapService.zoomToFeature(undefined, panel.features[0]);
+    }
+
+    openGeoJsonMenu(event: MouseEvent) {
+        event.stopPropagation();
+        this.inspectionTree?.showGeoJsonMenu(event);
     }
 
     dock(event: MouseEvent) {
@@ -326,14 +351,15 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         const index = this.dialogIndex();
         const panelId = this.panel().id;
         const slotIndex = this.dialogLayout.getSlotIndex(index);
-        const stored = this.dialogLayout.getPosition(index, panelId);
+        const pending = this.dialogLayout.consumePendingPosition(panelId);
+        const stored = pending ?? this.dialogLayout.getPosition(index, panelId);
         const rect = this.dialog.container.getBoundingClientRect();
         const offsetPx = this.stateService.baseFontSize;
         const offsetMultiplier = slotIndex + 1;
         const left = stored?.left ?? rect.left + offsetPx * offsetMultiplier;
         const top = stored?.top ?? rect.top + offsetPx * offsetMultiplier;
         this.setDialogPosition(left, top);
-        if (!stored) {
+        if (!stored || pending) {
             this.dialogLayout.setPosition(index, panelId, {left, top});
         }
     }

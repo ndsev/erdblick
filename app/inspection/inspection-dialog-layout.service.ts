@@ -15,6 +15,7 @@ interface InspectionDialogSlot {
 @Injectable({providedIn: 'root'})
 export class InspectionDialogLayoutService {
     private slots: Array<InspectionDialogSlot | undefined> = new Array(MAX_INSPECTION_DIALOG_POSITIONS);
+    private pendingPositions = new Map<number, InspectionDialogPosition>();
 
     getPosition(index: number, panelId: number): InspectionDialogPosition | undefined {
         const slot = this.slots[this.getSlotIndex(index)];
@@ -26,6 +27,18 @@ export class InspectionDialogLayoutService {
 
     setPosition(index: number, panelId: number, position: InspectionDialogPosition) {
         this.slots[this.getSlotIndex(index)] = {panelId, position};
+    }
+
+    setPendingPosition(panelId: number, position: InspectionDialogPosition) {
+        this.pendingPositions.set(panelId, position);
+    }
+
+    consumePendingPosition(panelId: number): InspectionDialogPosition | undefined {
+        const position = this.pendingPositions.get(panelId);
+        if (position) {
+            this.pendingPositions.delete(panelId);
+        }
+        return position;
     }
 
     getSlotIndex(index: number): number {

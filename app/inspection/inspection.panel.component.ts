@@ -5,6 +5,7 @@ import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
+import {InspectionTreeComponent} from "./inspection.tree.component";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -18,7 +19,7 @@ interface SourceLayerMenuItem {
         <p-accordion class="inspect-panel" value="0">
             <p-accordion-panel value="0">
                 <p-accordion-header>
-                    <div class="inspector-title">
+                    <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
                         <span>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
@@ -47,6 +48,18 @@ interface SourceLayerMenuItem {
                                       style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
+                                <p-button icon="" (click)="focusOnFeature($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="Focus on feature" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
+                                </p-button>
+                                <p-button icon="" (click)="openGeoJsonMenu($event)"
+                                          (mousedown)="$event.stopPropagation()"
+                                          pTooltip="GeoJSON actions" tooltipPosition="bottom">
+                                    <span class="material-symbols-outlined"
+                                          style="font-size: 1.2em; margin: 0 auto;">download</span>
+                                </p-button>
                                 <p-button icon="" (click)="openComparePopover($event)"
                                           (mousedown)="$event.stopPropagation()"
                                           pTooltip="Compare" tooltipPosition="bottom">
@@ -76,9 +89,16 @@ interface SourceLayerMenuItem {
                             </div>
                         } @else if (panel().sourceData) {
                             <sourcedata-panel [panel]="panel()"
+                                              [showFilter]="false"
+                                              [filterText]="filterText()"
+                                              (filterTextChange)="filterTextChange.emit($event)"
                                               (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
                         } @else {
-                            <feature-panel [panel]="panel()"></feature-panel>
+                            <feature-panel [panel]="panel()"
+                                           [showFilter]="false"
+                                           [filterText]="filterText()"
+                                           (filterTextChange)="filterTextChange.emit($event)">
+                            </feature-panel>
                         }
                     </div>
                 </p-accordion-content>
@@ -95,11 +115,10 @@ interface SourceLayerMenuItem {
                                    [showClear]="true"
                                    [selectionLimit]="3"
                                    placeholder="Compare with..."
-                                   appendTo="body"
                                    [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
                     @if (selectedCompareIds.length > 0) {
                         <div class="comparison-popover-actions">
-                            <p-button label="Apply" (click)="applyComparison($event)"/>
+                            <p-button icon="pi pi-check" label="" (click)="applyComparison($event)"/>
                         </div>
                     }
                 </div>
@@ -126,10 +145,14 @@ export class InspectionPanelComponent implements AfterViewInit {
     selectedCompareIds: number[] = [];
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
+    panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -244,6 +267,40 @@ export class InspectionPanelComponent implements AfterViewInit {
     undock(event: MouseEvent) {
         event.stopPropagation();
         this.ejectedPanel.emit(this.panel());
+    }
+
+    focusOnFeature(event: MouseEvent) {
+        event.stopPropagation();
+        const panel = this.panel();
+        if (!panel.features.length) {
+            return;
+        }
+        this.mapService.zoomToFeature(undefined, panel.features[0]);
+    }
+
+    openGeoJsonMenu(event: MouseEvent) {
+        event.stopPropagation();
+        this.inspectionTree?.showGeoJsonMenu(event);
+    }
+
+    onHeaderPointerDown(event: PointerEvent) {
+        if (event.button !== 0) {
+            return;
+        }
+        const target = event.target as HTMLElement | null;
+        if (this.isInteractiveTarget(target)) {
+            return;
+        }
+        this.panelDragRequest.emit({panel: this.panel(), event});
+    }
+
+    private isInteractiveTarget(target: HTMLElement | null): boolean {
+        if (!target) {
+            return false;
+        }
+        return !!target.closest(
+            'button, .p-button, .p-colorpicker, .p-select, .p-dropdown, .p-multiselect, input, textarea, select, option, a'
+        );
     }
 
     openComparePopover(event: MouseEvent) {

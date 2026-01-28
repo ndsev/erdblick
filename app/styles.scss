@@ -76,10 +76,12 @@ body {
     width: 22em;
   }
 
+  .p-popover-content {
+    padding: 0.25em;
+  }
+
   .editor-dialog {
     .p-dialog {
-      z-index: 9001 !important;
-
       .p-dialog-header {
         padding: 0.75em !important;
         height: 2.5em !important;
@@ -95,7 +97,6 @@ body {
 mapview-container {
   width: 100%;
 }
-
 
 .main-bar {
   position: absolute;
@@ -153,6 +154,52 @@ mapview-container {
   }
 }
 
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+
+  .collapsible-dock {
+    padding: 0;
+    height: 100vh;
+    max-width: 50vw;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    position: relative;
+    /* Hide native resizer */
+    resize: none;
+  }
+
+  .collapsible-dock.dock-drop-active {
+    box-shadow: inset 0 0 0 2px var(--p-primary-500);
+    background: color-mix(in srgb, var(--p-primary-50) 65%, transparent);
+    .inspection-container {
+      visibility: collapse;
+    }
+  }
+
+  .resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    /* Large hit area, subtle visuals */
+    background: transparent;
+    z-index: 2;
+    touch-action: none;
+  }
+  .resize-handle:hover {
+    background: rgba(0,0,0,0.05);
+  }
+}
+
 map-view {
   display: block;
   height: 100%;
@@ -162,7 +209,7 @@ map-view {
   .viewsync-select {
     position: absolute;
     right: 0.25em;
-    top: 2.25em;
+    top: 2.75em;
     z-index: 110;
     opacity: 0.75;
 
@@ -703,6 +750,13 @@ map-view {
   max-width: none;
 }
 
+body.dialog-dragging,
+body.dialog-dragging * {
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
 .clear-icon {
   position: absolute;
   top: 0.5em;
@@ -893,7 +947,13 @@ map-view {
   }
 
   .p-dialog-header {
-    padding: 0.25em 0.25em 0 0.25em;
+    padding: 0.25em 0.25em 0 0.5em;
+    height: 2.5em;
+
+    .title {
+      font-weight: bold;
+      font-size: 1.1em;
+    }
   }
 
   .p-dialog-content {
@@ -1131,18 +1191,20 @@ map-view {
 
 .comparison-popover {
   display: flex;
-  flex-direction: column;
-  gap: 0.5em;
-  min-width: 18em;
+  flex-direction: row;
+  gap: .5em;
+  max-width: 18em;
+  align-content: center;
+  justify-content: space-between;
 
   .p-multiselect {
-    width: 100%;
+    width: 13em;
   }
-}
 
-.comparison-popover-actions {
-  display: flex;
-  justify-content: flex-end;
+  .comparison-popover-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
 }
 
 .inspection-container {
@@ -1153,8 +1215,58 @@ map-view {
   height: 100vh;
   width: 100%;
 
+  .dock-filter {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding: 0.25em 0.5em 0.25em 0.5em;
+    background: var(--p-content-background);
+    border-bottom: 1px solid var(--p-content-border-color);
+
+    .input-container {
+      width: 100%;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+
+      .filter-input {
+        height: 1.75em;
+        width: 100%;
+        border-radius: 6px;
+        border: solid 1px var(--p-content-border-color);
+        direction: ltr;
+      }
+
+      .clear-icon {
+        cursor: pointer;
+      }
+    }
+  }
+
   inspection-panel {
     height: fit-content;
+  }
+
+  &.reordering {
+    p-accordion-content {
+      visibility: collapse;
+    }
+  }
+
+  inspection-panel.dragging {
+    opacity: 0.6;
+  }
+
+  inspection-panel.dragging .inspector-title {
+    cursor: grabbing;
+  }
+
+  inspection-panel.drop-before {
+    border-top: 2px solid var(--p-primary-500);
+  }
+
+  inspection-panel.drop-after {
+    border-bottom: 2px solid var(--p-primary-500);
   }
 
   .inspect-panel {
@@ -1166,6 +1278,7 @@ map-view {
       align-items: center;
       width: 100%;
       margin-right: 0.5em;
+      cursor: grab;
 
       & > * {
         display: flex;
@@ -2290,6 +2403,7 @@ map-view {
 
   .coordinates-panel {
     pointer-events: all;
+    border-radius: 6px;
 
     .coordinates-entries {
       display: flex;

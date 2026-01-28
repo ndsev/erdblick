@@ -21,6 +21,8 @@ import {Column} from "./inspection.tree.component";
             </div>
         } @else {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                             [showFilter]="showFilter()"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -31,6 +33,9 @@ import {Column} from "./inspection.tree.component";
 export class SourceDataPanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
     error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;

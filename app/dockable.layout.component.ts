@@ -27,62 +27,20 @@ import {AppStateService} from "./shared/appstate.service";
                     @if (isDockOpen) {
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
+                    <div class="drop-hint"></div>
                     <inspection-container [ngClass]="{'hidden': !isDockOpen}"></inspection-container>
                 </div>
             }
         </div>
     `,
     styles: [`
-        .main-layout {
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 0;
-        }
-        
-        .collapsible-dock {
-            padding: 0;
-            height: 100vh;
-            max-width: 50vw;
-            min-width: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 0;
-            position: relative;
-            /* Hide native resizer */
-            resize: none;
-        }
-
-        .collapsible-dock.dock-drop-active {
-            box-shadow: inset 0 0 0 2px var(--p-primary-500);
-            background: color-mix(in srgb, var(--p-primary-50) 65%, transparent);
-        }
-        
         .collapsed {
             width: 0 !important;
         }
-        
+
         .open {
             /* Let user resize override this default width */
             width: 40em;
-        }
-        
-        .resize-handle {
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 6px;
-            cursor: col-resize;
-            /* Large hit area, subtle visuals */
-            background: transparent;
-            z-index: 2;
-            touch-action: none;
-        }
-        .resize-handle:hover {
-            background: rgba(0,0,0,0.05);
         }
         
         .hidden {

@@ -41,35 +41,24 @@ export class FeatureFilterOptions {
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
-                <!-- TODO: transfer the inlined styles to styles.SCSS -->
-                <div class="filter-container">
-                    <p-iconfield class="input-container">
-                        @if (filterOptions()) {
-                            <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
-                                         style="cursor: pointer"/>
-                        }
-                        <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
-                               [(ngModel)]="filterString"
-                               (ngModelChange)="onFilterInput($event)"
-                               (input)="onFilterInput($any($event.target).value)"/>
-                        @if (filterString) {
-                            <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                        }
-                    </p-iconfield>
-                    @if (selectedFeatures()) {
-                        <!-- TODO: Zoom to whole feature collection -->
-                        <p-button (click)="mapService.zoomToFeature(undefined, selectedFeatures()![0])"
-                                label="" pTooltip="Focus on feature" tooltipPosition="bottom">
-                            <span class="material-symbols-outlined">center_focus_strong</span>
-                        </p-button>
-                    }
-                    @if (geoJson()) {
-                        <p-button (click)="showGeoJsonMenu($event)" icon="" label=""
-                                  pTooltip="GeoJSON actions" tooltipPosition="bottom">
-                            <span class="material-symbols-outlined">download</span>
-                        </p-button>
-                    }
-                </div>
+                @if (showFilter()) {
+                    <!-- TODO: transfer the inlined styles to styles.SCSS -->
+                    <div class="filter-container">
+                        <p-iconfield class="input-container">
+                            @if (filterOptions()) {
+                                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
+                                             style="cursor: pointer"/>
+                            }
+                            <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
+                                   [(ngModel)]="filterString"
+                                   (ngModelChange)="onFilterInput($event)"
+                                   (input)="onFilterInput($any($event.target).value)"/>
+                            @if (filterString) {
+                                <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                            }
+                        </p-iconfield>
+                    </div>
+                }
             </ng-template>
 
             <ng-template pTemplate="colgroup">
@@ -226,6 +215,7 @@ export class InspectionTreeComponent implements OnDestroy {
     filterOptions = input<FeatureFilterOptions>();
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
     geoJson = input<string>();
     selectedFeatures = input<FeatureWrapper[]>();
     enableSourceDataNavigation = input<boolean>(true);
