@@ -22,6 +22,16 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
                     <p-button class="close-dock-button" icon="pi pi-times" styleClass="p-button-danger" (click)="closeDock()"
                               (mousedown)="$event.stopPropagation()"/>
                 </div>
+            } @else {
+                <div class="dock-empty">
+                    <p-button class="close-dock-button" icon="pi pi-times" styleClass="p-button-danger" (click)="closeDock()"
+                              (mousedown)="$event.stopPropagation()"/>
+                    <span class="material-symbols-outlined dock-empty-icon" aria-hidden="true">subtitles_off</span>
+                    <div class="dock-empty-title">No docked inspections</div>
+                    <div class="dock-empty-text">
+                        Select a feature, or drag a floating inspection here to dock it.
+                    </div>
+                </div>
             }
             @for (panel of dockedPanels; track panel.id) {
                 @if (panel.features.length > 0 || panel.sourceData !== undefined) {
