@@ -1,4 +1,4 @@
-import {FeatureTile} from "../mapdata/features.model";
+import {FeatureTile, TileLoadState} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
@@ -49,17 +49,17 @@ class TileBoxVisualization {
         return this.tileBoxStatePerView[viewIndex];
     }
 
-    static get(viewIndex: number, tile: FeatureTile, featureCount: number, viewer: Viewer, color?: Color): TileBoxVisualization {
+    static get(viewIndex: number, tile: FeatureTile, featureCount: number, viewer: Viewer, owner: TileVisualization, status?: TileLoadState): TileBoxVisualization {
         const state = this.getTileBoxState(viewIndex);
         if (!state.visualizations.has(tile.tileId)) {
             state.visualizations.set(
-                tile.tileId, new TileBoxVisualization(tile, color));
+                tile.tileId, new TileBoxVisualization(tile));
             TileBoxVisualization.updatePrimitive(viewIndex, viewer);
         }
         let result = state.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
-        result.updateOutlineColor();
+        result.setStatus(owner, status);
         return result;
     }
 
@@ -85,13 +85,13 @@ class TileBoxVisualization {
     refCount: number = 0;
     featureCount: number = 0;
     private readonly id: bigint;
-    private color?: Color;
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
     private instance: GeometryInstance;
+    private statusByVisualization = new Map<TileVisualization, TileLoadState | undefined>();
+    private renderedStatus: TileLoadState | undefined;
 
-    constructor(tile: FeatureTile, color?: Color) {
-        this.color = color;
-        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(this.getCurrentOutlineColor());
+    constructor(tile: FeatureTile) {
+        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(Color.AQUA);
 
         let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         let rectangle = Rectangle.fromDegrees(...tileBox);
@@ -113,32 +113,66 @@ class TileBoxVisualization {
         this.id = tile.tileId;
     }
 
-    setColor(color?: Color) {
-        this.color = color;
+    setStatus(owner: TileVisualization, status?: TileLoadState) {
+        if (status === undefined) {
+            this.statusByVisualization.delete(owner);
+        } else {
+            this.statusByVisualization.set(owner, status);
+        }
         this.updateOutlineColor();
     }
 
-    private getCurrentOutlineColor(): Color {
-        if (this.color !== undefined) {
-            return this.color.withAlpha(0.7);
-        } else {
-            if (this.featureCount > 0) {
-                return Color.YELLOW.withAlpha(0.7);
-            } else {
-                return Color.AQUA.withAlpha(0.3);
+    updateOutlineColor() {
+        // Determine aggregate status.
+        let leastStatus: TileLoadState | undefined = undefined;
+        for (const status of this.statusByVisualization.values()) {
+            if (status === undefined) {
+                continue;
+            }
+            if (leastStatus === undefined || status < leastStatus) {
+                leastStatus = status;
             }
         }
-    }
 
-    updateOutlineColor() {
-        let newColor = this.getCurrentOutlineColor();
+        // No update needed?
+        if (leastStatus !== undefined && leastStatus === this.renderedStatus) {
+            return;
+        }
+
+        // Update color - determine based on status or feature count.
+        this.renderedStatus = leastStatus;
+        let newColor: Color;
+        if (leastStatus !== undefined) {
+            switch (leastStatus) {
+                case TileLoadState.LoadingQueued:
+                    newColor = Color.DIMGRAY; break;
+                case TileLoadState.BackendFetching:
+                    newColor = Color.ORANGE; break;
+                case TileLoadState.BackendConverting:
+                    newColor = Color.GOLD; break;
+                case TileLoadState.RenderingQueued:
+                    newColor = Color.CYAN; break;
+                case TileLoadState.Error:
+                    newColor = Color.RED; break;
+                default:
+                    newColor = Color.AQUA;
+            }
+        }
+        else if (this.featureCount > 0) {
+            newColor = Color.YELLOW.withAlpha(0.7);
+        }
+        else {
+            newColor = Color.AQUA.withAlpha(0.3);
+        }
+
         // Update the color attribute
         ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
     }
 
-    delete(viewIndex: number, viewer: Viewer, featureCount: number) {
+    delete(viewIndex: number, viewer: Viewer, featureCount: number, owner: TileVisualization) {
         --this.refCount;
         this.featureCount -= featureCount;
+        this.statusByVisualization.delete(owner);
         if (this.refCount <= 0) {
             const state = TileBoxVisualization.getTileBoxState(viewIndex);
             state.visualizations.delete(this.id);
@@ -155,7 +189,6 @@ export class TileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
-    specialBorderColour: Color | undefined;
     readonly viewIndex: number;
 
     private lowDetailVisu: TileBoxVisualization|null = null;
@@ -171,6 +204,7 @@ export class TileVisualization {
     private readonly auxTileFun: (key: string)=>FeatureTile|null;
     private readonly options: Record<string, boolean|number|string>;
     private readonly pointMergeService: PointMergeService;
+    private renderQueued: boolean = false;
 
     /**
      * Create a tile visualization.
@@ -216,10 +250,24 @@ export class TileVisualization {
         this.viewIndex = viewIndex;
     }
 
-    setBorderColor(color?: Color) {
-        this.specialBorderColour = color;
+    private effectiveStatus(): TileLoadState | undefined {
+        const tileStatus = this.tile.status;
+        const renderStatus = this.renderQueued ? TileLoadState.RenderingQueued : undefined;
+        if (tileStatus === undefined) {
+            return renderStatus;
+        }
+        if (renderStatus === undefined) {
+            return tileStatus;
+        }
+        return tileStatus < renderStatus ? tileStatus : renderStatus;
+    }
+
+    updateStatus(renderQueued?: boolean) {
+        if (renderQueued !== undefined) {
+            this.renderQueued = renderQueued;
+        }
         if (this.lowDetailVisu) {
-            this.lowDetailVisu.setColor(color);
+            this.lowDetailVisu.setStatus(this, this.effectiveStatus());
         }
     }
 
@@ -344,7 +392,13 @@ export class TileVisualization {
 
         if (this.showTileBorder) {
             // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(this.viewIndex, this.tile, this.tile.numFeatures, viewer, this.specialBorderColour);
+            this.lowDetailVisu = TileBoxVisualization.get(
+                this.viewIndex,
+                this.tile,
+                this.tile.numFeatures,
+                viewer,
+                this,
+                this.effectiveStatus());
             this.hasTileBorder = true;
         }
 
@@ -379,7 +433,7 @@ export class TileVisualization {
             this.primitiveCollection = null;
         }
         if (this.lowDetailVisu) {
-            this.lowDetailVisu.delete(this.viewIndex, viewer, this.tile.numFeatures);
+            this.lowDetailVisu.delete(this.viewIndex, viewer, this.tile.numFeatures, this);
             this.lowDetailVisu = null;
         }
         this.hasHighDetailVisualization = false;

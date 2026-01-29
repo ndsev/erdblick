@@ -22,7 +22,7 @@ import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
-import {Cartesian3, Viewer, Rectangle, Color} from "../integrations/cesium";
+import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
 import {deepEquals} from "../shared/app-state";
 
 const infoUrl = "sources";
@@ -59,8 +59,120 @@ class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
     highDetailTileIds: Set<bigint> = new Set();
-    visualizedTileLayers: Map<string, TileVisualization[]> = new Map();
     visualizationQueue: TileVisualization[] = [];
+    private visualizedTileLayers: Map<string, Map<string, TileVisualization>> = new Map();
+
+    getVisualization(styleId: string, tileKey: string): TileVisualization | undefined {
+        return this.visualizedTileLayers.get(styleId)?.get(tileKey);
+    }
+
+    putVisualization(styleId: string, tileKey: string, visu: TileVisualization) {
+        let tileVisus = this.visualizedTileLayers.get(styleId);
+        if (!tileVisus) {
+            tileVisus = new Map<string, TileVisualization>();
+            this.visualizedTileLayers.set(styleId, tileVisus);
+        }
+        tileVisus.set(tileKey, visu);
+    }
+
+    hasVisualizations(styleId: string): boolean {
+        return this.visualizedTileLayers.has(styleId);
+    }
+
+    *removeVisualizations(styleId?: string, tileKey?: string): Generator<TileVisualization> {
+        if (styleId !== undefined) {
+            if (tileKey !== undefined) {
+                const tileVisus = this.visualizedTileLayers.get(styleId);
+                if (!tileVisus) {
+                    return;
+                }
+                const visu = tileVisus.get(tileKey);
+                if (visu) {
+                    yield visu;
+                    tileVisus.delete(tileKey);
+                }
+                if (!tileVisus.size) {
+                    this.visualizedTileLayers.delete(styleId);
+                }
+                return;
+            }
+            const tileVisus = this.visualizedTileLayers.get(styleId);
+            if (tileVisus) {
+                for (const visu of tileVisus.values()) {
+                    yield visu;
+                }
+            }
+            this.visualizedTileLayers.delete(styleId);
+            return;
+        }
+
+        if (tileKey !== undefined) {
+            const stylesToDelete: string[] = [];
+            for (const [style, tileVisus] of this.visualizedTileLayers) {
+                const visu = tileVisus.get(tileKey);
+                if (visu) {
+                    yield visu;
+                    tileVisus.delete(tileKey);
+                }
+                if (!tileVisus.size) {
+                    stylesToDelete.push(style);
+                }
+            }
+            for (const style of stylesToDelete) {
+                this.visualizedTileLayers.delete(style);
+            }
+            return;
+        }
+
+        for (const tileVisus of this.visualizedTileLayers.values()) {
+            for (const visu of tileVisus.values()) {
+                yield visu;
+            }
+        }
+        this.visualizedTileLayers.clear();
+    }
+
+    *getStyleIds(): Generator<string> {
+        for (const styleId of Array.from(this.visualizedTileLayers.keys())) {
+            yield styleId;
+        }
+    }
+
+    *getVisualizations(styleId?: string, tileKey?: string): Generator<TileVisualization> {
+        if (styleId !== undefined) {
+            const tileVisus = this.visualizedTileLayers.get(styleId);
+            if (!tileVisus) {
+                return;
+            }
+            if (tileKey !== undefined) {
+                const visu = tileVisus.get(tileKey);
+                if (visu) {
+                    yield visu;
+                }
+                return;
+            }
+            for (const visu of tileVisus.values()) {
+                yield visu;
+            }
+            return;
+        }
+
+        if (tileKey !== undefined) {
+            for (const tileVisus of this.visualizedTileLayers.values()) {
+                const visu = tileVisus.get(tileKey);
+                if (visu) {
+                    yield visu;
+                }
+            }
+            return;
+        }
+
+        for (const tileVisus of this.visualizedTileLayers.values()) {
+            for (const visu of tileVisus.values()) {
+                yield visu;
+            }
+        }
+    }
 }
 
 interface SelectionTileRequest {
@@ -102,6 +214,11 @@ export class MapDataService {
     private hoverVisualizations: TileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
     private GeometryType?: typeof coreLib.GeomType;
+    private updateTimer: ReturnType<typeof setTimeout> | null = null;
+    private updateInProgress: boolean = false;
+    private updatePending: boolean = false;
+    private readonly updateDebounceMs: number = 50;
+    private lastUpdateAt: number = 0;
 
     tileParser: TileLayerParser | null = null;
     tileVisualizationTopic: Subject<TileVisualization>;
@@ -174,16 +291,14 @@ export class MapDataService {
         this.styleService.styleRemovedForId.subscribe(styleId => {
             this.viewVisualizationState.forEach(state => {
                 state.visualizationQueue = [];
-                state.visualizedTileLayers.get(styleId)?.forEach(tileVisu =>
-                    this.tileVisualizationDestructionTopic.next(tileVisu)
-                );
-                state.visualizedTileLayers.delete(styleId);
+                for (const tileVisu of state.removeVisualizations(styleId)) {
+                    this.tileVisualizationDestructionTopic.next(tileVisu);
+                }
             });
             this.stateService.prune(this.maps.maps, this.styleService.styles);
         });
         this.styleService.styleAddedForId.subscribe(styleId => {
             this.viewVisualizationState.forEach((state, viewIndex) => {
-                state.visualizedTileLayers.set(styleId, []);
                 for (let [_, tileLayer] of this.loadedTileLayers) {
                     const style = this.styleService.styles.get(styleId);
                     if (style) {
@@ -204,7 +319,7 @@ export class MapDataService {
 
             const syncResult = this.syncViewsIfEnabled(viewIndex);
             if (syncResult?.viewConfigChanged) {
-                this.update().then();
+                this.scheduleUpdate();
             }
         });
 
@@ -216,7 +331,7 @@ export class MapDataService {
             if (enabled && !layerSyncEnabled) {
                 const result = this.syncViewsIfEnabled(this.stateService.focusedView);
                 if (result?.viewConfigChanged) {
-                    this.update().then();
+                    this.scheduleUpdate();
                 }
             }
             layerSyncEnabled = enabled;
@@ -319,9 +434,7 @@ export class MapDataService {
             const viewState = this.viewVisualizationState[nextViewIndexToProcess];
             const entry = viewState.visualizationQueue.shift();
             if (entry !== undefined) {
-                if (entry.tile.status === TileLoadState.RenderingQueued) {
-                    this.clearTileLoadState(entry.tile);
-                }
+                entry.updateStatus(false);
                 this.tileVisualizationTopic.next(entry);
                 currentQueueLength--;
             }
@@ -412,8 +525,8 @@ export class MapDataService {
 
         const tileId = BigInt(payload.tileId);
         const tileKey = coreLib.getTileFeatureLayerKey(payload.mapId, payload.layerId, tileId);
-        const tile = this.ensureTilePlaceholder(payload.mapId, payload.layerId, tileId, false);
-        if (!tile || tile.mapTileKey !== tileKey) {
+        const tile = this.loadedTileLayers.get(tileKey);
+        if (!tile) {
             return;
         }
 
@@ -426,6 +539,37 @@ export class MapDataService {
 
     private buildTilesRequestSignature(requests: Array<{mapId: string, layerId: string}>) {
         return JSON.stringify(requests.map(req => [req.mapId, req.layerId]));
+    }
+
+    private scheduleUpdate() {
+        this.updatePending = true;
+        if (this.updateTimer) {
+            return;
+        }
+        const elapsed = Date.now() - this.lastUpdateAt;
+        const delay = Math.max(0, this.updateDebounceMs - elapsed);
+        this.updateTimer = setTimeout(() => {
+            this.updateTimer = null;
+            this.runUpdate().then();
+        }, delay);
+    }
+
+    private async runUpdate() {
+        if (this.updateInProgress) {
+            this.updatePending = true;
+            return;
+        }
+        this.updateInProgress = true;
+        this.updatePending = false;
+        try {
+            await this.update();
+        } finally {
+            this.updateInProgress = false;
+            this.lastUpdateAt = Date.now();
+            if (this.updatePending) {
+                this.scheduleUpdate();
+            }
+        }
     }
 
     private mapLoadStateFromStream(state: MapTileLoadState): TileLoadState | null {
@@ -441,58 +585,19 @@ export class MapDataService {
         }
     }
 
-    private borderColorForStatus(status?: TileLoadState) {
-        if (status === undefined) {
-            return undefined;
-        }
-        switch (status) {
-            case TileLoadState.LoadingQueued:
-                return Color.DIMGRAY;
-            case TileLoadState.BackendFetching:
-                return Color.ORANGE;
-            case TileLoadState.BackendConverting:
-                return Color.GOLD;
-            case TileLoadState.RenderingQueued:
-                return Color.CYAN;
-            case TileLoadState.Error:
-                return Color.RED;
-            default:
-                return undefined;
-        }
-    }
-
-    private applyTileLoadState(tile: FeatureTile, status: TileLoadState) {
+    private applyTileLoadState(tile: FeatureTile, status: TileLoadState|undefined) {
         tile.status = status;
-        const borderColor = this.borderColorForStatus(status);
+        const tileKey = tile.mapTileKey;
         for (const viewState of this.viewVisualizationState) {
-            for (const tileVisus of viewState.visualizedTileLayers.values()) {
-                for (const visu of tileVisus) {
-                    if (visu.tile.mapTileKey !== tile.mapTileKey) {
-                        continue;
-                    }
-                    visu.setBorderColor(borderColor);
-                }
+            for (const visu of viewState.getVisualizations(undefined, tileKey)) {
+                visu.updateStatus();
             }
         }
     }
 
-    private clearTileLoadState(tile: FeatureTile) {
-        tile.status = undefined;
-        for (const viewState of this.viewVisualizationState) {
-            for (const tileVisus of viewState.visualizedTileLayers.values()) {
-                for (const visu of tileVisus) {
-                    if (visu.tile.mapTileKey !== tile.mapTileKey) {
-                        continue;
-                    }
-                    visu.setBorderColor(undefined);
-                }
-            }
-        }
-    }
-
-    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: bigint, preventCulling: boolean): FeatureTile | null {
+    private ensureTilePlaceholder(mapId: string, layerId: string, tileId: bigint, preventCulling: boolean): boolean {
         if (!this.tileParser) {
-            return null;
+            return false;
         }
         const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
         const existing = this.loadedTileLayers.get(tileKey);
@@ -500,7 +605,7 @@ export class MapDataService {
             if (preventCulling) {
                 existing.preventCulling = true;
             }
-            return existing;
+            return false;
         }
 
         const placeholder = new FeatureTile(this.tileParser, null, preventCulling, {
@@ -509,20 +614,10 @@ export class MapDataService {
             layerName: layerId,
             tileId: tileId,
         });
-        this.applyTileLoadState(placeholder, TileLoadState.LoadingQueued);
         this.loadedTileLayers.set(tileKey, placeholder);
         this.statsDialogNeedsUpdate.next();
 
-        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-            if (!this.viewShowsFeatureTile(viewIndex, placeholder)) {
-                continue;
-            }
-            for (const style of this.styleService.styles.values()) {
-                this.renderTileLayerOnDemand(viewIndex, placeholder, style);
-            }
-        }
-
-        return placeholder;
+        return true;
     }
 
     private applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number) {
@@ -534,8 +629,7 @@ export class MapDataService {
         }
 
         const viewState = this.viewVisualizationState[viewIndex];
-        const visualizationsForStyle = viewState.visualizedTileLayers.get(optionNode.styleId);
-        if (!visualizationsForStyle) {
+        if (!viewState.hasVisualizations(optionNode.styleId)) {
             return;
         }
 
@@ -556,7 +650,7 @@ export class MapDataService {
         );
 
         const optionValue = optionNode.value[viewIndex];
-        for (const visu of visualizationsForStyle) {
+        for (const visu of viewState.getVisualizations(optionNode.styleId)) {
             console.assert(
                 visu.viewIndex === viewIndex,
                 `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`
@@ -607,7 +701,7 @@ export class MapDataService {
         }
         const result = this.syncViewsIfEnabled(viewIndex);
         if (result?.viewConfigChanged) {
-            this.update().then();
+            this.scheduleUpdate();
         }
     }
 
@@ -669,10 +763,13 @@ export class MapDataService {
         }
     }
 
-    async update() {
+    private async update() {
         let tileIdPerLevelPerView: Map<number, Array<bigint>>[] = [];
         const loadLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
         const visualizeLimit = this.stateService.tilesVisualizeLimit / this.stateService.numViews;
+        // Track whether we created new tiles during this update. New tiles have no
+        // visualizations yet, so we schedule a follow-up pass to build/queue them.
+        let createdNewTiles = false;
 
         // Get the tile IDs for the current viewport for each view.
         this.viewVisualizationState.forEach((state, viewIndex) => {
@@ -723,56 +820,49 @@ export class MapDataService {
 
         // Update visualizations.
         this.viewVisualizationState.forEach((state, viewIndex) => {
-            state.visualizedTileLayers.forEach((value, styleId) => {
-                const tileVisus = value.filter(tileVisu => {
-                    const mapName = tileVisu.tile.mapName;
-                    const layerName = tileVisu.tile.layerName;
+            for (const styleId of state.getStyleIds()) {
+                let styleEnabled = false;
+                if (this.styleService.styles.has(styleId)) {
+                    styleEnabled = this.styleService.styles.get(styleId)!.visible;
+                }
+                const removals: string[] = [];
+                for (const tileVisu of state.getVisualizations(styleId)) {
                     if (tileVisu.tile.disposed || !this.viewShowsFeatureTile(viewIndex, tileVisu.tile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
-                        return false;
-                    }
-                    let styleEnabled = false;
-                    if (this.styleService.styles.has(styleId)) {
-                        styleEnabled = this.styleService.styles.get(styleId)!.visible;
+                        removals.push(tileVisu.tile.mapTileKey);
+                        continue;
                     }
                     if (styleId != "_builtin" && !styleEnabled) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
-                        return false;
+                        removals.push(tileVisu.tile.mapTileKey);
+                        continue;
                     }
                     tileVisu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                     tileVisu.isHighDetail = state.highDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
-                    return true;
-                });
-                if (tileVisus && tileVisus.length) {
-                    state.visualizedTileLayers.set(styleId, tileVisus);
-                } else {
-                    state.visualizedTileLayers.delete(styleId);
                 }
-            });
+                for (const tileKey of removals) {
+                    state.removeVisualizations(styleId, tileKey).forEach(_ => _);
+                }
+            }
         });
 
         // Update Tile Visualization Queue.
         this.viewVisualizationState.forEach((state, viewIndex) => {
             state.visualizationQueue = [];
             // Schedule updates for visualizations which have changed (high-detail, border etc.)
-            const visualizedTileLayers: Map<string, Set<string>> = new Map();
-            state.visualizedTileLayers.forEach((tileVisus, styleId) => {
-                tileVisus.forEach(tileVisu => {
+            for (const styleId of state.getStyleIds()) {
+                for (const tileVisu of state.getVisualizations(styleId)) {
                     if (tileVisu.isDirty()) {
+                        tileVisu.updateStatus(true);
                         state.visualizationQueue.push(tileVisu);
                     }
-                    // Take note that this visualization already exists (for step 2).
-                    if (!visualizedTileLayers.has(styleId)) {
-                        visualizedTileLayers.set(styleId, new Set<string>());
-                    }
-                    visualizedTileLayers.get(styleId)!.add(tileVisu.tile.mapTileKey);
-                });
-            });
+                }
+            }
 
             // Schedule new visualizations for which the data is already present.
             for (const [styleId, style] of this.styleService.styles) {
                 for (let [tileKey, tile] of this.loadedTileLayers) {
-                    if (this.viewShowsFeatureTile(viewIndex, tile) && !visualizedTileLayers.get(styleId)?.has(tileKey)) {
+                    if (this.viewShowsFeatureTile(viewIndex, tile) && !state.getVisualization(styleId, tileKey)) {
                         this.renderTileLayerOnDemand(viewIndex, tile, style);
                     }
                 }
@@ -781,7 +871,24 @@ export class MapDataService {
 
         // Rest of this function: Request non-present required tile layers.
 
-        let requests = [];
+        const requestByLayer = new Map<string, {mapId: string, layerId: string, tileIds: number[], tileIdSet: Set<number>}>();
+        const queueTiles = (mapId: string, layerId: string, tileIds: Array<number>) => {
+            if (!tileIds.length) {
+                return;
+            }
+            const key = `${mapId}/${layerId}`;
+            let entry = requestByLayer.get(key);
+            if (!entry) {
+                entry = {mapId, layerId, tileIds: [], tileIdSet: new Set<number>()};
+                requestByLayer.set(key, entry);
+            }
+            for (const tileId of tileIds) {
+                if (!entry.tileIdSet.has(tileId)) {
+                    entry.tileIds.push(tileId);
+                    entry.tileIdSet.add(tileId);
+                }
+            }
+        };
         for (const selectionTileRequest of this.selectionTileRequests) {
             // Do not go forward with the selection tile request, if it
             // pertains to a map layer that is not available anymore.
@@ -789,13 +896,18 @@ export class MapDataService {
                 .get(selectionTileRequest.remoteRequest.mapId)?.layers
                 .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
-                requests.push(selectionTileRequest.remoteRequest);
+                queueTiles(
+                    selectionTileRequest.remoteRequest.mapId,
+                    selectionTileRequest.remoteRequest.layerId,
+                    selectionTileRequest.remoteRequest.tileIds);
                 for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
-                    this.ensureTilePlaceholder(
+                    if (this.ensureTilePlaceholder(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
-                        true);
+                        true)) {
+                        createdNewTiles = true;
+                    }
                 }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
@@ -825,21 +937,25 @@ export class MapDataService {
                         if ((!existingTile || !existingTile.hasData()) && !requestTilesForMapLayerSet.has(tileId)) {
                             requestTilesForMapLayer.push(Number(tileId)); // TODO: Get rid of type casting after new tile ids are available
                             requestTilesForMapLayerSet.add(tileId);
-                            this.ensureTilePlaceholder(mapName, layer.id, tileId, false);
+                            if (this.ensureTilePlaceholder(mapName, layer.id, tileId, false)) {
+                                createdNewTiles = true;
+                            }
                         }
                     }
                 }
 
                 // Only add a request if there are tiles to be loaded.
                 if (requestTilesForMapLayer.length > 0) {
-                    requests.push({
-                        mapId: mapName,
-                        layerId: layer.id,
-                        tileIds: requestTilesForMapLayer
-                    });
+                    queueTiles(mapName, layer.id, requestTilesForMapLayer);
                 }
             }
         }
+
+        const requests = Array.from(requestByLayer.values()).map(entry => ({
+            mapId: entry.mapId,
+            layerId: entry.layerId,
+            tileIds: entry.tileIds
+        }));
 
         const requestBody = {
             requests: requests,
@@ -848,6 +964,11 @@ export class MapDataService {
 
         // Nothing to do if all requests are empty.
         if (requests.length === 0) {
+            if (createdNewTiles) {
+                // No network work to do, but newly created tiles need a second pass
+                // to create their visualizations (creation happens earlier in update()).
+                this.scheduleUpdate();
+            }
             return;
         }
 
@@ -881,94 +1002,70 @@ export class MapDataService {
             console.error("Failed to send /tiles request.", err);
             this.messageService.showError("Failed to send /tiles request.");
         }
+        if (createdNewTiles) {
+            // New tiles were added to loadedTileLayers; schedule a follow-up update
+            // so visualization creation/queueing can pick them up.
+            this.scheduleUpdate();
+        }
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
-        let tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
-        const existingTile = this.loadedTileLayers.get(tileLayer.mapTileKey);
+        if (!this.tileParser) {
+            return;
+        }
+        const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
+            return this.tileParser!.readTileLayerMetadata(wasmBlob);
+        }, tileLayerBlob);
+        const existingTile = this.loadedTileLayers.get(mapTileMetadata.id);
+        let tileLayer: FeatureTile;
         if (existingTile) {
-            tileLayer.preventCulling = tileLayer.preventCulling || existingTile.preventCulling;
-        }
-        if (tileLayer.error) {
-            this.applyTileLoadState(tileLayer, TileLoadState.Error);
+            tileLayer = existingTile;
+            tileLayer.preventCulling = tileLayer.preventCulling || preventCulling;
+            tileLayer.hydrateFromBlob(tileLayerBlob);
         } else {
-            this.applyTileLoadState(tileLayer, TileLoadState.RenderingQueued);
+            tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
+            this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
         }
+        this.applyTileLoadState(tileLayer, tileLayer.error ? TileLoadState.Error : undefined);
 
         // Consider, if this tile is needed by a selection tile request.
-        let neededBySelection = false;
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
             if (tileLayer.mapTileKey === request.tileKey) {
-                neededBySelection = true;
                 request.resolve!(tileLayer);
                 return false;
             }
             return true;
         });
 
-        // Don't add a tile that is not supposed to be visible.
-        if (!neededBySelection && !preventCulling) {
-            if (!this.viewVisualizationState.some(state =>
-                state.visibleTileIds.has(tileLayer.tileId))) {
-                return;
-            }
-        }
-
-        // If this one replaces an older tile with the same key,
-        // then first remove the older existing one.
-        if (this.loadedTileLayers.has(tileLayer.mapTileKey)) {
-            this.removeTileLayer(this.loadedTileLayers.get(tileLayer.mapTileKey)!);
-        }
-        this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
         this.statsDialogNeedsUpdate.next();
 
         // Update legal information if any.
         if (tileLayer.legalInfo) {
             this.setLegalInfo(tileLayer.mapName, tileLayer.legalInfo);
         }
-
-        // Schedule the visualization of the newly added tile layer,
-        // but don't do it synchronously to avoid stalling the main thread.
-        setTimeout(() => {
+        if (style && !this.styleService.styles.has(style.id)) {
             for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
-                // Do not render the tile for any view that doesn't need it.
                 if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
                     continue;
                 }
-
-                if (style) {
-                    this.renderTileLayer(viewIndex, tileLayer, style);
-                } else {
-                    this.styleService.styles.forEach((style) => {
-                        this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
-                    });
-                }
+                this.renderTileLayer(viewIndex, tileLayer, style);
             }
-        });
+        }
+        this.scheduleUpdate();
     }
 
     private removeTileLayer(tileLayer: FeatureTile) {
         tileLayer.dispose();
+        const tileKey = tileLayer.mapTileKey;
         for (const viewState of this.viewVisualizationState) {
-            for (let [styleId, tileVisus] of viewState.visualizedTileLayers) {
-                tileVisus = tileVisus.filter(tileVisu => {
-                    if (tileVisu.tile.mapTileKey === tileLayer.mapTileKey) {
-                        this.tileVisualizationDestructionTopic.next(tileVisu);
-                        return false;
-                    }
-                    return true;
-                });
-                if (tileVisus.length) {
-                    viewState.visualizedTileLayers.set(styleId, tileVisus);
-                } else {
-                    viewState.visualizedTileLayers.delete(styleId);
-                }
+            for (const tileVisu of viewState.removeVisualizations(undefined, tileKey)) {
+                this.tileVisualizationDestructionTopic.next(tileVisu);
             }
             viewState.visualizationQueue = viewState.visualizationQueue.filter(tileVisu => {
-                return tileVisu.tile.mapTileKey !== tileLayer.mapTileKey;
+                return tileVisu.tile.mapTileKey !== tileKey;
             });
         }
-        this.loadedTileLayers.delete(tileLayer.mapTileKey);
+        this.loadedTileLayers.delete(tileKey);
         this.statsDialogNeedsUpdate.next();
     }
 
@@ -990,7 +1087,18 @@ export class MapDataService {
         const styleId = style.id;
         const mapName = tileLayer.mapName;
         const layerName = tileLayer.layerName;
+        const tileKey = tileLayer.mapTileKey;
         const viewState = this.viewVisualizationState[viewIndex];
+        const existing = viewState.getVisualization(styleId, tileKey);
+        if (existing) {
+            existing.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
+            existing.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
+            if (existing.isDirty()) {
+                existing.updateStatus(true);
+                viewState.visualizationQueue.push(existing);
+            }
+            return;
+        }
         let visu = new TileVisualization(
             viewIndex,
             tileLayer,
@@ -1002,13 +1110,9 @@ export class MapDataService {
             [],
             this.maps.getViewTileBorderState(viewIndex),
             this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId));
-        visu.setBorderColor(this.borderColorForStatus(tileLayer.status));
+        visu.updateStatus(true);
         viewState.visualizationQueue.push(visu);
-        if (viewState.visualizedTileLayers.has(styleId)) {
-            viewState.visualizedTileLayers.get(styleId)?.push(visu);
-        } else {
-            viewState.visualizedTileLayers.set(styleId, [visu]);
-        }
+        viewState.putVisualization(styleId, tileKey, visu);
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
@@ -1018,7 +1122,7 @@ export class MapDataService {
             return;
         }
         this.viewVisualizationState[viewIndex].viewport = viewport;
-        this.update().then();
+        this.scheduleUpdate();
     }
 
     getPrioritisedTiles(viewIndex: number) {
@@ -1076,7 +1180,7 @@ export class MapDataService {
             });
 
             this.selectionTileRequests.push(selectionTileRequest);
-            this.update().then();
+            this.scheduleUpdate();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
         }
@@ -1315,42 +1419,39 @@ export class MapDataService {
         if (viewIndex >= this.stateService.numViews) {
             return;
         }
-        for (const [_, tileVisualizations] of this.viewVisualizationState[viewIndex].visualizedTileLayers) {
-            tileVisualizations.forEach(tileVisu => {
-                try {
-                    tileVisu.destroy(viewer);
-                } catch (error) {
-                    console.warn('Error destroying tile visualization:', error);
-                }
-            });
+        for (const tileVisu of this.viewVisualizationState[viewIndex].removeVisualizations()) {
+            try {
+                tileVisu.destroy(viewer);
+            } catch (error) {
+                console.warn('Error destroying tile visualization:', error);
+            }
         }
-        this.viewVisualizationState[viewIndex].visualizedTileLayers.clear();
         this.viewVisualizationState[viewIndex].visualizationQueue = [];
     }
 
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
         this.syncViewsIfEnabled(viewIndex);
-        this.update().then();
+        this.scheduleUpdate();
     }
 
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
         this.maps.setViewTileBorderState(viewIndex, nextState);
         this.syncViewsIfEnabled(viewIndex);
-        this.update().then();
+        this.scheduleUpdate();
     }
 
     setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
         this.maps.setViewTileBorderState(viewIndex, enabled);
         this.syncViewsIfEnabled(viewIndex);
-        this.update().then();
+        this.scheduleUpdate();
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);
         this.syncViewsIfEnabled(viewIndex);
-        this.update().then();
+        this.scheduleUpdate();
     }
 
     private viewShowsFeatureTile(viewIndex: number, tile: FeatureTile, skipViewportCheck: boolean = false) {

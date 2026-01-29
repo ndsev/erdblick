@@ -105,6 +105,10 @@ vi.mock('./features.model', () => {
         hasData() {
             return this.hasDataFlag;
         }
+
+        hydrateFromBlob(_blob: Uint8Array) {
+            this.hasDataFlag = true;
+        }
     }
 
     return {
@@ -195,6 +199,17 @@ const createMapDataService = () => {
         getFieldDictOffsets: vi.fn().mockReturnValue([0]),
         reset: vi.fn(),
         setDataSourceInfo: vi.fn(),
+        readTileLayerMetadata: vi.fn().mockReturnValue({
+            id: 'm1/layerA/1',
+            mapName: 'm1',
+            layerName: 'layerA',
+            tileId: 1n,
+            legalInfo: '',
+            numFeatures: 0,
+            nodeId: 'n1',
+            error: '',
+            scalarFields: {}
+        }),
     };
 
     return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService};
@@ -313,10 +328,8 @@ describe('MapDataService', () => {
         const viewStates = (service as any).viewVisualizationState as any[];
         viewStates[0].visibleTileIds = new Set<bigint>([1n]);
         viewStates[0].highDetailTileIds = new Set<bigint>([1n]);
-        viewStates[0].visualizedTileLayers = new Map<string, any[]>([
-            ['enabled-style', [enabledVisu]],
-            ['disabled-style', [disabledVisu]],
-        ]);
+        viewStates[0].putVisualization('enabled-style', tile.mapTileKey, enabledVisu);
+        viewStates[0].putVisualization('disabled-style', tile.mapTileKey, disabledVisu);
 
         styleService.styles = new Map<string, any>([
             ['enabled-style', {id: 'enabled-style', visible: true}],
@@ -329,9 +342,9 @@ describe('MapDataService', () => {
         await service.update();
 
         expect(destructionSpy).toHaveBeenCalledWith(disabledVisu);
-        expect(viewStates[0].visualizedTileLayers.has('disabled-style')).toBe(false);
-        expect(viewStates[0].visualizedTileLayers.has('disabled-style')).toBe(false);
-        expect(viewStates[0].visualizedTileLayers.has('enabled-style')).toBe(true);
+        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
+        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
+        expect(viewStates[0].hasStyle('enabled-style')).toBe(true);
 
         expect(enabledVisu.showTileBorder).toBe(true);
         expect(enabledVisu.isHighDetail).toBe(false);
@@ -387,11 +400,9 @@ describe('MapDataService', () => {
         await selectionTilePromise;
     });
 
-    it('adds tile layers only when visible or prevented from culling and records legal info', () => {
+    it('records tile layers and legal info on arrival', () => {
         const {service} = createMapDataService();
 
-        const viewStates = (service as any).viewVisualizationState as any[];
-        viewStates[0].visibleTileIds = new Set<bigint>();
         const statsSpy = vi.spyOn(service.statsDialogNeedsUpdate, 'next');
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
 
@@ -410,13 +421,6 @@ describe('MapDataService', () => {
         (service as any).tileParser = {
             readTileLayerMetadata: vi.fn().mockReturnValue(tileMetadata),
         } as any;
-
-        service.addTileFeatureLayer(tileBlob as any, null, false);
-
-        expect(service.loadedTileLayers.size).toBe(0);
-        expect(statsSpy).not.toHaveBeenCalled();
-
-        viewStates[0].visibleTileIds = new Set<bigint>([1n]);
 
         service.addTileFeatureLayer(tileBlob as any, null, false);
 

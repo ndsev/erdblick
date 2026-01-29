@@ -27,7 +27,7 @@ export class FeatureTile {
     error?: string;
     private parser: TileLayerParser;
     preventCulling: boolean;
-    public readonly tileFeatureLayerBlob: Uint8Array | null;
+    public tileFeatureLayerBlob: Uint8Array | null;
     disposed: boolean;
     status?: TileLoadState;
     stats: Map<string, number[]> = new Map<string, number[]>();
@@ -82,6 +82,34 @@ export class FeatureTile {
         this.preventCulling = preventCulling;
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         this.disposed = false;
+    }
+
+    hydrateFromBlob(tileFeatureLayerBlob: Uint8Array) {
+        const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
+            return this.parser.readTileLayerMetadata(wasmBlob);
+        }, tileFeatureLayerBlob);
+
+        this.tileFeatureLayerBlob = tileFeatureLayerBlob;
+        if (!this.mapTileKey) {
+            this.mapTileKey = mapTileMetadata.id;
+        } else if (this.mapTileKey !== mapTileMetadata.id) {
+            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileMetadata.id}`);
+        }
+        this.nodeId = mapTileMetadata.nodeId;
+        this.mapName = mapTileMetadata.mapName;
+        this.layerName = mapTileMetadata.layerName;
+        this.tileId = mapTileMetadata.tileId;
+        this.legalInfo = mapTileMetadata.legalInfo;
+        this.error = mapTileMetadata.error ? mapTileMetadata.error : undefined;
+        this.numFeatures = mapTileMetadata.numFeatures;
+
+        const parseTimes = this.stats.get(FeatureTile.statParseTime) ?? [];
+        this.stats = new Map<string, number[]>();
+        this.stats.set(FeatureTile.statParseTime, parseTimes);
+        this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
+        for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
+            this.stats.set(k, [v as number]);
+        }
     }
 
     hasData(): boolean {
