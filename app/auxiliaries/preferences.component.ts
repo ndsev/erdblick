@@ -3,7 +3,7 @@ import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
+import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSPECTIONS, AppStateService} from "../shared/appstate.service";
 
 @Component({
     selector: 'pref-components',
@@ -28,6 +28,15 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from
             </div>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
+            <p-divider></p-divider>
+            <div class="slider-container">
+                <label [for]="limitSimultaneousInspectionsInput">Max Inspections:</label>
+                <div style="display: inline-block">
+                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
+                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="0" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                </div>
+            </div>
+            <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
                 <label>Dark Mode:</label>
@@ -80,6 +89,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
+    limitSimultaneousInspectionsInput: number = 0;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -106,6 +116,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
+            this.limitSimultaneousInspectionsInput = limit;
         }));
     }
 
@@ -196,6 +209,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
+    protected applyInspectionsLimits() {
+
+    }
+
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
+    protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
 }

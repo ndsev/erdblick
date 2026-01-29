@@ -10,6 +10,7 @@ import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
 
+export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
@@ -416,6 +417,12 @@ export class AppStateService implements OnDestroy {
         schema: z.string()
     });
 
+    readonly inspectionsLimitState = this.createState<number>({
+        name: 'inspectionsLimitState',
+        defaultValue: MAX_SIMULTANEOUS_INSPECTIONS / 5,
+        schema: z.coerce.number().int().positive()
+    });
+
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
@@ -627,6 +634,8 @@ export class AppStateService implements OnDestroy {
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
+    get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
+    set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
