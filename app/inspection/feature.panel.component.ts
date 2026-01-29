@@ -1,10 +1,10 @@
-import {Component, effect, input, output} from "@angular/core";
+import {Component, effect, input, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
-import {Column, FeatureFilterOptions} from "./inspection.tree.component";
+import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {KeyboardService} from "../shared/keyboard.service";
 import {Feature} from '../../build/libs/core/erdblick-core';
 
@@ -49,6 +49,8 @@ export class FeaturePanelComponent {
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
     selectedFeatures?: FeatureWrapper[];
+
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService,
                 private keyboardService: KeyboardService) {
@@ -156,5 +158,17 @@ export class FeaturePanelComponent {
             return;
         }
         this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
+    }
+
+    showGeoJsonMenu(event: MouseEvent) {
+        this.inspectionTree?.showGeoJsonMenu(event);
+    }
+
+    freezeTree() {
+        this.inspectionTree?.freeze();
+    }
+
+    unfreezeTree() {
+        this.inspectionTree?.unfreeze();
     }
 }

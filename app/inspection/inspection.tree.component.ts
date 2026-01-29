@@ -157,8 +157,8 @@ export class FeatureFilterOptions {
                 </tr>
             </ng-template>
         </p-treeTable>
-        <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="9999"></p-menu>
-        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="9999" appendTo="body"
+        <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="30000"></p-menu>
+        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="30000" appendTo="body"
                 [style]="{'font-size': '0.9em'}"></p-menu>
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">
             <div class="font-bold white-space-nowrap"

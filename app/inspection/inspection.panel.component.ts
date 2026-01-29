@@ -5,7 +5,7 @@ import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
-import {InspectionTreeComponent} from "./inspection.tree.component";
+import {FeaturePanelComponent} from "./feature.panel.component";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -149,7 +149,7 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
-    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
+    @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -277,7 +277,7 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     openGeoJsonMenu(event: MouseEvent) {
         event.stopPropagation();
-        this.inspectionTree?.showGeoJsonMenu(event);
+        this.featurePanel?.showGeoJsonMenu(event);
     }
 
     onHeaderPointerDown(event: PointerEvent) {

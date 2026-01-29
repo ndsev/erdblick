@@ -8,7 +8,8 @@ import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service";
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
-import {InspectionTreeComponent} from "./inspection.tree.component";
+import {FeaturePanelComponent} from "./feature.panel.component";
+import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -135,7 +136,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     @ViewChild('dialog') dialog?: Dialog;
     @ViewChild('comparePopover') comparePopover!: Popover;
-    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
+    @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
+    @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
 
     private detachFocusListener?: () => void;
     private detachHeaderDownListener?: () => void;
@@ -236,7 +238,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     openGeoJsonMenu(event: MouseEvent) {
         event.stopPropagation();
-        this.inspectionTree?.showGeoJsonMenu(event);
+        this.featurePanel?.showGeoJsonMenu(event);
     }
 
     dock(event: MouseEvent) {
@@ -295,7 +297,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     }
 
     beginDrag(): void {
-        this.inspectionTree?.freeze();
+        this.featurePanel?.freezeTree();
+        this.sourceDataPanel?.freezeTree();
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = this.renderer.listen('window', 'pointerup', () => {
             this.endDrag();
@@ -305,7 +308,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     endDrag(): void {
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = undefined;
-        this.inspectionTree?.unfreeze();
+        this.featurePanel?.unfreezeTree();
+        this.sourceDataPanel?.unfreezeTree();
     }
 
     private bindDialogFocus() {
