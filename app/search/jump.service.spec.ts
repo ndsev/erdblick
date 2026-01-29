@@ -7,20 +7,6 @@ beforeAll(async () => {
     await initializeLibrary();
 });
 
-vi.mock('/config/jump_plugin.js', () => ({
-    default: () => ([
-        {
-            icon: 'pi-mock',
-            color: 'green',
-            name: 'Mock Jump Target',
-            label: 'Mock jump target',
-            enabled: false,
-            jump: () => [1, 2],
-            validate: () => true,
-        },
-    ]),
-}));
-
 class HttpClientStub {
     get = vi.fn();
 }
@@ -83,6 +69,20 @@ const createService = (config: any = {}) => {
 describe('JumpTargetService', () => {
 
     it('loads jump-target plugin and merges its targets into jumpTargets', async () => {
+        const pluginTargets = [
+            {
+                icon: 'pi-mock',
+                color: 'green',
+                name: 'Mock Jump Target',
+                label: 'Mock jump target',
+                enabled: false,
+                jump: () => [1, 2],
+                validate: () => true,
+            },
+        ];
+        const loaderSpy = vi.spyOn(JumpTargetService.prototype as any, 'loadJumpTargetsModule')
+            .mockResolvedValue({default: () => pluginTargets});
+
         const config = {
             extensionModules: {
                 jumpTargets: 'jump_plugin',
@@ -90,19 +90,22 @@ describe('JumpTargetService', () => {
         };
         const {service} = createService(config);
 
-        for (let i = 0; i < 10 && service.extJumpTargets.length === 0; i++) {
-            await new Promise(resolve => setTimeout(resolve, 0));
+        try {
+            for (let i = 0; i < 10 && service.extJumpTargets.length === 0; i++) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            expect(service.extJumpTargets.length).toBeGreaterThan(0);
+
+            const combined = service.jumpTargets.getValue();
+            expect(combined.length).toBeGreaterThanOrEqual(service.extJumpTargets.length + 2);
+
+            const pluginNames = new Set(service.extJumpTargets.map(t => t.name));
+            const combinedNames = combined.map(t => t.name);
+            const hasPluginTarget = [...pluginNames].some(name => combinedNames.includes(name));
+            expect(hasPluginTarget).toBe(true);
+        } finally {
+            loaderSpy.mockRestore();
         }
-        // TODO: Fix
-        // expect(service.extJumpTargets.length).toBeGreaterThan(0);
-
-        const combined = service.jumpTargets.getValue();
-        expect(combined.length).toBeGreaterThanOrEqual(service.extJumpTargets.length + 2);
-
-        const pluginNames = new Set(service.extJumpTargets.map(t => t.name));
-        const combinedNames = combined.map(t => t.name);
-        const hasPluginTarget = [...pluginNames].some(name => combinedNames.includes(name));
-        expect(hasPluginTarget).toBe(true);
     });
 
     it('validates mapget tile IDs as numeric without whitespace', () => {

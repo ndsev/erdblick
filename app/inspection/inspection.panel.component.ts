@@ -40,7 +40,8 @@ interface SourceLayerMenuItem {
                             }
                         </span>
                         <span>
-                            <p-button class="dock-eject-button" icon="" (click)="undock($event)" (mousedown)="$event.stopPropagation()">
+                            <p-button class="undock-button" (click)="undock($event)" (mousedown)="$event.stopPropagation()"
+                                      icon="" pTooltip="Undock" tooltipPosition="bottom">
                                 <span class="material-symbols-outlined"
                                       style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>

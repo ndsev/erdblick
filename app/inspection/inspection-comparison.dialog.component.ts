@@ -24,7 +24,8 @@ interface ComparisonColumn {
     template: `
         <p-dialog #dialog class="inspection-comparison-dialog"
                   [modal]="false" [closable]="true" [(visible)]="comparisonService.isComparisonVisible"
-                  (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()">
+                  (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()"
+                  (onResizeEnd)="onDialogResizeEnd()">
             <ng-template #header>
                 <div class="title" (pointerdown)="beginDrag()">Inspection Comparison</div>
             </ng-template>
@@ -110,6 +111,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     onDialogShow() {
         this.dialogStack.bringToFront(this.dialog);
+        this.queueHeightSync();
     }
 
     onDialogHide() {
@@ -118,6 +120,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     onDialogDragEnd() {
         this.endDrag();
+    }
+
+    onDialogResizeEnd() {
+        this.queueHeightSync();
     }
 
     beginDrag(): void {
@@ -194,6 +200,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             };
         });
         this.columns = columns;
+        this.queueHeightSync();
         entries.forEach((entry, index) => {
             this.resolveFeatures(entry).then(features => {
                 const localId = columns[index].localId;
@@ -207,6 +214,35 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 this.columns = nextColumns;
             });
         });
+    }
+
+    private queueHeightSync() {
+        setTimeout(() => this.syncComparisonHeight(), 0);
+    }
+
+    private syncComparisonHeight() {
+        const container = this.dialog?.container;
+        if (!container) {
+            return;
+        }
+        const grid = container.querySelector('.comparison-grid') as HTMLElement | null;
+        const column = container.querySelector('.comparison-column') as HTMLElement | null;
+        const title = container.querySelector('.comparison-column-title') as HTMLElement | null;
+        if (!grid || !column || !title) {
+            return;
+        }
+        const baseFontSize = this.stateService.baseFontSize;
+        if (!baseFontSize) {
+            return;
+        }
+        const computedStyle = getComputedStyle(column);
+        const gapValue = parseFloat(computedStyle.rowGap || '0');
+        const gap = Number.isFinite(gapValue) ? gapValue : 0;
+        const availableHeight = grid.clientHeight - title.offsetHeight - gap;
+        if (availableHeight <= 0) {
+            return;
+        }
+        this.heightEm = availableHeight / baseFontSize;
     }
 
     private async resolveFeatures(entry: InspectionComparisonEntry): Promise<FeatureWrapper[]> {

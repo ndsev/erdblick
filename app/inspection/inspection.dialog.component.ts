@@ -15,7 +15,8 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
     selector: 'inspection-panel-dialog',
     template: `
         <p-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
-                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()">
+                  [style]="dialogStyle"
+                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()">
             @if (panel()) {
                 <ng-template #header>
                     <div class="inspector-title" (pointerdown)="beginDrag()">
@@ -41,7 +42,8 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
                             }
                         </span>
                         <span>
-                            <p-button icon="" (click)="dock($event)" (mousedown)="$event.stopPropagation()">
+                            <p-button icon="" (click)="dock($event)" (mousedown)="$event.stopPropagation()"
+                                      pTooltip="Dock" tooltipPosition="bottom">
                                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">move_to_inbox</span>
                             </p-button>
                             @if (panel().sourceData === undefined) {
@@ -129,6 +131,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     dialogIndex = input.required<number>();
     title = "";
     errorMessage: string = "";
+    dialogStyle: { [key: string]: string } = {};
     layerMenuItems: { label: string, disabled: boolean, command: () => void }[] = [];
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
     compareOptions: InspectionComparisonOption[] = [];
@@ -153,7 +156,9 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 private dialogStack: DialogStackService,
                 private dialogLayout: InspectionDialogLayoutService) {
         effect(() => {
-            this.updateHeaderFor(this.panel());
+            const panel = this.panel();
+            this.updateHeaderFor(panel);
+            this.dialogStyle = this.buildDialogStyle(panel);
         });
     }
 
@@ -285,6 +290,49 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.storeDialogPosition();
         this.clearDockCue();
         this.dialogStack.bringToFront(this.dialog);
+    }
+
+    onDialogResizeEnd() {
+        const panel = this.panel();
+        const container = this.dialog?.container;
+        if (!panel || !container || !container.offsetWidth || !container.offsetHeight) {
+            return;
+        }
+        const baseFontSize = this.stateService.baseFontSize;
+        if (!baseFontSize) {
+            return;
+        }
+        const currentEmWidth = container.offsetWidth / baseFontSize;
+        const currentEmHeight = container.offsetHeight / baseFontSize;
+        panel.size[0] = currentEmWidth;
+        panel.size[1] = currentEmHeight;
+        this.dialogStyle = this.buildDialogStyle(panel);
+        this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
+    }
+
+    private buildDialogStyle(panel: InspectionPanelModel<FeatureWrapper>): { [key: string]: string } {
+        const nextStyle: { [key: string]: string } = {
+            width: `${panel.size[0]}em`,
+            height: `${panel.size[1]}em`
+        };
+        const containerStyle = this.dialog?.container?.style;
+        const currentLeft = containerStyle?.left || this.dialogStyle['left'];
+        const currentTop = containerStyle?.top || this.dialogStyle['top'];
+        const currentPosition = containerStyle?.position || this.dialogStyle['position'];
+        const currentMargin = containerStyle?.margin || this.dialogStyle['margin'];
+        if (currentLeft) {
+            nextStyle['left'] = currentLeft;
+        }
+        if (currentTop) {
+            nextStyle['top'] = currentTop;
+        }
+        if (currentPosition) {
+            nextStyle['position'] = currentPosition;
+        }
+        if (currentMargin) {
+            nextStyle['margin'] = currentMargin;
+        }
+        return nextStyle;
     }
 
     ngOnDestroy() {

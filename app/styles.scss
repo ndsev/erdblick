@@ -151,6 +151,12 @@ mapview-container {
 }
 
 .main-layout {
+  .viewer-layout {
+    width: 100%;
+    position: relative;
+    height: 100vh;
+  }
+
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -169,6 +175,15 @@ mapview-container {
     position: relative;
     /* Hide native resizer */
     resize: none;
+
+    &.open {
+      /* Let user resize override this default width */
+      width: 40em;
+    }
+
+    &.collapsed {
+      width: 0 !important;
+    }
   }
 
   .collapsible-dock.dock-drop-active {
@@ -769,6 +784,8 @@ body.dialog-dragging * {
     overflow: hidden;
     max-width: calc(100vw - 5em);
     max-height: calc(100vh - 5em);
+    display: flex;
+    flex-direction: column;
   }
 
   .p-dialog-header {
@@ -816,6 +833,9 @@ body.dialog-dragging * {
     min-height: 30em;
     min-width: 20em;
     padding: 0.25em;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
 
     .filter-container {
       display: flex;
@@ -853,6 +873,31 @@ body.dialog-dragging * {
       width: 100%;
       height: 100%;
       overflow: auto;
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+
+      & > div {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      feature-panel,
+      sourcedata-panel,
+      inspection-tree {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      .p-treetable {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
 
       .source-data-ref-container {
         .p-buttongroup {
@@ -1109,7 +1154,7 @@ body.dialog-dragging * {
   .comparison-resizable {
     width: 100%;
     min-height: 10em;
-    resize: vertical;
+    resize: none;
     overflow: auto;
   }
 
@@ -1120,70 +1165,6 @@ body.dialog-dragging * {
     height: 100%;
   }
 }
-
-//.inspection-comparison-dialog {
-//  .p-dialog {
-//    min-height: 24em;
-//    min-width: 40em;
-//    width: min(120em, calc(100vw - 5em));
-//    height: min(60em, calc(100vh - 5em));
-//    max-width: calc(100vw - 5em);
-//    max-height: calc(100vh - 5em);
-//  }
-//
-//  .p-dialog-content {
-//    padding: 0.5em;
-//  }
-//
-//  .comparison-content {
-//    display: flex;
-//    flex-direction: column;
-//    gap: 0.5em;
-//    height: 100%;
-//  }
-//
-//  .comparison-controls {
-//    display: flex;
-//    align-items: center;
-//    gap: 0.5em;
-//  }
-//
-//  .comparison-grid {
-//    display: flex;
-//    flex: 1 1 auto;
-//    gap: 0.5em;
-//    min-height: 0;
-//  }
-//
-//  .comparison-column {
-//    display: flex;
-//    flex: 1 1 0;
-//    flex-direction: column;
-//    gap: 0.25em;
-//    min-width: 12em;
-//  }
-//
-//  .comparison-column-title {
-//    font-weight: 600;
-//    overflow: hidden;
-//    text-overflow: ellipsis;
-//    white-space: nowrap;
-//  }
-//
-//  .comparison-resizable {
-//    width: 100%;
-//    min-height: 10em;
-//    resize: vertical;
-//    overflow: auto;
-//  }
-//
-//  .comparison-loading {
-//    display: flex;
-//    align-items: center;
-//    justify-content: center;
-//    height: 100%;
-//  }
-//}
 
 .comparison-popover {
   display: flex;
@@ -1211,6 +1192,10 @@ body.dialog-dragging * {
   height: 100vh;
   width: 100%;
 
+  &.hidden {
+    visibility: collapse;
+  }
+
   .dock-filter {
     position: sticky;
     top: 0;
@@ -1218,6 +1203,10 @@ body.dialog-dragging * {
     padding: 0.25em 0.5em 0.25em 0.5em;
     background: var(--p-content-background);
     border-bottom: 1px solid var(--p-content-border-color);
+    display: flex;
+    flex-direction: row;
+    gap: 0.25em;
+    justify-items: center;
 
     .input-container {
       width: 100%;
@@ -1235,6 +1224,16 @@ body.dialog-dragging * {
 
       .clear-icon {
         cursor: pointer;
+      }
+    }
+
+    .close-dock-button {
+      visibility: collapse;
+
+      .p-button {
+        width: 1.75em !important;
+        height: 1.75em !important;
+        margin: 0;
       }
     }
   }
@@ -2609,15 +2608,37 @@ body.dialog-dragging * {
     }
   }
 
-  .dock-toggle {
-    visibility: collapse;
-  }
+  .main-layout {
+    .collapsible-dock {
+      &.open {
+        width: 100vw;
+        max-width: 100vw;
+      }
 
-  .collapsible-dock {
-    visibility: collapse;
+      .undock-button {
+        display: none;
+      }
 
-    .dock-eject-button {
-      display: none;
+      .inspection-container {
+        .close-dock-button {
+          visibility: visible;
+        }
+
+        .resizable-container {
+          width: 100%;
+          max-width: 100%;
+        }
+      }
+    }
+
+    .viewer-layout {
+      &.open {
+        visibility: visible;
+      }
+
+      &.collapsed {
+        visibility: collapse;
+      }
     }
   }
 
@@ -2730,10 +2751,6 @@ body.dialog-dragging * {
   .p-overlaypanel:after, .p-overlaypanel:before {
     left: unset !important;
     right: 1.25rem !important;
-  }
-
-  .inspection-container {
-    display: none;
   }
 
   .main-button-controls {

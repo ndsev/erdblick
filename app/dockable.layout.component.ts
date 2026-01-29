@@ -6,7 +6,7 @@ import {AppStateService} from "./shared/appstate.service";
     selector: 'dockable-layout',
     template: `
         <div class="main-layout">
-            <div style="width: 100%; position: relative; height: 100vh;">
+            <div class="viewer-layout" [ngClass]="{'open': !isDockOpen, 'collapsed': isDockOpen}">
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
@@ -34,20 +34,7 @@ import {AppStateService} from "./shared/appstate.service";
             }
         </div>
     `,
-    styles: [`
-        .collapsed {
-            width: 0 !important;
-        }
-
-        .open {
-            /* Let user resize override this default width */
-            width: 40em;
-        }
-        
-        .hidden {
-            display: none;
-        }
-    `],
+    styles: [``],
     standalone: false
 })
 export class DockableLayoutComponent {

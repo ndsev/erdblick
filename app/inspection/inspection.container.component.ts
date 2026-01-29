@@ -12,13 +12,15 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
             @if (dockedPanels.length > 0) {
                 <div class="dock-filter">
                     <p-iconfield class="input-container">
-                        <p-inputicon styleClass="pi pi-filter"/>
+                        <p-inputicon class="pi pi-filter"/>
                         <input class="filter-input" type="text" pInputText placeholder="Filter docked inspections"
                                [(ngModel)]="dockFilterText"/>
                         @if (dockFilterText) {
                             <i (click)="dockFilterText = ''" class="pi pi-times clear-icon"></i>
                         }
                     </p-iconfield>
+                    <p-button class="close-dock-button" icon="pi pi-times" styleClass="p-button-danger" (click)="closeDock()"
+                              (mousedown)="$event.stopPropagation()"/>
                 </div>
             }
             @for (panel of dockedPanels; track panel.id) {
@@ -251,5 +253,9 @@ export class InspectionContainerComponent implements OnDestroy {
         this.dropAfterId = undefined;
         this.isReordering = false;
         document.body.classList.remove('dialog-dragging');
+    }
+
+    protected closeDock() {
+        this.stateService.dockOpenState.next(false);
     }
 }
