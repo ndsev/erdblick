@@ -403,7 +403,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
         const index = this.dialogIndex();
         const panelId = this.panel().id;
-        const slotIndex = this.dialogLayout.getSlotIndex(index);
+        const slotIndex = this.dialogLayout.getSlotIndexForPanel(index, panelId);
         const pending = this.dialogLayout.consumePendingPosition(panelId);
         const stored = pending ?? this.dialogLayout.getPosition(index, panelId);
         const rect = this.dialog.container.getBoundingClientRect();

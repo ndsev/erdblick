@@ -76,9 +76,10 @@ export class InspectionContainerComponent implements OnDestroy {
                 private renderer: Renderer2) {
         this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
+            this.dialogLayout.syncPanels(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            this.stateService.dockOpenState.next(allPanels.length > 0);
+            this.stateService.dockOpenState.next(this.stateService.dockOpenState.value || allPanels.length > 0);
         });
         this.comparisonService.comparisons.subscribe(comparisons => {
             this.comparisons = comparisons;
