@@ -1,45 +1,15 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
-import {map, Subscription, timer} from "rxjs";
+import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {EditorService} from "../shared/editor.service";
-import {environment} from "../environments/environment";
 
 @Component({
     selector: 'pref-components',
     template: `
-        <p-menubar class="main-bar" [model]="menuItems">
-            <ng-template #start>
-                @if (!environment.visualizationOnly) {
-                    <search-panel></search-panel>
-                }
-            </ng-template>
-            <ng-template #item let-item>
-                <a pRipple class="p-menubar-item-link" (click)="item.command()">
-                    <span class="material-symbols-outlined">{{ item.icon }}</span>
-                    <span>{{ item.name }}</span>
-                </a>
-            </ng-template>
-            <ng-template #end>
-                <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
-                    <span class="material-symbols-outlined">
-                        {{ loader_icon$ | async }}
-                    </span>
-                    <span class="material-symbols-outlined" style="color: var(--p-button-danger-background)">
-                        warning
-                    </span>
-                    @if (copyright.length) {
-                        <div class="copyright-info" (click)="openLegalInfo()">
-                            {{ copyright }}
-                        </div>
-                    }
-                </div>
-            </ng-template>
-        </p-menubar>
-        <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
+        <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
@@ -78,88 +48,6 @@ import {environment} from "../environments/environment";
             <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
-        <p-dialog header="Keyboard Controls" [(visible)]="controlsDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #controls class="pref-dialog">
-            <div class="keyboard-dialog">
-                <ul class="keyboard-list">
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">K</span>
-                        </div>
-                        <div class="control-desc">Open Search</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">J</span>
-                        </div>
-                        <div class="control-desc">Zoom to Target Feature</div>
-                    </li>
-                    <li>
-                        <span class="key">M</span>
-                        <div class="control-desc">Open Maps & Styles Panel</div>
-                    </li>
-                    <li>
-                        <span class="key">W</span>
-                        <div class="control-desc">Move Camera Up</div>
-                    </li>
-                    <li>
-                        <span class="key">A</span>
-                        <div class="control-desc">Move Camera Left</div>
-                    </li>
-                    <li>
-                        <span class="key">S</span>
-                        <div class="control-desc">Move Camera Down</div>
-                    </li>
-                    <li>
-                        <span class="key">D</span>
-                        <div class="control-desc">Move Camera Right</div>
-                    </li>
-                    <li>
-                        <span class="key">Q</span>
-                        <div class="control-desc">Zoom In</div>
-                    </li>
-                    <li>
-                        <span class="key">E</span>
-                        <div class="control-desc">Zoom Out</div>
-                    </li>
-                    <li>
-                        <span class="key">R</span>
-                        <div class="control-desc">Reset Camera Orientation</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">X</span>
-                        </div>
-                        <div class="control-desc">Open Viewport Statistics</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left <-</span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the left</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Right -></span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the right</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left Click</span>
-                        </div>
-                        <div class="control-desc">Open inspection and pin it immediately</div>
-                    </li>
-                </ul>
-            </div>
-            <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
     `,
     styles: [
         `
@@ -178,78 +66,6 @@ import {environment} from "../environments/environment";
                 padding: 0.5em;
             }
 
-            .keyboard-dialog {
-                width: 25em;
-                text-align: center;
-                background-color: var(--p-content-background);
-            }
-
-            h2 {
-                font-size: 1.5em;
-                color: #333;
-                margin-bottom: 1em;
-                font-weight: bold;
-            }
-
-            .keyboard-list {
-                list-style-type: none;
-                padding: 0;
-            }
-
-            .keyboard-list li {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 1em;
-            }
-
-            .keyboard-list li span {
-                display: inline-block;
-                background-color: var(--p-highlight-background);
-                padding: 0.5em 0.75em;
-                border-radius: 0.5em;
-                color: var(--p-content-color);
-                font-weight: bold;
-                min-width: 4em;
-                text-align: center;
-            }
-
-            .control-desc {
-                color: var(--p-surface-500);
-                font-size: 0.9em;
-            }
-
-            /* Keyboard key styling */
-            .key {
-                border-radius: 0.5em;
-                background-color: #ffcc00;
-                font-size: 1em;
-                padding: 0.5em 0.75em;
-                color: #333;
-            }
-
-            .key-multi {
-                display: flex;
-                gap: 0.25em;
-            }
-
-            .key-multi .key {
-                background-color: #00bcd4;
-                padding: 0.3em 0.6em;
-            }
-
-            .highlight {
-                background-color: #ff5722;
-                color: white;
-            }
-            
-            .copyright-info {
-                width: 5em;
-                font-size: 0.8em;
-                word-wrap: normal;
-                text-align: end;
-            }
-
             @media only screen and (max-width: 56em) {
                 .elevated {
                     bottom: 3.5em;
@@ -264,73 +80,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
-    readonly loader_icons = ["", "clock_loader_10", "clock_loader_20", "clock_loader_40", "clock_loader_60", "clock_loader_80", "clock_loader_90"];
-
-    readonly loader_icon$ = timer(0, 500).pipe(
-        map(i => this.loader_icons.length ? this.loader_icons[i % this.loader_icons.length] : '')
-    );
-
-    controlsDialogVisible = false;
-    stylesDialogVisible = false;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
         { label: 'On', value: 'on' },
         { label: 'Auto', value: 'auto' }
-    ];
-    menuItems = [
-        {
-            name: "Maps",
-            icon: "stacks",
-            command: () => { this.showMapsPanel(); }
-        },
-        {
-            name: 'Styles',
-            icon: 'palette',
-            command: () => { this.openStylesDialog(); }
-        },
-        {
-            name: 'Settings',
-            icon: 'settings',
-            items: [
-                {
-                    name: 'Preferences',
-                    icon: 'settings',
-                    command: () => { this.showPreferencesDialog(); },
-                },
-                {
-                    name: 'Datasources',
-                    icon: 'data_table',
-                    command: () => { this.openDatasources(); }
-                },
-                {
-                    name: 'Controls',
-                    icon: 'keyboard',
-                    command: () => { this.showControlsDialog(); }
-                }
-            ]
-        },
-        {
-            name: 'Help',
-            icon: 'question_mark',
-            items: [
-                {
-                    name: 'Statistics',
-                    icon: 'bar_chart_4_bars',
-                    command: () => { this.showStatsDialog(); }
-                },
-                {
-                    name: 'Help',
-                    icon: 'question_mark',
-                    command: () => { this.openHelp(); }
-                },
-                {
-                    name: 'About',
-                    icon: 'info',
-                    command: () => { this.openAboutDialog(); }
-                }
-            ]
-        }
     ];
     private mediaQueryList?: MediaQueryList;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
@@ -343,26 +97,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     };
     private subscriptions: Subscription[] = [];
 
-    copyright: string = "";
-
     constructor(private messageService: InfoMessageService,
                 public mapService: MapDataService,
                 public styleService: StyleService,
-                public stateService: AppStateService,
-                public editorService: EditorService) {
+                public stateService: AppStateService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
         this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
         }));
-        this.mapService.legalInformationUpdated.subscribe(_ => {
-            this.copyright = "";
-            let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
-            if (firstSet !== undefined && firstSet.size) {
-                this.copyright = '© '.concat(firstSet.values().next().value as string).slice(0, 14).concat('…');
-            }
-        });
     }
 
     ngOnInit() {
@@ -386,28 +130,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
-    }
-
-    dialogVisible: boolean = false;
-    showPreferencesDialog() {
-        this.dialogVisible = true;
-    }
-
-    showControlsDialog() {
-        this.controlsDialogVisible = true;
-    }
-
-    showStatsDialog() {
-        this.mapService.statsDialogVisible = true;
-        this.mapService.statsDialogNeedsUpdate.next();
-    }
-
-    openHelp() {
-        window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
-    }
-
-    openAboutDialog() {
-        this.stateService.aboutDialogVisible = true;
     }
 
     clearURLProperties() {
@@ -474,24 +196,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
-    private openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
-    }
-
-    private openStylesDialog() {
-        this.styleService.stylesDialogVisible = true;
-    }
-
-    private showMapsPanel() {
-        this.stateService.mapsOpenState.next(true);
-    }
-
-    protected openLegalInfo() {
-        this.stateService.legalInfoDialogVisible = true;
-    }
-
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
-    protected readonly environment = environment;
 }

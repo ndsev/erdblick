@@ -9,6 +9,7 @@ import {AppStateService} from "./shared/appstate.service";
             <div style="width: 100%; position: relative; height: 100vh;">
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
+                    <main-bar></main-bar>
                     <pref-components></pref-components>
                     <coordinates-panel></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">

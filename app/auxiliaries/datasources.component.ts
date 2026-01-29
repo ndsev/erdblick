@@ -13,7 +13,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     selector: 'datasources',
     template: `
         <p-dialog header="DataSource Configuration Editor" [(visible)]="editorService.datasourcesEditorVisible" [modal]="false"
-                  #editorDialog (onShow)="onEditorDialogShow()" appendTo="body" class="editor-dialog datasource-dialog" [closeOnEscape]="false">
+                  #editorDialog (onShow)="onEditorDialogShow()" class="editor-dialog datasource-dialog" [closeOnEscape]="false">
             @if (errorMessage) {
                 <p>{{ errorMessage }}</p>
             }

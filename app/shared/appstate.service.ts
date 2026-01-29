@@ -365,6 +365,18 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly preferencesDialogVisibleState = this.createState<boolean>({
+        name: 'preferencesDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly controlsDialogVisibleState = this.createState<boolean>({
+        name: 'controlsDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -621,6 +633,10 @@ export class AppStateService implements OnDestroy {
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
     get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
     set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
+    get preferencesDialogVisible() {return this.preferencesDialogVisibleState.getValue();}
+    set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
+    get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
+    set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -839,7 +855,7 @@ export class AppStateService implements OnDestroy {
                 id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: !newPanelUndocked,
+                pinned: !newPanelUndocked || sourceDataSelection !== undefined,
                 size: this.defaultInspectionPanelSize,
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
                 undocked: newPanelUndocked

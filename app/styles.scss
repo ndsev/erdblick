@@ -79,19 +79,6 @@ body {
   .p-popover-content {
     padding: 0.25em;
   }
-
-  .editor-dialog {
-    .p-dialog {
-      .p-dialog-header {
-        padding: 0.75em !important;
-        height: 2.5em !important;
-      }
-
-      .p-dialog-content {
-        padding: 0.5em !important;
-      }
-    }
-  }
 }
 
 mapview-container {
@@ -133,6 +120,15 @@ mapview-container {
       }
     }
   }
+}
+
+.p-menubar-mobile {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  margin: 0 !important;
+  height: 3.1em;
+  width: 100%;
 }
 
 .dock-toggle {
@@ -2232,8 +2228,8 @@ body.dialog-dragging * {
   }
 
   .cm-editor {
-    width: 0;
-    flex-grow: 1;
+    flex: 1 1 auto;
+    width: 100%;
   }
 }
 
@@ -2595,48 +2591,35 @@ body.dialog-dragging * {
 }
 
 @media only screen and (max-width: 56em) {
-  .help-button {
-    width: 3em;
-    height: 3em;
-
-    .p-button {
-      border-radius: 50%;
-      padding: 0.8em 0;
-    }
-  }
-
-  .pref-button {
-    width: 3em;
-    height: 3em;
-
-    .p-button {
-      border-radius: 50%;
-      padding: 0.8em 0;
-    }
-  }
-
-  .bttn-container {
-    flex-direction: column-reverse;
-  }
-
-  .main-button-controls {
+  .maps-close-button {
     position: absolute;
-    top: 0;
-    left: 0;
+    top: 3em;
+    right: 0;
+    left: unset;
+    z-index: 30000;
 
-    .layers-button {
-      position: absolute;
-      top: 0;
-      left: 0;
-
-      button {
-        border-radius: 0;
-        width: 3em;
-        height: 3em;
-      }
+    .p-button {
+      border-radius: var(--p-button-border-radius);
     }
   }
 
+  .main-bar {
+    .p-menubar-root-list {
+      height: unset;
+    }
+  }
+
+  .dock-toggle {
+    visibility: collapse;
+  }
+
+  .collapsible-dock {
+    visibility: collapse;
+
+    .dock-eject-button {
+      display: none;
+    }
+  }
 
   .search-wrapper {
     position: absolute;
@@ -2646,20 +2629,6 @@ body.dialog-dragging * {
     min-height: 3.5em;
     max-width: 100%;
     max-height: calc(100vh - 5em);;
-    /* Default lower; elevate when focused/expanded */
-    z-index: 100;
-
-    &.search-menu-top {
-      z-index: 100002;
-    }
-
-    &:focus-within {
-      z-index: 1500;
-    }
-
-    &:has(textarea:not(.single-line)) {
-      z-index: 1500;
-    }
 
     .resizable-container {
       position: relative;
@@ -2676,7 +2645,6 @@ body.dialog-dragging * {
     .p-dialog {
       max-height: calc(100vh - 11.5em);
       border-radius: 0;
-      position: absolute !important;
 
       .p-dialog-content:last-of-type {
         border-bottom-right-radius: 0;
@@ -2713,6 +2681,7 @@ body.dialog-dragging * {
         white-space: nowrap;
         text-overflow: ellipsis;
         overflow: hidden;
+        padding-top: 1em;
       }
     }
   }

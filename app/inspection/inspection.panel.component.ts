@@ -26,9 +26,6 @@ interface SourceLayerMenuItem {
                                                (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
                                 </p-colorpicker>
-                            } @else {
-                                <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
-                                          (mousedown)="$event.stopPropagation()"/>
                             }
                             <span class="title" [pTooltip]="title" tooltipPosition="bottom">
                                 {{ title }}
@@ -43,7 +40,7 @@ interface SourceLayerMenuItem {
                             }
                         </span>
                         <span>
-                            <p-button icon="" (click)="undock($event)" (mousedown)="$event.stopPropagation()">
+                            <p-button class="dock-eject-button" icon="" (click)="undock($event)" (mousedown)="$event.stopPropagation()">
                                 <span class="material-symbols-outlined"
                                       style="font-size: 1.2em; margin: 0 auto;">eject</span>
                             </p-button>

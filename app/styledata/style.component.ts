@@ -138,7 +138,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <p-dialog header="Style Editor" [(visible)]="editorService.styleEditorVisible" [modal]="false" #editorDialog
-                  class="editor-dialog" appendTo="body" (onShow)="onEditorDialogShow()">
+                  class="editor-dialog" (onShow)="onEditorDialogShow()">
             <editor></editor>
             <div style="margin-top: 0.5em; display: flex; flex-direction: row; align-content: center; justify-content: space-between;">
                 <div style="display: flex; flex-direction: row; align-content: center; gap: 0.5em;">

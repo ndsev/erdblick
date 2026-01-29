@@ -21,6 +21,7 @@ declare let window: DebugWindow;
             <stats-dialog></stats-dialog>
             <style-panel></style-panel>
             <feature-search></feature-search>
+            <keyboard-dialog></keyboard-dialog>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
         <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>

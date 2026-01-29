@@ -24,7 +24,8 @@ import {InspectionTreeComponent} from "./inspection.tree.component";
                                                (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
                                 </p-colorpicker>
-                            } @else {
+                            } @else if (!panel().pinned) {
+                                <!-- TODO: Render only if the panel was opened in the unpinned inspection dialog -->
                                 <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
                                           (mousedown)="$event.stopPropagation()"/>
                             }
