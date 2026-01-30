@@ -382,8 +382,8 @@ export class MapView {
                     this.stateService.setSelection(Array.isArray(feature.id) ? feature.id : [feature.id]);
                 }
             } else {
-                // No new feature to select. Unset existing unpinned selections.
-                this.stateService.unsetUnpinnedSelections();
+                // No new feature to select. Unset existing locked selections.
+                this.stateService.unsetUnlockedSelections();
                 this.menuService.tileOutline.next(null);
             }
             // Handle position update after highlighting.
@@ -407,7 +407,7 @@ export class MapView {
                 // Select the feature and pin the panel immediately.
                 const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id], undefined, true);
                 if (id !== undefined) {
-                    this.stateService.setInspectionPanelPinnedState(id, true);
+                    this.stateService.setInspectionPanelLockedState(id, true);
                 }
             }
 

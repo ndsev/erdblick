@@ -235,7 +235,7 @@ import {Rectangle} from "../integrations/cesium";
             </ng-container>
         </p-dialog>
         @if (closeButtonVisible) {
-            <p-button class="maps-close-button" styleClass="p-button-danger" icon="" (click)="closeMapsPanel()"
+            <p-button class="maps-close-button" icon="" severity="secondary" (click)="closeMapsPanel()" 
                       pTooltip="Close maps panel" tooltipPosition="right">
             <span class="material-symbols-outlined" style="margin: 0 auto;">
                 close

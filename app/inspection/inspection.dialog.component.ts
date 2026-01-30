@@ -28,12 +28,27 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                                (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
                                 </p-colorpicker>
-                            } @else if (!panel().pinned) {
-                                <!-- TODO: Render only if the panel was opened in the unpinned inspection dialog -->
+                            } @else if (!panel().locked) {
+                                <!-- TODO: Render only if the panel was opened in the locked inspection dialog -->
                                 <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
                                           (mousedown)="$event.stopPropagation()"/>
                             }
-                            <span class="title" [pTooltip]="title" tooltipPosition="bottom">{{ title }}</span>
+                            <div class="title" [pTooltip]="title" tooltipPosition="bottom"
+                                 (mousedown)="$event.stopPropagation()"
+                                 (click)="toggleLockedState($event)">
+                                @if (panel().sourceData === undefined) {
+                                    @if (panel().locked) {
+                                        <span class="material-symbols-outlined">
+                                            lock
+                                        </span>
+                                    } @else {
+                                        <span class="material-symbols-outlined">
+                                            lock_open_right
+                                        </span>
+                                    }
+                                }
+                                <span>{{ title }}</span>
+                            </div>
                             @if (panel().sourceData !== undefined) {
                                 <p-select class="source-layer-dropdown" [options]="layerMenuItems"
                                           [(ngModel)]="selectedLayerItem"
@@ -56,20 +71,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                       pTooltip="Dock" tooltipPosition="bottom">
                                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">move_to_inbox</span>
                             </p-button>
-                            @if (panel().sourceData === undefined) {
-                                <p-button icon="" (click)="togglePinnedState($event)"
-                                          [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
-                                          (mousedown)="$event.stopPropagation()">
-                                    @if (panel().pinned) {
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">keep</span>
-                                    } @else {
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
-                                    }
-                                </p-button>
-                            }
-                            <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"
+                            <p-button icon="pi pi-times" severity="secondary" (click)="unsetPanel()"
                                       (mousedown)="$event.stopPropagation()"/>
                         </span>
                     </div>
@@ -83,7 +85,8 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                     <strong>Error</strong><br>{{ errorMessage }}
                                 </div>
                             } @else if (panel().sourceData) {
-                                <sourcedata-panel [panel]="panel()" (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
+                                <sourcedata-panel [panel]="panel()"
+                                                  (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
                             } @else {
                                 <feature-panel [panel]="panel()"></feature-panel>
                             }
@@ -218,10 +221,10 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
-    protected togglePinnedState(event: MouseEvent) {
+    protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
-        this.stateService.setInspectionPanelPinnedState(p.id, !p.pinned);
+        this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
     protected unsetPanel() {

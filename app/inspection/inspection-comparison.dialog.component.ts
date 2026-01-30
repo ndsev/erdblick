@@ -256,7 +256,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         return {
             id: localId,
             features: features,
-            pinned: true,
+            locked: true,
             size: [DEFAULT_EM_WIDTH, this.heightEm],
             color: '#ffffff',
             undocked: true

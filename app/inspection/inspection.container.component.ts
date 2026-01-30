@@ -19,12 +19,12 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
                             <i (click)="dockFilterText = ''" class="pi pi-times clear-icon"></i>
                         }
                     </p-iconfield>
-                    <p-button class="close-dock-button" icon="pi pi-times" styleClass="p-button-danger" (click)="closeDock()"
+                    <p-button class="close-dock-button" icon="pi pi-times" severity="secondary" (click)="closeDock()"
                               (mousedown)="$event.stopPropagation()"/>
                 </div>
             } @else {
                 <div class="dock-empty">
-                    <p-button class="close-dock-button" icon="pi pi-times" styleClass="p-button-danger" (click)="closeDock()"
+                    <p-button class="close-dock-button" icon="pi pi-times" severity="secondary" (click)="closeDock()"
                               (mousedown)="$event.stopPropagation()"/>
                     <span class="material-symbols-outlined dock-empty-icon" aria-hidden="true">subtitles_off</span>
                     <div class="dock-empty-title">No docked inspections</div>

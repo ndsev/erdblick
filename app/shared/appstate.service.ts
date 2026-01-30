@@ -52,7 +52,7 @@ export interface SelectedSourceData {
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
-    pinned: boolean;
+    locked: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
@@ -148,7 +148,7 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.pinned ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
@@ -169,7 +169,7 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const pinState = parts.shift() === "1";
+                const lockState = parts.shift() === "1";
                 const undocked = parts.pop()! === "1";
                 const color = parts.pop()!;
                 const sizeParts = parts.pop()!.split(':');
@@ -178,7 +178,7 @@ export class AppStateService implements OnDestroy {
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
                     features: [],
-                    pinned: pinState || !undocked,
+                    locked: lockState || !undocked,
                     size: size as [number, number],
                     color: color,
                     undocked: undocked
@@ -822,14 +822,14 @@ export class AppStateService implements OnDestroy {
         let newPanelUndocked = false;
         const hasDockedPanel = allPanels.some(panel => !panel.undocked);
         const hasUndockedPanel = allPanels.some(panel => panel.undocked);
-        const firstUndockedUnpinnedPanel = allPanels.find(panel => panel.undocked && !panel.pinned);
+        const firstUndockedUnlockedPanel = allPanels.find(panel => panel.undocked && !panel.locked);
 
         if (originPanel) {
             if (isClearSourceDataRequest) {
                 targetPanelId = originPanel.id;
             } else if (!originPanel.undocked) {
                 mustCreateNewPanel = true;
-            } else if (originPanel.pinned) {
+            } else if (originPanel.locked) {
                 mustCreateNewPanel = true;
                 newPanelUndocked = true;
             } else {
@@ -841,8 +841,8 @@ export class AppStateService implements OnDestroy {
             // Dock is empty: always create new selections as docked panels.
             mustCreateNewPanel = true;
             newPanelUndocked = false;
-        } else if (!mustCreateNewPanel && firstUndockedUnpinnedPanel) {
-            targetPanelId = firstUndockedUnpinnedPanel.id;
+        } else if (!mustCreateNewPanel && firstUndockedUnlockedPanel) {
+            targetPanelId = firstUndockedUnlockedPanel.id;
         }
 
         if (originPanel && mustCreateNewPanel && originPanel.undocked) {
@@ -851,13 +851,13 @@ export class AppStateService implements OnDestroy {
 
         // If no origin-driven decision was made, fall back to existing pinning logic.
         if (!mustCreateNewPanel && targetPanelId === undefined) {
-            mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+            mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.locked);
         }
 
         if (!mustCreateNewPanel && targetPanelId === undefined) {
-            const firstUnpinnedPanel = allPanels.find(panel => !panel.pinned);
-            if (firstUnpinnedPanel) {
-                targetPanelId = firstUnpinnedPanel.id;
+            const firstUnlockedPanel = allPanels.find(panel => !panel.locked);
+            if (firstUnlockedPanel) {
+                targetPanelId = firstUnlockedPanel.id;
             } else {
                 mustCreateNewPanel = true;
             }
@@ -874,7 +874,7 @@ export class AppStateService implements OnDestroy {
                 id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: false,
+                locked: false,
                 size: this.defaultInspectionPanelSize,
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
                 undocked: newPanelUndocked
@@ -914,13 +914,13 @@ export class AppStateService implements OnDestroy {
         this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
-    setInspectionPanelPinnedState(id: number, isPinned: boolean) {
+    setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
         if (index === -1) {
             return;
         }
-        allPanels[index].pinned = isPinned;
+        allPanels[index].locked = isLocked;
         this.selectionState.next(allPanels);
     }
 
@@ -932,7 +932,7 @@ export class AppStateService implements OnDestroy {
         }
         allPanels[index].undocked = undocked;
         if (!undocked) {
-            allPanels[index].pinned = true;
+            allPanels[index].locked = true;
         }
         this.selectionState.next(allPanels);
     }
@@ -976,8 +976,8 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
-    unsetUnpinnedSelections() {
-        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.pinned));
+    unsetUnlockedSelections() {
+        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.locked));
     }
 
     unsetPanel(id: number) {
@@ -1331,7 +1331,7 @@ export class AppStateService implements OnDestroy {
             const updated: InspectionPanelModel<TileFeatureId> = {
                 id: panel.id,
                 features: [],
-                pinned: panel.pinned,
+                locked: panel.locked,
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,

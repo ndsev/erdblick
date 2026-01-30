@@ -826,6 +826,14 @@ body.dialog-dragging * {
         text-overflow: ellipsis;
         white-space: nowrap;
         font-weight: bold;
+        display: flex;
+        gap: 0.125em;
+        align-items: center;
+        cursor: pointer;
+
+        .material-symbols-outlined {
+          font-size: 1.25em;
+        }
       }
 
       .p-button {
@@ -1338,6 +1346,14 @@ body.dialog-dragging * {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        display: flex;
+        gap: 0.125em;
+        align-items: center;
+        cursor: pointer;
+
+        .material-symbols-outlined {
+          font-size: 1.25em;
+        }
       }
 
       .p-button {

@@ -83,7 +83,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
                             <span class="key highlight">Ctrl</span>
                             <span class="key">Left Click</span>
                         </div>
-                        <div class="control-desc">Open inspection and pin it immediately</div>
+                        <div class="control-desc">Open inspection and lock it immediately</div>
                     </li>
                 </ul>
             </div>
