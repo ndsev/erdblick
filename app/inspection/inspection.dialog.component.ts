@@ -42,23 +42,6 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
                             }
                         </span>
                         <span>
-                            <p-button icon="" (click)="dock($event)" (mousedown)="$event.stopPropagation()"
-                                      pTooltip="Dock" tooltipPosition="bottom">
-                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">move_to_inbox</span>
-                            </p-button>
-                            @if (panel().sourceData === undefined) {
-                                <p-button icon="" (click)="togglePinnedState($event)"
-                                          [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
-                                          (mousedown)="$event.stopPropagation()">
-                                    @if (panel().pinned) {
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">keep</span>
-                                    } @else {
-                                        <span class="material-symbols-outlined"
-                                              style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
-                                    }
-                                </p-button>
-                            }
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-button icon="" (click)="focusOnFeature($event)"
                                           (mousedown)="$event.stopPropagation()"
@@ -77,6 +60,23 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
                                           pTooltip="Compare" tooltipPosition="bottom">
                                     <span class="material-symbols-outlined"
                                           style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                </p-button>
+                            }
+                            <p-button icon="" (click)="dock($event)" (mousedown)="$event.stopPropagation()"
+                                      pTooltip="Dock" tooltipPosition="bottom">
+                                <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">move_to_inbox</span>
+                            </p-button>
+                            @if (panel().sourceData === undefined) {
+                                <p-button icon="" (click)="togglePinnedState($event)"
+                                          [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
+                                          (mousedown)="$event.stopPropagation()">
+                                    @if (panel().pinned) {
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">keep</span>
+                                    } @else {
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
+                                    }
                                 </p-button>
                             }
                             <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"

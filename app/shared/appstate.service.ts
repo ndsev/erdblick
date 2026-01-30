@@ -864,7 +864,7 @@ export class AppStateService implements OnDestroy {
                 id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: !newPanelUndocked || sourceDataSelection !== undefined,
+                pinned: false,
                 size: this.defaultInspectionPanelSize,
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
                 undocked: newPanelUndocked

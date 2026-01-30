@@ -6,6 +6,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
+import {MenuItem} from "primeng/api";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -40,11 +41,6 @@ interface SourceLayerMenuItem {
                             }
                         </span>
                         <span>
-                            <p-button class="undock-button" (click)="undock($event)" (mousedown)="$event.stopPropagation()"
-                                      icon="" pTooltip="Undock" tooltipPosition="bottom">
-                                <span class="material-symbols-outlined"
-                                      style="font-size: 1.2em; margin: 0 auto;">eject</span>
-                            </p-button>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-button icon="" (click)="focusOnFeature($event)"
                                           (mousedown)="$event.stopPropagation()"
@@ -63,6 +59,24 @@ interface SourceLayerMenuItem {
                                           pTooltip="Compare" tooltipPosition="bottom">
                                     <span class="material-symbols-outlined"
                                           style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                </p-button>
+                            }
+                            <p-button class="undock-button" (click)="undock($event)" (mousedown)="$event.stopPropagation()"
+                                      icon="" pTooltip="Undock" tooltipPosition="bottom">
+                                <span class="material-symbols-outlined"
+                                      style="font-size: 1.2em; margin: 0 auto;">eject</span>
+                            </p-button>
+                            @if (panel().sourceData === undefined) {
+                                <p-button icon="" (click)="togglePinnedState($event)"
+                                          [styleClass]="panel().pinned ? 'p-button-success' : 'p-button-primary'"
+                                          (mousedown)="$event.stopPropagation()">
+                                    @if (panel().pinned) {
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">keep</span>
+                                    } @else {
+                                        <span class="material-symbols-outlined"
+                                              style="font-size: 1.2em; margin: 0 auto;">keep_off</span>
+                                    }
                                 </p-button>
                             }
                             <p-button icon="pi pi-times" styleClass="p-button-danger" (click)="unsetPanel()"
@@ -151,6 +165,7 @@ export class InspectionPanelComponent implements AfterViewInit {
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
+    protected extraFunctionsItems: MenuItem[] | undefined;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -206,20 +221,6 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.detectSafari();
     }
 
-    onGoBack(event: any) {
-        // The back-button can be used to navigate from a SourceData selection
-        // back to the feature-set from which it was called up.
-        event.stopPropagation();
-        const panel = this.panel();
-        if (panel.features.length) {
-            this.title = panel.features.length > 1 ?
-                `Selected ${panel.features.length} features` :
-                panel.features[0].featureId;
-        }
-        this.errorMessage = "";
-        this.stateService.setSelection(this.panel().features, this.panel().id);
-    }
-
     onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
@@ -256,6 +257,12 @@ export class InspectionPanelComponent implements AfterViewInit {
     onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
+    }
+
+    togglePinnedState(event: MouseEvent) {
+        event.stopPropagation();
+        const p = this.panel();
+        this.stateService.setInspectionPanelPinnedState(p.id, !p.pinned);
     }
 
     unsetPanel() {
