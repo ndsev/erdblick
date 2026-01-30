@@ -164,6 +164,18 @@ export class FeaturePanelComponent {
         this.inspectionTree?.showGeoJsonMenu(event);
     }
 
+    openGeoJsonInNewTab() {
+        this.inspectionTree?.openGeoJsonInNewTab();
+    }
+
+    downloadGeoJson() {
+        this.inspectionTree?.downloadGeoJson();
+    }
+
+    copyGeoJson() {
+        this.inspectionTree?.copyGeoJson();
+    }
+
     freezeTree() {
         this.inspectionTree?.freeze();
     }

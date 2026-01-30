@@ -1,6 +1,7 @@
 import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
 import {Dialog} from "primeng/dialog";
 import {Popover} from "primeng/popover";
+import {ContextMenu} from "primeng/contextmenu";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -10,6 +11,7 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
+import {MenuItem} from "primeng/api";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -43,23 +45,11 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
                         </span>
                         <span>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <p-button icon="" (click)="focusOnFeature($event)"
+                                <p-button icon="" (click)="openExtraMenu($event)"
                                           (mousedown)="$event.stopPropagation()"
-                                          pTooltip="Focus on feature" tooltipPosition="bottom">
+                                          pTooltip="More actions" tooltipPosition="bottom">
                                     <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
-                                </p-button>
-                                <p-button icon="" (click)="openGeoJsonMenu($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          pTooltip="GeoJSON actions" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">download</span>
-                                </p-button>
-                                <p-button icon="" (click)="openComparePopover($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          pTooltip="Compare" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                          style="font-size: 1.2em; margin: 0 auto;">more_vert</span>
                                 </p-button>
                             }
                             <p-button icon="" (click)="dock($event)" (mousedown)="$event.stopPropagation()"
@@ -122,6 +112,8 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
                 </div>
             </div>
         </p-popover>
+        <p-contextMenu #extraMenu [model]="extraMenuItems" [baseZIndex]="30000" appendTo="body"
+                       [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
     styles: [``],
     standalone: false
@@ -136,9 +128,11 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
+    extraMenuItems: MenuItem[] = [];
 
     @ViewChild('dialog') dialog?: Dialog;
     @ViewChild('comparePopover') comparePopover!: Popover;
+    @ViewChild('extraMenu') extraMenu!: ContextMenu;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
 
@@ -232,8 +226,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.unsetPanel(this.panel().id);
     }
 
-    focusOnFeature(event: MouseEvent) {
-        event.stopPropagation();
+    focusOnFeature(event?: MouseEvent) {
+        event?.stopPropagation();
         const panel = this.panel();
         if (!panel.features.length) {
             return;
@@ -255,6 +249,52 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         event.stopPropagation();
         this.refreshCompareOptions();
         this.comparePopover.toggle(event);
+    }
+
+    openExtraMenu(event: MouseEvent) {
+        event.stopPropagation();
+        this.extraMenuItems = [
+            {
+                label: 'Focus on feature',
+                icon: 'center_focus_strong',
+                iconClass: 'material-symbols-outlined',
+                command: () => this.focusOnFeature()
+            },
+            {
+                label: 'GeoJSON Actions',
+                icon: 'download',
+                iconClass: 'material-symbols-outlined',
+                items: [
+                    {
+                        label: 'Open in new tab',
+                        icon: 'pi pi-external-link',
+                        command: () => this.featurePanel?.openGeoJsonInNewTab()
+                    },
+                    {
+                        label: 'Download (.geojson)',
+                        icon: 'pi pi-download',
+                        command: () => this.featurePanel?.downloadGeoJson()
+                    },
+                    {
+                        label: 'Copy to clipboard',
+                        icon: 'pi pi-copy',
+                        command: () => this.featurePanel?.copyGeoJson()
+                    }
+                ]
+            },
+            {
+                label: 'Compare',
+                icon: 'compare_arrows',
+                iconClass: 'material-symbols-outlined',
+                command: (menuEvent) => {
+                    const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
+                    if (originalEvent) {
+                        this.openComparePopover(originalEvent);
+                    }
+                }
+            }
+        ];
+        this.extraMenu.toggle(event);
     }
 
     refreshCompareOptions() {

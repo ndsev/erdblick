@@ -468,7 +468,7 @@ export class InspectionTreeComponent implements OnDestroy {
         this.geoJsonMenu.toggle(event);
     }
 
-    private copyGeoJson() {
+    copyGeoJson() {
         const data = this.geoJson();
         if (!data) {
             return;
@@ -476,7 +476,7 @@ export class InspectionTreeComponent implements OnDestroy {
         this.copyToClipboard(data);
     }
 
-    private downloadGeoJson() {
+    downloadGeoJson() {
         const data = this.geoJson();
         if (!data) {
             return;
@@ -493,7 +493,7 @@ export class InspectionTreeComponent implements OnDestroy {
         this.messageService.showSuccess('GeoJSON download started');
     }
 
-    private openGeoJsonInNewTab() {
+    openGeoJsonInNewTab() {
         const data = this.geoJson();
         if (!data) {
             return;

@@ -1,5 +1,6 @@
 import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
+import {ContextMenu} from "primeng/contextmenu";
 import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
@@ -42,23 +43,11 @@ interface SourceLayerMenuItem {
                         </span>
                         <span>
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
-                                <p-button icon="" (click)="focusOnFeature($event)"
+                                <p-button icon="" (click)="openExtraMenu($event)"
                                           (mousedown)="$event.stopPropagation()"
-                                          pTooltip="Focus on feature" tooltipPosition="bottom">
+                                          pTooltip="More actions" tooltipPosition="bottom">
                                     <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
-                                </p-button>
-                                <p-button icon="" (click)="openGeoJsonMenu($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          pTooltip="GeoJSON actions" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">download</span>
-                                </p-button>
-                                <p-button icon="" (click)="openComparePopover($event)"
-                                          (mousedown)="$event.stopPropagation()"
-                                          pTooltip="Compare" tooltipPosition="bottom">
-                                    <span class="material-symbols-outlined"
-                                          style="font-size: 1.2em; margin: 0 auto;">compare_arrows</span>
+                                          style="font-size: 1.2em; margin: 0 auto;">more_vert</span>
                                 </p-button>
                             }
                             <p-button class="undock-button" (click)="undock($event)" (mousedown)="$event.stopPropagation()"
@@ -136,6 +125,8 @@ interface SourceLayerMenuItem {
                 </div>
             </div>
         </p-popover>
+        <p-contextMenu #extraMenu [model]="extraMenuItems" [baseZIndex]="30000" appendTo="body"
+                       [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
     styles: [`
         @media only screen and (max-width: 56em) {
@@ -165,7 +156,8 @@ export class InspectionPanelComponent implements AfterViewInit {
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
-    protected extraFunctionsItems: MenuItem[] | undefined;
+    @ViewChild('extraMenu') extraMenu!: ContextMenu;
+    extraMenuItems: MenuItem[] = [];
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -274,8 +266,8 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.ejectedPanel.emit(this.panel());
     }
 
-    focusOnFeature(event: MouseEvent) {
-        event.stopPropagation();
+    focusOnFeature(event?: MouseEvent) {
+        event?.stopPropagation();
         const panel = this.panel();
         if (!panel.features.length) {
             return;
@@ -312,6 +304,49 @@ export class InspectionPanelComponent implements AfterViewInit {
         event.stopPropagation();
         this.refreshCompareOptions();
         this.comparePopover.toggle(event);
+    }
+
+    openExtraMenu(event: MouseEvent) {
+        event.stopPropagation();
+        this.extraMenuItems = [
+            {
+                label: 'Focus on feature',
+                icon: 'pi pi-bullseye',
+                command: () => this.focusOnFeature()
+            },
+            {
+                label: 'GeoJSON Actions',
+                icon: 'pi pi-download',
+                items: [
+                    {
+                        label: 'Open in new tab',
+                        icon: 'pi pi-external-link',
+                        command: () => this.featurePanel?.openGeoJsonInNewTab()
+                    },
+                    {
+                        label: 'Download (.geojson)',
+                        icon: 'pi pi-download',
+                        command: () => this.featurePanel?.downloadGeoJson()
+                    },
+                    {
+                        label: 'Copy to clipboard',
+                        icon: 'pi pi-copy',
+                        command: () => this.featurePanel?.copyGeoJson()
+                    }
+                ]
+            },
+            {
+                label: 'Compare',
+                icon: 'pi pi-arrow-right-arrow-left',
+                command: (menuEvent) => {
+                    const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
+                    if (originalEvent) {
+                        this.openComparePopover(originalEvent);
+                    }
+                }
+            }
+        ];
+        this.extraMenu.toggle(event);
     }
 
     refreshCompareOptions() {

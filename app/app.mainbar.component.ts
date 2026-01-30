@@ -23,9 +23,7 @@ import {environment} from './environments/environment';
             </ng-template>
             <ng-template #end>
                 <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
-                    <span class="material-symbols-outlined">
-                        {{ loader_icon$ | async }}
-                    </span>
+                    <p-progress-spinner strokeWidth="8" fill="transparent" [style]="{ width: '1.25em', height: '1.25em' }" />
                     <span class="material-symbols-outlined" style="color: var(--p-button-danger-background)">
                         warning
                     </span>
