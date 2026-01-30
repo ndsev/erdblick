@@ -7,7 +7,7 @@ import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
-import {MenuItem} from "primeng/api";
+import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
 interface SourceLayerMenuItem {
     label: string,
@@ -158,6 +158,8 @@ export class InspectionPanelComponent implements AfterViewInit {
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     extraMenuItems: MenuItem[] = [];
+    private lastExtraMenuEvent?: MouseEvent;
+    private lastExtraMenuTarget?: HTMLElement;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -213,17 +215,17 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.detectSafari();
     }
 
-    onSelectedLayerItem() {
+    protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
         }
     }
 
-    onDropdownClick(event: MouseEvent) {
+    protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
     }
 
-    onInspectionContainerResize(event: MouseEvent, panel: InspectionPanelModel<FeatureWrapper> | undefined): void {
+    protected onInspectionContainerResize(event: MouseEvent, panel: InspectionPanelModel<FeatureWrapper> | undefined): void {
         if (!panel) {
             return;
         }
@@ -239,34 +241,34 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
-    detectSafari() {
+    private detectSafari() {
         const isSafari = /Safari/i.test(navigator.userAgent);
         if (isSafari) {
             this.renderer.addClass(this.resizeableContainer.nativeElement, 'safari');
         }
     }
 
-    onSourceDataError(errorMessage: string) {
+    protected onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
-    togglePinnedState(event: MouseEvent) {
+    protected togglePinnedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelPinnedState(p.id, !p.pinned);
     }
 
-    unsetPanel() {
+    protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
     }
 
-    undock(event: MouseEvent) {
+    protected undock(event: MouseEvent) {
         event.stopPropagation();
         this.ejectedPanel.emit(this.panel());
     }
 
-    focusOnFeature(event?: MouseEvent) {
+    private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
         if (!panel.features.length) {
@@ -275,12 +277,7 @@ export class InspectionPanelComponent implements AfterViewInit {
         this.mapService.zoomToFeature(undefined, panel.features[0]);
     }
 
-    openGeoJsonMenu(event: MouseEvent) {
-        event.stopPropagation();
-        this.featurePanel?.showGeoJsonMenu(event);
-    }
-
-    onHeaderPointerDown(event: PointerEvent) {
+    protected onHeaderPointerDown(event: PointerEvent) {
         if (event.button !== 0) {
             return;
         }
@@ -300,14 +297,10 @@ export class InspectionPanelComponent implements AfterViewInit {
         );
     }
 
-    openComparePopover(event: MouseEvent) {
+    protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
-        this.refreshCompareOptions();
-        this.comparePopover.toggle(event);
-    }
-
-    openExtraMenu(event: MouseEvent) {
-        event.stopPropagation();
+        this.lastExtraMenuEvent = event;
+        this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
         this.extraMenuItems = [
             {
                 label: 'Focus on feature',
@@ -338,25 +331,33 @@ export class InspectionPanelComponent implements AfterViewInit {
             {
                 label: 'Compare',
                 icon: 'pi pi-arrow-right-arrow-left',
-                command: (menuEvent) => {
-                    const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
-                    if (originalEvent) {
-                        this.openComparePopover(originalEvent);
-                    }
-                }
+                command: (menuEvent) => this.openCompareFromMenu(menuEvent)
             }
         ];
         this.extraMenu.toggle(event);
     }
 
-    refreshCompareOptions() {
+    private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
+        this.refreshCompareOptions();
+        const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
+        const target = this.lastExtraMenuTarget;
+        if (target) {
+            this.comparePopover.show(originalEvent ?? null, target);
+        } else if (originalEvent) {
+            originalEvent.stopPropagation();
+            this.refreshCompareOptions();
+            this.comparePopover.toggle(originalEvent);
+        }
+    }
+
+    protected refreshCompareOptions() {
         this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
     }
 
-    applyComparison(event: MouseEvent) {
+    protected applyComparison(event: MouseEvent) {
         event.stopPropagation();
         if (!this.selectedCompareIds.length) {
             return;

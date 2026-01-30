@@ -405,6 +405,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly dockAutoCollapse = this.createState<boolean>({
+        name: 'dockAutoCollapse',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly distributionVersions = this.createState<Versions[]>({
         name: 'distributionVersions',
         defaultValue: [],
@@ -636,6 +642,10 @@ export class AppStateService implements OnDestroy {
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
+    get isDockOpen() {return this.dockOpenState.getValue();}
+    set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
+    set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}

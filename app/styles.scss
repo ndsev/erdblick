@@ -1262,6 +1262,7 @@ body.dialog-dragging * {
     gap: 0.75em;
     text-align: center;
     overflow: hidden;
+    user-select: none;
 
     .close-dock-button {
       position: absolute;
@@ -2252,6 +2253,11 @@ body.dialog-dragging * {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin: 0.5em 0;
+  }
+
+  .p-divider-horizontal {
+    margin: 0.75em 0;
   }
 }
 
@@ -2764,10 +2770,6 @@ body.dialog-dragging * {
       max-width: 100vw !important;
       max-height: 100vh !important;
       margin: 0;
-    }
-
-    .p-button {
-      margin: 0.5em 0.5em 0.5em 0;
     }
   }
 

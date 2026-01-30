@@ -11,7 +11,7 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
 import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {MenuItem} from "primeng/api";
+import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -129,6 +129,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     extraMenuItems: MenuItem[] = [];
+    private lastExtraMenuEvent?: MouseEvent;
+    private lastExtraMenuTarget?: HTMLElement;
 
     @ViewChild('dialog') dialog?: Dialog;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -191,7 +193,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
     }
 
-    onGoBack(event: MouseEvent) {
+    protected onGoBack(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         if (p.features.length) {
@@ -201,32 +203,32 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.stateService.setSelection(p.features, p.id);
     }
 
-    onSelectedLayerItem() {
+    protected onSelectedLayerItem() {
         if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
             this.selectedLayerItem.command();
         }
     }
 
-    onDropdownClick(event: MouseEvent) {
+    protected onDropdownClick(event: MouseEvent) {
         event.stopPropagation();
     }
 
-    onSourceDataError(errorMessage: string) {
+    protected onSourceDataError(errorMessage: string) {
         this.errorMessage = errorMessage;
         console.error("Error while processing SourceData tree:", errorMessage);
     }
 
-    togglePinnedState(event: MouseEvent) {
+    protected togglePinnedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
         this.stateService.setInspectionPanelPinnedState(p.id, !p.pinned);
     }
 
-    unsetPanel() {
+    protected unsetPanel() {
         this.stateService.unsetPanel(this.panel().id);
     }
 
-    focusOnFeature(event?: MouseEvent) {
+    private focusOnFeature(event?: MouseEvent) {
         event?.stopPropagation();
         const panel = this.panel();
         if (!panel.features.length) {
@@ -235,35 +237,24 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.mapService.zoomToFeature(undefined, panel.features[0]);
     }
 
-    openGeoJsonMenu(event: MouseEvent) {
-        event.stopPropagation();
-        this.featurePanel?.showGeoJsonMenu(event);
-    }
-
-    dock(event: MouseEvent) {
+    protected dock(event: MouseEvent) {
         event.stopPropagation();
         this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
     }
 
-    openComparePopover(event: MouseEvent) {
+    protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
-        this.refreshCompareOptions();
-        this.comparePopover.toggle(event);
-    }
-
-    openExtraMenu(event: MouseEvent) {
-        event.stopPropagation();
+        this.lastExtraMenuEvent = event;
+        this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
         this.extraMenuItems = [
             {
                 label: 'Focus on feature',
-                icon: 'center_focus_strong',
-                iconClass: 'material-symbols-outlined',
+                icon: 'pi pi-bullseye',
                 command: () => this.focusOnFeature()
             },
             {
                 label: 'GeoJSON Actions',
-                icon: 'download',
-                iconClass: 'material-symbols-outlined',
+                icon: 'pi pi-download',
                 items: [
                     {
                         label: 'Open in new tab',
@@ -284,27 +275,34 @@ export class InspectionPanelDialogComponent implements OnDestroy {
             },
             {
                 label: 'Compare',
-                icon: 'compare_arrows',
-                iconClass: 'material-symbols-outlined',
-                command: (menuEvent) => {
-                    const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
-                    if (originalEvent) {
-                        this.openComparePopover(originalEvent);
-                    }
-                }
+                icon: 'pi pi-arrow-right-arrow-left',
+                command: (menuEvent) => this.openCompareFromMenu(menuEvent)
             }
         ];
         this.extraMenu.toggle(event);
     }
 
-    refreshCompareOptions() {
+    private openCompareFromMenu(menuEvent: MenuItemCommandEvent) {
+        this.refreshCompareOptions();
+        const originalEvent = menuEvent.originalEvent as MouseEvent | undefined;
+        const target = this.lastExtraMenuTarget;
+        if (target) {
+            this.comparePopover.show(originalEvent ?? null, target);
+        } else if (originalEvent) {
+            originalEvent.stopPropagation();
+            this.refreshCompareOptions();
+            this.comparePopover.toggle(originalEvent);
+        }
+    }
+
+    protected refreshCompareOptions() {
         this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
     }
 
-    applyComparison(event: MouseEvent) {
+    protected applyComparison(event: MouseEvent) {
         event.stopPropagation();
         if (!this.selectedCompareIds.length) {
             return;
@@ -314,7 +312,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.comparePopover.hide();
     }
 
-    onDialogShow() {
+    protected onDialogShow() {
         this.dockElement = document.querySelector('.collapsible-dock') as HTMLElement | null ?? undefined;
         this.dialogStack.bringToFront(this.dialog);
         this.bindDialogFocus();
@@ -322,7 +320,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.applyInitialPosition();
     }
 
-    onDialogDragEnd() {
+    protected onDialogDragEnd() {
         this.endDrag();
         if (this.shouldDock()) {
             this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
@@ -332,7 +330,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.dialogStack.bringToFront(this.dialog);
     }
 
-    onDialogResizeEnd() {
+    protected onDialogResizeEnd() {
         const panel = this.panel();
         const container = this.dialog?.container;
         if (!panel || !container || !container.offsetWidth || !container.offsetHeight) {
@@ -384,7 +382,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.clearDockCue();
     }
 
-    beginDrag(): void {
+    protected beginDrag(): void {
         this.featurePanel?.freezeTree();
         this.sourceDataPanel?.freezeTree();
         this.detachPointerUpListener?.();
@@ -393,7 +391,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         });
     }
 
-    endDrag(): void {
+    protected endDrag(): void {
         this.detachPointerUpListener?.();
         this.detachPointerUpListener = undefined;
         this.featurePanel?.unfreezeTree();
