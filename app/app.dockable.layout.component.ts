@@ -6,7 +6,7 @@ import {AppStateService} from "./shared/appstate.service";
     selector: 'dockable-layout',
     template: `
         <div class="main-layout">
-            <div class="viewer-layout" [ngClass]="{'open': !isDockOpen, 'collapsed': isDockOpen}">
+            <div class="viewer-layout" [ngClass]="{'open': !stateService.isDockOpen, 'collapsed': stateService.isDockOpen}">
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
@@ -14,7 +14,7 @@ import {AppStateService} from "./shared/appstate.service";
                     <coordinates-panel></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">
                         <span class="material-symbols-outlined">
-                            @if (isDockOpen) {
+                            @if (stateService.isDockOpen) {
                                 chevron_forward
                             } @else {
                                 chevron_backward
@@ -24,12 +24,12 @@ import {AppStateService} from "./shared/appstate.service";
                 }
             </div>
             @if (!environment.visualizationOnly) {
-                <div #dock class="collapsible-dock" [ngClass]="{'collapsed': !isDockOpen, 'open': isDockOpen}">
-                    @if (isDockOpen) {
+                <div #dock class="collapsible-dock" [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
+                    @if (stateService.isDockOpen) {
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
                     <div class="drop-hint"></div>
-                    <inspection-container [ngClass]="{'hidden': !isDockOpen}"></inspection-container>
+                    <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
                 </div>
             }
         </div>
@@ -39,25 +39,22 @@ import {AppStateService} from "./shared/appstate.service";
 })
 export class DockableLayoutComponent {
 
-    isDockOpen: boolean = false;
     @ViewChild('dock') private dockRef?: ElementRef<HTMLDivElement>;
     private detachMove?: () => void;
     private detachUp?: () => void;
     private dockRight = 0;
     private dragging = false;
 
-    constructor(private stateService: AppStateService, private renderer: Renderer2) {
-        this.stateService.dockOpenState.subscribe(isDockOpen => this.isDockOpen = isDockOpen);
-    }
+    constructor(public stateService: AppStateService, private renderer: Renderer2) {}
 
     protected readonly environment = environment;
 
     protected toggleDock() {
-        this.stateService.dockOpenState.next(!this.isDockOpen);
+        this.stateService.isDockOpen = !this.stateService.isDockOpen;
     }
     
     onResizeStart(ev: PointerEvent) {
-        if (!this.isDockOpen || !this.dockRef) return;
+        if (!this.stateService.isDockOpen || !this.dockRef) return;
         ev.preventDefault();
         ev.stopPropagation();
         const el = this.dockRef.nativeElement;

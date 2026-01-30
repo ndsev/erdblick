@@ -1,11 +1,14 @@
-import {Component} from '@angular/core';
+import {Component, ViewChild} from '@angular/core';
 import {AppStateService} from '../shared/appstate.service';
+import {Dialog} from 'primeng/dialog';
+import {DialogStackService} from '../shared/dialog-stack.service';
 
 @Component({
     selector: 'keyboard-dialog',
     template: `
         <p-dialog header="Keyboard Controls" [(visible)]="stateService.controlsDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="false" [draggable]="true" class="pref-dialog">
+                  [resizable]="false" [modal]="false" [draggable]="true" class="pref-dialog"
+                  #keyboardDialog (onShow)="onDialogShow()">
             <div class="keyboard-dialog">
                 <ul class="keyboard-list">
                     <li>
@@ -150,7 +153,14 @@ import {AppStateService} from '../shared/appstate.service';
     standalone: false
 })
 export class KeyboardComponent {
-    constructor(public stateService: AppStateService) {}
+    @ViewChild('keyboardDialog') keyboardDialog?: Dialog;
+
+    constructor(public stateService: AppStateService,
+                private dialogStack: DialogStackService) {}
+
+    onDialogShow() {
+        this.dialogStack.bringToFront(this.keyboardDialog);
+    }
 
     close() {
         this.stateService.controlsDialogVisible = false;

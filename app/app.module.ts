@@ -93,7 +93,7 @@ import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
 import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
-import {DockableLayoutComponent} from "./dockable.layout.component";
+import {DockableLayoutComponent} from "./app.dockable.layout.component";
 import {Menubar} from "primeng/menubar";
 import {DynamicDialogModule} from "primeng/dynamicdialog";
 import {DialogService} from "primeng/dynamicdialog";

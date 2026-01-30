@@ -89,7 +89,7 @@ export class InspectionContainerComponent implements OnDestroy {
             this.dialogLayout.syncPanels(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            this.stateService.dockOpenState.next(this.stateService.dockOpenState.value || allPanels.length > 0);
+            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible || allPanels.length > 0;
         });
         this.comparisonService.comparisons.subscribe(comparisons => {
             this.comparisons = comparisons;
@@ -267,6 +267,6 @@ export class InspectionContainerComponent implements OnDestroy {
     }
 
     protected closeDock() {
-        this.stateService.dockOpenState.next(false);
+        this.stateService.isDockOpen = false;
     }
 }

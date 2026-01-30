@@ -1,15 +1,18 @@
-import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSPECTIONS, AppStateService} from "../shared/appstate.service";
+import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
     selector: 'pref-components',
     template: `
         <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog">
+                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                  (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
@@ -42,6 +45,11 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSP
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
+            <div class="button-container">
+                <label>Collapse Dock automatically:</label>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible" />
+            </div>
+            <p-divider></p-divider>
             <div class="button-container">
                 <label>Storage for Viewer properties and search history:</label>
                 <p-button (click)="clearURLProperties()" label="Clear" icon="pi pi-trash"></p-button>
@@ -87,6 +95,8 @@ import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSP
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
 
+    @ViewChild('pref') preferencesDialog?: Dialog;
+
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
@@ -110,7 +120,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     constructor(private messageService: InfoMessageService,
                 public mapService: MapDataService,
                 public styleService: StyleService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
@@ -131,6 +142,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     ngOnDestroy() {
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
+    }
+
+    onDialogShow() {
+        this.dialogStack.bringToFront(this.preferencesDialog);
     }
 
     applyTileLimits() {
