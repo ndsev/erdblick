@@ -52,10 +52,11 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 </div>
             }
         </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog [closeOnEscape]="false">
+        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
+                  [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the datasource configuration. Do you really want to discard the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedDatasourceConfig()" label="Save"></p-button>
+                <p-button (click)="applyEditedDatasourceConfig(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="closeWarningAndEditor($event)" label="Discard"></p-button>
             </div>
@@ -81,6 +82,7 @@ export class DatasourcesComponent implements OnDestroy {
 
     // @ViewChild('formElement') formElement!: HTMLFormElement;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
+    @ViewChild('warningDialog') warningDialog: Dialog | undefined;
 
     private editedConfigSourceSubscription: Subscription = new Subscription();
     private savedConfigSourceSubscription: Subscription = new Subscription();
@@ -237,5 +239,9 @@ export class DatasourcesComponent implements OnDestroy {
             return;
         }
         this.closeEditorDialog(event);
+    }
+
+    protected onWarningShow() {
+        this.dialogStack.bringToFront(this.warningDialog);
     }
 }

@@ -161,10 +161,11 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 </div>
             </div>
         </p-dialog>
-        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog [closeOnEscape]="false">
+        <p-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
+                  [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedStyle()" label="Save"></p-button>
+                <p-button (click)="applyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
@@ -205,6 +206,7 @@ export class StyleComponent implements OnDestroy {
     @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
     @ViewChild('styles') stylesDialog: Dialog | undefined;
     @ViewChild('editorDialog') editorDialog: Dialog | undefined;
+    @ViewChild('warningDialog') warningDialog: Dialog | undefined;
 
     private detachStylesFocusListener?: () => void;
     private detachEditorFocusListener?: () => void;
@@ -495,4 +497,8 @@ export class StyleComponent implements OnDestroy {
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
+
+    protected onWarningShow() {
+        this.dialogStack.bringToFront(this.warningDialog);
+    }
 }
