@@ -1,17 +1,21 @@
-import {FeatureTile, TileLoadState} from "../mapdata/features.model";
+import {FeatureTile} from "../mapdata/features.model";
+import {TileLoadState} from "../mapdata/map-tile-stream-client";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
-    PrimitiveCollection,
-    Rectangle,
-    Viewer,
     ColorGeometryInstanceAttribute,
     GeometryInstance,
+    Material,
+    MaterialAppearance,
     PerInstanceColorAppearance,
     Primitive,
-    RectangleOutlineGeometry
+    PrimitiveCollection,
+    Rectangle,
+    RectangleGeometry,
+    RectangleOutlineGeometry,
+    Viewer
 } from "../integrations/cesium";
-import {FeatureLayerStyle, TileFeatureLayer, HighlightMode} from "../../build/libs/core/erdblick-core";
+import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 
 export interface LocateResolution {
@@ -28,6 +32,29 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
 }
 
+enum TileOverlayKind {
+    None = 0,
+    LoadingQueued = 1,
+    BackendFetching = 2,
+    BackendConverting = 3,
+    RenderingQueued = 4,
+    Empty = 5,
+    Error = 6,
+}
+
+const BASE_OUTLINE_COLOR = Color.DIMGRAY.withAlpha(0.5);
+const TRANSPARENT_COLOR = Color.WHITE.withAlpha(0.0);
+const LOADING_OUTLINE_COLOR = Color.ORANGE.withAlpha(0.9);
+const STRIPE_EVEN_COLOR = Color.ORANGE.withAlpha(0.35);
+const STRIPE_ODD_COLOR = Color.ORANGE.withAlpha(0.1);
+const RENDERING_FILL_COLOR = Color.ORANGE.withAlpha(0.2);
+const EMPTY_FILL_COLOR = Color.GRAY.withAlpha(0.2);
+const ERROR_FILL_COLOR = Color.RED.withAlpha(0.25);
+const INSET_FRACTION = 0.06;
+const STRIPE_REPEAT_FETCHING = 8.0;
+const STRIPE_REPEAT_CONVERTING = 14.0;
+const STRIPE_ST_ROTATION = Math.PI / 4;
+
 /**
  * Ensure that low-detail representations are only rendered once
  * per map tile layer. Otherwise, they are rendered once per
@@ -36,81 +63,317 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
 class TileBoxVisualization {
     static tileBoxStatePerView: {
         visualizations: Map<bigint, TileBoxVisualization>,
-        outlinePrimitive: Primitive | null
+        outlinePrimitive: Primitive | null,
+        loadingOutlinePrimitive: Primitive | null,
+        stripeFetchingPrimitive: Primitive | null,
+        stripeConvertingPrimitive: Primitive | null,
+        solidFillPrimitive: Primitive | null,
+        loadingOutlineInstances: Map<bigint, GeometryInstance>,
+        stripeFetchingInstances: Map<bigint, GeometryInstance>,
+        stripeConvertingInstances: Map<bigint, GeometryInstance>,
+        solidFillInstances: Map<bigint, GeometryInstance>,
+        viewer: Viewer | null
     }[] = [];
+
+    private static stripeMaterials: {fetching: Material | null, converting: Material | null} = {
+        fetching: null,
+        converting: null,
+    };
 
     static getTileBoxState(viewIndex: number) {
         while (viewIndex >= this.tileBoxStatePerView.length) {
             this.tileBoxStatePerView.push({
                 visualizations: new Map<bigint, TileBoxVisualization>(),
                 outlinePrimitive: null,
+                loadingOutlinePrimitive: null,
+                stripeFetchingPrimitive: null,
+                stripeConvertingPrimitive: null,
+                solidFillPrimitive: null,
+                loadingOutlineInstances: new Map<bigint, GeometryInstance>(),
+                stripeFetchingInstances: new Map<bigint, GeometryInstance>(),
+                stripeConvertingInstances: new Map<bigint, GeometryInstance>(),
+                solidFillInstances: new Map<bigint, GeometryInstance>(),
+                viewer: null,
             });
         }
         return this.tileBoxStatePerView[viewIndex];
     }
 
-    static get(viewIndex: number, tile: FeatureTile, featureCount: number, viewer: Viewer, owner: TileVisualization, status?: TileLoadState): TileBoxVisualization {
+    static get(
+        viewIndex: number,
+        tile: FeatureTile,
+        featureCount: number,
+        viewer: Viewer,
+        owner: TileVisualization,
+        status?: TileLoadState,
+        showBorder: boolean = false
+    ): TileBoxVisualization {
         const state = this.getTileBoxState(viewIndex);
+        state.viewer = viewer;
         if (!state.visualizations.has(tile.tileId)) {
             state.visualizations.set(
-                tile.tileId, new TileBoxVisualization(tile));
+                tile.tileId, new TileBoxVisualization(viewIndex, tile));
             TileBoxVisualization.updatePrimitive(viewIndex, viewer);
         }
-        let result = state.visualizations.get(tile.tileId)!;
+        const result = state.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
+        result.setBorder(owner, showBorder);
         result.setStatus(owner, status);
         return result;
     }
 
-    static updatePrimitive(viewIndex: number, viewer: Viewer) {
+    static updatePrimitive(viewIndex: number, viewer?: Viewer) {
         const state = this.getTileBoxState(viewIndex);
-        if (state.outlinePrimitive) {
-            viewer.scene.primitives.remove(state.outlinePrimitive);
+        const activeViewer = viewer ?? state.viewer;
+        if (!activeViewer) {
+            return;
         }
-        state.outlinePrimitive = viewer.scene.primitives.add(new Primitive({
-            geometryInstances: [...state.visualizations].map(kv => kv[1].instance),
+        if (state.outlinePrimitive) {
+            activeViewer.scene.primitives.remove(state.outlinePrimitive);
+        }
+        const instances = [...state.visualizations.values()].map(kv => kv.outlineInstance);
+        if (!instances.length) {
+            state.outlinePrimitive = null;
+            return;
+        }
+        state.outlinePrimitive = activeViewer.scene.primitives.add(new Primitive({
+            geometryInstances: instances,
             appearance: new PerInstanceColorAppearance({
                 flat: true,
+                translucent: true,
                 renderState: {
                     depthTest: {
                         enabled: true
-                    }
+                    },
+                    depthMask: false
                 }
             }),
             asynchronous: false
         }));
     }
 
+    static updateLoadingOutlinePrimitive(viewIndex: number) {
+        const state = this.getTileBoxState(viewIndex);
+        if (!state.viewer) {
+            return;
+        }
+        if (state.loadingOutlinePrimitive) {
+            state.viewer.scene.primitives.remove(state.loadingOutlinePrimitive);
+        }
+        const instances = [...state.loadingOutlineInstances.values()];
+        if (!instances.length) {
+            state.loadingOutlinePrimitive = null;
+            return;
+        }
+        state.loadingOutlinePrimitive = state.viewer.scene.primitives.add(new Primitive({
+            geometryInstances: instances,
+            appearance: new PerInstanceColorAppearance({
+                flat: true,
+                translucent: true,
+                renderState: {
+                    depthTest: {
+                        enabled: true
+                    },
+                    depthMask: false
+                }
+            }),
+            asynchronous: false
+        }));
+    }
+
+    static updateStripePrimitive(viewIndex: number, kind: "fetching" | "converting") {
+        const state = this.getTileBoxState(viewIndex);
+        if (!state.viewer) {
+            return;
+        }
+        const instances = kind === "fetching"
+            ? [...state.stripeFetchingInstances.values()]
+            : [...state.stripeConvertingInstances.values()];
+        const existing = kind === "fetching"
+            ? state.stripeFetchingPrimitive
+            : state.stripeConvertingPrimitive;
+        if (existing) {
+            state.viewer.scene.primitives.remove(existing);
+        }
+        if (!instances.length) {
+            if (kind === "fetching") {
+                state.stripeFetchingPrimitive = null;
+            } else {
+                state.stripeConvertingPrimitive = null;
+            }
+            return;
+        }
+        const appearance = new MaterialAppearance({
+            material: TileBoxVisualization.getStripeMaterial(kind),
+            flat: true,
+            translucent: true,
+            renderState: {
+                depthTest: {
+                    enabled: true
+                },
+                depthMask: false
+            }
+        });
+        const primitive = state.viewer.scene.primitives.add(new Primitive({
+            geometryInstances: instances,
+            appearance: appearance,
+            asynchronous: false
+        }));
+        if (kind === "fetching") {
+            state.stripeFetchingPrimitive = primitive;
+        } else {
+            state.stripeConvertingPrimitive = primitive;
+        }
+    }
+
+    static updateSolidFillPrimitive(viewIndex: number) {
+        const state = this.getTileBoxState(viewIndex);
+        if (!state.viewer) {
+            return;
+        }
+        if (state.solidFillPrimitive) {
+            state.viewer.scene.primitives.remove(state.solidFillPrimitive);
+        }
+        const instances = [...state.solidFillInstances.values()];
+        if (!instances.length) {
+            state.solidFillPrimitive = null;
+            return;
+        }
+        state.solidFillPrimitive = state.viewer.scene.primitives.add(new Primitive({
+            geometryInstances: instances,
+            appearance: new PerInstanceColorAppearance({
+                flat: true,
+                translucent: true,
+                renderState: {
+                    depthTest: {
+                        enabled: true
+                    },
+                    depthMask: false
+                }
+            }),
+            asynchronous: false
+        }));
+    }
+
+    private static getStripeMaterial(kind: "fetching" | "converting") {
+        const existing = kind === "fetching"
+            ? this.stripeMaterials.fetching
+            : this.stripeMaterials.converting;
+        if (existing) {
+            return existing;
+        }
+        const repeat = kind === "fetching"
+            ? STRIPE_REPEAT_FETCHING
+            : STRIPE_REPEAT_CONVERTING;
+        const material = Material.fromType(Material.StripeType, {
+            evenColor: STRIPE_EVEN_COLOR,
+            oddColor: STRIPE_ODD_COLOR,
+            repeat: repeat,
+            offset: 0.0,
+            horizontal: true
+        });
+        if (kind === "fetching") {
+            this.stripeMaterials.fetching = material;
+        } else {
+            this.stripeMaterials.converting = material;
+        }
+        return material;
+    }
+
     refCount: number = 0;
     featureCount: number = 0;
     private readonly id: bigint;
+    private readonly tile: FeatureTile;
+    private readonly viewIndex: number;
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
-    private instance: GeometryInstance;
-    private statusByVisualization = new Map<TileVisualization, TileLoadState | undefined>();
-    private renderedStatus: TileLoadState | undefined;
+    private loadingOutlineColorAttribute: ColorGeometryInstanceAttribute;
+    private solidInsetFillColorAttribute: ColorGeometryInstanceAttribute;
+    private solidFullFillColorAttribute: ColorGeometryInstanceAttribute;
+    private outlineInstance: GeometryInstance;
+    private loadingOutlineInstance: GeometryInstance;
+    private stripeFillInstance: GeometryInstance;
+    private solidInsetFillInstance: GeometryInstance;
+    private solidFullFillInstance: GeometryInstance;
+    private statusByVisualization = new Map<TileVisualization, TileLoadState>();
+    private borderByVisualization = new Map<TileVisualization, boolean>();
+    private overlayKind: TileOverlayKind = TileOverlayKind.None;
+    private borderVisible: boolean = false;
 
-    constructor(tile: FeatureTile) {
-        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(Color.AQUA);
+    constructor(viewIndex: number, tile: FeatureTile) {
+        this.id = tile.tileId;
+        this.tile = tile;
+        this.viewIndex = viewIndex;
 
-        let tileBox = coreLib.getTileBox(BigInt(tile.tileId));
-        let rectangle = Rectangle.fromDegrees(...tileBox);
-        let outlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
+        const tileBox = coreLib.getTileBox(BigInt(tile.tileId));
+        const rectangle = Rectangle.fromDegrees(...tileBox);
+        const insetRectangle = TileBoxVisualization.insetRectangle(rectangle, INSET_FRACTION);
+
+        const outlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
             rectangle: rectangle,
             height: 0.0
         }));
-        if (!outlineGeometry) {
+        const insetOutlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
+            rectangle: insetRectangle,
+            height: 0.0
+        }));
+        if (!outlineGeometry || !insetOutlineGeometry) {
             console.error("Failed to create RectangleOutlineGeometry!");
         }
 
-        this.instance = new GeometryInstance({
+        this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
+        this.loadingOutlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(LOADING_OUTLINE_COLOR);
+        this.solidInsetFillColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
+        this.solidFullFillColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
+
+        this.outlineInstance = new GeometryInstance({
+            id: this.id,
             geometry: outlineGeometry!,
             attributes: {
                 color: this.outlineColorAttribute
             }
         });
 
-        this.id = tile.tileId;
+        this.loadingOutlineInstance = new GeometryInstance({
+            id: this.id,
+            geometry: insetOutlineGeometry!,
+            attributes: {
+                color: this.loadingOutlineColorAttribute
+            }
+        });
+
+        const insetFillGeometry = new RectangleGeometry({
+            rectangle: insetRectangle,
+            height: 0.0,
+            vertexFormat: MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat,
+            stRotation: STRIPE_ST_ROTATION
+        });
+        const fullFillGeometry = new RectangleGeometry({
+            rectangle: rectangle,
+            height: 0.0,
+            vertexFormat: MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat
+        });
+
+        this.stripeFillInstance = new GeometryInstance({
+            id: this.id,
+            geometry: insetFillGeometry
+        });
+
+        this.solidInsetFillInstance = new GeometryInstance({
+            id: this.id,
+            geometry: insetFillGeometry,
+            attributes: {
+                color: this.solidInsetFillColorAttribute
+            }
+        });
+
+        this.solidFullFillInstance = new GeometryInstance({
+            id: this.id,
+            geometry: fullFillGeometry,
+            attributes: {
+                color: this.solidFullFillColorAttribute
+            }
+        });
     }
 
     setStatus(owner: TileVisualization, status?: TileLoadState) {
@@ -119,67 +382,188 @@ class TileBoxVisualization {
         } else {
             this.statusByVisualization.set(owner, status);
         }
-        this.updateOutlineColor();
+        this.updateOverlay();
     }
 
-    updateOutlineColor() {
-        // Determine aggregate status.
-        let leastStatus: TileLoadState | undefined = undefined;
-        for (const status of this.statusByVisualization.values()) {
-            if (status === undefined) {
-                continue;
-            }
-            if (leastStatus === undefined || status < leastStatus) {
-                leastStatus = status;
-            }
+    setBorder(owner: TileVisualization, enabled: boolean) {
+        if (enabled) {
+            this.borderByVisualization.set(owner, true);
+        } else {
+            this.borderByVisualization.delete(owner);
         }
+        this.updateBaseOutlineVisibility();
+    }
 
-        // No update needed?
-        if (leastStatus !== undefined && leastStatus === this.renderedStatus) {
+    private updateBaseOutlineVisibility() {
+        const shouldShow = [...this.borderByVisualization.values()].some(value => value);
+        if (shouldShow === this.borderVisible) {
             return;
         }
+        this.borderVisible = shouldShow;
+        const nextColor = shouldShow ? BASE_OUTLINE_COLOR : TRANSPARENT_COLOR;
+        ColorGeometryInstanceAttribute.toValue(nextColor, this.outlineColorAttribute.value);
+        const state = TileBoxVisualization.getTileBoxState(this.viewIndex);
+        TileBoxVisualization.updateInstanceColor(state.outlinePrimitive, this.id, nextColor);
+    }
 
-        // Update color - determine based on status or feature count.
-        this.renderedStatus = leastStatus;
-        let newColor: Color;
-        if (leastStatus !== undefined) {
-            switch (leastStatus) {
-                case TileLoadState.LoadingQueued:
-                    newColor = Color.DIMGRAY; break;
-                case TileLoadState.BackendFetching:
-                    newColor = Color.ORANGE; break;
-                case TileLoadState.BackendConverting:
-                    newColor = Color.GOLD; break;
-                case TileLoadState.RenderingQueued:
-                    newColor = Color.CYAN; break;
-                case TileLoadState.Error:
-                    newColor = Color.RED; break;
-                default:
-                    newColor = Color.AQUA;
+    private resolveOverlayKind(status: TileLoadState): TileOverlayKind {
+        switch (status) {
+            case TileLoadState.LoadingQueued:
+                return TileOverlayKind.LoadingQueued;
+            case TileLoadState.BackendFetching:
+                return TileOverlayKind.BackendFetching;
+            case TileLoadState.BackendConverting:
+                return TileOverlayKind.BackendConverting;
+            case TileLoadState.RenderingQueued:
+                return TileOverlayKind.RenderingQueued;
+            case TileLoadState.Error:
+                return TileOverlayKind.Error;
+            case TileLoadState.Ok:
+                break;
+        }
+        if (this.tile.hasData() && this.tile.numFeatures === 0) {
+            return TileOverlayKind.Empty;
+        }
+        return TileOverlayKind.None;
+    }
+
+    private updateOverlay() {
+        const nextKind = this.resolveOverlayKind(Math.min(TileLoadState.Ok, ...this.statusByVisualization.values()));
+        if (nextKind === this.overlayKind) {
+            return;
+        }
+        const state = TileBoxVisualization.getTileBoxState(this.viewIndex);
+        let rebuildLoading = false;
+        let rebuildFetching = false;
+        let rebuildConverting = false;
+        let rebuildSolid = false;
+
+        const removeSolid = () => {
+            if (state.solidFillInstances.delete(this.id)) {
+                rebuildSolid = true;
             }
-        }
-        else if (this.featureCount > 0) {
-            newColor = Color.YELLOW.withAlpha(0.7);
-        }
-        else {
-            newColor = Color.AQUA.withAlpha(0.3);
+        };
+
+        switch (this.overlayKind) {
+            case TileOverlayKind.LoadingQueued:
+                if (state.loadingOutlineInstances.delete(this.id)) {
+                    rebuildLoading = true;
+                }
+                break;
+            case TileOverlayKind.BackendFetching:
+                if (state.stripeFetchingInstances.delete(this.id)) {
+                    rebuildFetching = true;
+                }
+                break;
+            case TileOverlayKind.BackendConverting:
+                if (state.stripeConvertingInstances.delete(this.id)) {
+                    rebuildConverting = true;
+                }
+                break;
+            case TileOverlayKind.RenderingQueued:
+            case TileOverlayKind.Empty:
+            case TileOverlayKind.Error:
+                removeSolid();
+                break;
+            default:
+                break;
         }
 
-        // Update the color attribute
-        ColorGeometryInstanceAttribute.toValue(newColor, this.outlineColorAttribute.value);
+        switch (nextKind) {
+            case TileOverlayKind.LoadingQueued:
+                state.loadingOutlineInstances.set(this.id, this.loadingOutlineInstance);
+                rebuildLoading = true;
+                break;
+            case TileOverlayKind.BackendFetching:
+                state.stripeFetchingInstances.set(this.id, this.stripeFillInstance);
+                rebuildFetching = true;
+                break;
+            case TileOverlayKind.BackendConverting:
+                state.stripeConvertingInstances.set(this.id, this.stripeFillInstance);
+                rebuildConverting = true;
+                break;
+            case TileOverlayKind.RenderingQueued:
+                state.solidFillInstances.set(this.id, this.solidInsetFillInstance);
+                ColorGeometryInstanceAttribute.toValue(RENDERING_FILL_COLOR, this.solidInsetFillColorAttribute.value);
+                rebuildSolid = true;
+                break;
+            case TileOverlayKind.Empty:
+                state.solidFillInstances.set(this.id, this.solidFullFillInstance);
+                ColorGeometryInstanceAttribute.toValue(EMPTY_FILL_COLOR, this.solidFullFillColorAttribute.value);
+                rebuildSolid = true;
+                break;
+            case TileOverlayKind.Error:
+                state.solidFillInstances.set(this.id, this.solidFullFillInstance);
+                ColorGeometryInstanceAttribute.toValue(ERROR_FILL_COLOR, this.solidFullFillColorAttribute.value);
+                rebuildSolid = true;
+                break;
+            default:
+                break;
+        }
+
+        this.overlayKind = nextKind;
+        if (rebuildLoading) {
+            TileBoxVisualization.updateLoadingOutlinePrimitive(this.viewIndex);
+        }
+        if (rebuildFetching) {
+            TileBoxVisualization.updateStripePrimitive(this.viewIndex, "fetching");
+        }
+        if (rebuildConverting) {
+            TileBoxVisualization.updateStripePrimitive(this.viewIndex, "converting");
+        }
+        if (rebuildSolid) {
+            TileBoxVisualization.updateSolidFillPrimitive(this.viewIndex);
+        }
+        if ((rebuildLoading || rebuildFetching || rebuildConverting || rebuildSolid) && state.viewer) {
+            state.viewer.scene.requestRender();
+        }
+    }
+
+    private static updateInstanceColor(primitive: Primitive | null, id: bigint, color: Color) {
+        if (!primitive) {
+            return;
+        }
+        const attributes: any = primitive.getGeometryInstanceAttributes(id);
+        if (attributes && attributes.color) {
+            attributes.color = ColorGeometryInstanceAttribute.toValue(color);
+        }
+    }
+
+    private static insetRectangle(rectangle: Rectangle, insetFraction: number) {
+        const insetLon = (rectangle.east - rectangle.west) * insetFraction;
+        const insetLat = (rectangle.north - rectangle.south) * insetFraction;
+        return new Rectangle(
+            rectangle.west + insetLon,
+            rectangle.south + insetLat,
+            rectangle.east - insetLon,
+            rectangle.north - insetLat
+        );
     }
 
     delete(viewIndex: number, viewer: Viewer, featureCount: number, owner: TileVisualization) {
         --this.refCount;
         this.featureCount -= featureCount;
         this.statusByVisualization.delete(owner);
+        this.borderByVisualization.delete(owner);
+        const state = TileBoxVisualization.getTileBoxState(viewIndex);
         if (this.refCount <= 0) {
-            const state = TileBoxVisualization.getTileBoxState(viewIndex);
             state.visualizations.delete(this.id);
+            if (state.loadingOutlineInstances.delete(this.id)) {
+                TileBoxVisualization.updateLoadingOutlinePrimitive(this.viewIndex);
+            }
+            if (state.stripeFetchingInstances.delete(this.id)) {
+                TileBoxVisualization.updateStripePrimitive(this.viewIndex, "fetching");
+            }
+            if (state.stripeConvertingInstances.delete(this.id)) {
+                TileBoxVisualization.updateStripePrimitive(this.viewIndex, "converting");
+            }
+            if (state.solidFillInstances.delete(this.id)) {
+                TileBoxVisualization.updateSolidFillPrimitive(this.viewIndex);
+            }
             TileBoxVisualization.updatePrimitive(viewIndex, viewer);
         } else {
-            // Update the outline color since featureCount has changed
-            this.updateOutlineColor();
+            this.updateOverlay();
+            this.updateBaseOutlineVisibility();
         }
     }
 }
@@ -250,16 +634,11 @@ export class TileVisualization {
         this.viewIndex = viewIndex;
     }
 
-    private effectiveStatus(): TileLoadState | undefined {
-        const tileStatus = this.tile.status;
-        const renderStatus = this.renderQueued ? TileLoadState.RenderingQueued : undefined;
-        if (tileStatus === undefined) {
-            return renderStatus;
+    private effectiveStatus(): TileLoadState {
+        if (this.tile.status === TileLoadState.Ok && this.renderQueued) {
+            return TileLoadState.RenderingQueued;
         }
-        if (renderStatus === undefined) {
-            return tileStatus;
-        }
-        return tileStatus < renderStatus ? tileStatus : renderStatus;
+        return this.tile.status;
     }
 
     updateStatus(renderQueued?: boolean) {
@@ -286,6 +665,7 @@ export class TileVisualization {
 
         // Do not continue if the style was deleted while we were waiting.
         if (this.style.isDeleted()) {
+            this.updateStatus(false);
             return false;
         }
 
@@ -390,19 +770,19 @@ export class TileVisualization {
             this.hasHighDetailVisualization = true;
         }
 
-        if (this.showTileBorder) {
-            // Else: Low-detail bounding box representation
-            this.lowDetailVisu = TileBoxVisualization.get(
-                this.viewIndex,
-                this.tile,
-                this.tile.numFeatures,
-                viewer,
-                this,
-                this.effectiveStatus());
-            this.hasTileBorder = true;
-        }
+        // Low-detail bounding box and load-state overlays.
+        this.lowDetailVisu = TileBoxVisualization.get(
+            this.viewIndex,
+            this.tile,
+            this.tile.numFeatures,
+            viewer,
+            this,
+            this.effectiveStatus(),
+            this.showTileBorder);
+        this.hasTileBorder = this.showTileBorder;
 
         this.renderingInProgress = false;
+        this.updateStatus(false);
         if (this.deleted)
             this.destroy(viewer);
         return returnValue;
@@ -455,7 +835,8 @@ export class TileVisualization {
     isDirty() {
         return (
             this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
-            this.showTileBorder != this.hasTileBorder
+            this.showTileBorder != this.hasTileBorder ||
+            !this.lowDetailVisu
         );
     }
 

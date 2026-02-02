@@ -292,7 +292,7 @@ export class SearchPanelComponent implements AfterViewInit {
         });
 
         this.stateService.lastSearchHistoryEntryState.pipe(skip(2)).subscribe(entry => {
-            if (!this.stateService.ready) {
+            if (!this.stateService.ready.getValue()) {
                 return;
             }
             // TODO: Temporary cosmetic solution. Replace with a SIMFIL fix.

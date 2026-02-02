@@ -219,7 +219,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId == id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.scheduleUpdate();
                 }
             },
             {
@@ -229,7 +229,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, styleId != id, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.scheduleUpdate();
                 }
             },
             {
@@ -239,7 +239,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, false, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.scheduleUpdate();
                 }
             },
             {
@@ -249,7 +249,7 @@ export class StyleComponent {
                         this.styleService.toggleStyle(id, true, true);
                     }
                     this.styleService.reapplyAllStyles();
-                    this.mapService.update().then();
+                    this.mapService.scheduleUpdate();
                 }
             }
         ];
@@ -379,7 +379,7 @@ export class StyleComponent {
             this.styleService.toggleStyle(id, target, true);
         }
         this.styleService.reapplyAllStyles();
-        this.mapService.update().then();
+        this.mapService.scheduleUpdate();
     }
 
     private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {

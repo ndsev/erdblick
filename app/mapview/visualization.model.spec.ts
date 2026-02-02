@@ -103,7 +103,7 @@ describe('TileVisualization', () => {
         const result = await visu.render(viewer as any);
 
         expect(result).toBe(true);
-        expect(addSpy).toHaveBeenCalledTimes(1);
+        expect(addSpy).toHaveBeenCalledTimes(2);
         expect(visu.isDirty()).toBe(false);
 
         visu.isHighDetail = false;
@@ -168,13 +168,13 @@ describe('TileVisualization', () => {
         const removeSpy = vi.spyOn(primitives, 'remove');
 
         await visu.render(viewer as any);
-        expect(addSpy).toHaveBeenCalledTimes(1);
+        expect(addSpy).toHaveBeenCalledTimes(2);
 
         visu.destroy(viewer as any);
 
         expect(pointMergeService.remove).toHaveBeenCalledWith(tile.tileId, 'rule');
         expect(removedTiles[0].remove).toHaveBeenCalledWith(viewer);
-        expect(removeSpy).toHaveBeenCalledTimes(1);
+        expect(removeSpy).toHaveBeenCalledTimes(2);
         expect(visu.isDirty()).toBe(true);
     });
 

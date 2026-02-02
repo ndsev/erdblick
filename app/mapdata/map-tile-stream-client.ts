@@ -28,11 +28,14 @@ export interface MapTileStreamStatusPayload {
     requests: MapTileStreamStatusRequest[];
     message?: string;
 }
-
-export enum MapTileLoadState {
+export enum TileLoadState {
     LoadingQueued = 0,
     BackendFetching = 1,
     BackendConverting = 2,
+
+    Error = 128,            // Only used by erdblick
+    RenderingQueued = 129,  // Only used by erdblick
+    Ok = 130,               // Only used by erdblick
 }
 
 export interface MapTileStreamLoadStatePayload {
@@ -40,7 +43,7 @@ export interface MapTileStreamLoadStatePayload {
     mapId: string;
     layerId: string;
     tileId: number;
-    state: MapTileLoadState;
+    state: TileLoadState;
     stateText?: string;
 }
 

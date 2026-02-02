@@ -124,7 +124,7 @@ export class DatasourcesComponent {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {
                     this.loading = false;
-                    this.mapService.reloadDataSources().then(_ => this.mapService.update().then());
+                    this.mapService.reloadDataSources().then(_ => this.mapService.scheduleUpdate());
                 }, 2000);
             },
             error: error => {

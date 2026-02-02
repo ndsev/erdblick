@@ -311,7 +311,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
         this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
-        this.mapService.update().then();
+        this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
 

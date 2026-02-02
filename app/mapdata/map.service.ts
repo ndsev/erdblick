@@ -1,7 +1,6 @@
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
-    MapTileLoadState,
     MapTileRequestStatus,
     MapTileStreamClient,
     MAP_TILE_STREAM_HEADER_SIZE,
@@ -10,8 +9,8 @@ import {
     MAP_TILE_STREAM_TYPE_LOAD_STATE,
     MAP_TILE_STREAM_TYPE_SOURCEDATA,
 } from "./map-tile-stream-client";
-import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./map-tile-stream-client";
-import {FeatureTile, FeatureWrapper, TileLoadState} from "./features.model";
+import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload, TileLoadState} from "./map-tile-stream-client";
+import {FeatureTile, FeatureWrapper} from "./features.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileVisualization} from "../mapview/visualization.model";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
@@ -58,6 +57,7 @@ const DEFAULT_VIEWPORT: Viewport = {
 class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
+    visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
     highDetailTileIds: Set<bigint> = new Set();
     visualizationQueue: TileVisualization[] = [];
     private visualizedTileLayers: Map<string, Map<string, TileVisualization>> = new Map();
@@ -132,7 +132,7 @@ class ViewVisualizationState {
         this.visualizedTileLayers.clear();
     }
 
-    *getStyleIds(): Generator<string> {
+    *getVisualizedStyleIds(): Generator<string> {
         for (const styleId of Array.from(this.visualizedTileLayers.keys())) {
             yield styleId;
         }
@@ -173,6 +173,27 @@ class ViewVisualizationState {
             }
         }
     }
+
+    recalculateTileIds(loadLimit: number, visualizeLimit: number, levels: Iterable<number>) {
+        this.visibleTileIds.clear();
+        this.highDetailTileIds.clear();
+        this.visibleTileIdsPerLevel.clear();
+        for (let level of levels) {
+            if (this.visibleTileIdsPerLevel.has(level)) {
+                continue;
+            }
+            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, loadLimit) as bigint[];
+            this.visibleTileIdsPerLevel.set(level, visibleTileIdsForLevel);
+            this.visibleTileIds = new Set([
+                ...this.visibleTileIds,
+                ...new Set<bigint>(visibleTileIdsForLevel)
+            ]);
+            this.highDetailTileIds = new Set([
+                ...this.highDetailTileIds,
+                ...new Set<bigint>(visibleTileIdsForLevel.slice(0, visualizeLimit))
+            ]);
+        }
+    }
 }
 
 interface SelectionTileRequest {
@@ -205,10 +226,6 @@ export class MapDataService {
     public legalInformationUpdated = new Subject<boolean>();
     private tilesSocket: MapTileStreamClient | null = null;
     private lastTilesRequestBody: string | null = null;
-    private lastTilesRequestSignature: string | null = null;
-    private tilesStatusHandledSignature: string | null = null;
-    private tilesRequestId: number = 0;
-    private tilesRequestInFlight: boolean = false;
     private tileStreamParsingQueue: [Uint8Array, number][];
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
@@ -434,7 +451,6 @@ export class MapDataService {
             const viewState = this.viewVisualizationState[nextViewIndexToProcess];
             const entry = viewState.visualizationQueue.shift();
             if (entry !== undefined) {
-                entry.updateStatus(false);
                 this.tileVisualizationTopic.next(entry);
                 currentQueueLength--;
             }
@@ -460,13 +476,10 @@ export class MapDataService {
                 }
                 console.warn(`Ignoring unknown /tiles message type ${messageType}.`);
             };
-            this.tilesSocket.onStatus = (status) => this.handleTilesStatus(status);
+            this.tilesSocket.onStatus = (status) => this.handleTilesRequestStatus(status);
             this.tilesSocket.onLoadState = (payload) => this.handleTilesLoadState(payload);
             this.tilesSocket.onClose = () => {
                 this.lastTilesRequestBody = null;
-                this.lastTilesRequestSignature = null;
-                this.tilesStatusHandledSignature = null;
-                this.tilesRequestInFlight = false;
             };
             this.tilesSocket.onError = (event) => {
                 console.error("Tile WebSocket error.", event);
@@ -475,42 +488,26 @@ export class MapDataService {
         return this.tilesSocket;
     }
 
-    private handleTilesStatus(status: MapTileStreamStatusPayload) {
+    private handleTilesRequestStatus(status: MapTileStreamStatusPayload) {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
         }
-
         const requests = status.requests || [];
-        const signature = this.buildTilesRequestSignature(requests);
-        if (this.lastTilesRequestSignature && signature !== this.lastTilesRequestSignature) {
-            return;
-        }
-
         const statusMessage = status.message || "";
         if (statusMessage.includes("Replaced by a new /tiles WebSocket request")) {
             return;
         }
-
         if (statusMessage) {
             console.info("/tiles status:", statusMessage);
         }
-
         if (!status.allDone) {
             return;
         }
-
-        if (this.tilesStatusHandledSignature === signature) {
-            return;
-        }
-        this.tilesStatusHandledSignature = signature;
-        this.tilesRequestInFlight = false;
-
         const failures = requests.filter(req =>
             req.status !== MapTileRequestStatus.Success && req.status !== MapTileRequestStatus.Open);
         if (!failures.length) {
             return;
         }
-
         const summary = failures
             .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
             .join(", ");
@@ -530,18 +527,10 @@ export class MapDataService {
             return;
         }
 
-        const state = this.mapLoadStateFromStream(payload.state);
-        if (!state) {
-            return;
-        }
-        this.applyTileLoadState(tile, state);
+        this.applyTileLoadState(tile, payload.state);
     }
 
-    private buildTilesRequestSignature(requests: Array<{mapId: string, layerId: string}>) {
-        return JSON.stringify(requests.map(req => [req.mapId, req.layerId]));
-    }
-
-    private scheduleUpdate() {
+    public scheduleUpdate() {
         this.updatePending = true;
         if (this.updateTimer) {
             return;
@@ -562,7 +551,16 @@ export class MapDataService {
         this.updateInProgress = true;
         this.updatePending = false;
         try {
-            await this.update();
+            // Get the tile IDs for the current viewport for each view.
+            const loadLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
+            const visualizeLimit = this.stateService.tilesVisualizeLimit / this.stateService.numViews;
+            this.viewVisualizationState.forEach((state, viewIndex) => {
+                state.recalculateTileIds(loadLimit, visualizeLimit, this.maps.allLevels(viewIndex));
+            });
+
+            await this.updateMapDataRequest();
+            this.updateEvictLoadedLayers();
+            this.updateVisualizations();
         } finally {
             this.updateInProgress = false;
             this.lastUpdateAt = Date.now();
@@ -572,20 +570,7 @@ export class MapDataService {
         }
     }
 
-    private mapLoadStateFromStream(state: MapTileLoadState): TileLoadState | null {
-        switch (state) {
-            case MapTileLoadState.LoadingQueued:
-                return TileLoadState.LoadingQueued;
-            case MapTileLoadState.BackendFetching:
-                return TileLoadState.BackendFetching;
-            case MapTileLoadState.BackendConverting:
-                return TileLoadState.BackendConverting;
-            default:
-                return null;
-        }
-    }
-
-    private applyTileLoadState(tile: FeatureTile, status: TileLoadState|undefined) {
+    private applyTileLoadState(tile: FeatureTile, status: TileLoadState) {
         tile.status = status;
         const tileKey = tile.mapTileKey;
         for (const viewState of this.viewVisualizationState) {
@@ -763,39 +748,7 @@ export class MapDataService {
         }
     }
 
-    private async update() {
-        let tileIdPerLevelPerView: Map<number, Array<bigint>>[] = [];
-        const loadLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
-        const visualizeLimit = this.stateService.tilesVisualizeLimit / this.stateService.numViews;
-        // Track whether we created new tiles during this update. New tiles have no
-        // visualizations yet, so we schedule a follow-up pass to build/queue them.
-        let createdNewTiles = false;
-
-        // Get the tile IDs for the current viewport for each view.
-        this.viewVisualizationState.forEach((state, viewIndex) => {
-            // Map from level to array of tileIds.
-            const tileIdPerLevel = new Map<number, Array<bigint>>();
-            state.visibleTileIds = new Set<bigint>();
-            state.highDetailTileIds = new Set<bigint>();
-            for (let level of this.maps.allLevels(viewIndex)) {
-                if (tileIdPerLevel.has(level)) {
-                    continue;
-                }
-                const allViewportTileIds = coreLib.getTileIds(state.viewport, level, loadLimit) as bigint[];
-
-                tileIdPerLevel.set(level, allViewportTileIds);
-                state.visibleTileIds = new Set([
-                    ...state.visibleTileIds,
-                    ...new Set<bigint>(allViewportTileIds)
-                ]);
-                state.highDetailTileIds = new Set([
-                    ...state.highDetailTileIds,
-                    ...new Set<bigint>(allViewportTileIds.slice(0, visualizeLimit))
-                ]);
-            }
-            tileIdPerLevelPerView.push(tileIdPerLevel);
-        });
-
+    private updateEvictLoadedLayers() {
         // Evict present non-required tile layers.
         const evictTileLayer = (tileLayer: FeatureTile) => {
             // Is the tile needed to visualize the selection?
@@ -817,10 +770,12 @@ export class MapDataService {
             }
         }
         this.loadedTileLayers = newTileLayers;
+    }
 
-        // Update visualizations.
+    private updateVisualizations() {
+        // Update visualizations - first, delete stale visualizations.
         this.viewVisualizationState.forEach((state, viewIndex) => {
-            for (const styleId of state.getStyleIds()) {
+            for (const styleId of state.getVisualizedStyleIds()) {
                 let styleEnabled = false;
                 if (this.styleService.styles.has(styleId)) {
                     styleEnabled = this.styleService.styles.get(styleId)!.visible;
@@ -849,28 +804,19 @@ export class MapDataService {
         // Update Tile Visualization Queue.
         this.viewVisualizationState.forEach((state, viewIndex) => {
             state.visualizationQueue = [];
-            // Schedule updates for visualizations which have changed (high-detail, border etc.)
-            for (const styleId of state.getStyleIds()) {
-                for (const tileVisu of state.getVisualizations(styleId)) {
-                    if (tileVisu.isDirty()) {
-                        tileVisu.updateStatus(true);
-                        state.visualizationQueue.push(tileVisu);
-                    }
-                }
-            }
-
-            // Schedule new visualizations for which the data is already present.
-            for (const [styleId, style] of this.styleService.styles) {
-                for (let [tileKey, tile] of this.loadedTileLayers) {
-                    if (this.viewShowsFeatureTile(viewIndex, tile) && !state.getVisualization(styleId, tileKey)) {
+            // Schedule new or dirty visualizations.
+            for (const [_, style] of this.styleService.styles) {
+                for (let [_, tile] of this.loadedTileLayers) {
+                    if (this.viewShowsFeatureTile(viewIndex, tile)) {
                         this.renderTileLayerOnDemand(viewIndex, tile, style);
                     }
                 }
             }
         });
+    }
 
-        // Rest of this function: Request non-present required tile layers.
-
+    private async updateMapDataRequest() {
+        // Request non-present required tile layers.
         const requestByLayer = new Map<string, {mapId: string, layerId: string, tileIds: number[], tileIdSet: Set<number>}>();
         const queueTiles = (mapId: string, layerId: string, tileIds: Array<number>) => {
             if (!tileIds.length) {
@@ -901,13 +847,11 @@ export class MapDataService {
                     selectionTileRequest.remoteRequest.layerId,
                     selectionTileRequest.remoteRequest.tileIds);
                 for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
-                    if (this.ensureTilePlaceholder(
+                    this.ensureTilePlaceholder(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
-                        true)) {
-                        createdNewTiles = true;
-                    }
+                        true);
                 }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
@@ -927,7 +871,7 @@ export class MapDataService {
                         continue;
                     }
                     let level = this.maps.getMapLayerLevel(viewIndex, mapName, layer.id);
-                    let tileIds = tileIdPerLevelPerView[viewIndex].get(level);
+                    let tileIds = this.viewVisualizationState[viewIndex].visibleTileIdsPerLevel.get(level);
                     if (tileIds === undefined) {
                         continue;
                     }
@@ -937,9 +881,7 @@ export class MapDataService {
                         if ((!existingTile || !existingTile.hasData()) && !requestTilesForMapLayerSet.has(tileId)) {
                             requestTilesForMapLayer.push(Number(tileId)); // TODO: Get rid of type casting after new tile ids are available
                             requestTilesForMapLayerSet.add(tileId);
-                            if (this.ensureTilePlaceholder(mapName, layer.id, tileId, false)) {
-                                createdNewTiles = true;
-                            }
+                            this.ensureTilePlaceholder(mapName, layer.id, tileId, false)
                         }
                     }
                 }
@@ -964,48 +906,29 @@ export class MapDataService {
 
         // Nothing to do if all requests are empty.
         if (requests.length === 0) {
-            if (createdNewTiles) {
-                // No network work to do, but newly created tiles need a second pass
-                // to create their visualizations (creation happens earlier in update()).
-                this.scheduleUpdate();
-            }
             return;
         }
 
         const newRequestBody = JSON.stringify(requestBody);
-        const requestSignature = this.buildTilesRequestSignature(requests);
         const tilesSocket = this.getTilesSocket();
-        const requestId = ++this.tilesRequestId;
 
         // Ensure that the new request is different from the previous one.
-        if (this.lastTilesRequestBody === newRequestBody && tilesSocket.isOpen() && this.tilesRequestInFlight) {
+        if (this.lastTilesRequestBody === newRequestBody) {
             return;
         }
-
         this.lastTilesRequestBody = newRequestBody;
-        this.lastTilesRequestSignature = requestSignature;
-        this.tilesStatusHandledSignature = null;
 
         // Make sure that there are no unparsed bytes lingering from the previous response stream.
         this.tileParser!.reset();
         this.tileStreamParsingQueue = [];
 
         await tilesSocket.connect();
-        if (requestId !== this.tilesRequestId) {
-            return;
-        }
-        this.tilesRequestInFlight = true;
         try {
             await tilesSocket.sendRequest(requestBody);
         } catch (err) {
-            this.tilesRequestInFlight = false;
+            this.lastTilesRequestBody = null;
             console.error("Failed to send /tiles request.", err);
             this.messageService.showError("Failed to send /tiles request.");
-        }
-        if (createdNewTiles) {
-            // New tiles were added to loadedTileLayers; schedule a follow-up update
-            // so visualization creation/queueing can pick them up.
-            this.scheduleUpdate();
         }
     }
 
@@ -1026,7 +949,7 @@ export class MapDataService {
             tileLayer = new FeatureTile(this.tileParser!, tileLayerBlob, preventCulling);
             this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
         }
-        this.applyTileLoadState(tileLayer, tileLayer.error ? TileLoadState.Error : undefined);
+        this.applyTileLoadState(tileLayer, tileLayer.status);
 
         // Consider, if this tile is needed by a selection tile request.
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
@@ -1051,22 +974,9 @@ export class MapDataService {
                 this.renderTileLayer(viewIndex, tileLayer, style);
             }
         }
-        this.scheduleUpdate();
-    }
 
-    private removeTileLayer(tileLayer: FeatureTile) {
-        tileLayer.dispose();
-        const tileKey = tileLayer.mapTileKey;
-        for (const viewState of this.viewVisualizationState) {
-            for (const tileVisu of viewState.removeVisualizations(undefined, tileKey)) {
-                this.tileVisualizationDestructionTopic.next(tileVisu);
-            }
-            viewState.visualizationQueue = viewState.visualizationQueue.filter(tileVisu => {
-                return tileVisu.tile.mapTileKey !== tileKey;
-            });
-        }
-        this.loadedTileLayers.delete(tileKey);
-        this.statsDialogNeedsUpdate.next();
+        // Ensure that visualizations which now have data are queued for rendering.
+        this.updateVisualizations();
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
@@ -1438,12 +1348,6 @@ export class MapDataService {
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
         this.maps.setViewTileBorderState(viewIndex, nextState);
-        this.syncViewsIfEnabled(viewIndex);
-        this.scheduleUpdate();
-    }
-
-    setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
-        this.maps.setViewTileBorderState(viewIndex, enabled);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }

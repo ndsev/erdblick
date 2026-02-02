@@ -1,14 +1,7 @@
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
-
-export enum TileLoadState {
-    LoadingQueued = 0,
-    BackendFetching = 1,
-    BackendConverting = 2,
-    RenderingQueued = 3,
-    Error = 4,
-}
+import {TileLoadState} from "./map-tile-stream-client";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -17,19 +10,19 @@ export enum TileLoadState {
  * WASM TileFeatureLayer, use the peek()-function.
  */
 export class FeatureTile {
-    mapTileKey: string;
-    nodeId: string;
-    mapName: string;
-    layerName: string;
-    tileId: bigint;
-    legalInfo: string;
-    numFeatures: number;
+    mapTileKey: string = "undefined";
+    nodeId: string = "undefined";
+    mapName: string = "undefined";
+    layerName: string = "undefined";
+    tileId: bigint = BigInt(0);
+    legalInfo: string = "";
+    numFeatures: number = 0;
     error?: string;
     private parser: TileLayerParser;
-    preventCulling: boolean;
-    public tileFeatureLayerBlob: Uint8Array | null;
-    disposed: boolean;
-    status?: TileLoadState;
+    preventCulling: boolean = false;
+    public tileFeatureLayerBlob: Uint8Array | null = null;
+    disposed: boolean = false;
+    status: TileLoadState = TileLoadState.LoadingQueued;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
     static statTileSize = "mapget-tile-size-kb";
@@ -40,48 +33,28 @@ export class FeatureTile {
      * @param parser Singleton TileLayerStream WASM object.
      * @param tileFeatureLayerBlob Serialized TileFeatureLayer.
      * @param preventCulling Set to true to prevent the tile from being removed when it isn't visible.
+     * @param placeholder
      */
     constructor(
         parser: TileLayerParser,
         tileFeatureLayerBlob: Uint8Array | null,
         preventCulling: boolean,
-        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: bigint}) {
+        placeholder?: {mapTileKey: string, nodeId?: string, mapName: string, layerName: string, tileId: bigint})
+    {
+        this.parser = parser;
+        this.preventCulling = preventCulling;
         if (tileFeatureLayerBlob) {
-            let mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
-                return parser.readTileLayerMetadata(wasmBlob);
-            }, tileFeatureLayerBlob);
-            this.mapTileKey = mapTileMetadata.id;
-            this.nodeId = mapTileMetadata.nodeId;
-            this.mapName = mapTileMetadata.mapName;
-            this.layerName = mapTileMetadata.layerName;
-            this.tileId = mapTileMetadata.tileId;
-            this.legalInfo = mapTileMetadata.legalInfo;
-            if (mapTileMetadata.error) {
-                this.error = mapTileMetadata.error;
-            }
-            this.numFeatures = mapTileMetadata.numFeatures;
-            this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
-            for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
-                this.stats.set(k, [v as number]);
-            }
-            this.stats.set(FeatureTile.statParseTime, []);
+            this.hydrateFromBlob(tileFeatureLayerBlob)
         } else if (placeholder) {
             this.mapTileKey = placeholder.mapTileKey;
             this.nodeId = placeholder.nodeId ?? "";
             this.mapName = placeholder.mapName;
             this.layerName = placeholder.layerName;
             this.tileId = placeholder.tileId;
-            this.legalInfo = "";
-            this.numFeatures = 0;
-            this.error = undefined;
             this.stats.set(FeatureTile.statParseTime, []);
         } else {
             throw new Error("FeatureTile requires either tile data or placeholder metadata.");
         }
-        this.parser = parser;
-        this.preventCulling = preventCulling;
-        this.tileFeatureLayerBlob = tileFeatureLayerBlob;
-        this.disposed = false;
     }
 
     hydrateFromBlob(tileFeatureLayerBlob: Uint8Array) {
@@ -90,7 +63,7 @@ export class FeatureTile {
         }, tileFeatureLayerBlob);
 
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
-        if (!this.mapTileKey) {
+        if (this.mapTileKey === "undefined") {
             this.mapTileKey = mapTileMetadata.id;
         } else if (this.mapTileKey !== mapTileMetadata.id) {
             console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileMetadata.id}`);
@@ -102,6 +75,7 @@ export class FeatureTile {
         this.legalInfo = mapTileMetadata.legalInfo;
         this.error = mapTileMetadata.error ? mapTileMetadata.error : undefined;
         this.numFeatures = mapTileMetadata.numFeatures;
+        this.status = this.error ? TileLoadState.Error : TileLoadState.Ok;
 
         const parseTimes = this.stats.get(FeatureTile.statParseTime) ?? [];
         this.stats = new Map<string, number[]>();
