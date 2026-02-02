@@ -246,7 +246,7 @@ describe('MapDataService', () => {
             orientation: 0,
         };
 
-        await service.update();
+        await (service as any).runUpdate();
 
         expect(viewStates.length).toBe(1);
         const state = viewStates[0];
@@ -284,7 +284,7 @@ describe('MapDataService', () => {
             return tile === tileNeeded;
         });
 
-        await service.update();
+        await (service as any).runUpdate();
 
         expect(tileEvictable.dispose).toHaveBeenCalled();
         expect(Array.from(service.loadedTileLayers.keys())).toEqual(['m1/l1/1']);
@@ -309,6 +309,7 @@ describe('MapDataService', () => {
             showTileBorder: false,
             isHighDetail: false,
             isDirty: vi.fn().mockReturnValue(true),
+            updateStatus: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
@@ -316,6 +317,7 @@ describe('MapDataService', () => {
             showTileBorder: false,
             isHighDetail: false,
             isDirty: vi.fn().mockReturnValue(false),
+            updateStatus: vi.fn(),
         } as any;
 
         const fakeMapTree = {
@@ -332,22 +334,24 @@ describe('MapDataService', () => {
         viewStates[0].putVisualization('disabled-style', tile.mapTileKey, disabledVisu);
 
         styleService.styles = new Map<string, any>([
-            ['enabled-style', {id: 'enabled-style', visible: true}],
-            ['disabled-style', {id: 'disabled-style', visible: false}],
+            ['enabled-style', {id: 'enabled-style', visible: true, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
+            ['disabled-style', {id: 'disabled-style', visible: false, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
         ]);
+
+        service.loadedTileLayers.set(tile.mapTileKey, tile);
 
         const destructionSpy = vi.spyOn(service.tileVisualizationDestructionTopic, 'next');
         vi.spyOn(service as any, 'viewShowsFeatureTile').mockReturnValue(true);
 
-        await service.update();
+        (service as any).updateVisualizations();
 
         expect(destructionSpy).toHaveBeenCalledWith(disabledVisu);
-        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
-        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
-        expect(viewStates[0].hasStyle('enabled-style')).toBe(true);
+        expect(viewStates[0].hasVisualizations('disabled-style')).toBe(false);
+        expect(viewStates[0].getVisualization('enabled-style', tile.mapTileKey)).toBe(enabledVisu);
+        expect(viewStates[0].hasVisualizations('enabled-style')).toBe(true);
 
         expect(enabledVisu.showTileBorder).toBe(true);
-        expect(enabledVisu.isHighDetail).toBe(false);
+        expect(enabledVisu.isHighDetail).toBe(true);
         expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
@@ -382,7 +386,7 @@ describe('MapDataService', () => {
         });
         service.selectionTileRequests.push(selectionTileRequest);
 
-        await service.update();
+        await (service as any).runUpdate();
 
         const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
         expect(tileSocket).toBeDefined();

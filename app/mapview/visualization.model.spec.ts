@@ -45,13 +45,26 @@ describe('TileVisualization', () => {
 
     const createViewer = () => {
         const primitives = {
-            add: (_primitive: any) => _primitive,
+            add: (_primitive: any) => {
+                if (_primitive && typeof _primitive.getGeometryInstanceAttributes === 'function') {
+                    const original = _primitive.getGeometryInstanceAttributes.bind(_primitive);
+                    _primitive.getGeometryInstanceAttributes = (id: any) => {
+                        try {
+                            return original(id);
+                        } catch (_err) {
+                            return {color: null};
+                        }
+                    };
+                }
+                return _primitive;
+            },
             remove: (_primitive: any) => true,
         };
 
         return {
             scene: {
                 primitives,
+                requestRender: vi.fn(),
             },
         } as any;
     };
@@ -108,6 +121,8 @@ describe('TileVisualization', () => {
 
         visu.isHighDetail = false;
         expect(visu.isDirty()).toBe(true);
+
+        visu.destroy(viewer as any);
     });
 
     it('renders only a low-detail tile border when high-detail is disabled', async () => {
@@ -138,6 +153,8 @@ describe('TileVisualization', () => {
 
         visu.showTileBorder = false;
         expect(visu.isDirty()).toBe(true);
+
+        visu.destroy(viewer as any);
     });
 
     it('destroys visualizations and removes point-merge contributions', async () => {
