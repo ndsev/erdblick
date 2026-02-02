@@ -137,7 +137,7 @@ export class InspectionComparisonService {
     }
 
     formatFeatureLabel(features: FeatureWrapper[]): string {
-        return features.map(feature => feature.featureId).join(', ');
+        return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
     }
 
     private normalizeOtherPanelIds(basePanelId: number, otherPanelIds: number[]): number[] {

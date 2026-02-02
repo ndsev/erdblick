@@ -36,18 +36,20 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                             <div class="title" [pTooltip]="title" tooltipPosition="bottom"
                                  (mousedown)="$event.stopPropagation()"
                                  (click)="toggleLockedState($event)">
-                                @if (panel().sourceData === undefined) {
-                                    @if (panel().locked) {
-                                        <span class="material-symbols-outlined">
-                                            lock
-                                        </span>
-                                    } @else {
-                                        <span class="material-symbols-outlined">
-                                            lock_open_right
-                                        </span>
-                                    }
+                                @if (panel().locked) {
+                                    <span class="material-symbols-outlined">
+                                        lock
+                                    </span>
+                                } @else {
+                                    <span class="material-symbols-outlined">
+                                        lock_open_right
+                                    </span>
                                 }
-                                <span>{{ title }}</span>
+                                @if (panel().sourceData !== undefined) {
+                                    <span>Data.{{ title }}</span>
+                                } @else {
+                                    <span>{{ title }}</span>
+                                }
                             </div>
                             @if (panel().sourceData !== undefined) {
                                 <p-select class="source-layer-dropdown" [options]="layerMenuItems"

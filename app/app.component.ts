@@ -157,10 +157,11 @@ export class AppComponent implements OnDestroy {
                 return;
             }
             const header = target.closest('.p-dialog-header') as HTMLElement | null;
-            if (!header) {
+            const resizeHandle = target.closest('.p-resizable-handle') as HTMLElement | null;
+            if (!header && !resizeHandle) {
                 return;
             }
-            const dialog = header.closest('.p-dialog') as HTMLElement | null;
+            const dialog = (header ?? resizeHandle)?.closest('.p-dialog') as HTMLElement | null;
             if (!dialog) {
                 return;
             }
