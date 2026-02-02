@@ -77,7 +77,7 @@ export class ErdblickDebugApi {
      */
     showTestTile() {
         let tile = uint8ArrayFromWasm((sharedArr: any) => {
-            coreLib.generateTestTile(sharedArr, this.mapService.tileParser!);
+            coreLib.generateTestTile(sharedArr, this.mapService.tileLayerParser);
         });
         let style = coreLib.generateTestStyle();
         this.mapService.addTileFeatureLayer(tile, {

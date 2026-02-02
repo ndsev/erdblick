@@ -382,7 +382,7 @@ export class FeatureSearchService {
             this.startDiagnosticsForCompletedSearch(group.query, group.id);
         });
 
-        const tileParser = this.mapService.tileParser;
+        const tileParser = this.mapService.tileLayerParser;
         const makeTask = (tile: FeatureTile): SearchWorkerTask => {
             const taskId = this.generateTaskId();
             const task: SearchWorkerTask = {
@@ -500,7 +500,7 @@ export class FeatureSearchService {
 
         const diagnosticsGroup = this.jobGroupManager.createGroup('diagnostics', query, this.generateTaskGroupId());
 
-        const tileParser = this.mapService.tileParser;
+        const tileParser = this.mapService.tileLayerParser;
         const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask => {
             const taskId = this.generateTaskId();
             const task: DiagnosticsWorkerTask = {
@@ -554,7 +554,7 @@ export class FeatureSearchService {
         })
 
         // Build one task per tile
-        const tileParser = this.mapService.tileParser;
+        const tileParser = this.mapService.tileLayerParser;
         const limit = this.completionCandidateLimit;
         const makeTask = (tile: FeatureTile): CompletionWorkerTask => {
             const taskId = this.generateTaskId();

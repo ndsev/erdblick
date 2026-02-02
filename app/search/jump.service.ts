@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "../mapdata/map.service";
-import {LocateResponse} from "../mapview/visualization.model";
+import {LocateResponse} from "../mapview/tile.visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
@@ -254,7 +254,7 @@ export class JumpTargetService {
     }
 
     update() {
-        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(this.targetValueSubject.getValue());
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(this.targetValueSubject.getValue());
         let featureJumpTargetsConverted = [];
         if (featureJumpTargets) {
             featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
@@ -286,7 +286,7 @@ export class JumpTargetService {
     }
 
     async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
-        let featureJumpTargets = this.mapService.tileParser?.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);

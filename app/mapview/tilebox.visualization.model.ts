@@ -1,5 +1,5 @@
 import {FeatureTile} from "../mapdata/features.model";
-import {TileLoadState} from "../mapdata/map-tile-stream-client";
+import {TileLoadState} from "../mapdata/tilestream";
 import {coreLib} from "../integrations/wasm";
 import {
     Color,
@@ -9,28 +9,12 @@ import {
     MaterialAppearance,
     PerInstanceColorAppearance,
     Primitive,
-    PrimitiveCollection,
     Rectangle,
     RectangleGeometry,
     RectangleOutlineGeometry,
     Viewer
 } from "../integrations/cesium";
-import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
-import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
-
-export interface LocateResolution {
-    tileId: string,
-    typeId: string,
-    featureId: Array<string|number>
-}
-
-export interface LocateResponse {
-    responses: Array<Array<LocateResolution>>
-}
-
-interface StyleWithIsDeleted extends FeatureLayerStyle {
-    isDeleted(): boolean;
-}
+import type {TileVisualization} from "./tile.visualization.model";
 
 enum TileOverlayKind {
     None = 0,
@@ -60,7 +44,7 @@ const STRIPE_ST_ROTATION = Math.PI / 4;
  * per map tile layer. Otherwise, they are rendered once per
  * (style sheet, tile layer) combination.
  */
-class TileBoxVisualization {
+export class TileBoxVisualization {
     static tileBoxStatePerView: {
         visualizations: Map<bigint, TileBoxVisualization>,
         outlinePrimitive: Primitive | null,
@@ -295,7 +279,7 @@ class TileBoxVisualization {
     private stripeFillInstance: GeometryInstance;
     private solidInsetFillInstance: GeometryInstance;
     private solidFullFillInstance: GeometryInstance;
-    private statusByVisualization = new Map<TileVisualization, TileLoadState>();
+    private statusByVisualization = new Map<TileVisualization, TileLoadState | undefined>();
     private borderByVisualization = new Map<TileVisualization, boolean>();
     private overlayKind: TileOverlayKind = TileOverlayKind.None;
     private borderVisible: boolean = false;
@@ -406,20 +390,35 @@ class TileBoxVisualization {
         TileBoxVisualization.updateInstanceColor(state.outlinePrimitive, this.id, nextColor);
     }
 
-    private resolveOverlayKind(status: TileLoadState): TileOverlayKind {
-        switch (status) {
-            case TileLoadState.LoadingQueued:
-                return TileOverlayKind.LoadingQueued;
-            case TileLoadState.BackendFetching:
-                return TileOverlayKind.BackendFetching;
-            case TileLoadState.BackendConverting:
-                return TileOverlayKind.BackendConverting;
-            case TileLoadState.RenderingQueued:
-                return TileOverlayKind.RenderingQueued;
-            case TileLoadState.Error:
-                return TileOverlayKind.Error;
-            case TileLoadState.Ok:
-                break;
+    private aggregateStatus(): TileLoadState | undefined {
+        let leastStatus: TileLoadState | undefined = undefined;
+        for (const status of this.statusByVisualization.values()) {
+            if (status === undefined) {
+                continue;
+            }
+            if (leastStatus === undefined || status < leastStatus) {
+                leastStatus = status;
+            }
+        }
+        return leastStatus;
+    }
+
+    private resolveOverlayKind(status: TileLoadState | undefined): TileOverlayKind {
+        if (status !== undefined) {
+            switch (status) {
+                case TileLoadState.LoadingQueued:
+                    return TileOverlayKind.LoadingQueued;
+                case TileLoadState.BackendFetching:
+                    return TileOverlayKind.BackendFetching;
+                case TileLoadState.BackendConverting:
+                    return TileOverlayKind.BackendConverting;
+                case TileLoadState.RenderingQueued:
+                    return TileOverlayKind.RenderingQueued;
+                case TileLoadState.Error:
+                    return TileOverlayKind.Error;
+                default:
+                    return TileOverlayKind.None;
+            }
         }
         if (this.tile.hasData() && this.tile.numFeatures === 0) {
             return TileOverlayKind.Empty;
@@ -428,7 +427,7 @@ class TileBoxVisualization {
     }
 
     private updateOverlay() {
-        const nextKind = this.resolveOverlayKind(Math.min(TileLoadState.Ok, ...this.statusByVisualization.values()));
+        const nextKind = this.resolveOverlayKind(this.aggregateStatus());
         if (nextKind === this.overlayKind) {
             return;
         }
@@ -523,6 +522,9 @@ class TileBoxVisualization {
         if (!primitive) {
             return;
         }
+        if (!primitive.ready) {
+            return;
+        }
         const attributes: any = primitive.getGeometryInstanceAttributes(id);
         if (attributes && attributes.color) {
             attributes.color = ColorGeometryInstanceAttribute.toValue(color);
@@ -565,291 +567,5 @@ class TileBoxVisualization {
             this.updateOverlay();
             this.updateBaseOutlineVisibility();
         }
-    }
-}
-
-/** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
-export class TileVisualization {
-    tile: FeatureTile;
-    isHighDetail: boolean;
-    showTileBorder: boolean = false;
-    readonly viewIndex: number;
-
-    private lowDetailVisu: TileBoxVisualization|null = null;
-    private primitiveCollection: PrimitiveCollection|null = null;
-    private hasHighDetailVisualization: boolean = false;
-    private hasTileBorder: boolean = false;
-    private renderingInProgress: boolean = false;
-    private deleted: boolean = false;
-    private readonly style: StyleWithIsDeleted;
-    public readonly styleId: string;
-    private readonly highlightMode: HighlightMode;
-    private readonly featureIdSubset: string[];
-    private readonly auxTileFun: (key: string)=>FeatureTile|null;
-    private readonly options: Record<string, boolean|number|string>;
-    private readonly pointMergeService: PointMergeService;
-    private renderQueued: boolean = false;
-
-    /**
-     * Create a tile visualization.
-     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
-     * @param tile The tile to visualize.
-     * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
-     * @param auxTileFun Callback which may be called to resolve external references
-     *  for relation visualization.
-     * @param style The style to use for visualization.
-     * @param highDetail The level of detail to use. Currently,
-     *  a low-detail representation is indicated by `false`, and
-     *  will result in a dot representation. A high-detail representation
-     *  based on the style can be triggered using `true`.
-     * @param highlightMode Controls whether the visualization will run rules that
-     *  have a specific highlight mode.
-     * @param featureIdSubset Subset of feature IDs for visualization. If not set,
-     *  all features in the tile will be visualized.
-     * @param boxGrid Sets a flag to wrap this tile visualization into a bounding box
-     * @param options Option values for option variables defined by the style sheet.
-     */
-    constructor(viewIndex: number,
-                tile: FeatureTile,
-                pointMergeService: PointMergeService,
-                auxTileFun: (key: string) => FeatureTile | null,
-                style: FeatureLayerStyle,
-                highDetail: boolean,
-                highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
-                featureIdSubset?: string[],
-                boxGrid?: boolean,
-                options?: Record<string, boolean|number|string>) {
-        this.tile = tile;
-        this.style = style as StyleWithIsDeleted;
-        this.styleId = this.style.name();
-        this.isHighDetail = highDetail;
-        this.renderingInProgress = false;
-        this.highlightMode = highlightMode;
-        this.featureIdSubset = featureIdSubset || [];
-        this.deleted = false;
-        this.auxTileFun = auxTileFun;
-        this.showTileBorder = boxGrid === undefined ? false : boxGrid;
-        this.options = options || {};
-        this.pointMergeService = pointMergeService;
-        this.viewIndex = viewIndex;
-    }
-
-    private effectiveStatus(): TileLoadState {
-        if (this.tile.status === TileLoadState.Ok && this.renderQueued) {
-            return TileLoadState.RenderingQueued;
-        }
-        return this.tile.status;
-    }
-
-    updateStatus(renderQueued?: boolean) {
-        if (renderQueued !== undefined) {
-            this.renderQueued = renderQueued;
-        }
-        if (this.lowDetailVisu) {
-            this.lowDetailVisu.setStatus(this, this.effectiveStatus());
-        }
-    }
-
-    /**
-     * Actually create the visualization.
-     * @param viewer {Viewer} The viewer to add the rendered entity to.
-     * @return True if anything was rendered, false otherwise.
-     */
-    async render(viewer: Viewer) {
-        if (this.renderingInProgress || this.deleted)
-            return false;
-
-        // Remove any previous render-result, as a new one is generated.
-        this.destroy(viewer);
-        this.deleted = false;
-
-        // Do not continue if the style was deleted while we were waiting.
-        if (this.style.isDeleted()) {
-            this.updateStatus(false);
-            return false;
-        }
-
-        // Create potential high-detail visualization.
-        this.renderingInProgress = true;
-        let returnValue = true;
-        if (this.isHighDetailAndNotEmpty()) {
-            returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let wasmVisualization = new coreLib.FeatureLayerVisualization(
-                    this.viewIndex,
-                    this.tile.mapTileKey,
-                    this.style,
-                    this.options,
-                    this.pointMergeService,
-                    this.highlightMode,
-                    this.featureIdSubset);
-
-                let startTime = performance.now();
-                wasmVisualization.addTileFeatureLayer(tileFeatureLayer);
-                try {
-                    wasmVisualization.run();
-                }
-                catch (e) {
-                    console.error(`Exception while rendering: ${e}`);
-                    return false;
-                }
-
-                // Try to resolve externally referenced auxiliary tiles.
-                let extRefs = {requests: wasmVisualization.externalReferences()};
-                if (extRefs.requests && extRefs.requests.length > 0) {
-                    let response = await fetch("locate", {
-                        body: JSON.stringify(extRefs, (_, value) =>
-                            typeof value === 'bigint'
-                                ? Number(value)
-                                : value),
-                        method: "POST"
-                    }).catch((err)=>console.error(`Error during /locate call: ${err}`));
-                    if (!response) {
-                        return false;
-                    }
-
-                    let extRefsResolved = await response.json() as LocateResponse;
-                    if (this.style.isDeleted()) {
-                        // Do not continue if the style was deleted while we were waiting.
-                        return false;
-                    }
-
-                    // Resolve located external tile IDs to actual tiles.
-                    let seenTileIds = new Set<string>();
-                    let auxTiles = new Array<FeatureTile>();
-                    for (let resolutions of extRefsResolved.responses) {
-                        for (let resolution of resolutions) {
-                            if (!seenTileIds.has(resolution.tileId)) {
-                                let tile = this.auxTileFun(resolution.tileId);
-                                if (tile) {
-                                    auxTiles.push(tile);
-                                }
-                                seenTileIds.add(resolution.tileId);
-                            }
-                        }
-                    }
-
-                    // Now we can actually parse the auxiliary layers,
-                    // add them to the visualization, and let it process them.
-                    await FeatureTile.peekMany(auxTiles, async (tileFeatureLayers: Array<TileFeatureLayer>) => {
-                        for (let auxTile of tileFeatureLayers)
-                            wasmVisualization.addTileFeatureLayer(auxTile);
-
-                        try {
-                            wasmVisualization.processResolvedExternalReferences(extRefsResolved.responses);
-                        }
-                        catch (e) {
-                            console.error(`Exception while rendering: ${e}`);
-                        }
-                    });
-                }
-
-                if (!this.deleted) {
-                    this.primitiveCollection = wasmVisualization.primitiveCollection();
-                    for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
-                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
-                            finishedCornerTile.render(viewer);
-                        }
-                    }
-                }
-                wasmVisualization.delete();
-                let endTime = performance.now();
-
-                // Add the render time for this style sheet as a statistic to the tile.
-                let timingListKey = `render-time-${this.styleId.toLowerCase()}-${["normal", "hover", "selection"][this.highlightMode.value]}-ms`;
-                let timingList = this.tile.stats.get(timingListKey);
-                if (!timingList) {
-                    timingList = [];
-                    this.tile.stats.set(timingListKey, timingList);
-                }
-                timingList.push(endTime - startTime);
-                return true;
-            });
-            if (this.primitiveCollection) {
-                viewer.scene.primitives.add(this.primitiveCollection);
-            }
-            this.hasHighDetailVisualization = true;
-        }
-
-        // Low-detail bounding box and load-state overlays.
-        this.lowDetailVisu = TileBoxVisualization.get(
-            this.viewIndex,
-            this.tile,
-            this.tile.numFeatures,
-            viewer,
-            this,
-            this.effectiveStatus(),
-            this.showTileBorder);
-        this.hasTileBorder = this.showTileBorder;
-
-        this.renderingInProgress = false;
-        this.updateStatus(false);
-        if (this.deleted)
-            this.destroy(viewer);
-        return returnValue;
-    }
-
-    /**
-     * Destroy any current visualization.
-     * @param viewer {Viewer} The viewer to remove the rendered entity from.
-     */
-    destroy(viewer: Viewer) {
-        this.deleted = true;
-        if (this.renderingInProgress) {
-            return;
-        }
-
-        // Remove point-merge contributions that were made by this map-layer+style visualization combo.
-        let removedCornerTiles = this.pointMergeService.remove(
-            this.tile.tileId,
-            this.mapViewLayerStyleId());
-        for (let removedCornerTile of removedCornerTiles) {
-            removedCornerTile.remove(viewer);
-        }
-
-        if (this.primitiveCollection) {
-            viewer.scene.primitives.remove(this.primitiveCollection);
-            if (!this.primitiveCollection.isDestroyed())
-                this.primitiveCollection.destroy();
-            this.primitiveCollection = null;
-        }
-        if (this.lowDetailVisu) {
-            this.lowDetailVisu.delete(this.viewIndex, viewer, this.tile.numFeatures, this);
-            this.lowDetailVisu = null;
-        }
-        this.hasHighDetailVisualization = false;
-        this.hasTileBorder = false;
-    }
-
-    /**
-     * Check if the visualization is high-detail, and the
-     * underlying data is not empty.
-     */
-    private isHighDetailAndNotEmpty() {
-        return this.isHighDetail && (this.tile.numFeatures > 0 || this.tile.preventCulling);
-    }
-
-    /**
-     * Check if this visualization needs re-rendering, based on
-     * whether the isHighDetail flag changed.
-     */
-    isDirty() {
-        return (
-            this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
-            this.showTileBorder != this.hasTileBorder ||
-            !this.lowDetailVisu
-        );
-    }
-
-    /**
-     * Combination of map name, layer name, style name and highlight mode which
-     * (in combination with the tile id) uniquely identifies the rendered contents
-     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
-     */
-    private mapViewLayerStyleId(): MapViewLayerStyleRule {
-        return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);
-    }
-
-    public setStyleOption(optionId: string, value: string|number|boolean) {
-        this.options[optionId] = value;
     }
 }

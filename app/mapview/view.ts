@@ -25,7 +25,7 @@ import {
 } from "../integrations/cesium";
 import {AppStateService, CameraViewState} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
-import {TileVisualization} from "./visualization.model";
+import {TileVisualization} from "./tile.visualization.model";
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {
     FeatureSearchService, MAX_VISIBLE_TILES_PER_LEVEL,

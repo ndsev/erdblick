@@ -37,7 +37,7 @@ export async function initializeLibrary(): Promise<void> {
  * and then retrieve this data as a Uint8Array. Will return null
  * if the user function returns false.
  */
-export function uint8ArrayFromWasm(fun: (data: SharedUint8Array)=>any) {
+export function uint8ArrayFromWasm<T>(fun: (data: SharedUint8Array) => T | false): Uint8Array | null {
     let sharedGlbArray = new coreLib.SharedUint8Array();
     if (fun(sharedGlbArray) === false) {
         sharedGlbArray.delete();
@@ -55,7 +55,9 @@ export function uint8ArrayFromWasm(fun: (data: SharedUint8Array)=>any) {
  * through a SharedUint8Array. If the operation fails or the WASM function
  * returns false, null is returned.
  */
-export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
+export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T, inputData: Uint8Array): T;
+export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null;
+export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null {
     try {
         let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
         let bufferPtr = Number(sharedGlbArray.getPointer());
@@ -65,7 +67,7 @@ export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uin
         return (result === false) ? null : result;
     } catch (e) {
         console.error(`Error while parsing UINT8 encoded data: ${e}`)
-        return undefined;
+        return null;
     }
 }
 
@@ -75,7 +77,9 @@ export function uint8ArrayToWasm(fun: (d: SharedUint8Array)=>any, inputData: Uin
  * through a SharedUint8Array. If the operation fails or the WASM function
  * returns false, null is returned.
  */
-export async function uint8ArrayToWasmAsync(fun: (d: SharedUint8Array)=>any, inputData: Uint8Array) {
+export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T> | T, inputData: Uint8Array): Promise<T>;
+export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null>;
+export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null> {
     let sharedGlbArray = new coreLib.SharedUint8Array(inputData.length);
     let bufferPtr = Number(sharedGlbArray.getPointer());
     coreLib.HEAPU8.set(inputData, bufferPtr);

@@ -376,7 +376,7 @@ sequenceDiagram
   TileVis->>View: update TileBoxVisualization<br>for low detail tile boxes
 ```
 
-In `visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
+In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
 
 - `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed.
 - `coreLib.FeatureLayerVisualization` turns tile feature layers into Cesium primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.

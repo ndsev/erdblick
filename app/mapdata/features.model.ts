@@ -1,7 +1,7 @@
 import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
-import {TileLoadState} from "./map-tile-stream-client";
+import {TileLoadState} from "./tilestream";
 
 /**
  * JS interface of a WASM TileFeatureLayer.
@@ -25,8 +25,8 @@ export class FeatureTile {
     status: TileLoadState = TileLoadState.LoadingQueued;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
-    static statTileSize = "mapget-tile-size-kb";
-    static statParseTime = "parse-time-ms";
+    static statTileSize = "Size/Feature-Model#kb";
+    static statParseTime = "Rendering/Feature-Model-Parsing#ms";
 
     /**
      * Construct a FeatureTile object.
@@ -64,16 +64,16 @@ export class FeatureTile {
 
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         if (this.mapTileKey === "undefined") {
-            this.mapTileKey = mapTileMetadata.id;
+            this.mapTileKey = mapTileMetadata.id as string;
         } else if (this.mapTileKey !== mapTileMetadata.id) {
             console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileMetadata.id}`);
         }
-        this.nodeId = mapTileMetadata.nodeId;
-        this.mapName = mapTileMetadata.mapName;
-        this.layerName = mapTileMetadata.layerName;
+        this.nodeId = mapTileMetadata.nodeId as string;
+        this.mapName = mapTileMetadata.mapName as string;
+        this.layerName = mapTileMetadata.layerName as string;
         this.tileId = mapTileMetadata.tileId;
-        this.legalInfo = mapTileMetadata.legalInfo;
-        this.error = mapTileMetadata.error ? mapTileMetadata.error : undefined;
+        this.legalInfo = mapTileMetadata.legalInfo as string;
+        this.error = mapTileMetadata.error ? mapTileMetadata.error as string : undefined;
         this.numFeatures = mapTileMetadata.numFeatures;
         this.status = this.error ? TileLoadState.Error : TileLoadState.Ok;
 
@@ -273,4 +273,18 @@ export class FeatureWrapper implements TileFeatureId {
             featureId: this.featureId
         };
     }
+}
+
+export function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]) {
+    return rhs.length === lhs.length && rhs.every(rf =>
+        lhs.some(lf =>
+            rf.mapTileKey === lf.mapTileKey && rf.featureId === lf.featureId));
+}
+
+export function featureSetContains(container: TileFeatureId[], maybeSubset: TileFeatureId[]) {
+    if (!maybeSubset.length) {
+        return false;
+    }
+    return maybeSubset.every(candidate => container.some(item =>
+        item.mapTileKey === candidate.mapTileKey && item.featureId == candidate.featureId));
 }

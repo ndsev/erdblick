@@ -8,10 +8,8 @@ import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
     MapTileRequestStatus,
     MapTileStreamClient,
-    MAP_TILE_STREAM_HEADER_SIZE,
-    MAP_TILE_STREAM_TYPE_FIELDS,
-    MAP_TILE_STREAM_TYPE_SOURCEDATA,
-} from "../mapdata/map-tile-stream-client";
+} from "../mapdata/tilestream";
+import {MapDataService} from "../mapdata/map.service";
 import {Column} from "./inspection.tree.component";
 
 @Component({
@@ -48,7 +46,7 @@ export class SourceDataPanelComponent {
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;
 
-    constructor() {
+    constructor(private mapService: MapDataService) {
         effect(() => {
             if (!this.panel().sourceData) {
                 return;
@@ -79,7 +77,6 @@ export class SourceDataPanelComponent {
     }
 
     async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
-        const parser = new coreLib.TileLayerParser();
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         const requestBody = {
             requests: [{
@@ -89,87 +86,48 @@ export class SourceDataPanelComponent {
             }]
         };
 
-        return new Promise<TileSourceDataLayer>((resolve, reject) => {
-            let layer: TileSourceDataLayer | null = null;
-            let finished = false;
-            let statusMessage = "";
-            const socket = new MapTileStreamClient("tiles");
+        let layer: TileSourceDataLayer | null = null;
+        const socket = new MapTileStreamClient("tiles");
+        const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
+        if (dataSourceInfoJson) {
+            socket.setDataSourceInfoJson(dataSourceInfoJson);
+        }
 
-            const finish = (err?: unknown) => {
-                if (finished) {
-                    return;
-                }
-                finished = true;
-                socket.close(1000, "done");
-
-                if (err) {
-                    if (layer) {
-                        layer.delete();
-                    }
-                    reject(err instanceof Error ? err : new Error(`${err}`));
-                    return;
-                }
-
-                if (!layer) {
-                    reject(new Error(statusMessage || "Unknown error while loading layer."));
-                    return;
-                }
-
-                const error = layer.getError();
-                if (error) {
-                    layer.delete();
-                    reject(new Error(`Error while loading layer: ${error}`));
-                    return;
-                }
-                resolve(layer);
-            };
-
-            socket.onFrame = (message, messageType) => {
-                if (messageType === MAP_TILE_STREAM_TYPE_FIELDS) {
-                    uint8ArrayToWasm((wasmBuffer: any) => {
-                        parser.readFieldDictUpdate(wasmBuffer);
-                    }, message);
-                    return;
-                }
-                if (messageType === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
-                    const blob = message.slice(MAP_TILE_STREAM_HEADER_SIZE);
-                    layer = uint8ArrayToWasm((wasmBlob: any) => {
-                        return parser.readTileSourceDataLayer(wasmBlob);
-                    }, blob);
-                    return;
-                }
-                console.warn(`Unknown message type ${messageType}.`);
-            };
-
-            socket.onStatus = (status) => {
-                statusMessage = status.message || "";
-                if (!status.allDone) {
-                    return;
-                }
-                const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
-                if (failures.length) {
-                    const summary = failures
-                        .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
-                        .join(", ");
-                    finish(new Error(`Tile request failed: ${summary}`));
-                    return;
-                }
-                finish();
-            };
-
-            socket.onError = (event) => {
-                finish(event);
-            };
-            socket.onClose = () => {
-                if (!finished && !layer) {
-                    finish(new Error(statusMessage || "WebSocket closed while loading layer."));
-                }
-            };
-
-            void socket.sendRequest(requestBody).catch(err => finish(err));
-        }).finally(() => {
-            parser.delete();
+        socket.withSourceDataCallback((payload) => {
+            layer = uint8ArrayToWasm((wasmBlob) => {
+                return socket.parser.readTileSourceDataLayer(wasmBlob);
+            }, payload);
         });
+
+        let status;
+        try {
+            status = await socket.sendRequest(requestBody).waitAndDestroy();
+        } catch (err) {
+            (layer as any)?.delete();
+            throw err instanceof Error ? err : new Error(`${err}`);
+        }
+
+        const statusMessage = status.message || "";
+        const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
+        if (failures.length) {
+            const summary = failures
+                .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
+                .join(", ");
+            (layer as any)?.delete();
+            throw new Error(`Tile request failed: ${summary}`);
+        }
+
+        if (!layer) {
+            throw new Error(statusMessage || "Unknown error while loading layer.");
+        }
+
+        const error = (layer as unknown as { getError: () => string }).getError();
+        if (error) {
+            (layer as any)?.delete();
+            throw new Error(`Error while loading layer: ${error}`);
+        }
+
+        return layer;
     }
 
     /**

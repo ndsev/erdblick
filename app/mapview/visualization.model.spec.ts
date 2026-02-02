@@ -1,7 +1,7 @@
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../integrations/wasm';
 import {FeatureTile} from '../mapdata/features.model';
-import {TileVisualization} from './visualization.model';
+import {TileVisualization} from './tile.visualization.model';
 
 beforeAll(async () => {
     // Minimal polyfills for the jsdom test environment so Cesium's texture and image handling paths
