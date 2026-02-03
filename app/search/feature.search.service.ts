@@ -234,6 +234,9 @@ export class FeatureSearchService {
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
     private diagnosticsQueue: Array<WorkerTask> = [];
+    private workersReady: Promise<void> | null = null;
+
+    private static workerBlobUrlPromise: Promise<string | null> | null = null;
 
     jobGroupManager: JobGroupManager = new JobGroupManager();
     currentCompletion: JobGroup | null = null;
@@ -286,13 +289,49 @@ export class FeatureSearchService {
                 private stateService: AppStateService) {
         // Instantiate pin graphics
         this.makeClusterPins();
+    }
 
-        // Instantiate workers.
+    private static async resolveWorkerBlobUrl(): Promise<string | null> {
+        if (!FeatureSearchService.workerBlobUrlPromise) {
+            if (typeof fetch !== 'function') {
+                FeatureSearchService.workerBlobUrlPromise = Promise.resolve(null);
+            } else {
+                FeatureSearchService.workerBlobUrlPromise = fetch(
+                    new URL('./search.worker', import.meta.url),
+                    {cache: 'force-cache'}
+                ).then((response) => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
+                    }
+                    return response.blob();
+                }).then((blob) => {
+                    return URL.createObjectURL(blob);
+                }).catch((error) => {
+                    console.warn("Search worker preload failed; falling back to module URL.", error);
+                    return null;
+                });
+            }
+        }
+        return FeatureSearchService.workerBlobUrlPromise;
+    }
+
+    private async ensureWorkersReady(): Promise<void> {
+        if (!this.workersReady) {
+            this.workersReady = this.initWorkers();
+        }
+        return this.workersReady;
+    }
+
+    private async initWorkers(): Promise<void> {
+        // Instantiate workers lazily to avoid startup fetches.
         const maxWorkers = navigator.hardwareConcurrency || 4;
+        const workerBlobUrl = await FeatureSearchService.resolveWorkerBlobUrl();
+
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(new URL('./search.worker', import.meta.url), {
-                type: 'module'
-            });
+            const worker = workerBlobUrl
+                ? new Worker(workerBlobUrl, {type: 'module'})
+                : new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
+
             this.workers.push(worker);
             this.workerBusy.push(false);
             worker.onmessage = (event: MessageEvent<WorkerResult>) => {
@@ -419,11 +458,13 @@ export class FeatureSearchService {
     // Further tasks will be picked up in the worker's
     // onMessage callback.
     private runWorkers() {
-        this.workers.forEach((worker, index) => {
-            if (this.workerBusy[index]) {
-                return;
-            }
-            this.scheduleNextTask(index);
+        void this.ensureWorkersReady().then(() => {
+            this.workers.forEach((worker, index) => {
+                if (this.workerBusy[index]) {
+                    return;
+                }
+                this.scheduleNextTask(index);
+            });
         });
     }
 
