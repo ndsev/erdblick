@@ -22,6 +22,7 @@ declare let window: DebugWindow;
             <style-panel></style-panel>
             <feature-search></feature-search>
             <keyboard-dialog></keyboard-dialog>
+            <preferences></preferences>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
         }
         <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
