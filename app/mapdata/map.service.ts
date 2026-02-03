@@ -3,8 +3,9 @@ import {HttpClient} from "@angular/common/http";
 import {
     MapTileRequestStatus,
     MapTileStreamClient,
+    TileLoadState,
 } from "./tilestream";
-import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload, TileLoadState} from "./tilestream";
+import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {TileVisualization} from "../mapview/tile.visualization.model";

@@ -282,7 +282,7 @@ export class TileVisualization {
      * underlying data is not empty.
      */
     private isHighDetailAndNotEmpty() {
-        return this.isHighDetail && (this.tile.numFeatures > 0 || this.tile.preventCulling);
+        return this.isHighDetail && this.tile.hasData() && this.tile.numFeatures > 0;
     }
 
     /**
