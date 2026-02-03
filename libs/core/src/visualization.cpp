@@ -3,6 +3,7 @@
 #include "cesium-interface/primitive.h"
 #include "geometry.h"
 
+#include <algorithm>
 #include <iostream>
 
 #include "cesium-interface/billboards.h"
@@ -17,6 +18,22 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
     return (
         (static_cast<uint32_t>(v.r * 255) << 24) | (static_cast<uint32_t>(v.g * 255) << 16) |
         (static_cast<uint32_t>(v.b * 255) << 8) | static_cast<uint32_t>(v.a * 255));
+}
+
+std::string_view stripFeatureIdSuffix(std::string_view featureId) {
+    constexpr std::string_view attributeSuffix = ":attribute#";
+    constexpr std::string_view relationSuffix = ":relation#";
+    auto cut = std::string_view::npos;
+    if (auto pos = featureId.find(attributeSuffix); pos != std::string_view::npos) {
+        cut = pos;
+    }
+    if (auto pos = featureId.find(relationSuffix); pos != std::string_view::npos) {
+        cut = (cut == std::string_view::npos) ? pos : std::min(cut, pos);
+    }
+    if (cut == std::string_view::npos) {
+        return featureId;
+    }
+    return featureId.substr(0, cut);
 }
 }
 
@@ -57,7 +74,9 @@ FeatureLayerVisualization::FeatureLayerVisualization(
     // Convert feature ID subset.
     auto featureIdSubset = JsValue(rawFeatureIdSubset);
     for (auto i = 0; i < featureIdSubset.size(); ++i) {
-        featureIdSubset_.insert(featureIdSubset.at(i).as<std::string>());
+        auto featureId = featureIdSubset.at(i).as<std::string>();
+        featureIdSubset_.insert(featureId);
+        featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
     }
 }
 
@@ -92,7 +111,8 @@ void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile
 
 void FeatureLayerVisualization::run()
 {
-    for (auto&& feature : *tile_) {
+    auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
+    {
         auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
         simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
         addOptionsToSimfilContext(evaluationContext);
@@ -112,6 +132,19 @@ void FeatureLayerVisualization::run()
                 addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
             }
+        }
+    };
+
+    if (featureIdBaseSubset_.empty()) {
+        for (auto&& feature : *tile_) {
+            processFeature(feature);
+        }
+        return;
+    }
+
+    for (auto const& featureId : featureIdBaseSubset_) {
+        if (auto feature = tile_->find(featureId)) {
+            processFeature(feature);
         }
     }
 }
@@ -245,19 +278,8 @@ void FeatureLayerVisualization::addFeature(
     std::string const& mapLayerStyleRuleId)
 {
     auto featureId = feature->id()->toString();
-    if (!featureIdSubset_.empty()) {
-        bool isAllowed = false;
-        for (auto const& allowedFeatureId : featureIdSubset_) {
-            // The featureId may also refer to an attribute,
-            // in this case :attribute#<NUMBER> is appended to the string.
-            if (allowedFeatureId == featureId || allowedFeatureId.starts_with(featureId + ':')) {
-                isAllowed = true;
-                break;
-            }
-        }
-        if (!isAllowed) {
-            return;
-        }
+    if (!featureIdBaseSubset_.empty() && !featureIdBaseSubset_.contains(featureId)) {
+        return;
     }
 
     auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
@@ -307,7 +329,7 @@ void FeatureLayerVisualization::addFeature(
                     feature,
                     layerName,
                     attr,
-                    featureId, // TODO: Rethink, how an attribute link may be encoded in the id.
+                    featureId,
                     rule,
                     mapLayerStyleRuleId,
                     offsetFactor,
