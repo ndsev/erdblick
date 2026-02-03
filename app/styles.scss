@@ -218,6 +218,285 @@ mapview-container {
   }
 }
 
+.diagnostics-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.diagnostics-indicator-button {
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  cursor: pointer;
+  padding: 0.1em 0.2em;
+}
+
+.diagnostics-indicator-icon {
+  font-size: 1.1em;
+}
+
+.diagnostics-indicator-badge {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: var(--p-button-danger-background);
+  display: flex;
+  align-items: center;
+}
+
+.diagnostics-ring {
+  transform: rotate(-90deg);
+}
+
+.diagnostics-ring-bg {
+  fill: none;
+  stroke: var(--p-content-border-color);
+  stroke-width: 3;
+}
+
+.diagnostics-ring-fg {
+  fill: none;
+  stroke: var(--p-primary-500);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.diagnostics-popover-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.5em;
+  min-width: 20em;
+}
+
+.diagnostics-popover-row {
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.diagnostics-label {
+  font-weight: 600;
+}
+
+.diagnostics-muted {
+  color: var(--p-text-muted-color);
+}
+
+.diagnostics-error {
+  color: var(--p-button-danger-background);
+}
+
+.diagnostics-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.diagnostics-progress-item {
+  display: grid;
+  grid-template-columns: 7em 1fr 5em;
+  gap: 0.5em;
+  align-items: center;
+}
+
+.diagnostics-stage-label {
+  font-size: 0.85em;
+}
+
+.diagnostics-stage-count {
+  font-size: 0.8em;
+  text-align: right;
+  color: var(--p-text-muted-color);
+}
+
+.diagnostics-popover-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4em;
+}
+
+.diagnostics-progress-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.diagnostics-progress-summary {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+
+.diagnostics-progress-summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.diagnostics-progress-title {
+  font-weight: 600;
+}
+
+.diagnostics-progress-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+}
+
+.diagnostics-stage-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9em;
+  margin-bottom: 0.25em;
+}
+
+.diagnostics-counts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8em, 1fr));
+  gap: 0.75em;
+}
+
+.diagnostics-count-card {
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5em;
+  padding: 0.75em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.diagnostics-count {
+  font-size: 1.4em;
+  font-weight: 600;
+}
+
+.diagnostics-dialog-actions {
+  display: flex;
+  gap: 0.5em;
+  justify-content: flex-end;
+}
+
+.diagnostics-perf-table {
+  margin-top: 0.5em;
+}
+
+.diagnostics-key-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.diagnostics-warn {
+  color: var(--p-yellow-500);
+  font-size: 1em;
+}
+
+.diagnostics-bad {
+  color: var(--p-button-danger-background);
+  font-size: 1em;
+}
+
+.diagnostics-suspicious-warn {
+  background: color-mix(in srgb, var(--p-yellow-100) 35%, transparent);
+}
+
+.diagnostics-suspicious-bad {
+  background: color-mix(in srgb, var(--p-red-100) 35%, transparent);
+}
+
+.diagnostics-ellipsis {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostics-log-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  flex-wrap: wrap;
+  margin-bottom: 0.75em;
+}
+
+.diagnostics-log-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.diagnostics-log-actions {
+  display: flex;
+  gap: 0.5em;
+}
+
+.diagnostics-log-table {
+  max-height: 20em;
+  overflow: auto;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5em;
+}
+
+.diagnostics-log-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.diagnostics-log-table th,
+.diagnostics-log-table td {
+  padding: 0.5em;
+  border-bottom: 1px solid var(--p-content-border-color);
+  font-size: 0.9em;
+}
+
+.diagnostics-log-info td:nth-child(2) {
+  color: var(--p-primary-500);
+}
+
+.diagnostics-log-warn td:nth-child(2) {
+  color: var(--p-yellow-600);
+}
+
+.diagnostics-log-error td:nth-child(2) {
+  color: var(--p-button-danger-background);
+}
+
+.diagnostics-empty {
+  padding: 0.75em;
+  color: var(--p-text-muted-color);
+  text-align: center;
+}
+
+.diagnostics-export-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.diagnostics-export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.diagnostics-export-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+  align-items: center;
+}
+
+.hidden {
+  display: none;
+}
+
 map-view {
   display: block;
   height: 100%;
@@ -526,6 +805,103 @@ map-view {
     .p-dialog-content {
       padding: 0.5em !important;
     }
+  }
+}
+
+.diagnostics-progress-dialog,
+.diagnostics-performance-dialog,
+.diagnostics-log-dialog,
+.diagnostics-export-dialog {
+  .p-dialog {
+    .p-dialog-header {
+      padding: 0.75em !important;
+      height: 2.5em !important;
+    }
+
+    .p-dialog-content {
+      padding: 0.5em !important;
+    }
+  }
+}
+
+.diagnostics-progress-dialog {
+  .p-dialog {
+    min-width: 40em;
+    min-height: 22em;
+    width: 42em;
+  }
+}
+
+.diagnostics-performance-dialog {
+  .p-dialog {
+    min-width: 44em;
+    min-height: 24em;
+    width: 48em;
+  }
+
+  .p-dialog-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .diagnostics-perf-table {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .p-treetable {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .p-treetable-header {
+    padding: 0;
+  }
+
+  .p-treetable-thead {
+    th {
+      padding: 0.25em;
+      font-size: 0.9em;
+    }
+  }
+
+  .p-treetable-tbody {
+    border-collapse: collapse;
+    font-size: 0.9em !important;
+
+    td {
+      padding: 0 0 0 0.5em;
+      height: 1.5em;
+      border-right: 1px solid var(--p-content-border-color);
+    }
+
+    th {
+      padding: 0 0 0 0.5em;
+      height: 1.5em;
+      border-right: 1px solid var(--p-content-border-color);
+    }
+
+    .p-treetable-toggler {
+      margin: 0;
+      width: 1.25em;
+      height: 1.25em;
+    }
+  }
+}
+
+.diagnostics-log-dialog {
+  .p-dialog {
+    min-width: 40em;
+    min-height: 20em;
+    width: 44em;
+  }
+}
+
+.diagnostics-export-dialog {
+  .p-dialog {
+    min-width: 26em;
+    width: 30em;
   }
 }
 

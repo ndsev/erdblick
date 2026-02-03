@@ -19,6 +19,9 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <map-panel></map-panel>
             <stats-dialog></stats-dialog>
+            <diagnostics-performance-dialog></diagnostics-performance-dialog>
+            <diagnostics-log-dialog></diagnostics-log-dialog>
+            <diagnostics-export-dialog></diagnostics-export-dialog>
             <style-panel></style-panel>
             <feature-search></feature-search>
             <keyboard-dialog></keyboard-dialog>

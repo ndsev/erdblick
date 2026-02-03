@@ -100,6 +100,12 @@ import {DialogService} from "primeng/dynamicdialog";
 import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
+import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
+import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.performance.component";
+import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
+import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
+import {DIAGNOSTICS_DATA_SOURCE} from "./diagnostics/diagnostics.datasource";
+import {MockDiagnosticsDataSource} from "./diagnostics/mock-diagnostics.datasource";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -164,7 +170,11 @@ export const initializeServices = () => {
         DockableLayoutComponent,
         InspectionPanelDialogComponent,
         InspectionComparisonDialogComponent,
-        SurveyComponent
+        SurveyComponent,
+        DiagnosticsIndicatorComponent,
+        DiagnosticsPerformanceDialogComponent,
+        DiagnosticsLogDialogComponent,
+        DiagnosticsExportDialogComponent
     ],
     bootstrap: [
         AppComponent
@@ -235,6 +245,7 @@ export const initializeServices = () => {
         EditorService,
         RightClickMenuService,
         DialogService,
+        {provide: DIAGNOSTICS_DATA_SOURCE, useClass: MockDiagnosticsDataSource},
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({
