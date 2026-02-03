@@ -23,7 +23,7 @@ import {
     CallbackProperty,
     JulianDate
 } from "../integrations/cesium";
-import {AppStateService, CameraViewState} from "../shared/appstate.service";
+import {AppStateService, CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {TileVisualization} from "./tile.visualization.model";
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
@@ -132,6 +132,13 @@ export class MapView {
     protected markerCollection: BillboardCollection | null = null;
     private ignoreNextCamAppStateUpdate: boolean = false;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
+    hoveredFeatureIds: BehaviorSubject<{
+        featureIds: (TileFeatureId | null | string)[],
+        position: {x: number, y: number}
+    } | undefined> = new BehaviorSubject<{
+        featureIds: (TileFeatureId | null | string)[],
+        position: {x: number, y: number}
+    } | undefined>(undefined);
 
     // While there are ongoing animation requests, enable the cesium
     // animation clock explicitly. Afterward we reset it to the saved state.
@@ -372,11 +379,11 @@ export class MapView {
                     }
                 } else {
                     // Just select the feature.
-                    this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id]);
+                    this.stateService.setSelection(Array.isArray(feature.id) ? feature.id : [feature.id]);
                 }
             } else {
-                // No new feature to select. Unset existing selections.
-                this.stateService.unsetUnpinnedSelections();
+                // No new feature to select. Unset existing locked selections.
+                this.stateService.unsetUnlockedSelections();
                 this.menuService.tileOutline.next(null);
             }
             // Handle position update after highlighting.
@@ -400,7 +407,7 @@ export class MapView {
                 // Select the feature and pin the panel immediately.
                 const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id], undefined, true);
                 if (id !== undefined) {
-                    this.stateService.setInspectionPanelPinnedState(id, true);
+                    this.stateService.setInspectionPanelLockedState(id, true);
                 }
             }
 
@@ -439,8 +446,15 @@ export class MapView {
                     this.coordinatesService.mouseMoveCoordinates.next(Cartographic.fromCartesian(coordinates))
                 }
 
-                let feature = this.viewer.scene.pick(position);
-                this.mapService.setHoveredFeatures(Array.isArray(feature?.id) ? feature.id : [feature?.id]).then();
+                const feature = this.viewer.scene.pick(position);
+                if (defined(feature)) {
+                    const featureIdsArray = Array.isArray(feature.id) ? feature.id : [feature.id];
+                    this.mapService.setHoveredFeatures(featureIdsArray).then(() => {
+                        this.hoveredFeatureIds.next({featureIds: featureIdsArray, position: position});
+                    });
+                } else {
+                    this.hoveredFeatureIds.next(undefined);
+                }
             }
         };
 

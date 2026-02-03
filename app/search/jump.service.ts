@@ -59,14 +59,14 @@ export class JumpTargetService {
                         if (jumpTargetsConfig !== undefined) {
                             const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
                             // Using string interpolation so webpack can trace imports, and tell Vite to leave the absolute path untouched
-                            import(/* @vite-ignore */ jumpTargetsPath).then(function (plugin) {
-                                return plugin.default() as Array<SearchTarget>;
-                            }).then((jumpTargets: Array<SearchTarget>) => {
-                                this.extJumpTargets = jumpTargets;
-                                this.update();
-                            }).catch((error) => {
-                                console.error(error);
-                            });
+                            this.loadJumpTargetsModule(jumpTargetsPath)
+                                .then((plugin) => plugin.default() as Array<SearchTarget>)
+                                .then((jumpTargets: Array<SearchTarget>) => {
+                                    this.extJumpTargets = jumpTargets;
+                                    this.update();
+                                }).catch((error) => {
+                                    console.error(error);
+                                });
                             return;
                         }
                     }
@@ -251,6 +251,10 @@ export class JumpTargetService {
                 return valid;
             }
         }
+    }
+
+    private loadJumpTargetsModule(jumpTargetsPath: string) {
+        return import(/* @vite-ignore */ jumpTargetsPath);
     }
 
     update() {

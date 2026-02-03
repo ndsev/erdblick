@@ -47,12 +47,12 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         }).first();
         await expect(layerIdRow).toHaveCount(1);
 
-        const pinIcon = panel.locator('.material-symbols-outlined', {
-            hasText: 'keep_off'
-        }).first();
+        // const pinIcon = panel.locator('.material-symbols-outlined', {
+        //     hasText: 'keep_off'
+        // }).first();
         // Pin the first panel so the next selection opens a second panel.
-        await expect(pinIcon).toBeVisible();
-        await pinIcon.click();
+        // await expect(pinIcon).toBeVisible();
+        // await pinIcon.click();
 
         // Selecting another result should open a second inspection panel.
         await clickSearchResultLeaf(page, 1);

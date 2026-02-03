@@ -194,20 +194,22 @@ export class MapDataService {
                 // opened panels are not recalculated.
                 const existing = this.selectionTopic.getValue().find(p => p.id === selection.id);
                 if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
-                    existing.pinned = selection.pinned;
+                    existing.locked = selection.locked;
                     existing.color = selection.color;
                     existing.size = selection.size;
+                    existing.undocked = selection.undocked ?? false;
                     convertedSelections.push(existing);
                     continue;
                 }
                 const features = await this.loadFeatures(selection.features);
                 convertedSelections.push({
                     id: selection.id,
-                    pinned: selection.pinned,
+                    locked: selection.locked,
                     size: selection.size,
                     features: features,
                     sourceData: selection.sourceData,
-                    color: selection.color
+                    color: selection.color,
+                    undocked: selection.undocked ?? false
                 });
             }
             this.selectionTopic.next(convertedSelections);

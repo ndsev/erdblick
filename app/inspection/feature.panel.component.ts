@@ -1,10 +1,10 @@
-import {Component, effect, input} from "@angular/core";
+import {Component, effect, input, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {MapDataService} from "../mapdata/map.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
-import {Column, FeatureFilterOptions} from "./inspection.tree.component";
+import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {KeyboardService} from "../shared/keyboard.service";
 import {Feature} from '../../build/libs/core/erdblick-core';
 
@@ -24,7 +24,10 @@ interface InspectionModelData {
     selector: 'feature-panel',
     template: `
         <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                         [geoJson]="geoJson" [selectedFeatures]="selectedFeatures">
+                         [geoJson]="geoJson" [selectedFeatures]="selectedFeatures"
+                         [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                         [showFilter]="showFilter()"
+                         [enableSourceDataNavigation]="enableSourceDataNavigation()">
         </inspection-tree>
     `,
     styles: [``],
@@ -33,6 +36,10 @@ interface InspectionModelData {
 export class FeaturePanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    enableSourceDataNavigation = input<boolean>(true);
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
@@ -42,6 +49,8 @@ export class FeaturePanelComponent {
     filterOptions = new FeatureFilterOptions();
     geoJson: string = "";
     selectedFeatures?: FeatureWrapper[];
+
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService,
                 private keyboardService: KeyboardService) {
@@ -149,5 +158,29 @@ export class FeaturePanelComponent {
             return;
         }
         this.mapService.zoomToFeature(undefined, this.selectedFeatures[0]);
+    }
+
+    showGeoJsonMenu(event: MouseEvent) {
+        this.inspectionTree?.showGeoJsonMenu(event);
+    }
+
+    openGeoJsonInNewTab() {
+        this.inspectionTree?.openGeoJsonInNewTab();
+    }
+
+    downloadGeoJson() {
+        this.inspectionTree?.downloadGeoJson();
+    }
+
+    copyGeoJson() {
+        this.inspectionTree?.copyGeoJson();
+    }
+
+    freezeTree() {
+        this.inspectionTree?.freeze();
+    }
+
+    unfreezeTree() {
+        this.inspectionTree?.unfreeze();
     }
 }

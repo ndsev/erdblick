@@ -1,4 +1,4 @@
-import {Component, output, input, effect} from "@angular/core";
+import {Component, output, input, effect, ViewChild} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
@@ -10,7 +10,7 @@ import {
     MapTileStreamClient,
 } from "../mapdata/tilestream";
 import {MapDataService} from "../mapdata/map.service";
-import {Column} from "./inspection.tree.component";
+import {Column, InspectionTreeComponent} from "./inspection.tree.component";
 
 @Component({
     selector: 'sourcedata-panel',
@@ -21,6 +21,8 @@ import {Column} from "./inspection.tree.component";
             </div>
         } @else {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                             [showFilter]="showFilter()"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -31,6 +33,9 @@ import {Column} from "./inspection.tree.component";
 export class SourceDataPanelComponent {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
     error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;
@@ -45,6 +50,8 @@ export class SourceDataPanelComponent {
 
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;
+
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private mapService: MapDataService) {
         effect(() => {
@@ -207,7 +214,6 @@ export class SourceDataPanelComponent {
                 }
             }
         }
-
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
         let firstHighlightedItemIndex: number | undefined;
 
@@ -223,8 +229,9 @@ export class SourceDataPanelComponent {
             if (node.data.address && addressInRange && addressInRange(node.data.address)) {
                 highlight = true;
 
-                if (!firstHighlightedItemIndex)
+                if (!firstHighlightedItemIndex) {
                     firstHighlightedItemIndex = virtualRowIndex;
+                }
 
                 node.data.styleClass = "highlight";
                 parents.forEach((parent: TreeTableNode) =>{
@@ -242,7 +249,9 @@ export class SourceDataPanelComponent {
             }
 
             if (node.children) {
-                node.children.forEach((item: TreeTableNode, index) => { select(item, [...parents, node], highlight, 1 + virtualRowIndex + index) })
+                node.children.forEach((item: TreeTableNode, index) => {
+                    select(item, [...parents, node], highlight, 1 + virtualRowIndex + index);
+                });
             }
         };
 
@@ -264,5 +273,13 @@ export class SourceDataPanelComponent {
         }
 
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
+    }
+
+    freezeTree() {
+        this.inspectionTree?.freeze();
+    }
+
+    unfreezeTree() {
+        this.inspectionTree?.unfreeze();
     }
 }

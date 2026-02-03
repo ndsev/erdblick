@@ -1,6 +1,7 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject, of, Subject} from 'rxjs';
 import {initializeLibrary} from "../integrations/wasm";
+import {MapTileStreamClient} from './tilestream';
 
 beforeAll(async () => {
     await initializeLibrary();
@@ -195,7 +196,7 @@ const createMapDataService = () => {
     );
 
     // Provide a minimal tile parser stub for update() to use.
-    (service as any).tileParser = {
+    const tileParser = {
         getFieldDictOffsets: vi.fn().mockReturnValue([0]),
         reset: vi.fn(),
         setDataSourceInfo: vi.fn(),
@@ -212,7 +213,11 @@ const createMapDataService = () => {
         }),
     };
 
-    return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService};
+    const tileStream = new MapTileStreamClient('/tiles');
+    (tileStream as any).parser = tileParser;
+    (service as any).tileStream = tileStream;
+
+    return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService, tileParser};
 };
 
 describe('MapDataService', () => {
@@ -246,7 +251,7 @@ describe('MapDataService', () => {
             orientation: 0,
         };
 
-        await service.update();
+        await (service as any).runUpdate();
 
         expect(viewStates.length).toBe(1);
         const state = viewStates[0];
@@ -259,7 +264,7 @@ describe('MapDataService', () => {
     });
 
     it('evicts non-required tiles while keeping required ones', async () => {
-        const {service} = createMapDataService();
+        const {service, tileParser} = createMapDataService();
 
         const fakeMapTree = {
             allLevels: (_viewIndex: number) => [],
@@ -284,7 +289,7 @@ describe('MapDataService', () => {
             return tile === tileNeeded;
         });
 
-        await service.update();
+        await (service as any).runUpdate();
 
         expect(tileEvictable.dispose).toHaveBeenCalled();
         expect(Array.from(service.loadedTileLayers.keys())).toEqual(['m1/l1/1']);
@@ -309,6 +314,7 @@ describe('MapDataService', () => {
             showTileBorder: false,
             isHighDetail: false,
             isDirty: vi.fn().mockReturnValue(true),
+            updateStatus: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
@@ -316,6 +322,7 @@ describe('MapDataService', () => {
             showTileBorder: false,
             isHighDetail: false,
             isDirty: vi.fn().mockReturnValue(false),
+            updateStatus: vi.fn(),
         } as any;
 
         const fakeMapTree = {
@@ -332,22 +339,24 @@ describe('MapDataService', () => {
         viewStates[0].putVisualization('disabled-style', tile.mapTileKey, disabledVisu);
 
         styleService.styles = new Map<string, any>([
-            ['enabled-style', {id: 'enabled-style', visible: true}],
-            ['disabled-style', {id: 'disabled-style', visible: false}],
+            ['enabled-style', {id: 'enabled-style', visible: true, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
+            ['disabled-style', {id: 'disabled-style', visible: false, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
         ]);
+
+        service.loadedTileLayers.set(tile.mapTileKey, tile);
 
         const destructionSpy = vi.spyOn(service.tileVisualizationDestructionTopic, 'next');
         vi.spyOn(service as any, 'viewShowsFeatureTile').mockReturnValue(true);
 
-        await service.update();
+        (service as any).updateVisualizations();
 
         expect(destructionSpy).toHaveBeenCalledWith(disabledVisu);
-        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
-        expect(viewStates[0].hasStyle('disabled-style')).toBe(false);
-        expect(viewStates[0].hasStyle('enabled-style')).toBe(true);
+        expect(viewStates[0].hasVisualizations('disabled-style')).toBe(false);
+        expect(viewStates[0].getVisualization('enabled-style', tile.mapTileKey)).toBe(enabledVisu);
+        expect(viewStates[0].hasVisualizations('enabled-style')).toBe(true);
 
         expect(enabledVisu.showTileBorder).toBe(true);
-        expect(enabledVisu.isHighDetail).toBe(false);
+        expect(enabledVisu.isHighDetail).toBe(true);
         expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
@@ -382,7 +391,7 @@ describe('MapDataService', () => {
         });
         service.selectionTileRequests.push(selectionTileRequest);
 
-        await service.update();
+        await (service as any).runUpdate();
 
         const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
         expect(tileSocket).toBeDefined();
@@ -401,7 +410,7 @@ describe('MapDataService', () => {
     });
 
     it('records tile layers and legal info on arrival', () => {
-        const {service} = createMapDataService();
+        const {service, tileParser} = createMapDataService();
 
         const statsSpy = vi.spyOn(service.statsDialogNeedsUpdate, 'next');
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
@@ -418,9 +427,7 @@ describe('MapDataService', () => {
             scalarFields: {},
         };
         const tileBlob = new Uint8Array([1, 2, 3]);
-        (service as any).tileParser = {
-            readTileLayerMetadata: vi.fn().mockReturnValue(tileMetadata),
-        } as any;
+        tileParser.readTileLayerMetadata = vi.fn().mockReturnValue(tileMetadata);
 
         service.addTileFeatureLayer(tileBlob as any, null, false);
 

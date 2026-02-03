@@ -1,4 +1,4 @@
-import {Component, ViewChild, ViewContainerRef, Input} from "@angular/core";
+import {Component, OnDestroy, ViewChild, ViewContainerRef, Input} from "@angular/core";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -6,18 +6,20 @@ import {TreeNode} from "primeng/api";
 import {InfoMessageService} from "../shared/info.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {DiagnosticsMessage, TraceResult} from "./search.worker";
-import {SearchPanelComponent} from "./search.panel.component";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {Tree} from "primeng/tree";
 import {Scroller} from "primeng/scroller";
+import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
     selector: "feature-search",
     template: `
-        <p-dialog class="feature-search-dialog" header="Search Loaded Features" [closeOnEscape]="false"
+        <p-dialog #featureSearchDialog class="feature-search-dialog" header="Search Loaded Features"
+                  [closeOnEscape]="false"
                   [(visible)]="isPanelVisible" [draggable]="true" [resizable]="true"
-                  (onShow)="syncTreeScrollHeight($event)"
+                  (onShow)="onDialogShow($event)"
                   (onResizeEnd)="syncTreeScrollHeight($event)" (onHide)="onHide($event)">
             <div class="feature-search-controls">
                 <div class="progress-bar-container">
@@ -57,8 +59,8 @@ import {Scroller} from "primeng/scroller";
                     <p-tabpanel value="results">
                         <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
-                            <p-colorPicker [(ngModel)]="searchService.pointColor"
-                                           (ngModelChange)="searchService.updatePointColor()" appendTo="body"/>
+                            <p-colorPicker [(ngModel)]="searchService.pointColor" (ngModelChange)="searchService.updatePointColor()"
+                                           appendTo="body"></p-colorPicker>
                         </div>
                         <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
                             <span>Group:</span>
@@ -147,7 +149,7 @@ import {Scroller} from "primeng/scroller";
     styles: [``],
     standalone: false
 })
-export class FeatureSearchComponent {
+export class FeatureSearchComponent implements OnDestroy {
     isPanelVisible: boolean = false;
     traces: Array<TraceResult> = [];
     diagnostics: Array<DiagnosticsMessage> = [];
@@ -173,16 +175,18 @@ export class FeatureSearchComponent {
     resultsStatus: string = "Loading...";
     scrollHeight: string = "28.5em";
 
-    @Input() searchPanelComponent!: SearchPanelComponent; // TODO: Do not use `Input`, use `output`?
     @ViewChild('alert', { read: ViewContainerRef, static: true }) alertContainer!: ViewContainerRef;
     @ViewChild('tree') tree!: Tree;
+    @ViewChild('featureSearchDialog') featureSearchDialog: Dialog | undefined;
+
+    private detachFocusListener?: () => void;
 
     constructor(public searchService: FeatureSearchService,
                 public jumpService: JumpTargetService,
                 public mapService: MapDataService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService,
-                private infoMessageService: InfoMessageService) {
+                private infoMessageService: InfoMessageService,
+                private dialogStack: DialogStackService) {
         this.searchService.progress.subscribe(searchState => {
             if (!searchState) {
                 this.resultsTree = [];
@@ -205,6 +209,30 @@ export class FeatureSearchComponent {
             if (this.diagnostics.length > 0 && this.results.length === 0)
                 this.resultPanelIndex = 'diagnostics';
         })
+    }
+
+    ngOnDestroy() {
+        this.detachFocusListener?.();
+    }
+
+    onDialogShow(event: any) {
+        this.syncTreeScrollHeight(event);
+        this.dialogStack.bringToFront(this.featureSearchDialog);
+        this.bindDialogFocus();
+    }
+
+    private bindDialogFocus() {
+        if (!this.featureSearchDialog?.container) {
+            return;
+        }
+        this.detachFocusListener?.();
+        const handler = () => {
+            this.dialogStack.bringToFront(this.featureSearchDialog);
+        };
+        this.featureSearchDialog.container.addEventListener('mousedown', handler, true);
+        this.detachFocusListener = () => {
+            this.featureSearchDialog?.container?.removeEventListener('mousedown', handler, true);
+        };
     }
 
     searchResultReady() {
@@ -288,7 +316,7 @@ export class FeatureSearchComponent {
 
     onApplyFix(message: DiagnosticsMessage) {
         if (message.fix) {
-            this.searchPanelComponent.setSearchValue(message.fix);
+            this.searchService.fixedDiagnosticsSearchQuery.next(message.fix);
         }
     }
 

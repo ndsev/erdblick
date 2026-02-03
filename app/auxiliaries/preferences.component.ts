@@ -1,42 +1,18 @@
-import {Component, OnDestroy, OnInit} from '@angular/core';
+import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, AppStateService} from "../shared/appstate.service";
-import {EditorService} from "../shared/editor.service";
+import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSPECTIONS, AppStateService} from "../shared/appstate.service";
+import {Dialog} from "primeng/dialog";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
-    selector: 'pref-components',
+    selector: 'preferences',
     template: `
-        <div class="pref-buttons-container" [ngClass]="{'elevated': stateService.getNumSelections() > 0 }">
-            <div class="pref-button-subcontainer" (click)="openHelp()">
-                <span class="material-symbols-outlined">question_mark</span>
-                <span>Help</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showPreferencesDialog()">
-                <span class="material-symbols-outlined">settings</span>
-                <span>Preferences</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showControlsDialog()">
-                <span class="material-symbols-outlined">keyboard</span>
-                <span>Controls</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="showStatsDialog()">
-                <span class="material-symbols-outlined">bar_chart_4_bars</span>
-                <span>Statistics</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openDatasources()">
-                <span class="material-symbols-outlined">data_table</span>
-                <span>Datasources</span>
-            </div>
-            <div class="pref-button-subcontainer" (click)="openStylesDialog()" >
-                <span class="material-symbols-outlined">palette</span>
-                <span>Styles</span>
-            </div>
-        </div>
-        <p-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #pref class="pref-dialog">
+        <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
+                  [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
+                  (onShow)="onDialogShow()">
             <!-- Label and input field for MAX_NUM_TILES_TO_LOAD -->
             <div class="slider-container">
                 <label [for]="tilesToLoadInput">Max Tiles to Load:</label>
@@ -56,13 +32,22 @@ import {EditorService} from "../shared/editor.service";
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
+            <div class="slider-container">
+                <label [for]="limitSimultaneousInspectionsInput">Max Inspections:</label>
+                <div style="display: inline-block">
+                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
+                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="0" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                </div>
+            </div>
+            <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
+            <p-divider></p-divider>
             <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
             <div class="button-container">
-                <label>Allow unlimited inspected features <span style="color: var(--p-badge-danger-background)">EXPERIMENTAL!</span>:</label>
-                <p-toggleswitch [(ngModel)]="stateService.isNumSelectionsUnlimited" />
+                <label>Collapse Dock automatically:</label>
+                <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible" />
             </div>
             <p-divider></p-divider>
             <div class="button-container">
@@ -79,88 +64,6 @@ import {EditorService} from "../shared/editor.service";
             </div>
             <p-divider></p-divider>
             <p-button (click)="pref.close($event)" label="Close" icon="pi pi-times"></p-button>
-        </p-dialog>
-        <p-dialog header="Keyboard Controls" [(visible)]="controlsDialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="true" #controls class="pref-dialog">
-            <div class="keyboard-dialog">
-                <ul class="keyboard-list">
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">K</span>
-                        </div>
-                        <div class="control-desc">Open Search</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">J</span>
-                        </div>
-                        <div class="control-desc">Zoom to Target Feature</div>
-                    </li>
-                    <li>
-                        <span class="key">M</span>
-                        <div class="control-desc">Open Maps & Styles Panel</div>
-                    </li>
-                    <li>
-                        <span class="key">W</span>
-                        <div class="control-desc">Move Camera Up</div>
-                    </li>
-                    <li>
-                        <span class="key">A</span>
-                        <div class="control-desc">Move Camera Left</div>
-                    </li>
-                    <li>
-                        <span class="key">S</span>
-                        <div class="control-desc">Move Camera Down</div>
-                    </li>
-                    <li>
-                        <span class="key">D</span>
-                        <div class="control-desc">Move Camera Right</div>
-                    </li>
-                    <li>
-                        <span class="key">Q</span>
-                        <div class="control-desc">Zoom In</div>
-                    </li>
-                    <li>
-                        <span class="key">E</span>
-                        <div class="control-desc">Zoom Out</div>
-                    </li>
-                    <li>
-                        <span class="key">R</span>
-                        <div class="control-desc">Reset Camera Orientation</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">X</span>
-                        </div>
-                        <div class="control-desc">Open Viewport Statistics</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left <-</span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the left</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Right -></span>
-                        </div>
-                        <div class="control-desc">Cycle through Viewers to the right</div>
-                    </li>
-                    <li>
-                        <div class="key-multi">
-                            <span class="key highlight">Ctrl</span>
-                            <span class="key">Left Click</span>
-                        </div>
-                        <div class="control-desc">Open inspection and pin it immediately</div>
-                    </li>
-                </ul>
-            </div>
-            <p-button (click)="controls.close($event)" label="Close" icon="pi pi-times"></p-button>
         </p-dialog>
     `,
     styles: [
@@ -180,71 +83,6 @@ import {EditorService} from "../shared/editor.service";
                 padding: 0.5em;
             }
 
-            .keyboard-dialog {
-                width: 25em;
-                text-align: center;
-                background-color: var(--p-content-background);
-            }
-
-            h2 {
-                font-size: 1.5em;
-                color: #333;
-                margin-bottom: 1em;
-                font-weight: bold;
-            }
-
-            .keyboard-list {
-                list-style-type: none;
-                padding: 0;
-            }
-
-            .keyboard-list li {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 1em;
-            }
-
-            .keyboard-list li span {
-                display: inline-block;
-                background-color: var(--p-highlight-background);
-                padding: 0.5em 0.75em;
-                border-radius: 0.5em;
-                color: var(--p-content-color);
-                font-weight: bold;
-                min-width: 4em;
-                text-align: center;
-            }
-
-            .control-desc {
-                color: var(--p-surface-500);
-                font-size: 0.9em;
-            }
-
-            /* Keyboard key styling */
-            .key {
-                border-radius: 0.5em;
-                background-color: #ffcc00;
-                font-size: 1em;
-                padding: 0.5em 0.75em;
-                color: #333;
-            }
-
-            .key-multi {
-                display: flex;
-                gap: 0.25em;
-            }
-
-            .key-multi .key {
-                background-color: #00bcd4;
-                padding: 0.3em 0.6em;
-            }
-
-            .highlight {
-                background-color: #ff5722;
-                color: white;
-            }
-
             @media only screen and (max-width: 56em) {
                 .elevated {
                     bottom: 3.5em;
@@ -257,11 +95,11 @@ import {EditorService} from "../shared/editor.service";
 })
 export class PreferencesComponent implements OnInit, OnDestroy {
 
+    @ViewChild('pref') preferencesDialog?: Dialog;
+
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
-
-    controlsDialogVisible = false;
-    stylesDialogVisible = false;
+    limitSimultaneousInspectionsInput: number = 0;
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -283,12 +121,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService) {
+                private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
         this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
             this.tilesToVisualizeInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
+            this.limitSimultaneousInspectionsInput = limit;
         }));
     }
 
@@ -303,6 +144,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.cleanupMediaQueryListener();
     }
 
+    onDialogShow() {
+        this.dialogStack.bringToFront(this.preferencesDialog);
+    }
+
     applyTileLimits() {
         if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) ||
             this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
@@ -313,24 +158,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
-    }
-
-    dialogVisible: boolean = false;
-    showPreferencesDialog() {
-        this.dialogVisible = true;
-    }
-
-    showControlsDialog() {
-        this.controlsDialogVisible = true;
-    }
-
-    showStatsDialog() {
-        this.mapService.statsDialogVisible = true;
-        this.mapService.statsDialogNeedsUpdate.next();
-    }
-
-    openHelp() {
-        window.open("https://developer.nds.live/tools/mapviewer/user-guide", "_blank");
     }
 
     clearURLProperties() {
@@ -397,15 +224,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
     }
 
-    openDatasources() {
-        this.editorService.styleEditorVisible = false;
-        this.editorService.datasourcesEditorVisible = true;
-    }
+    protected applyInspectionsLimits() {
 
-    openStylesDialog() {
-        this.styleService.stylesDialogVisible = true;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
+    protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
 }

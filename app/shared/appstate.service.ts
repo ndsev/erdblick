@@ -10,13 +10,14 @@ import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
 
+export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
 export const VIEW_SYNC_LAYERS = "lay";
-export const MAX_NUM_SELECTIONS = 3;
+export const MAX_NUM_SELECTIONS = 25;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_HIGHLIGHT_COLORS = [
@@ -32,6 +33,12 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
+export interface Versions {
+    name: string;
+    tag: string;
+    whatsnew?: string;
+}
+
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
@@ -45,10 +52,11 @@ export interface SelectedSourceData {
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
     features: FeatureRepresentation[];
-    pinned: boolean;
+    locked: boolean;
     size: [number, number];
     sourceData?: SelectedSourceData;
     color: string;
+    undocked: boolean;
 }
 
 export interface CameraViewState {
@@ -140,12 +148,13 @@ export class AppStateService implements OnDestroy {
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
             return value.map(state => {
-                let s = `${state.id}~${state.pinned ? 1 : 0}~`;
+                let s = `${state.id}~${state.locked ? 1 : 0}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                s += `${state.size[0]}:${state.size[1]}~${state.color}`;
+                // size ~ color ~ undockedFlag
+                s += `${state.size[0]}:${state.size[1]}~${state.color}~${state.undocked ? 1 : 0}`;
                 return s;
             });
         },
@@ -156,11 +165,12 @@ export class AppStateService implements OnDestroy {
             }
             for (const panelStateStr of payload) {
                 const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 6) {
+                if (parts.length < 7) {
                     continue;
                 }
                 const id = Number(parts.shift()!);
-                const pinState = parts.shift() === "1";
+                const lockState = parts.shift() === "1";
+                const undocked = parts.pop()! === "1";
                 const color = parts.pop()!;
                 const sizeParts = parts.pop()!.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
@@ -168,9 +178,10 @@ export class AppStateService implements OnDestroy {
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
                     features: [],
-                    pinned: pinState,
+                    locked: lockState || !undocked,
                     size: size as [number, number],
-                    color: color
+                    color: color,
+                    undocked: undocked
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -349,6 +360,24 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly aboutDialogVisibleState = this.createState<boolean>({
+        name: 'aboutDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly preferencesDialogVisibleState = this.createState<boolean>({
+        name: 'preferencesDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly controlsDialogVisibleState = this.createState<boolean>({
+        name: 'controlsDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -362,6 +391,42 @@ export class AppStateService implements OnDestroy {
         name: 'unlimitNumSelections',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly mapsOpenState = this.createState<boolean>({
+        name: 'mapsOpenState',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly dockOpenState = this.createState<boolean>({
+        name: 'dockOpenState',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly dockAutoCollapse = this.createState<boolean>({
+        name: 'dockAutoCollapse',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly distributionVersions = this.createState<Versions[]>({
+        name: 'distributionVersions',
+        defaultValue: [],
+        schema: z.array(z.record(z.string(), z.string()))
+    });
+
+    readonly erdblickVersion = this.createState<string>({
+        name: 'erdblickVersion',
+        defaultValue: "",
+        schema: z.string()
+    });
+
+    readonly inspectionsLimitState = this.createState<number>({
+        name: 'inspectionsLimitState',
+        defaultValue: MAX_SIMULTANEOUS_INSPECTIONS / 5,
+        schema: z.coerce.number().int().positive()
     });
 
     constructor(private readonly router: Router,
@@ -575,10 +640,22 @@ export class AppStateService implements OnDestroy {
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
+    get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
+    set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
+    get isDockOpen() {return this.dockOpenState.getValue();}
+    set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
+    get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
+    set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
+    get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
+    set aboutDialogVisible(val: boolean) {this.aboutDialogVisibleState.next(val);};
+    get preferencesDialogVisible() {return this.preferencesDialogVisibleState.getValue();}
+    set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
+    get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
+    set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}
@@ -718,59 +795,113 @@ export class AppStateService implements OnDestroy {
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
         const allPanels = this.selectionState.getValue();
+        const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
-        // If a panel index was passed, change the SourceData-selection in that panel.
-        if (id !== undefined) {
-            const panelIndex = allPanels.findIndex(panel => panel.id === id);
-            if (panelIndex !== -1) {
-                allPanels[panelIndex].sourceData = sourceDataSelection;
-                this.selectionState.next(allPanels);
-                return id;
-            }
-        }
-        // Filter out features which are already selected. If there are none left, we don't need to do anything.
+        const isClearSourceDataRequest =
+            originPanel !== undefined &&
+            sourceDataSelection === undefined &&
+            originPanel.sourceData !== undefined;
+
+        // Filter out features which are already selected. If there are none left, we don't need to do anything
+        // unless we are explicitly clearing a source data selection.
         if (featureSelection.length) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
-            if (!featureSelection.length) {
+            if (!featureSelection.length && !isClearSourceDataRequest) {
                 this._replaceUrl = true;
                 return;
             }
         }
-        const mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.pinned);
+
+        // Decide whether to reuse the origin panel or spawn a new one based on docking/pinning rules.
+        let targetPanelId: number | undefined = undefined;
+        let mustCreateNewPanel = forceNewPanel;
+        let newPanelUndocked = false;
+        const hasDockedPanel = allPanels.some(panel => !panel.undocked);
+        const hasUndockedPanel = allPanels.some(panel => panel.undocked);
+        const firstUndockedUnlockedPanel = allPanels.find(panel => panel.undocked && !panel.locked);
+
+        if (originPanel) {
+            if (isClearSourceDataRequest) {
+                targetPanelId = originPanel.id;
+            } else if (!originPanel.undocked) {
+                mustCreateNewPanel = true;
+            } else if (originPanel.locked) {
+                mustCreateNewPanel = true;
+                newPanelUndocked = true;
+            } else {
+                targetPanelId = originPanel.id;
+            }
+        } else if (hasDockedPanel) {
+            mustCreateNewPanel = true;
+        } else if (hasUndockedPanel) {
+            // Dock is empty: always create new selections as docked panels.
+            mustCreateNewPanel = true;
+            newPanelUndocked = false;
+        } else if (!mustCreateNewPanel && firstUndockedUnlockedPanel) {
+            targetPanelId = firstUndockedUnlockedPanel.id;
+        }
+
+        if (originPanel && mustCreateNewPanel && originPanel.undocked) {
+            newPanelUndocked = true;
+        }
+
+        // If no origin-driven decision was made, fall back to existing pinning logic.
+        if (!mustCreateNewPanel && targetPanelId === undefined) {
+            mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.locked);
+        }
+
+        if (!mustCreateNewPanel && targetPanelId === undefined) {
+            const firstUnlockedPanel = allPanels.find(panel => !panel.locked);
+            if (firstUnlockedPanel) {
+                targetPanelId = firstUnlockedPanel.id;
+            } else {
+                mustCreateNewPanel = true;
+            }
+        }
+
         if (mustCreateNewPanel) {
-            if (!this.isNumSelectionsUnlimited && allPanels.length >= MAX_NUM_SELECTIONS) {
-                this.infoMessageService.showError(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an unpinned panel or enable unlimited selections to add more.`);
+            if (allPanels.length >= MAX_NUM_SELECTIONS) {
+                this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an existing panel to add more.`);
                 this._replaceUrl = true;
                 return;
             }
-            id = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
-                id: id,
+                id: newId,
                 features: featureSelection,
                 sourceData: sourceDataSelection,
-                pinned: false,
+                locked: false,
                 size: this.defaultInspectionPanelSize,
-                color: DEFAULT_HIGHLIGHT_COLORS[id % DEFAULT_HIGHLIGHT_COLORS.length]
+                color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
+                undocked: newPanelUndocked
             });
             this.selectionState.next(allPanels);
-            return id;
+            return newId;
         }
-        // Find the first unpinned panel and change the selection there.
-        for (let i = 0; i < allPanels.length; i++) {
-            if (allPanels[i].pinned) {
-                continue;
+
+        if (targetPanelId !== undefined) {
+            const panelIndex = allPanels.findIndex(panel => panel.id === targetPanelId);
+            if (panelIndex === -1) {
+                this._replaceUrl = true;
+                return;
             }
-            id = allPanels[i].id;
-            allPanels[i].features = featureSelection;
-            allPanels[i].sourceData = sourceDataSelection;
-            break;
+            if (sourceDataSelection !== undefined) {
+                allPanels[panelIndex].sourceData = sourceDataSelection;
+            } else {
+                if (featureSelection.length) {
+                    allPanels[panelIndex].features = featureSelection;
+                }
+                allPanels[panelIndex].sourceData = sourceDataSelection;
+            }
+            this.selectionState.next(allPanels);
+            return targetPanelId;
         }
-        this.selectionState.next(allPanels);
-        return id;
+
+        return;
     }
 
     setInspectionPanelSize(id: number, size: [number, number]) {
@@ -783,18 +914,56 @@ export class AppStateService implements OnDestroy {
         this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
     }
 
-    setInspectionPanelPinnedState(id: number, isPinned: boolean) {
+    setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = this.selectionState.getValue();
         const index = allPanels.findIndex(panel => panel.id === id);
         if (index === -1) {
             return;
         }
-        if (isPinned && !this.isNumSelectionsUnlimited &&
-            allPanels.filter(panel => panel.pinned).length >= MAX_NUM_SELECTIONS - 1) {
-            this.infoMessageService.showError(`To pin more than ${MAX_NUM_SELECTIONS-1} panels, enable unlimited selections in the settings.`);
-        }
-        allPanels[index].pinned = isPinned;
+        allPanels[index].locked = isLocked;
         this.selectionState.next(allPanels);
+    }
+
+    setInspectionPanelUndockedState(id: number, undocked: boolean) {
+        const allPanels = this.selectionState.getValue();
+        const index = allPanels.findIndex(panel => panel.id === id);
+        if (index === -1) {
+            return;
+        }
+        allPanels[index].undocked = undocked;
+        if (!undocked) {
+            allPanels[index].locked = true;
+        }
+        this.selectionState.next(allPanels);
+    }
+
+    reorderInspectionPanels(dockedDisplayOrder: number[]) {
+        const allPanels = this.selectionState.getValue();
+        const dockedPanels = allPanels.filter(panel => !panel.undocked);
+        if (dockedPanels.length < 2) {
+            return;
+        }
+        const dockedById = new Map(dockedPanels.map(panel => [panel.id, panel]));
+        const normalizedDisplayOrder = dockedDisplayOrder.filter(id => dockedById.has(id));
+        if (normalizedDisplayOrder.length !== dockedPanels.length) {
+            dockedPanels.forEach(panel => {
+                if (!normalizedDisplayOrder.includes(panel.id)) {
+                    normalizedDisplayOrder.push(panel.id);
+                }
+            });
+        }
+        const rawOrder = normalizedDisplayOrder.toReversed();
+        let dockedIndex = 0;
+        const nextPanels = allPanels.map(panel => {
+            if (panel.undocked) {
+                return panel;
+            }
+            const nextId = rawOrder[dockedIndex++];
+            return dockedById.get(nextId)!;
+        });
+        if (!this.panelOrderEquals(allPanels, nextPanels)) {
+            this.selectionState.next(nextPanels);
+        }
     }
 
     setInspectionPanelColor(id: number, color: string) {
@@ -807,8 +976,8 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
-    unsetUnpinnedSelections() {
-        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.pinned));
+    unsetUnlockedSelections() {
+        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.locked));
     }
 
     unsetPanel(id: number) {
@@ -823,6 +992,18 @@ export class AppStateService implements OnDestroy {
 
     getNumSelections(): number {
         return this.selectionState.getValue().length;
+    }
+
+    private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i].id !== b[i].id) {
+                return false;
+            }
+        }
+        return true;
     }
 
     setMarkerState(enabled: boolean) {
@@ -1150,10 +1331,11 @@ export class AppStateService implements OnDestroy {
             const updated: InspectionPanelModel<TileFeatureId> = {
                 id: panel.id,
                 features: [],
-                pinned: panel.pinned,
+                locked: panel.locked,
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
-                color: panel.color
+                color: panel.color,
+                undocked: panel.undocked
             };
 
             // Filter features

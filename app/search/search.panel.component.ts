@@ -12,6 +12,7 @@ import {FeatureSearchService} from "./feature.search.service";
 import getCaretCoordinates from "../shared/caret.util";
 import {CompletionCandidate} from "./search.worker";
 import {coreLib} from "../integrations/wasm";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 interface ExtendedSearchTarget extends SearchTarget {
     index: number;
@@ -20,7 +21,7 @@ interface ExtendedSearchTarget extends SearchTarget {
 @Component({
     selector: 'search-panel',
     template: `
-        <div class="search-wrapper">
+        <div class="search-wrapper" [ngClass]="{'search-menu-top': searchService.showFeatureSearchDialog}">
             <div class="search-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
@@ -114,7 +115,6 @@ interface ExtendedSearchTarget extends SearchTarget {
             </div>
             <p-button label="Cancel" (click)="setSelectedMap(null)" severity="danger"/>
         </p-dialog>
-        <feature-search [searchPanelComponent]="this"></feature-search>
     `,
     styles: [`
         .item-disabled {
@@ -256,7 +256,8 @@ export class SearchPanelComponent implements AfterViewInit {
                 private messageService: InfoMessageService,
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
-                public searchService: FeatureSearchService) {
+                public searchService: FeatureSearchService,
+                private dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.clickOnSearchToStart.bind(this));
 
         this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -365,6 +366,8 @@ export class SearchPanelComponent implements AfterViewInit {
     }
 
     ngAfterViewInit() {
+        this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery));
+
         this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();

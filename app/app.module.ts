@@ -71,6 +71,9 @@ import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedatase
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
+import {AboutComponent} from "./auxiliaries/about.component";
+import {KeyboardComponent} from "./auxiliaries/keyboard.component";
+import {MainBarComponent} from "./app.mainbar.component";
 import {IconFieldModule} from 'primeng/iconfield';
 import {InputIconModule} from 'primeng/inputicon';
 import {PopoverModule} from "primeng/popover";
@@ -87,8 +90,15 @@ import {MapViewComponent} from "./mapview/view.component";
 import {Splitter} from "primeng/splitter";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
+import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
 import {ToggleSwitch} from "primeng/toggleswitch";
 import {ToggleButton} from "primeng/togglebutton";
+import {DockableLayoutComponent} from "./app.dockable.layout.component";
+import {Menubar} from "primeng/menubar";
+import {DynamicDialogModule} from "primeng/dynamicdialog";
+import {DialogService} from "primeng/dynamicdialog";
+import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
+import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
 
 export const ErdblickTheme = definePreset(Aura, {
@@ -163,12 +173,18 @@ export const initializeServices = () => {
         StatsDialogComponent,
         SourceDataLayerSelectionDialogComponent,
         LegalInfoDialogComponent,
+        AboutComponent,
+        KeyboardComponent,
+        MainBarComponent,
         ErdblickViewUIComponent,
         StyleComponent,
         MapViewContainerComponent,
         MapViewComponent,
         InspectionContainerComponent,
         InspectionTreeComponent,
+        DockableLayoutComponent,
+        InspectionPanelDialogComponent,
+        InspectionComparisonDialogComponent,
         SurveyComponent
     ],
     bootstrap: [
@@ -181,6 +197,7 @@ export const initializeServices = () => {
         AppRoutingModule,
         SpeedDialModule,
         DialogModule,
+        DynamicDialogModule,
         FormsModule,
         ScrollPanelModule,
         BadgeModule,
@@ -223,7 +240,9 @@ export const initializeServices = () => {
         ChipModule,
         Splitter,
         ToggleSwitch,
-        ToggleButton
+        ToggleButton,
+        Menubar,
+        Ripple
     ],
     providers: [
         provideAppInitializer(initializeServices),
@@ -236,6 +255,7 @@ export const initializeServices = () => {
         ClipboardService,
         EditorService,
         RightClickMenuService,
+        DialogService,
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

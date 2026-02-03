@@ -27,8 +27,11 @@ export async function waitForAppReady(page: Page): Promise<void> {
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
     // Open the layer dialog through the toolbar button.
-    const layersButton = page.locator('.layers-button').locator('.p-button');
-    await layersButton.click({ force: true });
+    const menuBar = page.locator('.main-bar').first()
+    const mapsButton = menuBar.locator('span', {
+        hasText: 'Maps'
+    }).first();
+    await mapsButton.click({ force: true });
 
     const dialog = page.locator('.map-layer-dialog').locator('.p-dialog-content');
     await expect(dialog).toBeVisible();
@@ -73,8 +76,11 @@ export async function openLayerDialog(page: Page): Promise<void> {
         return;
     }
 
-    const layersButton = page.locator('.layers-button').locator('.p-button');
-    await layersButton.click({ force: true });
+    const menuBar = page.locator('.main-bar').first()
+    const mapsButton = menuBar.locator('span', {
+        hasText: 'Maps'
+    }).first();
+    await mapsButton.click({ force: true });
     await expect(dialog).toBeVisible();
 }
 
