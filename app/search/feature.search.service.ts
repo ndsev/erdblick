@@ -236,8 +236,6 @@ export class FeatureSearchService {
     private diagnosticsQueue: Array<WorkerTask> = [];
     private workersReady: Promise<void> | null = null;
 
-    private static workerBlobUrlPromise: Promise<string | null> | null = null;
-
     jobGroupManager: JobGroupManager = new JobGroupManager();
     currentCompletion: JobGroup | null = null;
     taskIdCounter: number = 0;
@@ -291,31 +289,7 @@ export class FeatureSearchService {
         this.makeClusterPins();
     }
 
-    private static async resolveWorkerBlobUrl(): Promise<string | null> {
-        if (!FeatureSearchService.workerBlobUrlPromise) {
-            if (typeof fetch !== 'function') {
-                FeatureSearchService.workerBlobUrlPromise = Promise.resolve(null);
-            } else {
-                FeatureSearchService.workerBlobUrlPromise = fetch(
-                    new URL('./search.worker', import.meta.url),
-                    {cache: 'force-cache'}
-                ).then((response) => {
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
-                    }
-                    return response.blob();
-                }).then((blob) => {
-                    return URL.createObjectURL(blob);
-                }).catch((error) => {
-                    console.warn("Search worker preload failed; falling back to module URL.", error);
-                    return null;
-                });
-            }
-        }
-        return FeatureSearchService.workerBlobUrlPromise;
-    }
-
-    private async ensureWorkersReady(): Promise<void> {
+    public initializeWorkers(): Promise<void> {
         if (!this.workersReady) {
             this.workersReady = this.initWorkers();
         }
@@ -323,41 +297,72 @@ export class FeatureSearchService {
     }
 
     private async initWorkers(): Promise<void> {
-        // Instantiate workers lazily to avoid startup fetches.
         const maxWorkers = navigator.hardwareConcurrency || 4;
-        const workerBlobUrl = await FeatureSearchService.resolveWorkerBlobUrl();
-
-        for (let i = 0; i < maxWorkers; i++) {
-            const worker = workerBlobUrl
-                ? new Worker(workerBlobUrl, {type: 'module'})
-                : new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
-
-            this.workers.push(worker);
-            this.workerBusy.push(false);
-            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-                this.workerBusy[i] = false;
-                const result = event.data;
-
-                // Notify the job-group if the task has an id
-                if (result.taskId) {
-                    this.jobGroupManager.completeTask(result.taskId, result);
-                }
-
-                switch (result.type) {
-                    case 'SearchResultForTile':
-                        this.addSearchResult(result as SearchResultForTile);
-                        break;
-                    case 'CompletionCandidatesForTile':
-                        this.addCompletionCandidates(result as CompletionCandidatesForTile);
-                        break;
-                    case 'DiagnosticsResultsForTile':
-                        this.addDiagnostics(result as DiagnosticsResultsForTile);
-                        break;
-                }
-
-                this.scheduleNextTask(i);
-            };
+        if (maxWorkers <= 0) {
+            return;
         }
+
+        const firstWorker = new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
+        const workerModuleUrl = await this.waitForWorkerReady(firstWorker);
+        this.registerWorker(firstWorker, 0);
+
+        const workerBlobUrl = await this.fetchWorkerBlobUrl(workerModuleUrl);
+        for (let i = 1; i < maxWorkers; i++) {
+            const worker = new Worker(workerBlobUrl, {type: 'module'});
+            this.registerWorker(worker, i);
+        }
+    }
+
+    private waitForWorkerReady(worker: Worker): Promise<string> {
+        return new Promise((resolve) => {
+            const handler = (event: MessageEvent<any>) => {
+                const result = event.data;
+                if (result?.type !== 'WorkerReady') {
+                    return;
+                }
+                worker.removeEventListener('message', handler);
+                resolve(result.scriptUrl as string);
+            };
+            worker.addEventListener('message', handler);
+            worker.postMessage({type: 'WorkerInit'});
+        });
+    }
+
+    private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
+        const response = await fetch(workerModuleUrl, {cache: 'force-cache'});
+        if (!response.ok) {
+            throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
+        }
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+    }
+
+    private registerWorker(worker: Worker, index: number) {
+        this.workers[index] = worker;
+        this.workerBusy[index] = false;
+        worker.onmessage = (event: MessageEvent<any>) => {
+            const result = event.data;
+            this.workerBusy[index] = false;
+
+            // Notify the job-group if the task has an id
+            if (result.taskId) {
+                this.jobGroupManager.completeTask(result.taskId, result);
+            }
+
+            switch (result.type) {
+                case 'SearchResultForTile':
+                    this.addSearchResult(result as SearchResultForTile);
+                    break;
+                case 'CompletionCandidatesForTile':
+                    this.addCompletionCandidates(result as CompletionCandidatesForTile);
+                    break;
+                case 'DiagnosticsResultsForTile':
+                    this.addDiagnostics(result as DiagnosticsResultsForTile);
+                    break;
+            }
+
+            this.scheduleNextTask(index);
+        };
     }
 
     private createCustomPin(text: string): string {
@@ -458,13 +463,11 @@ export class FeatureSearchService {
     // Further tasks will be picked up in the worker's
     // onMessage callback.
     private runWorkers() {
-        void this.ensureWorkersReady().then(() => {
-            this.workers.forEach((worker, index) => {
-                if (this.workerBusy[index]) {
-                    return;
-                }
-                this.scheduleNextTask(index);
-            });
+        this.workers.forEach((worker, index) => {
+            if (this.workerBusy[index]) {
+                return;
+            }
+            this.scheduleNextTask(index);
         });
     }
 
