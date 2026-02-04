@@ -61,17 +61,6 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         push("mapId", "mapId", ValueType::String)->value_ = convertString(featurePtr->model().mapId());
         push("layerId", "layerId", ValueType::String)->value_ = convertString(featurePtr->model().layerInfo()->layerId_);
 
-        // TODO: Investigate and fix the issue for "index out of bounds" error.
-        //   Affects boundaries and lane connectors
-        //  if (auto prefix = featurePtr->model().getIdPrefix()) {
-        //      for (auto const& [k, v] : prefix->fields()) {
-        //          convertField(k, v);
-        //      }
-        //  }
-        //  for (auto const& [k, v] : featurePtr->id()->fields()) {
-        //      convertField(k, v);
-        //  }
-
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
             field.key_ = convertString(key);
@@ -390,6 +379,8 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
             auto vv = value->value();
             if (std::holds_alternative<std::string_view>(vv))
                 singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::String};
+            else if (std::holds_alternative<simfil::ByteArray>(vv))
+                singleValue = {JsValue(std::get<simfil::ByteArray>(vv).toDisplayString()), ValueType::String};
             else
                 singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
             break;
