@@ -50,6 +50,7 @@ export class MapDataService {
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private tileStream: MapTileStreamClient|null = null;
+    private featureLayerParsingQueue: Uint8Array[] = [];
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
@@ -125,13 +126,15 @@ export class MapDataService {
 
         // Setup TileLayerStream
         this.tileStream = new MapTileStreamClient("/tiles");
-        this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
+        this.tileStream.onFeatures = (payload) => this.featureLayerParsingQueue.push(payload);
         this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);
         this.tileStream.onLoadState = (payload) => this.handleTilesLoadState(payload);
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
         };
 
+        // Initial calls to processTileStream and processVisualizationTasks: will keep calling themselves.
+        this.processTileStream();
         this.processVisualizationTasks();
 
         this.styleService.styleRemovedForId.subscribe(styleId => {
@@ -234,6 +237,25 @@ export class MapDataService {
             this.statsDialogVisible = true;
             this.statsDialogNeedsUpdate.next();
         }, true);
+    }
+
+    private processTileStream() {
+        const startTime = Date.now();
+        const timeBudget = 10; // milliseconds
+
+        while (this.featureLayerParsingQueue.length) {
+            // Check if the time budget is exceeded.
+            if (Date.now() - startTime > timeBudget) {
+                break;
+            }
+
+            let message = this.featureLayerParsingQueue.shift()!;
+            this.addTileFeatureLayer(message);
+        }
+
+        // Continue processing messages with a delay.
+        const delay = this.featureLayerParsingQueue.length ? 0 : 10;
+        setTimeout((_: any) => this.processTileStream(), delay);
     }
 
     private processVisualizationTasks() {
@@ -675,6 +697,10 @@ export class MapDataService {
             tileIds: entry.tileIds
         }));
 
+        // Make sure that there are no unparsed bytes lingering from the previous response stream.
+        // Parsing a tile layer now which we previously assumed as not-yet-arrived would lead to flickering
+        // or possibly even dangling data in the map.
+        this.featureLayerParsingQueue = [];
         await this.tileStream!.updateRequest(requests);
     }
 
@@ -723,7 +749,9 @@ export class MapDataService {
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
-        if (style.visible && style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName)) {
+        if (style.visible
+            && style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName)
+            && style.featureLayerStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             this.renderTileLayer(viewIndex, tileLayer, style);
         }
     }
