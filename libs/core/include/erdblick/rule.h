@@ -17,7 +17,7 @@ namespace erdblick
  */
 struct BoundEvalFun
 {
-    simfil::OverlayNode context_;
+    simfil::model_ptr<simfil::OverlayNode> context_;
     std::function<simfil::Value(std::string const& expr)> eval_;
 };
 
@@ -47,10 +47,12 @@ public:
     };
 
     FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
+    [[nodiscard]] bool maybeMatchesType(std::string_view typeId) const;
     [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] HighlightMode mode() const;
     [[nodiscard]] bool selectable() const;
     [[nodiscard]] bool supports(mapget::GeomType const& g, std::optional<std::string_view> geometryName={}) const;
+    [[nodiscard]] uint32_t geometryTypesMask() const;
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
     [[nodiscard]] float width() const;

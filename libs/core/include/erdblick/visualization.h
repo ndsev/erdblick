@@ -256,7 +256,7 @@ private:
     /**
      * Insert style option variables into the given OverlayNode.
      */
-    void addOptionsToSimfilContext(simfil::OverlayNode& context);
+    void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
 
     /**
      * Create a feature primitive ID struct from the mapTileKey_ and the given feature ID.

@@ -416,6 +416,31 @@ FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundE
     return this;
 }
 
+bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
+{
+    if (type_) {
+        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+            return false;
+        }
+    }
+
+    if (!firstOfRules_.empty()) {
+        for (auto const& rule : firstOfRules_) {
+            if (rule.maybeMatchesType(typeId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return true;
+}
+
+uint32_t FeatureStyleRule::geometryTypesMask() const
+{
+    return geometryTypes_;
+}
+
 bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
 {
     // Ensure that the geometry type is supported by the rule.

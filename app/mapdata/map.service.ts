@@ -749,9 +749,9 @@ export class MapDataService {
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
-        if (style.visible
-            && style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName)
-            && style.featureLayerStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
+        if (style.visible &&
+            style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName) &&
+            style.featureLayerStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             this.renderTileLayer(viewIndex, tileLayer, style);
         }
     }
@@ -762,6 +762,9 @@ export class MapDataService {
             return;
         }
         if (!style.visible) {
+            return;
+        }
+        if (!wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             return;
         }
 
@@ -1058,7 +1061,9 @@ export class MapDataService {
                         continue;
                     }
                     for (let [_, style] of this.styleService.styles) {
-                        if (style.visible && style.featureLayerStyle.hasLayerAffinity(featureTile.layerName)) {
+                        if (style.visible &&
+                            style.featureLayerStyle.hasLayerAffinity(featureTile.layerName) &&
+                            style.featureLayerStyle.supportsHighlightMode(mode)) {
                             const styleOptions = this.maps.getLayerStyleOptions(
                                 viewIndex, featureTile.mapName, featureTile.layerName, style.id) ?? {};
                             if (group.color) {
