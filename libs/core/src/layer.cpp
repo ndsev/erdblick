@@ -210,8 +210,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
         data.set("key", std::move(key));
 
         if (node.addr().column() == mapget::TileSourceDataLayer::Compound) {
-            auto compound = model_->resolveCompound(*ModelNode::Ptr::make(model_->shared_from_this(), node.addr()));
-
+            auto compound = model_->resolve<SourceDataCompoundNode>(node);
             data.set("address", visitAddress(compound->sourceDataAddress()));
             data.set("type", JsValue(std::string(compound->schemaName())));
         }
