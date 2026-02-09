@@ -13,13 +13,15 @@ import {AppStateService} from "./shared/appstate.service";
                     <pref-components></pref-components>
                     <coordinates-panel></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">
-                        <span class="material-symbols-outlined">
-                            @if (stateService.isDockOpen) {
+                        @if (stateService.isDockOpen) {
+                            <span class="material-symbols-outlined" pTooltip="Collapse dock">
                                 chevron_forward
-                            } @else {
+                            </span>
+                        } @else {
+                            <span class="material-symbols-outlined" pTooltip="Open dock">
                                 chevron_backward
-                            }
-                        </span>
+                            </span>
+                        }
                     </div>
                 }
             </div>

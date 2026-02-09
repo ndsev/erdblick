@@ -1,7 +1,8 @@
-import {Inject, Injectable} from '@angular/core';
+import {Injectable, OnDestroy} from '@angular/core';
 import {BehaviorSubject} from 'rxjs';
 import {AppStateService} from '../shared/appstate.service';
-import {DIAGNOSTICS_DATA_SOURCE, DiagnosticsDataSource} from './diagnostics.datasource';
+import {MapDataService} from '../mapdata/map.service';
+import {DiagnosticsDatasource} from './diagnostics.datasource';
 import {DiagnosticsExportBundle, DiagnosticsSnapshot, LogEntry, PerfStat} from './diagnostics.model';
 
 export interface DiagnosticsLogFilter {
@@ -18,17 +19,14 @@ export interface DiagnosticsExportOptions {
 }
 
 @Injectable({providedIn: 'root'})
-export class DiagnosticsFacadeService {
-    readonly snapshot$ = this.dataSource.snapshot$;
-    readonly perfStats$ = this.dataSource.perfStats$;
-    readonly logs$ = this.dataSource.logs$;
+export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
 
     progressDialogVisible = false;
     performanceDialogVisible = false;
     logDialogVisible = false;
     exportDialogVisible = false;
 
-    private readonly logFilterState = new BehaviorSubject<DiagnosticsLogFilter>({
+    readonly logFilterState = new BehaviorSubject<DiagnosticsLogFilter>({
         info: true,
         warn: true,
         error: true
@@ -40,8 +38,9 @@ export class DiagnosticsFacadeService {
     private latestPerfStats: PerfStat[] = [];
     private latestLogs: LogEntry[] = [];
 
-    constructor(@Inject(DIAGNOSTICS_DATA_SOURCE) private readonly dataSource: DiagnosticsDataSource,
+    constructor(mapService: MapDataService,
                 private readonly stateService: AppStateService) {
+        super(mapService);
         this.snapshot$.subscribe(snapshot => {
             this.latestSnapshot = snapshot;
         });
@@ -85,10 +84,12 @@ export class DiagnosticsFacadeService {
     }
 
     openPerformanceDialog() {
+        this.refreshPerfStats();
         this.performanceDialogVisible = true;
     }
 
     openLogDialog(errorsOnly: boolean = false) {
+        this.refreshLogs();
         this.logDialogVisible = true;
         if (errorsOnly) {
             this.setLogFilter({info: false, warn: false, error: true});
@@ -96,6 +97,8 @@ export class DiagnosticsFacadeService {
     }
 
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
+        this.refreshPerfStats();
+        this.refreshLogs();
         const base = this.defaultExportOptions();
         this.setExportOptions({
             ...base,
@@ -157,6 +160,10 @@ export class DiagnosticsFacadeService {
             }
             return filter.error;
         });
+    }
+
+    override ngOnDestroy(): void {
+        super.ngOnDestroy();
     }
 
     private defaultExportOptions(): DiagnosticsExportOptions {

@@ -101,11 +101,9 @@ import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.com
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
 import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
-import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.performance.component";
+import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
 import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
-import {DIAGNOSTICS_DATA_SOURCE} from "./diagnostics/diagnostics.datasource";
-import {MockDiagnosticsDataSource} from "./diagnostics/mock-diagnostics.datasource";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -245,7 +243,6 @@ export const initializeServices = () => {
         EditorService,
         RightClickMenuService,
         DialogService,
-        {provide: DIAGNOSTICS_DATA_SOURCE, useClass: MockDiagnosticsDataSource},
         provideHttpClient(),
         provideAnimationsAsync(),
         providePrimeNG({

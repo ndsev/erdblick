@@ -269,6 +269,24 @@ export class MapDataService {
         return this.tileStream!.parser;
     }
 
+    public getVisualizationCounts(): {present: number; queue: number} {
+        const presentTiles = new Set<string>();
+        const queuedTiles = new Set<string>();
+        for (const state of this.viewVisualizationState) {
+            for (const visualization of state.visualizationQueue) {
+                queuedTiles.add(visualization.tile.mapTileKey);
+            }
+            for (const visualization of state.getVisualizations()) {
+                presentTiles.add(visualization.tile.mapTileKey);
+            }
+        }
+        return {present: presentTiles.size, queue: queuedTiles.size};
+    }
+
+    public isTileStreamConnected(): boolean {
+        return this.tileStream?.isOpen() ?? false;
+    }
+
     private handleTilesRequestStatus(status: MapTileStreamStatusPayload) {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
@@ -703,6 +721,7 @@ export class MapDataService {
         });
 
         this.statsDialogNeedsUpdate.next();
+        this.logTileStats(tileLayer);
 
         // Update legal information if any.
         if (tileLayer.legalInfo) {
@@ -719,6 +738,24 @@ export class MapDataService {
 
         // Ensure that visualizations which now have data are queued for rendering.
         this.updateVisualizations();
+    }
+
+    private logTileStats(tileLayer: FeatureTile) {
+        if (!tileLayer.hasData() || tileLayer.numFeatures <= 0) {
+            return;
+        }
+        const stats: Record<string, number[]> = {};
+        for (const [key, value] of tileLayer.stats.entries()) {
+            stats[key] = value;
+        }
+        const payload = {
+            mapTileKey: tileLayer.mapTileKey,
+            mapName: tileLayer.mapName,
+            layerName: tileLayer.layerName,
+            tileId: tileLayer.tileId.toString(),
+            stats
+        };
+        console.info("Tile stats", JSON.stringify(payload));
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {

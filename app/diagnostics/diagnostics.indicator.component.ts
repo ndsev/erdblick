@@ -56,10 +56,9 @@ interface ProgressStage {
                                 }
                             </div>
                             <div class="diagnostics-popover-actions">
-                                <p-button size="small" label="Open Progress" (click)="openProgress()" />
                                 <p-button size="small" label="Open Performance" (click)="openPerformance()" />
                                 <p-button size="small" label="Open Log" (click)="openLog()" />
-                                <p-button size="small" label="Export…" (click)="openExport()" />
+                                <p-button size="small" label="Export" (click)="openExport()" />
                             </div>
                         </div>
                     }
@@ -101,11 +100,6 @@ export class DiagnosticsIndicatorComponent {
         this.popover?.toggle(event);
     }
 
-    openProgress() {
-        this.diagnostics.openProgressDialog();
-        this.popover?.hide();
-    }
-
     openPerformance() {
         this.diagnostics.openPerformanceDialog();
         this.popover?.hide();
@@ -139,7 +133,7 @@ export class DiagnosticsIndicatorComponent {
 
     private progressRatio(counter: ProgressCounter): number {
         if (!counter.total) {
-            return 0;
+            return 1;
         }
         return counter.done / counter.total;
     }

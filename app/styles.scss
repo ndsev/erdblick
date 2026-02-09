@@ -269,7 +269,7 @@ mapview-container {
   display: flex;
   flex-direction: column;
   gap: 0.5em;
-  padding: 0.5em;
+  padding: 0.25em;
   min-width: 20em;
 }
 
@@ -316,9 +316,11 @@ mapview-container {
 }
 
 .diagnostics-popover-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 0.4em;
+  margin-top: 0.25em;
 }
 
 .diagnostics-progress-content {
@@ -384,7 +386,7 @@ mapview-container {
 }
 
 .diagnostics-perf-table {
-  margin-top: 0.5em;
+  margin-bottom: 0.5em;
 }
 
 .diagnostics-key-cell {
@@ -412,10 +414,9 @@ mapview-container {
 }
 
 .diagnostics-ellipsis {
-  max-width: 16em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .diagnostics-log-controls {
@@ -423,37 +424,87 @@ mapview-container {
   justify-content: space-between;
   gap: 1em;
   flex-wrap: wrap;
-  margin-bottom: 0.75em;
+  margin-bottom: 0.25em;
+  align-items: center;
 }
 
 .diagnostics-log-filters {
   display: flex;
   align-items: center;
   gap: 0.75em;
+  font-size: 0.9em;
+}
+
+.diagnostics-log-filters .p-checkbox {
+  font-size: 0.9em;
 }
 
 .diagnostics-log-actions {
   display: flex;
   gap: 0.5em;
+  align-items: center;
+}
+
+.diagnostics-log-sort .p-selectbutton {
+  font-size: 0.9em;
+}
+
+.diagnostics-log-caption {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.25em 0.5em;
+}
+
+.diagnostics-log-caption-search {
+  width: 100%;
+}
+
+.diagnostics-log-caption-search .p-inputtext {
+  width: 100%;
 }
 
 .diagnostics-log-table {
-  max-height: 20em;
-  overflow: auto;
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5em;
+  overflow: hidden;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.diagnostics-log-table table {
+.diagnostics-log-table .p-datatable {
+  border: none;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.diagnostics-log-table .p-datatable-header {
+  padding: 0 !important;
+}
+
+.diagnostics-log-table .p-datatable-table-container {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.diagnostics-log-table .p-datatable-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.diagnostics-log-table th,
-.diagnostics-log-table td {
+.diagnostics-log-table .p-datatable-thead > tr > th,
+.diagnostics-log-table .p-datatable-tbody > tr > td {
   padding: 0.5em;
   border-bottom: 1px solid var(--p-content-border-color);
   font-size: 0.9em;
+}
+
+.diagnostics-log-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5em;
 }
 
 .diagnostics-log-info td:nth-child(2) {
@@ -819,7 +870,7 @@ map-view {
     }
 
     .p-dialog-content {
-      padding: 0.5em !important;
+      padding: 0 0.25em 0.25em 0.25em !important;
     }
   }
 }
@@ -871,15 +922,16 @@ map-view {
     font-size: 0.9em !important;
 
     td {
-      padding: 0 0 0 0.5em;
+      padding: 0.25em !important;
       height: 1.5em;
-      border-right: 1px solid var(--p-content-border-color);
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     th {
       padding: 0 0 0 0.5em;
       height: 1.5em;
-      border-right: 1px solid var(--p-content-border-color);
     }
 
     .p-treetable-toggler {
@@ -895,6 +947,12 @@ map-view {
     min-width: 40em;
     min-height: 20em;
     width: 44em;
+  }
+
+  .p-dialog-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 }
 
