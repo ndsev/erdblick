@@ -269,7 +269,7 @@ export class MapDataService {
         return this.tileStream!.parser;
     }
 
-    public getVisualizationCounts(): {present: number; queue: number} {
+    public getVisualizationCounts(): {present: number; queue: number; tilesWithFeatures: number; features: number} {
         const presentTiles = new Set<string>();
         const queuedTiles = new Set<string>();
         for (const state of this.viewVisualizationState) {
@@ -280,7 +280,24 @@ export class MapDataService {
                 presentTiles.add(visualization.tile.mapTileKey);
             }
         }
-        return {present: presentTiles.size, queue: queuedTiles.size};
+
+        let tilesWithFeatures = 0;
+        let features = 0;
+        for (const tileKey of presentTiles) {
+            const tile = this.loadedTileLayers.get(tileKey);
+            const numFeatures = Number(tile?.numFeatures ?? 0);
+            if (numFeatures > 0) {
+                tilesWithFeatures += 1;
+                features += numFeatures;
+            }
+        }
+
+        return {
+            present: presentTiles.size,
+            queue: queuedTiles.size,
+            tilesWithFeatures,
+            features
+        };
     }
 
     public isTileStreamConnected(): boolean {

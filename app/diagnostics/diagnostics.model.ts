@@ -23,6 +23,8 @@ export interface TileStateCounts {
 export interface VisualizationCounts {
     present: number;
     queue: number;
+    tilesWithFeatures: number;
+    features: number;
 }
 
 export interface BackendState {

@@ -2,7 +2,7 @@ import {Component, ViewChild} from '@angular/core';
 import {combineLatest, map} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {ProgressCounter, TilePipelineProgress} from './diagnostics.model';
+import {DiagnosticsSnapshot, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
 
 interface ProgressStage {
     key: keyof TilePipelineProgress;
@@ -14,7 +14,7 @@ interface ProgressStage {
     template: `
         <div class="diagnostics-indicator">
             <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)">
-                @if ((progressRatio$ | async) ?? 0 < 1) {
+                @if (showSpinner$ | async) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s" [style]="{ width: '1.75em', height: '1.75em' }" />
                 } @else {
                     <i class="pi pi-circle-fill" style="color: green; font-size: 1.75em"></i>
@@ -32,15 +32,15 @@ interface ProgressStage {
                             <div class="diagnostics-popover-row">
                                 <span class="diagnostics-label">Tiles</span>
                                 <span>{{ snapshot.tiles.loaded }} / {{ snapshot.tiles.expected }}</span>
-                                <span class="diagnostics-muted">cached {{ snapshot.tiles.cached }}</span>
+                                <span class="diagnostics-muted">cached n/a</span>
                                 @if (snapshot.tiles.errors > 0) {
                                     <span class="diagnostics-error">errors {{ snapshot.tiles.errors }}</span>
                                 }
                             </div>
                             <div class="diagnostics-popover-row">
                                 <span class="diagnostics-label">Visualizations</span>
-                                <span>{{ snapshot.visualizations.present }} present</span>
-                                <span class="diagnostics-muted">queue {{ snapshot.visualizations.queue }}</span>
+                                <span>{{ visualizationSummary(snapshot) }}</span>
+                                <span class="diagnostics-muted">{{ queueSummary(snapshot.visualizations.queue) }}</span>
                             </div>
                             <div class="diagnostics-popover-row">
                                 <span class="diagnostics-label">Backend</span>
@@ -56,7 +56,7 @@ interface ProgressStage {
                                 }
                             </div>
                             <div class="diagnostics-popover-actions">
-                                <p-button size="small" label="Open Performance" (click)="openPerformance()" />
+                                <p-button size="small" label="Open Statistics" (click)="openPerformance()" />
                                 <p-button size="small" label="Open Log" (click)="openLog()" />
                                 <p-button size="small" label="Export" (click)="openExport()" />
                             </div>
@@ -73,8 +73,8 @@ export class DiagnosticsIndicatorComponent {
     @ViewChild('popover') popover?: Popover;
 
     readonly snapshot$ = this.diagnostics.snapshot$;
-    readonly progressRatio$ = this.snapshot$.pipe(
-        map(snapshot => this.progressRatio(snapshot.progress.rendered))
+    readonly showSpinner$ = this.snapshot$.pipe(
+        map(snapshot => this.shouldShowSpinner(snapshot))
     );
     readonly hasError$ = combineLatest([this.snapshot$, this.diagnostics.logs$]).pipe(
         map(([snapshot, logs]) => {
@@ -128,13 +128,33 @@ export class DiagnosticsIndicatorComponent {
         if (!counter.total) {
             return 0;
         }
-        return Math.round((counter.done / counter.total) * 100);
+        if (counter.done >= counter.total) {
+            return 100;
+        }
+        const percent = Math.floor((counter.done / counter.total) * 100);
+        return Math.max(0, Math.min(99, percent));
     }
 
-    private progressRatio(counter: ProgressCounter): number {
-        if (!counter.total) {
-            return 1;
-        }
-        return counter.done / counter.total;
+    private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
+        const receivingDone = this.isCounterComplete(snapshot.progress.received);
+        return !receivingDone || snapshot.visualizations.queue > 0;
+    }
+
+    visualizationSummary(snapshot: DiagnosticsSnapshot): string {
+        const tileCount = snapshot.visualizations.tilesWithFeatures;
+        const featureCount = snapshot.visualizations.features;
+        return `${tileCount} ${this.pluralize(tileCount, 'tile')} (${featureCount} ${this.pluralize(featureCount, 'feature')})`;
+    }
+
+    queueSummary(queueCount: number): string {
+        return `queue ${queueCount} ${this.pluralize(queueCount, 'tile')}`;
+    }
+
+    private pluralize(count: number, singular: string): string {
+        return count === 1 ? singular : `${singular}s`;
+    }
+
+    private isCounterComplete(counter: ProgressCounter): boolean {
+        return !counter.total || counter.done >= counter.total;
     }
 }
