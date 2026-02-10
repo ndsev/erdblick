@@ -39,6 +39,13 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
     return node;
 }
 
+auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
+{
+    if (auto decoded = value.decodeBigEndianI64())
+        return std::to_string(*decoded);
+    return "0x" + value.toHex(false);
+}
+
 }
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
@@ -379,12 +386,13 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
             auto vv = value->value();
             if (std::holds_alternative<std::string_view>(vv))
                 singleValue = {convertString(std::get<std::string_view>(vv)), ValueType::String};
-            else if (std::holds_alternative<simfil::ByteArray>(vv))
-                singleValue = {JsValue(std::get<simfil::ByteArray>(vv).toDisplayString()), ValueType::String};
             else
                 singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
             break;
         }
+        case simfil::ValueType::Bytes:
+            singleValue = {JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value()))), ValueType::String};
+            break;
         case simfil::ValueType::Object: break;
         case simfil::ValueType::Array: isArray = true; break;
         }

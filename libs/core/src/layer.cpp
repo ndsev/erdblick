@@ -4,6 +4,18 @@
 #include "mapget/model/feature.h"
 #include <iostream>
 
+namespace
+{
+
+auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
+{
+    if (auto decoded = value.decodeBigEndianI64())
+        return std::to_string(*decoded);
+    return "0x" + value.toHex(false);
+}
+
+}
+
 namespace erdblick
 {
 
@@ -155,6 +167,13 @@ NativeJsValue TileSourceDataLayer::toObject() const
                     return JsValue(*vv);
                 if (auto vv = std::get_if<std::string_view>(&v))
                     return JsValue(std::string(*vv));
+                return JsValue();
+            }
+            case simfil::ValueType::Bytes: {
+                auto v = node.value();
+                if (auto vv = std::get_if<simfil::ByteArray>(&v))
+                    return JsValue(byteArrayToDisplayString(*vv));
+                return JsValue();
             }
             default:
                 return JsValue();
