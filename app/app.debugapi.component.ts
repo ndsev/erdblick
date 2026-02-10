@@ -1,9 +1,10 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
-import {SceneMode, CesiumMath} from "./integrations/cesium";
+import {SceneMode, CesiumMath, Viewer} from "./integrations/cesium";
 import {MapView} from "./mapview/view";
-import {MapView2D} from "./mapview/view2d";
+import {TileVisualization} from "./mapview/tile.visualization.model";
+import type {ErdblickStyle} from "./styledata/style.service";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -20,6 +21,7 @@ export interface DebugWindow extends Window {
  * GUI.
  */
 export class ErdblickDebugApi {
+    private views: Map<number, MapView> = new Map();
     /**
      * Initialize a new ErdblickDebugApi instance.
      */
@@ -70,6 +72,149 @@ export class ErdblickDebugApi {
         ];
         const orientation = this.stateService.getCameraOrientation(viewIndex);
         return JSON.stringify({position, orientation});
+    }
+
+    /**
+     * Register a MapView so it can be accessed from the debug API.
+     */
+    registerView(viewIndex: number, view: MapView) {
+        this.views.set(viewIndex, view);
+    }
+
+    /**
+     * Access the MapView instance for a given view index.
+     */
+    getView(viewIndex: number = 0): MapView | undefined {
+        return this.views.get(viewIndex);
+    }
+
+    /**
+     * Access the Cesium Viewer instance for a given view index.
+     */
+    getViewer(viewIndex: number = 0): Viewer | undefined {
+        return this.views.get(viewIndex)?.viewer;
+    }
+
+    /**
+     * Enumerate tile visualizations currently active for a view.
+     */
+    getTileVisualizations(viewIndex: number = 0, styleId?: string, tileKey?: string): TileVisualization[] {
+        const state = (this.mapService as any).viewVisualizationState?.[viewIndex];
+        if (!state || typeof state.getVisualizations !== "function") {
+            return [];
+        }
+        return Array.from(state.getVisualizations(styleId, tileKey));
+    }
+
+    private resolveStyle(styleId: string): ErdblickStyle | undefined {
+        if (!styleId) {
+            return undefined;
+        }
+        const styles = this.mapService.styleService?.styles;
+        if (!styles) {
+            return undefined;
+        }
+        const direct = styles.get(styleId);
+        if (direct) {
+            return direct;
+        }
+        for (const style of styles.values()) {
+            if (style.shortId === styleId) {
+                return style;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Fetch a specific tile and render it immediately.
+     */
+    async renderTile(tileId: number | bigint | string,
+                     mapId: string,
+                     layerId: string,
+                     styleId: string,
+                     viewIndex: number = 0): Promise<TileVisualization | null> {
+        if (viewIndex >= this.stateService.numViews) {
+            console.error(`Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`);
+            return null;
+        }
+        const view = this.getView(viewIndex);
+        if (!view || !view.viewer) {
+            console.error("No viewer available yet. Wait for the view to initialize.");
+            return null;
+        }
+        const style = this.resolveStyle(styleId);
+        if (!style) {
+            console.error(`Unknown style '${styleId}'.`);
+            return null;
+        }
+        if (!mapId || !layerId) {
+            console.error("Expected mapId and layerId.");
+            return null;
+        }
+
+        let tileIdBig: bigint;
+        try {
+            tileIdBig = typeof tileId === "bigint" ? tileId : BigInt(tileId);
+        } catch (err) {
+            console.error(`Invalid tileId '${tileId}': ${err}`);
+            return null;
+        }
+
+        const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileIdBig);
+        const tiles = await this.mapService.loadTiles(new Set([tileKey]));
+        const tile = tiles.get(tileKey);
+        if (!tile) {
+            console.error(`Failed to load tile ${tileKey}.`);
+            return null;
+        }
+
+        const viewState = (this.mapService as any).viewVisualizationState?.[viewIndex];
+        if (!viewState) {
+            console.error(`Missing view visualization state for view ${viewIndex}.`);
+            return null;
+        }
+
+        let visu: TileVisualization | undefined = viewState.getVisualization(style.id, tileKey);
+        if (!visu) {
+            const use3dTiles = this.stateService.visualizationBackend === "3dtiles";
+            visu = new TileVisualization(
+                viewIndex,
+                tile,
+                (this.mapService as any).pointMergeService,
+                (key: string) => this.mapService.getFeatureTile(key),
+                style.featureLayerStyle,
+                tile.preventCulling || viewState.highDetailTileIds?.has(tile.tileId),
+                coreLib.HighlightMode.NO_HIGHLIGHT,
+                [],
+                this.mapService.maps.getViewTileBorderState(viewIndex),
+                this.mapService.maps.getLayerStyleOptions(viewIndex, mapId, layerId, style.id),
+                use3dTiles
+            );
+            viewState.putVisualization(style.id, tileKey, visu);
+        } else {
+            visu.isHighDetail = tile.preventCulling || viewState.highDetailTileIds?.has(tile.tileId);
+            visu.showTileBorder = this.mapService.maps.getViewTileBorderState(viewIndex);
+        }
+
+        const rendered = await visu.render(view.viewer);
+        if (rendered && view.viewer?.scene) {
+            view.viewer.scene.requestRender();
+        }
+        return visu;
+    }
+
+    /**
+     * Access recent 3D tiles debug objects captured by the renderer.
+     */
+    get3DTilesDebug() {
+        const g = globalThis as any;
+        return {
+            tileset: g.__ERDBLICK_DEBUG_3DTILES_TILESET__,
+            debugModel: g.__ERDBLICK_DEBUG_3DTILES_DEBUG_MODEL__,
+            attributeStats: g.__ERDBLICK_DEBUG_3DTILES_ATTRS__,
+            viewer: g.__ERDBLICK_DEBUG_VIEWER__
+        };
     }
 
     /**

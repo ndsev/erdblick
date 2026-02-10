@@ -42,6 +42,13 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
+                <label>Visualization backend:</label>
+                <p-selectButton [options]="visualizationBackendOptions" [(ngModel)]="visualizationBackendSetting"
+                                optionLabel="label" optionValue="value"
+                                (ngModelChange)="setVisualizationBackend($event)"></p-selectButton>
+            </div>
+            <p-divider></p-divider>
+            <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
             </div>
@@ -100,6 +107,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
+    visualizationBackendSetting: 'legacy' | '3dtiles' = 'legacy';
+    visualizationBackendOptions = [
+        { label: 'Legacy primitives', value: 'legacy' },
+        { label: '3D Tiles (Experimental)', value: '3dtiles' }
+    ];
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -130,6 +142,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.visualizationBackendState.subscribe(backend => {
+            this.visualizationBackendSetting = backend;
         }));
     }
 
@@ -186,6 +201,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.darkModeSetting = setting;
         localStorage.setItem(this.DARK_MODE_KEY, setting);
         this.applyDarkModeSetting(setting);
+    }
+
+    setVisualizationBackend(setting: 'legacy' | '3dtiles') {
+        this.visualizationBackendSetting = setting;
+        this.stateService.visualizationBackend = setting;
+        this.mapService.resetVisualizations();
+        this.mapService.scheduleUpdate();
+        this.messageService.showSuccess("Visualization backend updated.");
     }
 
     private applyDarkModeSetting(setting: 'off' | 'on' | 'auto') {

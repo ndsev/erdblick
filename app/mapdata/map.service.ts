@@ -783,6 +783,7 @@ export class MapDataService {
             }
             return;
         }
+        const use3dTiles = this.stateService.visualizationBackend === '3dtiles';
         let visu = new TileVisualization(
             viewIndex,
             tileLayer,
@@ -793,7 +794,8 @@ export class MapDataService {
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.maps.getViewTileBorderState(viewIndex),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId));
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId),
+            use3dTiles);
         visu.updateStatus(true);
         viewState.visualizationQueue.push(visu);
         viewState.putVisualization(styleId, tileKey, visu);
@@ -1096,6 +1098,37 @@ export class MapDataService {
             this.legalInformationPerMap.set(mapName, new Set<string>().add(legalInfo));
         }
         this.legalInformationUpdated.next(true);
+    }
+
+    /**
+     * Clear all visualizations and merged point tiles across all views.
+     * Used when switching visualization backends.
+     */
+    resetVisualizations(): void {
+        for (const viewState of this.viewVisualizationState) {
+            viewState.visualizationQueue = [];
+            for (const tileVisu of viewState.removeVisualizations()) {
+                this.tileVisualizationDestructionTopic.next(tileVisu);
+            }
+        }
+
+        while (this.selectionVisualizations.length) {
+            const visualization = this.selectionVisualizations.pop();
+            if (visualization) {
+                this.tileVisualizationDestructionTopic.next(visualization);
+            }
+        }
+
+        while (this.hoverVisualizations.length) {
+            const visualization = this.hoverVisualizations.pop();
+            if (visualization) {
+                this.tileVisualizationDestructionTopic.next(visualization);
+            }
+        }
+
+        for (const removedMergedPointsTile of this.pointMergeService.clear("")) {
+            this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
+        }
     }
 
     /**

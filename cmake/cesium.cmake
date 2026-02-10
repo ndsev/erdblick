@@ -10,6 +10,7 @@ endif()
 # List of cesium libs we want to expose as CMake targets
 set(CESIUM_LIBS
   CesiumUtility
+  CesiumJsonWriter
   Cesium3DTilesWriter
   CesiumGeospatial
   CesiumGltf

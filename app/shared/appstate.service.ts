@@ -33,6 +33,8 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#58cf08"
 ]
 
+export type VisualizationBackend = 'legacy' | '3dtiles';
+
 export interface Versions {
     name: string;
     tag: string;
@@ -348,6 +350,12 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'tvl'
     });
 
+    readonly visualizationBackendState = this.createState<VisualizationBackend>({
+        name: 'visualizationBackend',
+        defaultValue: 'legacy',
+        schema: z.enum(['legacy', '3dtiles'])
+    });
+
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
@@ -642,6 +650,8 @@ export class AppStateService implements OnDestroy {
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
+    get visualizationBackend() {return this.visualizationBackendState.getValue();}
+    set visualizationBackend(val: VisualizationBackend) {this.visualizationBackendState.next(val);};
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}

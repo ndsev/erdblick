@@ -194,6 +194,10 @@ export class MapView {
                 sceneMode: this.sceneMode,
                 mapProjection: mapProjection
             });
+            const debugApi = (window as any).ebDebug;
+            if (debugApi && typeof debugApi.registerView === "function") {
+                debugApi.registerView(this._viewIndex, this);
+            }
 
             // Restore OpenStreetMap layer
             if (this.openStreetMapLayer) {

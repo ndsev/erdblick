@@ -3,6 +3,7 @@ project(erdblick-core)
 # For WASM modules, add_executable is used instead of add_library.
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
+  include/erdblick/visualization_3dtiles.h
   include/erdblick/style.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
@@ -23,7 +24,8 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/cesium-interface/labels.h
   include/erdblick/cesium-interface/billboards.h
 
-  src/visualization.cpp
+  src/visualization_legacy.cpp
+  src/visualization_3dtiles.cpp
   src/style.cpp
   src/rule.cpp
   src/color.cpp
@@ -92,11 +94,20 @@ target_include_directories(erdblick-core
   PUBLIC
     include
   PRIVATE
-    include/erdblick)
+    include/erdblick
+  SYSTEM PRIVATE
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/Cesium3DTiles/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/Cesium3DTiles/generated/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/CesiumJsonWriter/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/CesiumGeometry/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/extern/GSL/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/extern/rapidjson/include
+    ${CMAKE_BINARY_DIR}/_deps/cesiumnative_src-src/CesiumGltf/generated/include)
 
 target_link_libraries(erdblick-core
   PUBLIC
     CesiumUtility
+    CesiumJsonWriter
     Cesium3DTilesWriter
     CesiumGeospatial
     CesiumGltf

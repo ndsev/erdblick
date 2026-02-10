@@ -29,6 +29,7 @@ const char *__asan_default_options() {
 #include "mapget/model/simfilutil.h"
 #include "simfil/model/nodes.h"
 #include "visualization.h"
+#include "visualization_3dtiles.h"
 #include "parser.h"
 #include "style.h"
 #include "testdataprovider.h"
@@ -442,6 +443,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
         .function("externalReferences", &FeatureLayerVisualization::externalReferences)
         .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
+
+    ////////// FeatureLayerVisualization3DTiles
+    em::class_<FeatureLayerVisualization3DTiles>("FeatureLayerVisualization3DTiles")
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .function("addTileFeatureLayer", &FeatureLayerVisualization3DTiles::addTileFeatureLayer)
+        .function("renderGlb", &FeatureLayerVisualization3DTiles::renderGlb)
+        .function("origin", &FeatureLayerVisualization3DTiles::origin)
+        .function("makeTileset", &FeatureLayerVisualization3DTiles::makeTileset);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
