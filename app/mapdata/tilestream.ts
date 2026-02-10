@@ -170,11 +170,6 @@ export class MapTileStreamClient {
     }
 
     async updateRequest(tileLayerRequests: any) {
-        // Nothing to do if all requests are empty.
-        if (tileLayerRequests.length === 0) {
-            return;
-        }
-
         const requestBody = {
             requests: tileLayerRequests,
             stringPoolOffsets: this.parser!.getFieldDictOffsets(),

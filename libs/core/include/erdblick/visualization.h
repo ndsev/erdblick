@@ -256,7 +256,7 @@ private:
     /**
      * Insert style option variables into the given OverlayNode.
      */
-    void addOptionsToSimfilContext(simfil::OverlayNode& context);
+    void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
 
     /**
      * Create a feature primitive ID struct from the mapTileKey_ and the given feature ID.
@@ -298,6 +298,7 @@ private:
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
     std::set<std::string> featureIdSubset_;
+    std::set<std::string> featureIdBaseSubset_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;

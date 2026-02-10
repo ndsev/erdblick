@@ -14,7 +14,7 @@ class HttpClientStub {
 class MapDataServiceStub {
     maps = {maps: new Map<string, any>()};
     sourceDataLayerIdForLayerName = vi.fn();
-    tileParser: any = undefined;
+    tileLayerParser: any = {filterFeatureJumpTargets: vi.fn().mockReturnValue([])};
     setHoveredFeatures = vi.fn();
     focusOnFeature = vi.fn();
 }
@@ -210,7 +210,7 @@ describe('JumpTargetService', () => {
             },
         ];
 
-        mapService.tileParser = {
+        mapService.tileLayerParser = {
             filterFeatureJumpTargets: vi.fn(() => actions),
         };
 

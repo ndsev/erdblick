@@ -3,7 +3,9 @@
 #include "cesium-interface/primitive.h"
 #include "geometry.h"
 
+#include <algorithm>
 #include <iostream>
+#include <type_traits>
 
 #include "cesium-interface/billboards.h"
 
@@ -17,6 +19,26 @@ uint32_t fvec4ToInt(glm::fvec4 const& v) {
     return (
         (static_cast<uint32_t>(v.r * 255) << 24) | (static_cast<uint32_t>(v.g * 255) << 16) |
         (static_cast<uint32_t>(v.b * 255) << 8) | static_cast<uint32_t>(v.a * 255));
+}
+
+constexpr uint32_t geomTypeBit(mapget::GeomType const& g) {
+    return 1u << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
+}
+
+std::string_view stripFeatureIdSuffix(std::string_view featureId) {
+    constexpr std::string_view attributeSuffix = ":attribute#";
+    constexpr std::string_view relationSuffix = ":relation#";
+    auto cut = std::string_view::npos;
+    if (auto pos = featureId.find(attributeSuffix); pos != std::string_view::npos) {
+        cut = pos;
+    }
+    if (auto pos = featureId.find(relationSuffix); pos != std::string_view::npos) {
+        cut = (cut == std::string_view::npos) ? pos : std::min(cut, pos);
+    }
+    if (cut == std::string_view::npos) {
+        return featureId;
+    }
+    return featureId.substr(0, cut);
 }
 }
 
@@ -57,7 +79,9 @@ FeatureLayerVisualization::FeatureLayerVisualization(
     // Convert feature ID subset.
     auto featureIdSubset = JsValue(rawFeatureIdSubset);
     for (auto i = 0; i < featureIdSubset.size(); ++i) {
-        featureIdSubset_.insert(featureIdSubset.at(i).as<std::string>());
+        auto featureId = featureIdSubset.at(i).as<std::string>();
+        featureIdSubset_.insert(featureId);
+        featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
     }
 }
 
@@ -92,26 +116,61 @@ void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile
 
 void FeatureLayerVisualization::run()
 {
-    for (auto&& feature : *tile_) {
+    auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
+    {
         auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
-        simfil::OverlayNode evaluationContext(simfil::Value::field(constFeature));
+        auto evaluationContext = simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(constFeature));
         addOptionsToSimfilContext(evaluationContext);
         auto boundEvalFun = BoundEvalFun{
             evaluationContext,
             [this, &evaluationContext](auto&& str)
             {
-                return evaluateExpression(str, evaluationContext, false, false);
+                return evaluateExpression(str, *evaluationContext, false, false);
             }};
 
-        for (auto&& rule : style_.rules()) {
-            if (rule.mode() != highlightMode_) {
-                continue;
+        auto const& candidateRuleIndices =
+            style_.candidateRuleIndices(highlightMode_, constFeature.typeId());
+        uint32_t featureGeomMask = 0;
+        bool needsFeatureGeomMask = false;
+        for (auto ruleIndex : candidateRuleIndices) {
+            if (style_.rules()[ruleIndex].aspect() == FeatureStyleRule::Feature) {
+                needsFeatureGeomMask = true;
+                break;
+            }
+        }
+        if (needsFeatureGeomMask) {
+            if (auto geom = feature->geomOrNull()) {
+                geom->forEachGeometry([&featureGeomMask](auto&& geomEntry) {
+                    featureGeomMask |= geomTypeBit(geomEntry->geomType());
+                    return true;
+                });
+            }
+        }
+        for (auto ruleIndex : candidateRuleIndices) {
+            auto const& rule = style_.rules()[ruleIndex];
+            if (rule.aspect() == FeatureStyleRule::Feature) {
+                if ((featureGeomMask & rule.geometryTypesMask()) == 0) {
+                    continue;
+                }
             }
             auto mapLayerStyleRuleId = getMapLayerStyleRuleId(rule.index());
             if (auto* matchingSubRule = rule.match(*feature, boundEvalFun)) {
                 addFeature(feature, boundEvalFun, *matchingSubRule, mapLayerStyleRuleId);
                 featuresAdded_ = true;
             }
+        }
+    };
+
+    if (featureIdBaseSubset_.empty()) {
+        for (auto&& feature : *tile_) {
+            processFeature(feature);
+        }
+        return;
+    }
+
+    for (auto const& featureId : featureIdBaseSubset_) {
+        if (auto feature = tile_->find(featureId)) {
+            processFeature(feature);
         }
     }
 }
@@ -245,19 +304,8 @@ void FeatureLayerVisualization::addFeature(
     std::string const& mapLayerStyleRuleId)
 {
     auto featureId = feature->id()->toString();
-    if (!featureIdSubset_.empty()) {
-        bool isAllowed = false;
-        for (auto const& allowedFeatureId : featureIdSubset_) {
-            // The featureId may also refer to an attribute,
-            // in this case :attribute#<NUMBER> is appended to the string.
-            if (allowedFeatureId == featureId || allowedFeatureId.starts_with(featureId + ':')) {
-                isAllowed = true;
-                break;
-            }
-        }
-        if (!isAllowed) {
-            return;
-        }
+    if (!featureIdBaseSubset_.empty() && !featureIdBaseSubset_.contains(featureId)) {
+        return;
     }
 
     auto offset = localWgs84UnitCoordinateSystem(feature->firstGeometry()) * rule.offset();
@@ -307,7 +355,7 @@ void FeatureLayerVisualization::addFeature(
                     feature,
                     layerName,
                     attr,
-                    featureId, // TODO: Rethink, how an attribute link may be encoded in the id.
+                    featureId,
                     rule,
                     mapLayerStyleRuleId,
                     offsetFactor,
@@ -487,7 +535,7 @@ void FeatureLayerVisualization::addMergedPointGeometry(
         mapLayerStyleRuleId) + static_cast<int32_t>(mergedPointFeatureSet.size());
 
     auto mergeCountId = internalStringPoolCopy_->emplace("$mergeCount");
-    evalFun.context_.set(mergeCountId.value(), simfil::Value(mergedPointCount));
+    evalFun.context_->set(mergeCountId.value(), simfil::Value(mergedPointCount));
 
     // Add a MergedPointVisualization to the list.
     if (!mergedPointVisu) {
@@ -725,23 +773,23 @@ void FeatureLayerVisualization::addAttribute(
     auto const& constAttr = static_cast<mapget::Attribute const&>(*attr);
     auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
 
-    simfil::OverlayNode attrEvaluationContext(simfil::Value::field(constAttr));
+    auto attrEvaluationContext = simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(constAttr));
     addOptionsToSimfilContext(attrEvaluationContext);
 
     // Assemble simfil evaluation context.
     auto nameId = internalStringPoolCopy_->emplace("$name");
-    attrEvaluationContext.set(nameId.value(), simfil::Value(attr->name()));
+    attrEvaluationContext->set(nameId.value(), simfil::Value(attr->name()));
     auto featureId = internalStringPoolCopy_->emplace("$feature");
-    attrEvaluationContext.set(featureId.value(), simfil::Value::field(constFeature));
+    attrEvaluationContext->set(featureId.value(), simfil::Value::field(constFeature));
     auto layerId = internalStringPoolCopy_->emplace("$layer");
-    attrEvaluationContext.set(layerId.value(), simfil::Value(layer));
+    attrEvaluationContext->set(layerId.value(), simfil::Value(layer));
 
     // Function which can evaluate a simfil expression in the attribute context.
     auto boundEvalFun = BoundEvalFun{
         attrEvaluationContext,
         [this, &attrEvaluationContext](auto&& str)
         {
-            return evaluateExpression(str, attrEvaluationContext, false, false);
+            return evaluateExpression(str, *attrEvaluationContext, false, false);
         }};
 
     // Bump visual offset factor for next visualized attribute.
@@ -786,11 +834,11 @@ void FeatureLayerVisualization::addAttribute(
     }
 }
 
-void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::OverlayNode& context)
+void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context)
 {
     for (auto const& [key, value] : optionValues_) {
         auto keyId = internalStringPoolCopy_->emplace(key);
-        context.set(keyId.value(), value);
+        context->set(keyId.value(), value);
     }
 }
 
@@ -915,17 +963,17 @@ void RecursiveRelationVisualizationState::render(
     auto const& constSource = static_cast<mapget::Feature const&>(*r.sourceFeature_);
     auto const& constTarget = static_cast<mapget::Feature const&>(*r.targetFeature_);
 
-    simfil::OverlayNode relationEvaluationContext(simfil::Value::field(constRelation));
+    auto relationEvaluationContext = simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(constRelation));
     visu_.addOptionsToSimfilContext(relationEvaluationContext);
 
     // Assemble simfil evaluation context.
     {
         auto sourceId = visu_.internalStringPoolCopy_->emplace("$source");
-        relationEvaluationContext.set(sourceId.value(), simfil::Value::field(constSource));
+        relationEvaluationContext->set(sourceId.value(), simfil::Value::field(constSource));
         auto targetId = visu_.internalStringPoolCopy_->emplace("$target");
-        relationEvaluationContext.set(targetId.value(), simfil::Value::field(constTarget));
+        relationEvaluationContext->set(targetId.value(), simfil::Value::field(constTarget));
         auto twowayId = visu_.internalStringPoolCopy_->emplace("$twoway");
-        relationEvaluationContext.set(twowayId.value(), simfil::Value(r.twoway_));
+        relationEvaluationContext->set(twowayId.value(), simfil::Value(r.twoway_));
     }
 
     // Function which can evaluate a simfil expression in the relation context.
@@ -933,7 +981,7 @@ void RecursiveRelationVisualizationState::render(
         relationEvaluationContext,
         [this, &relationEvaluationContext](auto&& str)
         {
-            return visu_.evaluateExpression(str, relationEvaluationContext, false, false);
+            return visu_.evaluateExpression(str, *relationEvaluationContext, false, false);
         }};
 
     // Obtain source/target geometries.

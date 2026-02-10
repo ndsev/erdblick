@@ -371,7 +371,7 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
     OptionalValueAndType singleValue;
 
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds) {
-        singleValue = {convertString(tile_->resolveFeatureId(*value)->toString()), ValueType::FeatureId};
+        singleValue = {convertString(tile_->resolve<FeatureId>(*value)->toString()), ValueType::FeatureId};
         fieldScope->mapId_ = JsValue(tile_->mapId());
     }
     else {

@@ -32,6 +32,32 @@
             z-index: 9999;
         }
 
+        #global-spinner-status {
+            position: absolute;
+            top: calc(50vh + 5em);
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(80vw, 520px);
+            text-align: center;
+            color: #e5e7eb;
+            font-family: "Inter", sans-serif;
+        }
+
+        #global-spinner-message {
+            font-size: 1rem;
+            margin-top: 0.75rem;
+        }
+
+        #global-spinner-details {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #9ca3af;
+        }
+
+        #global-spinner-details .spinner-line {
+            margin-top: 0.25rem;
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -42,6 +68,10 @@
 <body>
 <div id="global-spinner-container">
     <div id="global-spinner"></div>
+    <div id="global-spinner-status">
+        <div id="global-spinner-message">Starting</div>
+        <div id="global-spinner-details"></div>
+    </div>
 </div>
 <app-root></app-root>
 </body>

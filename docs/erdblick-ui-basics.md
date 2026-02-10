@@ -69,6 +69,17 @@ Finally, at the bottom of the dialog, the `Add View` button may be used to open 
 
 ![erdblick UI](screenshots/maps-and-layers.png)
 
+## Tile Load Status Overlay
+
+Erdblick visualizes tile load progress directly on the map. These overlays are shown even when tile borders are disabled, and they update as the backend streams data and the renderer catches up.
+
+- **LoadingQueued** – thin, slightly inset orange outline.
+- **BackendFetching** – inset rectangle filled with diagonal orange stripes.
+- **BackendConverting** – inset rectangle with denser diagonal orange stripes.
+- **RenderingQueued** – inset rectangle filled with a translucent orange tint.
+- **Empty** – full tile rectangle filled with a translucent gray tint.
+- **Error** – full tile rectangle filled with a translucent red tint.
+
 ## Coordinate panel and markers
 
 - The compact panel in the status bar shows the current cursor position. While you move the mouse over the map, it streams WGS‑84 longitude/latitude plus pre-computed MapViewer tile IDs for levels 0–15. Click any label to copy that value.

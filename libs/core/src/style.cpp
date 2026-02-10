@@ -10,6 +10,13 @@
 namespace erdblick
 {
 
+namespace {
+constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
+    return static_cast<size_t>(mode);
+}
+const std::vector<uint32_t> kEmptyRuleIndices{};
+}
+
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 {
     auto styleSpec = yamlArray.toString();
@@ -48,6 +55,12 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         options_.emplace_back(option);
     }
 
+    for (auto const& rule : rules_) {
+        auto modeIndex = highlightModeIndex(rule.mode());
+        ruleIndicesByMode_[modeIndex].push_back(rule.index());
+        highlightModeMask_ |= (1u << modeIndex);
+    }
+
     valid_ = true;
 }
 
@@ -80,6 +93,48 @@ bool FeatureLayerStyle::defaultEnabled() const
 
 std::string const& FeatureLayerStyle::name() const {
     return name_;
+}
+
+uint32_t FeatureLayerStyle::supportedHighlightModesMask() const
+{
+    return highlightModeMask_;
+}
+
+bool FeatureLayerStyle::supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const
+{
+    return (highlightModeMask_ & (1u << highlightModeIndex(mode))) != 0;
+}
+
+std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
+    FeatureStyleRule::HighlightMode mode,
+    std::string_view featureTypeId) const
+{
+    auto modeIndex = highlightModeIndex(mode);
+    if (!supportsHighlightMode(mode)) {
+        return kEmptyRuleIndices;
+    }
+    if (featureTypeId.empty()) {
+        return ruleIndicesByMode_[modeIndex];
+    }
+
+    auto cacheIt = ruleIndicesByTypeCache_.find(featureTypeId);
+    if (cacheIt == ruleIndicesByTypeCache_.end()) {
+        RuleIndexCacheEntry entry{};
+        for (size_t cacheModeIndex = 0; cacheModeIndex < kHighlightModeCount; ++cacheModeIndex) {
+            auto const& ruleIndices = ruleIndicesByMode_[cacheModeIndex];
+            auto& filtered = entry.byMode[cacheModeIndex];
+            filtered.reserve(ruleIndices.size());
+            for (auto ruleIndex : ruleIndices) {
+                if (rules_[ruleIndex].maybeMatchesType(featureTypeId)) {
+                    filtered.push_back(ruleIndex);
+                }
+            }
+        }
+        auto [insertIt, _] = ruleIndicesByTypeCache_.emplace(std::string(featureTypeId), std::move(entry));
+        cacheIt = insertIt;
+    }
+
+    return cacheIt->second.byMode[modeIndex];
 }
 
 FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)

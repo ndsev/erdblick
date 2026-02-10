@@ -123,16 +123,37 @@ export const ErdblickTheme = definePreset(Aura, {
     }
 });
 
+const updateGlobalSpinner = (message: string) => {
+    const messageEl = document.getElementById('global-spinner-message');
+    if (messageEl) {
+        messageEl.textContent = message;
+    }
+    const detailsEl = document.getElementById('global-spinner-details');
+    if (detailsEl) {
+        const line = document.createElement('div');
+        line.className = 'spinner-line';
+        line.textContent = message;
+        detailsEl.appendChild(line);
+    }
+};
+
 export const initializeServices = () => {
     const styleService = inject(StyleService);
     const mapService = inject(MapDataService);
     const coordService = inject(CoordinatesService);
+    const searchService = inject(FeatureSearchService);
 
     return (async () => {
+        updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
+        updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
+        updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
+        updateGlobalSpinner('Initializing map data');
         await mapService.initialize();
+        updateGlobalSpinner('Starting search workers');
+        await searchService.initializeWorkers();
     })();
 }
 

@@ -356,7 +356,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
         .function("name", &FeatureLayerStyle::name)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
-        .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled);
+        .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
+        .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")

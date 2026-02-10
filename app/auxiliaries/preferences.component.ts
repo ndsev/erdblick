@@ -8,7 +8,7 @@ import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
-    selector: 'pref-components',
+    selector: 'preferences',
     template: `
         <p-dialog header="Preferences" [(visible)]="stateService.preferencesDialogVisible" [position]="'center'"
                   [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"

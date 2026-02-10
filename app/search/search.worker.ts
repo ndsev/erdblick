@@ -98,8 +98,19 @@ export interface DiagnosticsResultsForTile {
     groupId?: string;
 }
 
+export interface WorkerInitMessage {
+    type: 'WorkerInit';
+}
+
+export interface WorkerReadyMessage {
+    type: 'WorkerReady';
+    scriptUrl: string;
+}
+
 export type WorkerTask = SearchWorkerTask | CompletionWorkerTask | DiagnosticsWorkerTask;
 export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile | DiagnosticsResultsForTile;
+export type WorkerInboundMessage = WorkerTask | WorkerInitMessage;
+export type WorkerOutboundMessage = WorkerResult | WorkerReadyMessage;
 
 function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
@@ -240,9 +251,18 @@ function processDiagnostics(task: DiagnosticsWorkerTask) {
 }
 
 addEventListener('message', async ({data}) => {
+    const task = (data as WorkerInboundMessage);
+
+    if (task?.type === 'WorkerInit') {
+        postMessage({
+            type: 'WorkerReady',
+            scriptUrl: self.location.href
+        } as WorkerReadyMessage);
+        return;
+    }
+
     await initializeLibrary();
 
-    let task = (data as WorkerTask);
     switch (task['type']) {
         case 'SearchWorkerTask':
             return processSearch(task as SearchWorkerTask);

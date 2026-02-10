@@ -234,6 +234,7 @@ export class FeatureSearchService {
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
     private diagnosticsQueue: Array<WorkerTask> = [];
+    private workersReady: Promise<void> | null = null;
 
     jobGroupManager: JobGroupManager = new JobGroupManager();
     currentCompletion: JobGroup | null = null;
@@ -288,39 +289,82 @@ export class FeatureSearchService {
                 private stateService: AppStateService) {
         // Instantiate pin graphics
         this.makeClusterPins();
+    }
 
-        // Instantiate workers.
-        const maxWorkers = navigator.hardwareConcurrency || 4;
-        for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(new URL('./search.worker', import.meta.url), {
-                type: 'module'
-            });
-            this.workers.push(worker);
-            this.workerBusy.push(false);
-            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-                this.workerBusy[i] = false;
-                const result = event.data;
-
-                // Notify the job-group if the task has an id
-                if (result.taskId) {
-                    this.jobGroupManager.completeTask(result.taskId, result);
-                }
-
-                switch (result.type) {
-                    case 'SearchResultForTile':
-                        this.addSearchResult(result as SearchResultForTile);
-                        break;
-                    case 'CompletionCandidatesForTile':
-                        this.addCompletionCandidates(result as CompletionCandidatesForTile);
-                        break;
-                    case 'DiagnosticsResultsForTile':
-                        this.addDiagnostics(result as DiagnosticsResultsForTile);
-                        break;
-                }
-
-                this.scheduleNextTask(i);
-            };
+    public initializeWorkers(): Promise<void> {
+        if (!this.workersReady) {
+            this.workersReady = this.initWorkers();
         }
+        return this.workersReady;
+    }
+
+    private async initWorkers(): Promise<void> {
+        const maxWorkers = navigator.hardwareConcurrency || 4;
+        if (maxWorkers <= 0) {
+            return;
+        }
+
+        const firstWorker = new Worker(new URL('./search.worker', import.meta.url), {type: 'module'});
+        const workerModuleUrl = await this.waitForWorkerReady(firstWorker);
+        this.registerWorker(firstWorker, 0);
+
+        const workerBlobUrl = await this.fetchWorkerBlobUrl(workerModuleUrl);
+        for (let i = 1; i < maxWorkers; i++) {
+            const worker = new Worker(workerBlobUrl, {type: 'module'});
+            this.registerWorker(worker, i);
+        }
+    }
+
+    private waitForWorkerReady(worker: Worker): Promise<string> {
+        return new Promise((resolve) => {
+            const handler = (event: MessageEvent<any>) => {
+                const result = event.data;
+                if (result?.type !== 'WorkerReady') {
+                    return;
+                }
+                worker.removeEventListener('message', handler);
+                resolve(result.scriptUrl as string);
+            };
+            worker.addEventListener('message', handler);
+            worker.postMessage({type: 'WorkerInit'});
+        });
+    }
+
+    private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
+        const response = await fetch(workerModuleUrl, {cache: 'force-cache'});
+        if (!response.ok) {
+            throw new Error(`Failed to fetch search worker module (${response.status} ${response.statusText})`);
+        }
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+    }
+
+    private registerWorker(worker: Worker, index: number) {
+        this.workers[index] = worker;
+        this.workerBusy[index] = false;
+        worker.onmessage = (event: MessageEvent<any>) => {
+            const result = event.data;
+            this.workerBusy[index] = false;
+
+            // Notify the job-group if the task has an id
+            if (result.taskId) {
+                this.jobGroupManager.completeTask(result.taskId, result);
+            }
+
+            switch (result.type) {
+                case 'SearchResultForTile':
+                    this.addSearchResult(result as SearchResultForTile);
+                    break;
+                case 'CompletionCandidatesForTile':
+                    this.addCompletionCandidates(result as CompletionCandidatesForTile);
+                    break;
+                case 'DiagnosticsResultsForTile':
+                    this.addDiagnostics(result as DiagnosticsResultsForTile);
+                    break;
+            }
+
+            this.scheduleNextTask(index);
+        };
     }
 
     private createCustomPin(text: string): string {

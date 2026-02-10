@@ -1,6 +1,7 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject, of, Subject} from 'rxjs';
 import {initializeLibrary} from "../integrations/wasm";
+import {MapTileStreamClient} from './tilestream';
 
 beforeAll(async () => {
     await initializeLibrary();
@@ -195,7 +196,7 @@ const createMapDataService = () => {
     );
 
     // Provide a minimal tile parser stub for update() to use.
-    (service as any).tileParser = {
+    const tileParser = {
         getFieldDictOffsets: vi.fn().mockReturnValue([0]),
         reset: vi.fn(),
         setDataSourceInfo: vi.fn(),
@@ -212,7 +213,11 @@ const createMapDataService = () => {
         }),
     };
 
-    return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService};
+    const tileStream = new MapTileStreamClient('/tiles');
+    (tileStream as any).parser = tileParser;
+    (service as any).tileStream = tileStream;
+
+    return {service, styleService, stateService, httpClient, infoService, pointMergeService, keyboardService, tileParser};
 };
 
 describe('MapDataService', () => {
@@ -259,7 +264,7 @@ describe('MapDataService', () => {
     });
 
     it('evicts non-required tiles while keeping required ones', async () => {
-        const {service} = createMapDataService();
+        const {service, tileParser} = createMapDataService();
 
         const fakeMapTree = {
             allLevels: (_viewIndex: number) => [],
@@ -405,7 +410,7 @@ describe('MapDataService', () => {
     });
 
     it('records tile layers and legal info on arrival', () => {
-        const {service} = createMapDataService();
+        const {service, tileParser} = createMapDataService();
 
         const statsSpy = vi.spyOn(service.statsDialogNeedsUpdate, 'next');
         const legalSpy = vi.spyOn(service.legalInformationUpdated, 'next');
@@ -422,9 +427,7 @@ describe('MapDataService', () => {
             scalarFields: {},
         };
         const tileBlob = new Uint8Array([1, 2, 3]);
-        (service as any).tileParser = {
-            readTileLayerMetadata: vi.fn().mockReturnValue(tileMetadata),
-        } as any;
+        tileParser.readTileLayerMetadata = vi.fn().mockReturnValue(tileMetadata);
 
         service.addTileFeatureLayer(tileBlob as any, null, false);
 

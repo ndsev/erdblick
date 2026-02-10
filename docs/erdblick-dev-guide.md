@@ -115,6 +115,7 @@ flowchart LR
   subgraph mapdata_dir[mapdata/*]
     MapPanel[MapPanelComponent<br>maps and layers]
     MapSvc[MapDataService<br>tiles and visualizations]
+    TileStream[MapTileStreamClient<br>/tiles stream + TileLayerParser]
   end
   State[AppStateService<br>shared state]
   StyleSvc[StyleService<br>styles]
@@ -130,7 +131,9 @@ flowchart LR
 
   MapSvc --> StyleSvc
   MapSvc --> Core
-  MapSvc --> Backend
+  MapSvc --> TileStream
+  TileStream --> Core
+  TileStream --> Backend
   MapSvc --> View
 ```
 
@@ -260,7 +263,8 @@ flowchart LR
   end
   State[AppStateService<br>selection state]
   MapSvc[MapDataService<br>tiles and SourceData]
-  Core[WASM core<br>inspection and SourceData]
+  TileStream[MapTileStreamClient<br>/tiles SourceData]
+  Core[WASM core<br>TileLayerParser + inspection]
   Backend[Backend<br>/tiles SourceData]
 
   InspectPanel --> InspectTree
@@ -270,8 +274,10 @@ flowchart LR
   State --> MapSvc
   MapSvc --> InspectPanel
   MapSvc --> SourcePanel
-  SourcePanel --> Core
-  MapSvc --> Backend
+  SourcePanel --> MapSvc
+  SourcePanel --> TileStream
+  TileStream --> Core
+  TileStream --> Backend
 ```
 
 Here the focus is on selection and inspection:
@@ -292,7 +298,7 @@ sequenceDiagram
   participant View as MapView
   participant State as AppStateService
   participant MapSvc as MapDataService
-  participant TilesWS as Tiles WebSocket
+  participant TilesWS as MapTileStreamClient
   participant Core as WASM tile helpers
   participant Backend as Backend tiles endpoints
 
@@ -305,32 +311,38 @@ sequenceDiagram
 
   MapSvc->>TilesWS: open WebSocket /tiles (if needed)
   MapSvc->>TilesWS: send request JSON<br>with requested map tile keys
-  TilesWS->>Backend: GET /tiles (WebSocket)
+  TilesWS->>Backend: WebSocket /tiles
   Backend-->>TilesWS: VTLV tile stream frames
 
   loop for each received frame
-    TilesWS-->>MapSvc: buffer frame with type<br>and payload bytes
     alt fields chunk
-      MapSvc->>Core: readFieldDictUpdate for<br>field dictionary changes
+      TilesWS->>Core: readFieldDictUpdate for<br>field dictionary changes
     else features chunk
+      TilesWS-->>MapSvc: feature payload bytes
       MapSvc->>Core: readTileFeatureLayer for<br>feature layer payload
       Core-->>MapSvc: TileFeatureLayer metadata<br>and feature data
       MapSvc->>MapSvc: update loadedTileLayers<br>and viewVisualizationState
+    else load-state chunk
+      TilesWS-->>MapSvc: load-state payload
+      MapSvc->>MapSvc: applyTileLoadState<br>update TileBoxVisualization
+    else status chunk
+      TilesWS-->>MapSvc: status payload<br>allDone + per-request info
     end
   end
 
-  Note over MapSvc: processTileStream and processVisualizationTasks<br>run in short time slices and reschedule via setTimeout<br>so parsing and rendering work does not block the UI thread
+  Note over MapSvc: MapTileStreamClient processes frames immediately,<br>while processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
 ```
 
 In `MapDataService` this flow is implemented roughly as follows:
 
-- `update()` computes the current viewport, calls `coreLib.getTileIds` to determine which tile IDs should be present, and compares this against `loadedTileLayers` to decide which tiles to request or drop per view.
-- For tile data, `MapDataService` opens a WebSocket connection to `/tiles` and sends a JSON request message with the map/layer/tile IDs plus the current `stringPoolOffsets`. New requests on the same socket replace any in-flight request.
-- The backend responds with binary WebSocket messages, each carrying one version–type–length–value (VTLV) frame from the tile stream. Status frames (type `Status`) contain JSON that summarizes request completion or errors.
-- `CHUNK_TYPE_FIELDS` frames carry dictionary updates and are passed directly to `TileLayerParser.readFieldDictUpdate`.
-- `CHUNK_TYPE_FEATURES` frames hold compressed tile payloads. `MapDataService.addTileFeatureLayer` uses the parser to construct `FeatureTile` objects, updates `loadedTileLayers`, and marks affected `TileVisualization` instances as dirty.
+- `scheduleUpdate()` drives `runUpdate()`, which recalculates visible/high-detail tile IDs per view and then calls `updateMapDataRequest()`, `updateEvictLoadedLayers()`, and `updateVisualizations()`.
+- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs (so load-state updates have a target), and sends the request through `MapTileStreamClient.updateRequest()`. The request JSON includes `stringPoolOffsets` from the current `TileLayerParser` field dictionary so the backend can skip already-known strings.
+- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance. It deduplicates identical request payloads, decodes VTLV frames, and applies `readFieldDictUpdate()` immediately when `Fields` frames arrive.
+- `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
+- `Status` frames (`mapget.tiles.status`) contain per-request results and `allDone` flags; the service uses these to resolve selection requests and surface failures.
+- `Load-state` frames (`mapget.tiles.load-state`) carry per-tile backend progress. `MapDataService` writes the state into `FeatureTile.status` and updates `TileVisualization` so `TileBoxVisualization` can display loading overlays.
 - For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
 
 Tile metadata such as legal notices and scalar fields is also extracted through the parser and stored alongside `MapLayerTree` so it can be surfaced in the Maps & Layers panel and legal information dialogs.
@@ -378,7 +390,8 @@ sequenceDiagram
 
 In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
 
-- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed.
+- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed. It also forwards `TileLoadState` updates so load-state overlays stay in sync with backend progress and local rendering queues.
+- `TileBoxVisualization` renders one low-detail rectangle per tile *per view* (shared across styles) and aggregates load state across all `TileVisualization` instances that reference that tile. It renders inset outlines, stripe fills, or solid fills to represent queued, backend-fetching, backend-converting, rendering-queued, empty, and error states; the overlays remain visible even when tile borders are disabled.
 - `coreLib.FeatureLayerVisualization` turns tile feature layers into Cesium primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
 - For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into Cesium primitives held by `MergedPointsTile`.
 - When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.
@@ -494,6 +507,7 @@ sequenceDiagram
   participant Tiles as FeatureTile cache
   participant Inspect as Inspection UI
   participant SourcePanel as SourceDataPanelComponent
+  participant TileStream as MapTileStreamClient
   participant Backend as Backend tiles SourceData
 
   View->>MapSvc: setHoveredFeatures<br>TileFeatureId list from pick
@@ -507,9 +521,11 @@ sequenceDiagram
 
   Inspect->>State: setSelection with<br>SelectedSourceData for address
   State-->>MapSvc: selectionState update<br>panel with SourceData selection
-  MapSvc->>Backend: request SourceData tile<br>from /tiles for layer
-  Backend-->>MapSvc: SourceData tile payload
-  MapSvc-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
+  SourcePanel->>MapSvc: getDataSourceInfoJson<br>for TileLayerParser
+  SourcePanel->>TileStream: request SourceData tile<br>from /tiles for layer
+  TileStream->>Backend: WebSocket /tiles
+  Backend-->>TileStream: SourceData tile payload
+  TileStream-->>SourcePanel: decoded SourceData layer<br>and updated panel contents
 ```
 
 Key points to understand:
