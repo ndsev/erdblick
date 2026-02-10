@@ -17,7 +17,7 @@ interface ProgressStage {
                 @if (showSpinner$ | async) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s" [style]="{ width: '1.75em', height: '1.75em' }" />
                 } @else {
-                    <i class="pi pi-circle-fill" style="color: green; font-size: 1.75em"></i>
+                    <i class="pi pi-circle-fill" style="color: var(--p-badge-success-background); font-size: 1.75em"></i>
                 }
             </button>
             @if (hasError$ | async) {
