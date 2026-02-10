@@ -59,8 +59,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     <p-tabpanel value="results">
                         <div style="display: flex; flex-direction: row; gap: 0.5em; margin: 0.5em 0; font-size: 0.9em; align-items: center;">
                             <span>Highlight colour:</span>
-                            <p-colorPicker [(ngModel)]="searchService.pointColor" (ngModelChange)="searchService.updatePointColor()"
-                                           appendTo="body"></p-colorPicker>
+                            <p-colorPicker [(ngModel)]="searchService.pointColor" (ngModelChange)="searchService.updatePointColor()"></p-colorPicker>
                         </div>
                         <div style="display: flex; flex-direction: row; gap: 0.5em; font-size: 0.9em; align-items: center;">
                             <span>Group:</span>

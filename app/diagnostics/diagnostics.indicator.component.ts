@@ -1,5 +1,5 @@
 import {Component, ViewChild} from '@angular/core';
-import {combineLatest, map} from 'rxjs';
+import {combineLatest, map, scan} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import {DiagnosticsSnapshot, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
@@ -13,19 +13,19 @@ interface ProgressStage {
     selector: 'diagnostics-indicator',
     template: `
         <div class="diagnostics-indicator">
-            <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)">
+            <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)" pTooltip="Open progress statistics" tooltipPosition="left">
                 @if (showSpinner$ | async) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s" [style]="{ width: '1.75em', height: '1.75em' }" />
                 } @else {
-                    <i class="pi pi-circle-fill" style="color: var(--p-badge-success-background); font-size: 1.75em"></i>
+                    <i class="pi pi-circle-fill" [class.disconnected]="!(backendConnected$ | async)"></i>
                 }
             </button>
             @if (hasError$ | async) {
-                <button class="diagnostics-indicator-badge" type="button" (click)="openErrors($event)" pTooltip="Open error log" tooltipPosition="bottom">
+                <button class="diagnostics-indicator-badge" type="button" (click)="openErrors($event)" pTooltip="Open error log" tooltipPosition="left">
                     <span class="material-symbols-outlined">error</span>
                 </button>
             }
-            <p-popover #popover class="diagnostics-popover" [baseZIndex]="30000">
+            <p-popover #popover class="diagnostics-popover" [baseZIndex]="30000" appendTo="diagnostics-indicator">
                 <ng-template pTemplate="content">
                     @if (snapshot$ | async; as snapshot) {
                         <div class="diagnostics-popover-content">
@@ -56,8 +56,10 @@ interface ProgressStage {
                                 }
                             </div>
                             <div class="diagnostics-popover-actions">
-                                <p-button size="small" label="Open Statistics" (click)="openPerformance()" />
-                                <p-button size="small" label="Open Log" (click)="openLog()" />
+                                <div class="open-actions">
+                                    <p-button size="small" label="Open Statistics" (click)="openPerformance()" />
+                                    <p-button size="small" label="Open Log" (click)="openLog()" />
+                                </div>
                                 <p-button size="small" label="Export" (click)="openExport()" />
                             </div>
                         </div>
@@ -76,14 +78,12 @@ export class DiagnosticsIndicatorComponent {
     readonly showSpinner$ = this.snapshot$.pipe(
         map(snapshot => this.shouldShowSpinner(snapshot))
     );
+    readonly backendConnected$ = this.snapshot$.pipe(
+        map(snapshot => snapshot.backend.connected)
+    );
     readonly hasError$ = combineLatest([this.snapshot$, this.diagnostics.logs$]).pipe(
-        map(([snapshot, logs]) => {
-            if (snapshot.tiles.errors > 0) {
-                return true;
-            }
-            const cutoff = Date.now() - 60_000;
-            return logs.some(entry => entry.level === 'error' && entry.at >= cutoff);
-        })
+        map(([snapshot, logs]) => snapshot.tiles.errors > 0 || logs.some(entry => entry.level === 'error')),
+        scan((hasSeenError, hasError) => hasSeenError || hasError, false)
     );
 
     readonly progressStages: ProgressStage[] = [

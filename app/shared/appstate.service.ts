@@ -20,6 +20,7 @@ export const VIEW_SYNC_LAYERS = "lay";
 export const MAX_NUM_SELECTIONS = 25;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
+export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -875,7 +876,7 @@ export class AppStateService implements OnDestroy {
                 features: featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
-                size: this.defaultInspectionPanelSize,
+                size: [DEFAULT_EM_WIDTH, newPanelUndocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
                 undocked: newPanelUndocked
             });
@@ -931,6 +932,10 @@ export class AppStateService implements OnDestroy {
             return;
         }
         allPanels[index].undocked = undocked;
+        allPanels[index].size = [
+            allPanels[index].size[0],
+            undocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT
+        ];
         if (!undocked) {
             allPanels[index].locked = true;
         }

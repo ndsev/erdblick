@@ -89,7 +89,8 @@ export class InspectionContainerComponent implements OnDestroy {
             this.dialogLayout.syncPanels(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible || allPanels.length > 0;
+            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible ||
+                allPanels.filter(p => !p.undocked).length > 0;
         });
         this.comparisonService.comparisons.subscribe(comparisons => {
             this.comparisons = comparisons;

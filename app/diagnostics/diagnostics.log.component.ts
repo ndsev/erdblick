@@ -9,7 +9,9 @@ import {DialogStackService} from '../shared/dialog-stack.service';
     template: `
         <p-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
                   [(visible)]="diagnostics.logDialogVisible"
-                  [modal]="false" (onShow)="onDialogShow()">
+                  [modal]="false"
+                  [style]="dialogStyle"
+                  (onShow)="onDialogShow()">
             <div class="diagnostics-log-controls">
                 <div class="diagnostics-log-filters">
                     <p-checkbox inputId="diag-log-info" [(ngModel)]="logFilter.info" [binary]="true"
@@ -97,6 +99,9 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 })
 export class DiagnosticsLogDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
+    readonly dialogStyle: {[key: string]: string} = {
+        height: '75vh'
+    };
     sortOrder: 'asc' | 'desc' = 'desc';
     readonly sortOrderOptions: Array<{label: string; value: 'desc' | 'asc'}> = [
         {label: 'Newest first', value: 'desc'},

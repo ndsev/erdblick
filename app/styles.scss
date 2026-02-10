@@ -6,6 +6,10 @@
 :root {
   --erdblick-card-bg: rgba(255, 255, 255, 0.87);
   --erdblick-card-bg-hover: rgba(255, 255, 255, 1);
+  --p-progressspinner-color-one: var(--p-blue-500) !important;
+  --p-progressspinner-color-two: var(--p-blue-500) !important;
+  --p-progressspinner-color-three: var(--p-blue-500) !important;
+  --p-progressspinner-color-four: var(--p-blue-500) !important;
 }
 
 .erdblick-dark {
@@ -89,13 +93,13 @@ mapview-container {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 9000 !important;
   width: calc(100% - 0.35em);
   height: 2.25em;
   margin: 0.15em;
+  padding: 0 !important;
 
   .p-menubar-root-list {
-    padding: 0 0 0 15em;
+    padding: 0 0 0 15.5em;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     background: color-mix(in srgb, var(--p-menubar-background) 70%, transparent);
@@ -135,7 +139,7 @@ mapview-container {
   width: 1.25em;
   height: 2em;
   cursor: pointer;
-  background-color: white;
+  background-color: var(--p-content-background);
   border-top-left-radius: 6px;
   border-bottom-left-radius: 6px;
   position: absolute;
@@ -218,164 +222,148 @@ mapview-container {
   }
 }
 
-.diagnostics-indicator {
-  display: flex;
-  align-items: center;
-  gap: 0.35em;
-}
+diagnostics-indicator {
+  .diagnostics-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
 
-.diagnostics-indicator-button {
-  border: none;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  gap: 0.25em;
-  cursor: pointer;
-  padding: 0.1em 0.2em;
-}
+    .pi-circle-fill {
+      color: var(--p-badge-success-background);
+      font-size: 1.75em
+    }
 
-.diagnostics-indicator-icon {
-  font-size: 1.1em;
-}
+    .pi-circle-fill.disconnected {
+      color: var(--p-badge-danger-background);
+    }
 
-.diagnostics-indicator-badge {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 0;
-  color: var(--p-button-danger-background);
-  display: flex;
-  align-items: center;
-}
+    .diagnostics-indicator-button {
+      border: none;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 0.25em;
+      cursor: pointer;
+      padding: 0;
+    }
 
-.diagnostics-ring {
-  transform: rotate(-90deg);
-}
+    .diagnostics-indicator-badge {
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      padding: 0;
+      color: var(--p-button-danger-background);
+      display: flex;
+      align-items: center;
+    }
+  }
 
-.diagnostics-ring-bg {
-  fill: none;
-  stroke: var(--p-content-border-color);
-  stroke-width: 3;
-}
+  .p-popover {
+    .diagnostics-popover-content {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+      padding: 0.25em;
+      min-width: 25em;
+    }
 
-.diagnostics-ring-fg {
-  fill: none;
-  stroke: var(--p-primary-500);
-  stroke-width: 3;
-  stroke-linecap: round;
-}
+    .diagnostics-popover-row {
+      display: flex;
+      gap: 0.5em;
+      align-items: center;
+      flex-wrap: wrap;
+    }
 
-.diagnostics-popover-content {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5em;
-  padding: 0.25em;
-  min-width: 20em;
-}
+    .diagnostics-muted {
+      color: var(--p-text-muted-color);
+    }
 
-.diagnostics-popover-row {
-  display: flex;
-  gap: 0.5em;
-  align-items: center;
-  flex-wrap: wrap;
+    .diagnostics-error {
+      color: var(--p-button-danger-background);
+    }
+
+    .diagnostics-label {
+      font-weight: 600;
+    }
+
+    .diagnostics-progress-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4em;
+    }
+
+    .diagnostics-progress-item {
+      display: grid;
+      grid-template-columns: 7em 1fr 5em;
+      gap: 0.5em;
+      align-items: center;
+    }
+
+    .diagnostics-stage-label {
+      font-size: 0.85em;
+    }
+
+    .diagnostics-stage-count {
+      font-size: 0.8em;
+      text-align: right;
+      color: var(--p-text-muted-color);
+    }
+
+    .diagnostics-popover-actions {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      margin-top: 0.25em;
+      align-items: center;
+
+      .open-actions {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.25em;
+      }
+    }
+
+    .diagnostics-progress-content {
+      display: flex;
+      flex-direction: column;
+      gap: 1em;
+    }
+
+    .diagnostics-progress-summary {
+      display: flex;
+      align-items: center;
+      gap: 1em;
+    }
+
+    .diagnostics-progress-summary-text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25em;
+    }
+
+    .diagnostics-progress-title {
+      font-weight: 600;
+    }
+
+    .diagnostics-progress-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75em;
+    }
+
+    .diagnostics-stage-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.9em;
+      margin-bottom: 0.25em;
+    }
+  }
 }
 
 .diagnostics-label {
-  font-weight: 600;
-}
-
-.diagnostics-muted {
-  color: var(--p-text-muted-color);
-}
-
-.diagnostics-error {
-  color: var(--p-button-danger-background);
-}
-
-.diagnostics-progress-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4em;
-}
-
-.diagnostics-progress-item {
-  display: grid;
-  grid-template-columns: 7em 1fr 5em;
-  gap: 0.5em;
-  align-items: center;
-}
-
-.diagnostics-stage-label {
-  font-size: 0.85em;
-}
-
-.diagnostics-stage-count {
-  font-size: 0.8em;
-  text-align: right;
-  color: var(--p-text-muted-color);
-}
-
-.diagnostics-popover-actions {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 0.4em;
-  margin-top: 0.25em;
-}
-
-.diagnostics-progress-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1em;
-}
-
-.diagnostics-progress-summary {
-  display: flex;
-  align-items: center;
-  gap: 1em;
-}
-
-.diagnostics-progress-summary-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25em;
-}
-
-.diagnostics-progress-title {
-  font-weight: 600;
-}
-
-.diagnostics-progress-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75em;
-}
-
-.diagnostics-stage-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9em;
-  margin-bottom: 0.25em;
-}
-
-.diagnostics-counts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8em, 1fr));
-  gap: 0.75em;
-}
-
-.diagnostics-count-card {
-  background: var(--p-content-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 0.5em;
-  padding: 0.75em;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25em;
-}
-
-.diagnostics-count {
-  font-size: 1.4em;
   font-weight: 600;
 }
 
@@ -952,6 +940,7 @@ map-view {
   .p-dialog-content {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
   }
 }
@@ -1854,9 +1843,9 @@ body.dialog-dragging * {
 
     .resizable-container {
       width: 30em;
-      height: 40em;
+      height: 20em;
       min-width: 20em;
-      min-height: 20em;
+      min-height: 15em;
       resize: vertical;
       overflow: auto;
       direction: rtl;

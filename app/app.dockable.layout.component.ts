@@ -55,7 +55,9 @@ export class DockableLayoutComponent {
     }
     
     onResizeStart(ev: PointerEvent) {
-        if (!this.stateService.isDockOpen || !this.dockRef) return;
+        if (!this.stateService.isDockOpen || !this.dockRef) {
+            return;
+        }
         ev.preventDefault();
         ev.stopPropagation();
         const el = this.dockRef.nativeElement;
