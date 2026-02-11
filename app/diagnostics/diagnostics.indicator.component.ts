@@ -38,11 +38,6 @@ interface ProgressStage {
                                 }
                             </div>
                             <div class="diagnostics-popover-row">
-                                <span class="diagnostics-label">Visualizations</span>
-                                <span>{{ visualizationSummary(snapshot) }}</span>
-                                <span class="diagnostics-muted">{{ queueSummary(snapshot.visualizations.queue) }}</span>
-                            </div>
-                            <div class="diagnostics-popover-row">
                                 <span class="diagnostics-label">Backend</span>
                                 <span>{{ snapshot.backend.connected ? 'connected' : 'disconnected' }}</span>
                             </div>
@@ -136,22 +131,7 @@ export class DiagnosticsIndicatorComponent {
     }
 
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
-        const receivingDone = this.isCounterComplete(snapshot.progress.received);
-        return !receivingDone || snapshot.visualizations.queue > 0;
-    }
-
-    visualizationSummary(snapshot: DiagnosticsSnapshot): string {
-        const tileCount = snapshot.visualizations.tilesWithFeatures;
-        const featureCount = snapshot.visualizations.features;
-        return `${tileCount} ${this.pluralize(tileCount, 'tile')} (${featureCount} ${this.pluralize(featureCount, 'feature')})`;
-    }
-
-    queueSummary(queueCount: number): string {
-        return `queue ${queueCount} ${this.pluralize(queueCount, 'tile')}`;
-    }
-
-    private pluralize(count: number, singular: string): string {
-        return count === 1 ? singular : `${singular}s`;
+        return !this.isCounterComplete(snapshot.progress.rendered);
     }
 
     private isCounterComplete(counter: ProgressCounter): boolean {

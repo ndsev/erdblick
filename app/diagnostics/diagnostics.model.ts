@@ -38,7 +38,6 @@ export interface DiagnosticsSnapshot {
     at: number;
     tiles: TileStateCounts;
     progress: TilePipelineProgress;
-    visualizations: VisualizationCounts;
     backend: BackendState;
 }
 

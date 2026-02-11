@@ -111,7 +111,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         let converted = 0;
 
         for (const tile of tiles) {
-            const status = tile.status ?? TileLoadState.LoadingQueued;
+            const status = tile.status;
             const hasData = tile.hasData();
             if (hasData) {
                 loaded += 1;
@@ -135,23 +135,18 @@ export class DiagnosticsDatasource implements OnDestroy {
             errors
         };
 
-        const visualizationCounts = this.mapService.getVisualizationCounts();
-        const received = loaded;
-        const rendered = Math.min(received, visualizationCounts.present);
-
         const progress: TilePipelineProgress = {
             requested: {done: expected, total: expected},
             fetched: {done: fetched, total: expected},
             converted: {done: converted, total: expected},
-            received: {done: received, total: expected},
-            rendered: {done: rendered, total: expected}
+            received: {done: loaded, total: expected},
+            rendered: this.mapService.getVisualizationCounts()
         };
 
         return {
             at: Date.now(),
             tiles: tilesSummary,
             progress,
-            visualizations: visualizationCounts,
             backend: {
                 connected: this.mapService.isTileStreamConnected()
             }

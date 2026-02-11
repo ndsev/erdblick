@@ -50,7 +50,6 @@ export class MapDataService {
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private tileStream: MapTileStreamClient|null = null;
-    private featureLayerParsingQueue: Uint8Array[] = [];
     private selectionVisualizations: TileVisualization[];
     private hoverVisualizations: TileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
@@ -126,15 +125,14 @@ export class MapDataService {
 
         // Setup TileLayerStream
         this.tileStream = new MapTileStreamClient("/tiles");
-        this.tileStream.onFeatures = (payload) => this.featureLayerParsingQueue.push(payload);
+        this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
         this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);
         this.tileStream.onLoadState = (payload) => this.handleTilesLoadState(payload);
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
         };
 
-        // Initial calls to processTileStream and processVisualizationTasks: will keep calling themselves.
-        this.processTileStream();
+        // Initial call to processVisualizationTasks: will keep calling itself.
         this.processVisualizationTasks();
 
         this.styleService.styleRemovedForId.subscribe(styleId => {
@@ -239,25 +237,6 @@ export class MapDataService {
         }, true);
     }
 
-    private processTileStream() {
-        const startTime = Date.now();
-        const timeBudget = 10; // milliseconds
-
-        while (this.featureLayerParsingQueue.length) {
-            // Check if the time budget is exceeded.
-            if (Date.now() - startTime > timeBudget) {
-                break;
-            }
-
-            let message = this.featureLayerParsingQueue.shift()!;
-            this.addTileFeatureLayer(message);
-        }
-
-        // Continue processing messages with a delay.
-        const delay = this.featureLayerParsingQueue.length ? 0 : 10;
-        setTimeout((_: any) => this.processTileStream(), delay);
-    }
-
     private processVisualizationTasks() {
         const startTime = Date.now();
         const timeBudget = 20; // milliseconds
@@ -292,35 +271,22 @@ export class MapDataService {
         return this.tileStream!.parser;
     }
 
-    public getVisualizationCounts(): {present: number; queue: number; tilesWithFeatures: number; features: number} {
-        const presentTiles = new Set<string>();
-        const queuedTiles = new Set<string>();
-        for (const state of this.viewVisualizationState) {
-            for (const visualization of state.visualizationQueue) {
-                queuedTiles.add(visualization.tile.mapTileKey);
-            }
-            for (const visualization of state.getVisualizations()) {
-                presentTiles.add(visualization.tile.mapTileKey);
-            }
-        }
-
-        let tilesWithFeatures = 0;
-        let features = 0;
-        for (const tileKey of presentTiles) {
-            const tile = this.loadedTileLayers.get(tileKey);
-            const numFeatures = Number(tile?.numFeatures ?? 0);
-            if (numFeatures > 0) {
-                tilesWithFeatures += 1;
-                features += numFeatures;
-            }
-        }
-
-        return {
-            present: presentTiles.size,
-            queue: queuedTiles.size,
-            tilesWithFeatures,
-            features
+    public getVisualizationCounts(): {total: number; done: number} {
+        const result = {
+            total: 0,
+            done: 0
         };
+
+        for (const view of this.viewVisualizationState) {
+            for (const visu of view.getVisualizations()) {
+                ++result.total;
+                if (visu.tile.hasData() && !visu.isDirty()) {
+                    ++result.done;
+                }
+            }
+        }
+
+        return result;
     }
 
     public isTileStreamConnected(): boolean {
@@ -732,11 +698,13 @@ export class MapDataService {
             tileIds: entry.tileIds
         }));
 
-        // Make sure that there are no unparsed bytes lingering from the previous response stream.
-        // Parsing a tile layer now which we previously assumed as not-yet-arrived would lead to flickering
-        // or possibly even dangling data in the map.
-        this.featureLayerParsingQueue = [];
-        await this.tileStream!.updateRequest(requests);
+        const requestWasUpdated = await this.tileStream!.updateRequest(requests);
+        if (requestWasUpdated) {
+            // Make sure that there are no unparsed bytes lingering from the previous response stream.
+            // Parsing a tile layer now which we previously assumed as not-yet-arrived would lead to flickering
+            // or possibly even dangling data in the map.
+            this.tileStream!.clearPendingFrames();
+        }
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
@@ -750,8 +718,9 @@ export class MapDataService {
             tileLayer.preventCulling = tileLayer.preventCulling || preventCulling;
             tileLayer.hydrateFromBlob(tileLayerBlob);
         } else {
-            tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
-            this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
+            // tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
+            // this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
+            return;
         }
         this.applyTileLoadState(tileLayer, tileLayer.status);
 
@@ -765,7 +734,6 @@ export class MapDataService {
         });
 
         this.statsDialogNeedsUpdate.next();
-        this.logTileStats(tileLayer);
 
         // Update legal information if any.
         if (tileLayer.legalInfo) {
@@ -782,24 +750,6 @@ export class MapDataService {
 
         // Ensure that visualizations which now have data are queued for rendering.
         this.updateVisualizations();
-    }
-
-    private logTileStats(tileLayer: FeatureTile) {
-        if (!tileLayer.hasData() || tileLayer.numFeatures <= 0) {
-            return;
-        }
-        const stats: Record<string, number[]> = {};
-        for (const [key, value] of tileLayer.stats.entries()) {
-            stats[key] = value;
-        }
-        const payload = {
-            mapTileKey: tileLayer.mapTileKey,
-            mapName: tileLayer.mapName,
-            layerName: tileLayer.layerName,
-            tileId: tileLayer.tileId.toString(),
-            stats
-        };
-        console.info("Tile stats", JSON.stringify(payload));
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
