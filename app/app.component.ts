@@ -7,6 +7,7 @@ import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -18,10 +19,18 @@ declare let window: DebugWindow;
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
             <map-panel></map-panel>
-            <stats-dialog></stats-dialog>
-            <diagnostics-performance-dialog></diagnostics-performance-dialog>
-            <diagnostics-log-dialog></diagnostics-log-dialog>
-            <diagnostics-export-dialog></diagnostics-export-dialog>
+            @if (mapService.statsDialogVisible) {
+                <stats-dialog></stats-dialog>
+            }
+            @if (diagnostics.performanceDialogVisible) {
+                <diagnostics-performance-dialog></diagnostics-performance-dialog>
+            }
+            @if (diagnostics.logDialogVisible) {
+                <diagnostics-log-dialog></diagnostics-log-dialog>
+            }
+            @if (diagnostics.exportDialogVisible) {
+                <diagnostics-export-dialog></diagnostics-export-dialog>
+            }
             <style-panel></style-panel>
             <feature-search></feature-search>
             <keyboard-dialog></keyboard-dialog>
@@ -60,7 +69,8 @@ export class AppComponent implements OnDestroy {
                 public stateService: AppStateService,
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService) {
+                private dialogStack: DialogStackService,
+                public diagnostics: DiagnosticsFacadeService) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.bindDialogFocusStacking();
