@@ -67,7 +67,7 @@ import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
 import {StatsDialogComponent} from "./auxiliaries/stats.component";
-import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedataselection.dialog.component";
+import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";

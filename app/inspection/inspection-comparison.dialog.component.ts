@@ -1,15 +1,17 @@
 import {Component, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren, effect, input} from '@angular/core';
 import {Dialog} from 'primeng/dialog';
 import {MapDataService} from '../mapdata/map.service';
-import {AppStateService, DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH, InspectionPanelModel} from '../shared/appstate.service';
-import {FeatureWrapper} from '../mapdata/features.model';
-import {DialogStackService} from '../shared/dialog-stack.service';
 import {
+    AppStateService,
+    DEFAULT_EM_HEIGHT,
+    DEFAULT_EM_WIDTH,
     InspectionComparisonEntry,
     InspectionComparisonModel,
     InspectionComparisonOption,
-    InspectionComparisonService
-} from './inspection-comparison.service';
+    InspectionPanelModel
+} from '../shared/appstate.service';
+import {FeatureWrapper} from '../mapdata/features.model';
+import {DialogStackService} from '../shared/dialog-stack.service';
 import {InspectionTreeComponent} from './inspection.tree.component';
 
 interface ComparisonColumn {
@@ -23,7 +25,7 @@ interface ComparisonColumn {
     selector: 'inspection-comparison-dialog',
     template: `
         <p-dialog #dialog class="inspection-comparison-dialog"
-                  [modal]="false" [closable]="true" [(visible)]="comparisonService.isComparisonVisible"
+                  [modal]="false" [closable]="true" [(visible)]="visible"
                   (onShow)="onDialogShow()" (onHide)="onDialogHide()" (onDragEnd)="onDialogDragEnd()"
                   (onResizeEnd)="onDialogResizeEnd()">
             <ng-template #header>
@@ -80,6 +82,7 @@ interface ComparisonColumn {
 })
 export class InspectionComparisonDialogComponent implements OnDestroy {
     comparison = input.required<InspectionComparisonModel>();
+    visible = true;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     columns: ComparisonColumn[] = [];
@@ -93,7 +96,6 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService,
-                public comparisonService: InspectionComparisonService,
                 private dialogStack: DialogStackService,
                 private renderer: Renderer2) {
         effect(() => {
@@ -115,7 +117,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     onDialogHide() {
-        this.comparisonService.closeComparison();
+        this.stateService.closeInspectionComparison();
     }
 
     onDialogDragEnd() {
@@ -149,26 +151,29 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (normalized.length > 4) {
             normalized = normalized.slice(0, 4);
         }
-        this.selectedCompareIds = normalized;
-        this.comparisonService.updateComparisonPanels(model.id, normalized);
+        const nextBasePanelId = normalized.includes(model.base.panelId)
+            ? model.base.panelId
+            : normalized[0];
+        const nextOtherPanelIds = normalized.filter(panelId => panelId !== nextBasePanelId);
+        const nextModel = this.stateService.createComparisonModel(
+            nextBasePanelId,
+            nextOtherPanelIds,
+            this.mapService.selectionTopic.getValue()
+        );
+        if (!nextModel) {
+            this.stateService.closeInspectionComparison();
+            return;
+        }
+        this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
+        this.stateService.inspectionComparison = nextModel;
     }
 
     refreshCompareOptions() {
-        const model = this.comparison();
-        const options = this.comparisonService.buildCompareOptions();
-        const optionMap = new Map(options.map(option => [option.value, option]));
-        const ensureOption = (entry: InspectionComparisonEntry) => {
-            if (!optionMap.has(entry.panelId)) {
-                options.push({
-                    label: entry.label,
-                    value: entry.panelId
-                });
-            }
-        };
-        ensureOption(model.base);
-        model.others.forEach(entry => ensureOption(entry));
+        const options = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue());
         this.compareOptions = options;
-        this.selectedCompareIds = [model.base.panelId, ...model.others.map(entry => entry.panelId)];
+        this.selectedCompareIds = this.selectedCompareIds.filter(id =>
+            options.some(option => option.value === id)
+        );
     }
 
     onResize(event: MouseEvent) {
@@ -191,7 +196,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     private buildColumns(model: InspectionComparisonModel) {
         const entries = [model.base, ...model.others];
         const columns = entries.map((entry, index) => {
-            const localId = this.localPanelId(model.id, index);
+            const localId = this.localPanelId(index);
             return {
                 entry,
                 panel: this.buildPanel([], localId),
@@ -246,9 +251,6 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private async resolveFeatures(entry: InspectionComparisonEntry): Promise<FeatureWrapper[]> {
-        if (entry.featureWrappers && entry.featureWrappers.length) {
-            return entry.featureWrappers;
-        }
         return await this.mapService.loadFeatures(entry.featureIds);
     }
 
@@ -263,7 +265,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         };
     }
 
-    private localPanelId(comparisonId: number, index: number): number {
-        return -((comparisonId * 10) + index + 1);
+    private localPanelId(index: number): number {
+        return -(index + 1);
     }
 }

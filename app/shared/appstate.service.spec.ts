@@ -212,4 +212,67 @@ describe('AppStateService', () => {
         service.ngOnDestroy();
         routerStub.events.complete();
     });
+
+    it('stores inspection dialog layout directly on selection panels', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
+            { id: 22, features: [], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        service.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
+        service.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
+
+        const first = service.getInspectionDialogLayoutEntry(11);
+        const second = service.getInspectionDialogLayoutEntry(22);
+        expect(first?.slot).toBe(0);
+        expect(second?.slot).toBe(0);
+
+        service.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
+        expect(service.getInspectionDialogLayoutEntry(11)?.slot).toBe(0);
+
+        service.pruneInspectionDialogLayout([22]);
+        expect(service.getInspectionDialogLayoutEntry(11)?.position).toEqual({ left: 12, top: 24 });
+        expect(service.getInspectionDialogLayoutEntry(22)?.position).toEqual({ left: 30, top: 40 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists comparison and layout states after hydration', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        service.selection = [
+            { id: 5, features: [], locked: false, size: [30, 40], color: '#555555', undocked: true },
+        ];
+        service.setInspectionDialogPosition(5, { left: 100, top: 200 }, 3);
+        service.openInspectionComparison({
+            base: {
+                panelId: 5,
+                label: 'base',
+                featureIds: [{ mapTileKey: 'map/layer/tile', featureId: 'f1' }]
+            },
+            others: []
+        });
+        await flushMicrotasks();
+
+        expect(localStorage.getItem('selected')).toContain('3:100:200');
+        expect(localStorage.getItem('inspectionDialogLayoutState')).toBeNull();
+        expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');
+
+        service.closeInspectionComparison();
+        await flushMicrotasks();
+        expect(service.inspectionComparison).toBeNull();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
 });

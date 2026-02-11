@@ -3,12 +3,10 @@ import {Dialog} from "primeng/dialog";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
 import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionComparisonOption, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
 import {DialogStackService} from "../shared/dialog-stack.service";
-import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service";
-import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
@@ -153,9 +151,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
                 private renderer: Renderer2,
-                private comparisonService: InspectionComparisonService,
-                private dialogStack: DialogStackService,
-                private dialogLayout: InspectionDialogLayoutService) {
+                private dialogStack: DialogStackService) {
         effect(() => {
             const panel = this.panel();
             this.updateHeaderFor(panel);
@@ -301,7 +297,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     }
 
     protected refreshCompareOptions() {
-        this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
+        this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -312,7 +308,15 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        this.comparisonService.openComparison(this.panel().id, this.selectedCompareIds);
+        const model = this.stateService.createComparisonModel(
+            this.panel().id,
+            this.selectedCompareIds,
+            this.mapService.selectionTopic.getValue()
+        );
+        if (!model) {
+            return;
+        }
+        this.stateService.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }
@@ -446,17 +450,16 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
         const index = this.dialogIndex();
         const panelId = this.panel().id;
-        const slotIndex = this.dialogLayout.getSlotIndexForPanel(index, panelId);
-        const pending = this.dialogLayout.consumePendingPosition(panelId);
-        const stored = pending ?? this.dialogLayout.getPosition(index, panelId);
+        const slotIndex = this.stateService.ensureInspectionDialogSlot(panelId, index);
+        const stored = this.stateService.getInspectionDialogLayoutEntry(panelId)?.position;
         const rect = this.dialog.container.getBoundingClientRect();
         const offsetPx = this.stateService.baseFontSize;
         const offsetMultiplier = slotIndex + 1;
         const left = stored?.left ?? rect.left + offsetPx * offsetMultiplier;
         const top = stored?.top ?? rect.top + offsetPx * offsetMultiplier;
         this.setDialogPosition(left, top);
-        if (!stored || pending) {
-            this.dialogLayout.setPosition(index, panelId, {left, top});
+        if (!stored) {
+            this.stateService.setInspectionDialogPosition(panelId, {left, top}, index);
         }
     }
 
@@ -465,7 +468,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
             return;
         }
         const rect = this.dialog.container.getBoundingClientRect();
-        this.dialogLayout.setPosition(this.dialogIndex(), this.panel().id, {left: rect.left, top: rect.top});
+        this.stateService.setInspectionDialogPosition(this.panel().id, {left: rect.left, top: rect.top}, this.dialogIndex());
     }
 
     private setDialogPosition(left: number, top: number) {

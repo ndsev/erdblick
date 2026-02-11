@@ -9,8 +9,10 @@ import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
+import type {FeatureWrapper} from "../mapdata/features.model";
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
+export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 2048;
 export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
@@ -58,6 +60,34 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+    inspectionDialogLayoutEntry?: InspectionDialogLayoutEntry;
+}
+
+export interface InspectionDialogPosition {
+    left: number;
+    top: number;
+}
+
+export interface InspectionDialogLayoutEntry {
+    panelId: number;
+    slot: number;
+    position: InspectionDialogPosition;
+}
+
+export interface InspectionComparisonEntry {
+    panelId: number;
+    label: string;
+    featureIds: TileFeatureId[];
+}
+
+export interface InspectionComparisonModel {
+    base: InspectionComparisonEntry;
+    others: InspectionComparisonEntry[];
+}
+
+export interface InspectionComparisonOption {
+    label: string;
+    value: number;
 }
 
 export interface CameraViewState {
@@ -154,8 +184,13 @@ export class AppStateService implements OnDestroy {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
                 }
                 s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                // size ~ color ~ undockedFlag
-                s += `${state.size[0]}:${state.size[1]}~${state.color}~${state.undocked ? 1 : 0}`;
+                // size ~ [optional layout slot:left:top] ~ color ~ undockedFlag
+                if (state.inspectionDialogLayoutEntry) {
+                    const entry = state.inspectionDialogLayoutEntry;
+                    s += `${state.size[0]}:${state.size[1]}~${entry.slot}:${entry.position.left}:${entry.position.top}~${state.color}~${state.undocked ? 1 : 0}`;
+                } else {
+                    s += `${state.size[0]}:${state.size[1]}~${state.color}~${state.undocked ? 1 : 0}`;
+                }
                 return s;
             });
         },
@@ -173,7 +208,18 @@ export class AppStateService implements OnDestroy {
                 const lockState = parts.shift() === "1";
                 const undocked = parts.pop()! === "1";
                 const color = parts.pop()!;
-                const sizeParts = parts.pop()!.split(':');
+                let sizeToken = parts.pop()!;
+                let inspectionDialogLayoutEntry: InspectionDialogLayoutEntry | undefined;
+                if (sizeToken.split(':').length === 3) {
+                    const [slot, left, top] = sizeToken.split(':').map(Number);
+                    inspectionDialogLayoutEntry = {
+                        panelId: id,
+                        slot,
+                        position: {left, top}
+                    };
+                    sizeToken = parts.pop() ?? '';
+                }
+                const sizeParts = sizeToken.split(':');
                 const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
 
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
@@ -182,7 +228,8 @@ export class AppStateService implements OnDestroy {
                     locked: lockState || !undocked,
                     size: size as [number, number],
                     color: color,
-                    undocked: undocked
+                    undocked: undocked,
+                    inspectionDialogLayoutEntry
                 };
 
                 // Check if the first MapTileKey is for SourceData.
@@ -430,6 +477,32 @@ export class AppStateService implements OnDestroy {
         schema: z.coerce.number().int().positive()
     });
 
+    readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
+        name: 'inspectionComparisonState',
+        defaultValue: null,
+        schema: z.union([
+            z.null(),
+            z.object({
+                base: z.object({
+                    panelId: z.coerce.number(),
+                    label: z.string(),
+                    featureIds: z.array(z.object({
+                        featureId: z.string(),
+                        mapTileKey: z.string()
+                    }))
+                }),
+                others: z.array(z.object({
+                    panelId: z.coerce.number(),
+                    label: z.string(),
+                    featureIds: z.array(z.object({
+                        featureId: z.string(),
+                        mapTileKey: z.string()
+                    }))
+                }))
+            })
+        ])
+    });
+
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
         // Perform initial hydration after the initial NavigationEnd event arrives.
@@ -643,6 +716,8 @@ export class AppStateService implements OnDestroy {
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
+    get inspectionComparison() {return this.inspectionComparisonState.getValue();}
+    set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
@@ -942,6 +1017,44 @@ export class AppStateService implements OnDestroy {
         this.selectionState.next(allPanels);
     }
 
+    getInspectionDialogLayoutEntry(panelId: number): InspectionDialogLayoutEntry | undefined {
+        return this.selectionState.getValue().find(panel => panel.id === panelId)?.inspectionDialogLayoutEntry;
+    }
+
+    ensureInspectionDialogSlot(panelId: number, preferredIndex: number): number {
+        return this.getInspectionDialogLayoutEntry(panelId)?.slot ?? preferredIndex;
+    }
+
+    setInspectionDialogPosition(panelId: number, position: InspectionDialogPosition, preferredIndex?: number): void {
+        const allPanels = this.selectionState.getValue();
+        const panelIndex = allPanels.findIndex(panel => panel.id === panelId);
+        if (panelIndex === -1) {
+            return;
+        }
+        const existing = allPanels[panelIndex].inspectionDialogLayoutEntry;
+        const slot = existing === undefined
+            ? this.ensureInspectionDialogSlot(panelId, preferredIndex ?? panelId)
+            : existing.slot;
+        allPanels[panelIndex].inspectionDialogLayoutEntry = {
+            panelId,
+            slot,
+            position: {left: position.left, top: position.top}
+        };
+        this.onStateChanged(this.selectionState, true);
+    }
+
+    pruneInspectionDialogLayout(_activePanelIds: number[]) {
+        // Layout is stored directly on the corresponding selection panel.
+    }
+
+    openInspectionComparison(model: InspectionComparisonModel): void {
+        this.inspectionComparisonState.next(model);
+    }
+
+    closeInspectionComparison(): void {
+        this.inspectionComparisonState.next(null);
+    }
+
     reorderInspectionPanels(dockedDisplayOrder: number[]) {
         const allPanels = this.selectionState.getValue();
         const dockedPanels = allPanels.filter(panel => !panel.undocked);
@@ -982,7 +1095,8 @@ export class AppStateService implements OnDestroy {
     }
 
     unsetUnlockedSelections() {
-        this.selectionState.next(this.selectionState.getValue().filter(panel => panel.locked));
+        const nextSelection = this.selectionState.getValue().filter(panel => panel.locked);
+        this.selectionState.next(nextSelection);
     }
 
     unsetPanel(id: number) {
@@ -993,10 +1107,6 @@ export class AppStateService implements OnDestroy {
         }
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
-    }
-
-    getNumSelections(): number {
-        return this.selectionState.getValue().length;
     }
 
     private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
@@ -1340,7 +1450,17 @@ export class AppStateService implements OnDestroy {
                 size: panel.size,
                 sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
                 color: panel.color,
-                undocked: panel.undocked
+                undocked: panel.undocked,
+                inspectionDialogLayoutEntry: panel.inspectionDialogLayoutEntry
+                    ? {
+                        panelId: panel.id,
+                        slot: panel.inspectionDialogLayoutEntry.slot,
+                        position: {
+                            left: panel.inspectionDialogLayoutEntry.position.left,
+                            top: panel.inspectionDialogLayoutEntry.position.top
+                        }
+                    }
+                    : undefined
             };
 
             // Filter features
@@ -1370,5 +1490,57 @@ export class AppStateService implements OnDestroy {
 
         // Sync all states, so the URL is replaced.
         this.syncAllStates();
+    }
+
+    buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
+        return panels
+            .filter(panel => excludePanelId === undefined || panel.id !== excludePanelId)
+            .filter(panel => this.isFeaturePanel(panel))
+            .map(panel => ({
+                label: this.formatFeatureLabel(panel.features),
+                value: panel.id
+            }));
+    }
+
+    private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
+        return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
+    }
+
+    private formatFeatureLabel(features: FeatureWrapper[]): string {
+        return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
+    }
+
+    private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
+        return {
+            panelId: panel.id,
+            label: this.formatFeatureLabel(panel.features),
+            featureIds: panel.features.map(feature => ({
+                mapTileKey: feature.mapTileKey,
+                featureId: feature.featureId
+            }))
+        };
+    }
+
+    createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
+        const panelsById = new Map(
+            panels
+                .filter(this.isFeaturePanel)
+                .map(panel => [panel.id, panel] as const)
+        );
+        const basePanel = panelsById.get(basePanelId);
+        if (!basePanel) {
+            return null;
+        }
+        const others = Array.from(new Set(otherPanelIds))
+            .filter(panelId => panelId !== basePanelId)
+            .slice(0, MAX_COMPARE_PANELS - 1)
+            .map(panelId => panelsById.get(panelId))
+            .filter((panel): panel is InspectionPanelModel<FeatureWrapper> => !!panel)
+            .map(panel => this.createComparisonEntryFromPanel(panel));
+
+        return {
+            base: this.createComparisonEntryFromPanel(basePanel),
+            others
+        };
     }
 }

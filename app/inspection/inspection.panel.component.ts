@@ -1,11 +1,15 @@
 import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
-import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
+import {
+    AppStateService,
+    DEFAULT_EM_WIDTH,
+    InspectionComparisonOption,
+    InspectionPanelModel
+} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
-import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
@@ -166,7 +170,6 @@ export class InspectionPanelComponent implements AfterViewInit {
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
-                private comparisonService: InspectionComparisonService,
                 private renderer: Renderer2) {
         effect(() => {
             this.title = "";
@@ -354,7 +357,7 @@ export class InspectionPanelComponent implements AfterViewInit {
     }
 
     protected refreshCompareOptions() {
-        this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
+        this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -365,7 +368,15 @@ export class InspectionPanelComponent implements AfterViewInit {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        this.comparisonService.openComparison(this.panel().id, this.selectedCompareIds);
+        const model = this.stateService.createComparisonModel(
+            this.panel().id,
+            this.selectedCompareIds,
+            this.mapService.selectionTopic.getValue()
+        );
+        if (!model) {
+            return;
+        }
+        this.stateService.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }

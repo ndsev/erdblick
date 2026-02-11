@@ -199,6 +199,7 @@ export class MapDataService {
                     existing.color = selection.color;
                     existing.size = selection.size;
                     existing.undocked = selection.undocked ?? false;
+                    existing.inspectionDialogLayoutEntry = selection.inspectionDialogLayoutEntry;
                     convertedSelections.push(existing);
                     continue;
                 }
@@ -210,7 +211,8 @@ export class MapDataService {
                     features: features,
                     sourceData: selection.sourceData,
                     color: selection.color,
-                    undocked: selection.undocked ?? false
+                    undocked: selection.undocked ?? false,
+                    inspectionDialogLayoutEntry: selection.inspectionDialogLayoutEntry
                 });
             }
             this.selectionTopic.next(convertedSelections);
