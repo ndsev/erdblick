@@ -10,6 +10,7 @@ import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
 import {Rectangle} from "../integrations/cesium";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 
 @Component({
@@ -17,7 +18,7 @@ import {Rectangle} from "../integrations/cesium";
     template: `
         <p-dialog #mapLayerDialog class="map-layer-dialog" header="" [(visible)]="layerDialogVisible"
                   [position]="'left'" [draggable]="false" [resizable]="false" 
-                  (onShow)="closeButtonVisible = true"
+                  (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
@@ -280,7 +281,8 @@ export class MapPanelComponent {
     constructor(public mapService: MapDataService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
-                public keyboardService: KeyboardService) {
+                public keyboardService: KeyboardService,
+                private readonly dialogStack: DialogStackService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
@@ -358,6 +360,11 @@ export class MapPanelComponent {
         this.subscriptions.push(
             this.stateService.mapsOpenState.subscribe(isOpen => this.layerDialogVisible = isOpen)
         );
+    }
+
+    onMapLayerDialogShow() {
+        this.closeButtonVisible = true;
+        this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
     onOsmOpacityInput(event: any, viewIndex: number) {

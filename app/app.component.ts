@@ -130,9 +130,6 @@ export class AppComponent implements OnDestroy {
             }
             const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
             if (dialogElement) {
-                if (dialogElement.closest('.map-layer-dialog')) {
-                    return;
-                }
                 if (dialogElement.closest('.search-menu-dialog')) {
                     const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
                     if (mainBar) {

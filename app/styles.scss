@@ -2894,6 +2894,7 @@ body.dialog-dragging * {
   .coordinates-panel {
     pointer-events: all;
     border-radius: 6px;
+    max-width: 80%;
 
     .coordinates-entries {
       display: flex;
@@ -2901,7 +2902,8 @@ body.dialog-dragging * {
       padding-bottom: 0;
       gap: 0.25em;
       overflow-y: auto;
-      max-width: calc(100vw - 20em);
+      max-width: calc(100% - 1.75em);
+      min-width: 0;
       align-items: center;
 
       & > .coordinates-entry:nth-child(1) {
@@ -2956,6 +2958,7 @@ body.dialog-dragging * {
       padding: 0;
       display: flex;
       flex-direction: row;
+      max-width: 100%;
 
       .p-multiselect {
         box-shadow: none;
