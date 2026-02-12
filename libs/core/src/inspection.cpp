@@ -39,6 +39,13 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
     return node;
 }
 
+auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
+{
+    if (auto decoded = value.decodeBigEndianI64())
+        return std::to_string(*decoded);
+    return "0x" + value.toHex(false);
+}
+
 }
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
@@ -60,17 +67,6 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         // Add map and layer names to the Identifiers section.
         push("mapId", "mapId", ValueType::String)->value_ = convertString(featurePtr->model().mapId());
         push("layerId", "layerId", ValueType::String)->value_ = convertString(featurePtr->model().layerInfo()->layerId_);
-
-        // TODO: Investigate and fix the issue for "index out of bounds" error.
-        //   Affects boundaries and lane connectors
-        //  if (auto prefix = featurePtr->model().getIdPrefix()) {
-        //      for (auto const& [k, v] : prefix->fields()) {
-        //          convertField(k, v);
-        //      }
-        //  }
-        //  for (auto const& [k, v] : featurePtr->id()->fields()) {
-        //      convertField(k, v);
-        //  }
 
         for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
             auto &field = current_->children_.emplace_back();
@@ -394,6 +390,9 @@ InspectionConverter::convertField(const JsValue& fieldName, const simfil::ModelN
                 singleValue = {JsValue(std::get<std::string>(vv)), ValueType::String};
             break;
         }
+        case simfil::ValueType::Bytes:
+            singleValue = {JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value()))), ValueType::String};
+            break;
         case simfil::ValueType::Object: break;
         case simfil::ValueType::Array: isArray = true; break;
         }

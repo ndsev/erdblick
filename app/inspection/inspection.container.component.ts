@@ -1,9 +1,7 @@
 import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/features.model";
-import {InspectionComparisonModel, InspectionComparisonService} from "./inspection-comparison.service";
-import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service";
 
 @Component({
     selector: 'inspection-container',
@@ -52,7 +50,7 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
                 <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
             }
         }
-        @for (comparison of comparisons; track comparison.id) {
+        @if (comparison) {
             <inspection-comparison-dialog [comparison]="comparison"></inspection-comparison-dialog>
         }
     `,
@@ -62,7 +60,7 @@ import {InspectionDialogLayoutService} from "./inspection-dialog-layout.service"
 export class InspectionContainerComponent implements OnDestroy {
     dockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
     undockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
-    comparisons: InspectionComparisonModel[] = [];
+    comparison: InspectionComparisonModel | null = null;
     isReordering = false;
     dockFilterText = '';
     dragPanelId?: number;
@@ -81,18 +79,17 @@ export class InspectionContainerComponent implements OnDestroy {
 
     constructor(private stateService: AppStateService,
                 private mapService: MapDataService,
-                private comparisonService: InspectionComparisonService,
-                private dialogLayout: InspectionDialogLayoutService,
                 private renderer: Renderer2) {
         this.mapService.selectionTopic.subscribe(panels => {
             const allPanels = panels.slice();
-            this.dialogLayout.syncPanels(allPanels.map(panel => panel.id));
+            this.stateService.pruneInspectionDialogLayout(allPanels.map(panel => panel.id));
             this.undockedPanels = allPanels.filter(panel => panel.undocked);
             this.dockedPanels = allPanels.filter(panel => !panel.undocked).toReversed();
-            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible || allPanels.length > 0;
+            this.stateService.isDockOpen = this.stateService.isDockOpen && !this.stateService.isDockAutoCollapsible ||
+                allPanels.filter(p => !p.undocked).length > 0;
         });
-        this.comparisonService.comparisons.subscribe(comparisons => {
-            this.comparisons = comparisons;
+        this.stateService.inspectionComparisonState.subscribe(comparison => {
+            this.comparison = comparison;
         });
     }
 
@@ -237,7 +234,7 @@ export class InspectionContainerComponent implements OnDestroy {
         const offset = this.stateService.baseFontSize;
         const left = Math.max(0, event.clientX - offset);
         const top = Math.max(0, event.clientY - offset);
-        this.dialogLayout.setPendingPosition(panelId, {left, top});
+        this.stateService.setInspectionDialogPosition(panelId, {left, top});
         this.stateService.setInspectionPanelUndockedState(panelId, true);
     }
 

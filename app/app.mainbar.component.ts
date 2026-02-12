@@ -5,6 +5,7 @@ import {StyleService} from './styledata/style.service';
 import {AppStateService} from './shared/appstate.service';
 import {EditorService} from './shared/editor.service';
 import {environment} from './environments/environment';
+import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
 
 @Component({
     selector: 'main-bar',
@@ -23,10 +24,7 @@ import {environment} from './environments/environment';
             </ng-template>
             <ng-template #end>
                 <div style="display: flex; flex-direction: row; gap: 0.25em; align-items: center">
-                    <p-progress-spinner strokeWidth="8" fill="transparent" [style]="{ width: '1.25em', height: '1.25em' }" />
-                    <span class="material-symbols-outlined" style="color: var(--p-button-danger-background)">
-                        warning
-                    </span>
+                    <diagnostics-indicator></diagnostics-indicator>
                     @if (copyright.length) {
                         <div class="copyright-info" (click)="openLegalInfo()">
                             {{ copyright }}
@@ -49,11 +47,6 @@ import {environment} from './environments/environment';
     standalone: false
 })
 export class MainBarComponent {
-
-    readonly loader_icons = ['', 'clock_loader_10', 'clock_loader_20', 'clock_loader_40', 'clock_loader_60', 'clock_loader_80', 'clock_loader_90'];
-    readonly loader_icon$ = timer(0, 500).pipe(
-        map(i => this.loader_icons.length ? this.loader_icons[i % this.loader_icons.length] : '')
-    );
 
     menuItems = [
         {
@@ -92,9 +85,19 @@ export class MainBarComponent {
             icon: 'question_mark',
             items: [
                 {
-                    name: 'Statistics',
-                    icon: 'bar_chart_4_bars',
-                    command: () => { this.showStatsDialog(); }
+                    name: 'Performance Statistics',
+                    icon: 'insights',
+                    command: () => { this.openDiagnosticsPerformance(); }
+                },
+                {
+                    name: 'Log',
+                    icon: 'list_alt',
+                    command: () => { this.openDiagnosticsLog(); }
+                },
+                {
+                    name: 'Export Diagnostics',
+                    icon: 'download',
+                    command: () => { this.openDiagnosticsExport(); }
                 },
                 {
                     name: 'Help',
@@ -115,7 +118,8 @@ export class MainBarComponent {
     constructor(public mapService: MapDataService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
-                public editorService: EditorService) {
+                public editorService: EditorService,
+                private diagnostics: DiagnosticsFacadeService) {
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.copyright = '';
             let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
@@ -136,6 +140,26 @@ export class MainBarComponent {
     showStatsDialog() {
         this.mapService.statsDialogVisible = true;
         this.mapService.statsDialogNeedsUpdate.next();
+    }
+
+    openDiagnosticsProgress() {
+        this.diagnostics.openProgressDialog();
+    }
+
+    openDiagnosticsPerformance() {
+        this.diagnostics.openPerformanceDialog();
+    }
+
+    openDiagnosticsLog() {
+        this.diagnostics.openLogDialog();
+    }
+
+    openDiagnosticsExport() {
+        this.diagnostics.openExportDialog({
+            includeProgress: true,
+            includePerformance: true,
+            includeLogs: true
+        });
     }
 
     openHelp() {

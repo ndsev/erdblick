@@ -63,6 +63,10 @@ export class MapTileStreamClient {
     private completionReject: ((error: unknown) => void) | null = null;
     private lastStatusPayload: MapTileStreamStatusPayload | null = null;
     private lastTilesRequestBody: string | null = null;
+    private frameQueue: Array<ArrayBuffer | Blob> = [];
+    private frameQueueTimer: ReturnType<typeof setTimeout> | null = null;
+    private processingFrameQueue: boolean = false;
+    private readonly frameTimeBudgetMs: number = 10;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -144,10 +148,16 @@ export class MapTileStreamClient {
         this.awaitingCompletion = false;
         this.lastRequestPromise = null;
         this.lastStatusPayload = null;
+        this.clearPendingFrames();
         this.resetCompletionPromise();
         if (this.parser) {
             this.parser.delete();
         }
+    }
+
+    clearPendingFrames() {
+        console.log(`Clearing ${this.frameQueue.length} frames.`)
+        this.frameQueue = [];
     }
 
     sendRequest(body: object | string) {
@@ -179,15 +189,17 @@ export class MapTileStreamClient {
 
         // Ensure that the new request is different from the previous one.
         if (this.lastTilesRequestBody === newRequestBody) {
-            return;
+            return false;
         }
         this.lastTilesRequestBody = newRequestBody;
         try {
             this.sendRequest(requestBody);
             await this.waitForSend();
+            return true;
         } catch (err) {
             this.lastTilesRequestBody = null;
             console.error("Failed to send /tiles request.", err);
+            return false;
         }
     }
 
@@ -274,9 +286,7 @@ export class MapTileStreamClient {
                 if (this.socket !== socket) {
                     return;
                 }
-                this.handleMessage(event).catch(err => {
-                    console.error("Tile stream message handler failed.", err);
-                });
+                this.enqueueFrame(event.data);
             };
         });
 
@@ -329,8 +339,54 @@ export class MapTileStreamClient {
         return url.toString();
     }
 
-    private async handleMessage(event: MessageEvent) {
-        const data = event.data;
+    private enqueueFrame(data: ArrayBuffer | Blob) {
+        this.frameQueue.push(data);
+        this.scheduleFrameProcessing(0);
+    }
+
+    private scheduleFrameProcessing(delayMs: number) {
+        if (this.frameQueueTimer) {
+            return;
+        }
+        this.frameQueueTimer = setTimeout(() => {
+            this.frameQueueTimer = null;
+            this.processFrameQueue().catch(err => {
+                console.error("Tile stream message handler failed.", err);
+            });
+        }, delayMs);
+    }
+
+    private async processFrameQueue() {
+        if (this.processingFrameQueue) {
+            return;
+        }
+        this.processingFrameQueue = true;
+        try {
+            const startTime = Date.now();
+            let handledMessages = 0;
+            while (this.frameQueue.length) {
+                const data = this.frameQueue.shift()!;
+                try {
+                    await this.handleMessage(data);
+                    ++handledMessages;
+                } catch (err) {
+                    console.error("Tile stream message handler failed.", err);
+                }
+                if (Date.now() - startTime > this.frameTimeBudgetMs) {
+                    break;
+                }
+            }
+            console.log(`TileStream: Processed ${handledMessages} messages, queue size: ${this.frameQueue.length}`)
+        } finally {
+            this.processingFrameQueue = false;
+        }
+
+        if (this.frameQueue.length) {
+            this.scheduleFrameProcessing(0);
+        }
+    }
+
+    private async handleMessage(data: ArrayBuffer | Blob) {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {

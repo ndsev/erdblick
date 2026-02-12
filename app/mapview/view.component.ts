@@ -4,6 +4,7 @@ import {
     ChangeDetectorRef,
     Component,
     ElementRef,
+    NgZone,
     OnDestroy,
     OnInit,
     ViewChild,
@@ -116,7 +117,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public menuService: RightClickMenuService,
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
-                private cdr: ChangeDetectorRef
+                private cdr: ChangeDetectorRef,
+                private ngZone: NgZone
     ) {
         this.subscriptions.push(
             // TODO: Consider only if the view is focused?
@@ -175,7 +177,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      */
     private async createViewerForMode(is2D: boolean) {
         if (this.mapView) {
-            await this.mapView.destroy();
+            await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
         }
         const mapView = is2D
             ? new MapView2D(
@@ -184,7 +186,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             : new MapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
                 this.jumpService, this.menuService, this.coordinatesService, this.stateService);
-        await mapView.setup();
+        // Cesium registers high-frequency input and animation callbacks.
+        // Keep it out of Angular's zone to prevent global change detection on every pointer move.
+        await this.ngZone.runOutsideAngular(() => mapView.setup());
         this.mapView = mapView;
     }
 
@@ -200,7 +204,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
         }
         this.modeSubscription?.unsubscribe();
-        this.mapView?.destroy().then();
+        if (this.mapView) {
+            this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
+        }
     }
 
     private initializeViewer(mode2d: boolean) {

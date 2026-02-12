@@ -36,7 +36,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 <label [for]="limitSimultaneousInspectionsInput">Max Inspections:</label>
                 <div style="display: inline-block">
                     <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="limitSimultaneousInspectionsInput" (keydown.enter)="applyInspectionsLimits()"/>
-                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="0" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput" class="w-full" [min]="1" [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
                 </div>
             </div>
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
@@ -225,7 +225,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     protected applyInspectionsLimits() {
-
+        this.stateService.inspectionsLimit = this.limitSimultaneousInspectionsInput;
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

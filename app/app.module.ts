@@ -67,7 +67,7 @@ import {ProgressBarModule} from "primeng/progressbar";
 import {ButtonModule} from "primeng/button";
 import {TooltipModule} from "primeng/tooltip";
 import {StatsDialogComponent} from "./auxiliaries/stats.component";
-import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedataselection.dialog.component";
+import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
 import {ContextMenuModule} from "primeng/contextmenu";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
@@ -100,6 +100,10 @@ import {DialogService} from "primeng/dynamicdialog";
 import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
+import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
+import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
+import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
+import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -185,7 +189,11 @@ export const initializeServices = () => {
         DockableLayoutComponent,
         InspectionPanelDialogComponent,
         InspectionComparisonDialogComponent,
-        SurveyComponent
+        SurveyComponent,
+        DiagnosticsIndicatorComponent,
+        DiagnosticsPerformanceDialogComponent,
+        DiagnosticsLogDialogComponent,
+        DiagnosticsExportDialogComponent
     ],
     bootstrap: [
         AppComponent

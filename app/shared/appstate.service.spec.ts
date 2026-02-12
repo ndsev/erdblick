@@ -75,6 +75,8 @@ const createRouterStub = (queryParams: Record<string, unknown> = {}): RouterStub
     };
 };
 
+const feature = (id: string, mapTileKey = 'map/layer/tile') => ({ featureId: id, mapTileKey });
+
 describe('AppStateService', () => {
     beforeEach(() => {
         localStorage.clear();
@@ -208,6 +210,140 @@ describe('AppStateService', () => {
         expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
         expect(service.layerZoomLevelState.getValue(0)).toEqual([7]);
         expect(service.layerTileBordersState.getValue(0)).toEqual([true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces an unlocked docked inspection panel before dialogs', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = [feature('new-feature', 'map/layer/new-tile')];
+        const targetPanelId = service.setSelection(selected);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(1);
+        expect(panels).toHaveLength(2);
+        expect(panels.find(panel => panel.id === 1)?.features).toEqual(selected);
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual([feature('old-dialog')]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces an unlocked inspection dialog when no unlocked docked panel exists', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = [feature('new-feature', 'map/layer/new-tile')];
+        const targetPanelId = service.setSelection(selected);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(2);
+        expect(panels).toHaveLength(2);
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual(selected);
+        expect(panels.find(panel => panel.id === 2)?.undocked).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('creates a new docked inspection panel when no unlocked panels or dialogs exist', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('locked-dialog')], locked: true, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = [feature('new-feature', 'map/layer/new-tile')];
+        const targetPanelId = service.setSelection(selected);
+        const panels = service.selection;
+        const newPanel = panels.find(panel => panel.id === targetPanelId);
+
+        expect(targetPanelId).toBe(3);
+        expect(panels).toHaveLength(3);
+        expect(newPanel?.features).toEqual(selected);
+        expect(newPanel?.undocked).toBe(false);
+        expect(newPanel?.locked).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('stores inspection dialog layout directly on selection panels', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
+            { id: 22, features: [], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        service.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
+        service.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
+
+        const first = service.getInspectionDialogLayoutEntry(11);
+        const second = service.getInspectionDialogLayoutEntry(22);
+        expect(first?.slot).toBe(0);
+        expect(second?.slot).toBe(0);
+
+        service.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
+        expect(service.getInspectionDialogLayoutEntry(11)?.slot).toBe(0);
+
+        service.pruneInspectionDialogLayout([22]);
+        expect(service.getInspectionDialogLayoutEntry(11)?.position).toEqual({ left: 12, top: 24 });
+        expect(service.getInspectionDialogLayoutEntry(22)?.position).toEqual({ left: 30, top: 40 });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists comparison and layout states after hydration', async () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        service.selection = [
+            { id: 5, features: [], locked: false, size: [30, 40], color: '#555555', undocked: true },
+        ];
+        service.setInspectionDialogPosition(5, { left: 100, top: 200 }, 3);
+        service.openInspectionComparison({
+            base: {
+                panelId: 5,
+                label: 'base',
+                featureIds: [{ mapTileKey: 'map/layer/tile', featureId: 'f1' }]
+            },
+            others: []
+        });
+        await flushMicrotasks();
+
+        expect(localStorage.getItem('selected')).toContain('3:100:200');
+        expect(localStorage.getItem('inspectionDialogLayoutState')).toBeNull();
+        expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');
+
+        service.closeInspectionComparison();
+        await flushMicrotasks();
+        expect(service.inspectionComparison).toBeNull();
 
         service.ngOnDestroy();
         routerStub.events.complete();

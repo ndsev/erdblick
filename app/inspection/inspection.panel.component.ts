@@ -1,11 +1,15 @@
-import {AfterViewInit, Component, ElementRef, input, output, Renderer2, ViewChild, effect} from "@angular/core";
+import {AfterViewInit, Component, ElementRef, input, OnDestroy, output, Renderer2, ViewChild, effect} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {ContextMenu} from "primeng/contextmenu";
-import {AppStateService, DEFAULT_EM_WIDTH, InspectionPanelModel} from "../shared/appstate.service";
+import {
+    AppStateService,
+    DEFAULT_EM_WIDTH,
+    InspectionComparisonOption,
+    InspectionPanelModel
+} from "../shared/appstate.service";
 import {MapDataService} from "../mapdata/map.service";
 import {FeatureWrapper} from "../mapdata/features.model";
 import {coreLib} from "../integrations/wasm";
-import {InspectionComparisonOption, InspectionComparisonService} from "./inspection-comparison.service";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {MenuItem, MenuItemCommandEvent} from "primeng/api";
 
@@ -18,7 +22,7 @@ interface SourceLayerMenuItem {
 @Component({
     selector: 'inspection-panel',
     template: `
-        <p-accordion class="inspect-panel" value="0">
+        <p-accordion class="inspect-panel" [value]="accordionValue">
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
@@ -140,7 +144,7 @@ interface SourceLayerMenuItem {
     `],
     standalone: false
 })
-export class InspectionPanelComponent implements AfterViewInit {
+export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     title = "";
     isExpanded: boolean = true;
     errorMessage: string = "";
@@ -155,6 +159,7 @@ export class InspectionPanelComponent implements AfterViewInit {
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
     panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
+    accordionValue: string | undefined = undefined;
 
     @ViewChild('resizeableContainer') resizeableContainer!: ElementRef;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -163,10 +168,10 @@ export class InspectionPanelComponent implements AfterViewInit {
     extraMenuItems: MenuItem[] = [];
     private lastExtraMenuEvent?: MouseEvent;
     private lastExtraMenuTarget?: HTMLElement;
+    private autoExpandTimer?: number;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
-                private comparisonService: InspectionComparisonService,
                 private renderer: Renderer2) {
         effect(() => {
             this.title = "";
@@ -212,10 +217,22 @@ export class InspectionPanelComponent implements AfterViewInit {
                 this.selectedLayerItem = undefined;
             }
         });
+
+        this.autoExpandTimer = window.setTimeout(() => {
+            this.accordionValue = '0';
+            this.autoExpandTimer = undefined;
+        }, 0);
     }
 
     ngAfterViewInit() {
         this.detectSafari();
+    }
+
+    ngOnDestroy() {
+        if (this.autoExpandTimer !== undefined) {
+            window.clearTimeout(this.autoExpandTimer);
+            this.autoExpandTimer = undefined;
+        }
     }
 
     protected onSelectedLayerItem() {
@@ -354,7 +371,7 @@ export class InspectionPanelComponent implements AfterViewInit {
     }
 
     protected refreshCompareOptions() {
-        this.compareOptions = this.comparisonService.buildCompareOptions(this.panel().id);
+        this.compareOptions = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -365,7 +382,15 @@ export class InspectionPanelComponent implements AfterViewInit {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        this.comparisonService.openComparison(this.panel().id, this.selectedCompareIds);
+        const model = this.stateService.createComparisonModel(
+            this.panel().id,
+            this.selectedCompareIds,
+            this.mapService.selectionTopic.getValue()
+        );
+        if (!model) {
+            return;
+        }
+        this.stateService.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }
