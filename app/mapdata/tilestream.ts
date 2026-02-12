@@ -503,9 +503,6 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-                if (!this.shouldAcceptCurrentDataFrame()) {
-                    return {isFlowControlledDataFrame, frameBytes: bytes.length};
-                }
                 uint8ArrayToWasm((wasmBuffer: any) => {
                     this.parser.readFieldDictUpdate(wasmBuffer);
                 }, bytes);
@@ -516,9 +513,6 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
-                if (!this.shouldAcceptCurrentDataFrame()) {
-                    return {isFlowControlledDataFrame, frameBytes: bytes.length};
-                }
                 if (this.onFeatures) {
                     this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
@@ -526,9 +520,6 @@ export class MapTileStreamClient {
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
-                if (!this.shouldAcceptCurrentDataFrame()) {
-                    return {isFlowControlledDataFrame, frameBytes: bytes.length};
-                }
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
@@ -558,16 +549,6 @@ export class MapTileStreamClient {
             return true;
         }
         return requestId === this.latestRequestedRequestId;
-    }
-
-    private shouldAcceptCurrentDataFrame(): boolean {
-        if (!this.supportsRequestContextFrames) {
-            return true;
-        }
-        if (this.latestRequestedRequestId === null) {
-            return true;
-        }
-        return this.incomingRequestId === this.latestRequestedRequestId;
     }
 
     private sendFlowGrant(frames: number, bytes: number) {
