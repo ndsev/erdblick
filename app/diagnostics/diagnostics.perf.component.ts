@@ -32,17 +32,11 @@ const unitSuffixes: Array<{suffix: string; unit: string}> = [
                     </tr>
                 </ng-template>
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                    <tr [ttRow]="rowNode" [ngClass]="rowData.suspicious ? 'diagnostics-suspicious-' + rowData.suspicious : ''">
+                    <tr [ttRow]="rowNode">
                         <td>
                             <div class="diagnostics-key-cell">
                                 <p-treeTableToggler [rowNode]="rowNode"></p-treeTableToggler>
                                 <span>{{ rowData.key }}</span>
-                                @if (rowData.suspicious === 'warn') {
-                                    <span class="material-symbols-outlined diagnostics-warn">warning</span>
-                                }
-                                @if (rowData.suspicious === 'bad') {
-                                    <span class="material-symbols-outlined diagnostics-bad">error</span>
-                                }
                             </div>
                         </td>
                         <td [pTooltip]="rowData.basePeakTooltip" tooltipPosition="top" [tooltipDisabled]="!rowData.basePeakTooltip">
@@ -161,46 +155,6 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return segments.length ? segments : [cleaned];
     }
 
-    private computeSuspiciousLevel(stat: any, unit?: string): string | undefined {
-        const resolvedUnit = unit ?? stat.unit;
-        const keyLower = String(stat.key ?? '').toLowerCase();
-        const peak = stat.peak ?? 0;
-        const average = stat.average ?? 0;
-
-        if (keyLower.includes('error') && (peak > 0 || average > 0)) {
-            return 'bad';
-        }
-
-        if (resolvedUnit === 'ms') {
-            if (peak > 200) {
-                return 'bad';
-            }
-            if (peak > 50) {
-                return 'warn';
-            }
-        }
-
-        if (resolvedUnit === 'KB') {
-            if (peak > 1024) {
-                return 'bad';
-            }
-            if (peak > 256) {
-                return 'warn';
-            }
-        }
-
-        if (resolvedUnit === '%') {
-            if (peak < 50) {
-                return 'bad';
-            }
-            if (peak < 90) {
-                return 'warn';
-            }
-        }
-
-        return undefined;
-    }
-
     private buildPerfTreeNodes(stats: any[]): TreeTableNode[] {
         const rootNodes: TreeTableNode[] = [];
         const nodeLookup = new Map<string, TreeTableNode>();
@@ -262,8 +216,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                         displayAverage: this.formatValueWithUnit(averageNumber, unit),
                         basePeakTooltip: this.formatBaseTooltip(peakNumber, unit),
                         baseAverageTooltip: this.formatBaseTooltip(averageNumber, unit),
-                        peakTileIds: stat.peakTileIds?.join(', '),
-                        suspicious: this.computeSuspiciousLevel(stat, unit)
+                        peakTileIds: stat.peakTileIds?.join(', ')
                     };
                 }
                 parent = node;

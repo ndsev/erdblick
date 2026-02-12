@@ -892,50 +892,30 @@ export class AppStateService implements OnDestroy {
             }
         }
 
-        // Decide whether to reuse the origin panel or spawn a new one based on docking/pinning rules.
+        // Decide whether to reuse an existing panel or create a new one.
         let targetPanelId: number | undefined = undefined;
         let mustCreateNewPanel = forceNewPanel;
-        let newPanelUndocked = false;
-        const hasDockedPanel = allPanels.some(panel => !panel.undocked);
-        const hasUndockedPanel = allPanels.some(panel => panel.undocked);
-        const firstUndockedUnlockedPanel = allPanels.find(panel => panel.undocked && !panel.locked);
 
-        if (originPanel) {
-            if (isClearSourceDataRequest) {
-                targetPanelId = originPanel.id;
-            } else if (!originPanel.undocked) {
-                mustCreateNewPanel = true;
-            } else if (originPanel.locked) {
-                mustCreateNewPanel = true;
-                newPanelUndocked = true;
-            } else {
-                targetPanelId = originPanel.id;
-            }
-        } else if (hasDockedPanel) {
-            mustCreateNewPanel = true;
-        } else if (hasUndockedPanel) {
-            // Dock is empty: always create new selections as docked panels.
-            mustCreateNewPanel = true;
-            newPanelUndocked = false;
-        } else if (!mustCreateNewPanel && firstUndockedUnlockedPanel) {
-            targetPanelId = firstUndockedUnlockedPanel.id;
+        // Explicit updates from an unlocked origin panel should stay in that panel.
+        if (!forceNewPanel && originPanel && (isClearSourceDataRequest || !originPanel.locked)) {
+            targetPanelId = originPanel.id;
         }
 
-        if (originPanel && mustCreateNewPanel && originPanel.undocked) {
-            newPanelUndocked = true;
-        }
-
-        // If no origin-driven decision was made, fall back to existing pinning logic.
+        // New inspection strategy:
+        // 1) reuse unlocked docked panel
+        // 2) otherwise reuse unlocked undocked dialog
+        // 3) otherwise create a new docked panel
         if (!mustCreateNewPanel && targetPanelId === undefined) {
-            mustCreateNewPanel = forceNewPanel || allPanels.every(panel => panel.locked);
-        }
-
-        if (!mustCreateNewPanel && targetPanelId === undefined) {
-            const firstUnlockedPanel = allPanels.find(panel => !panel.locked);
-            if (firstUnlockedPanel) {
-                targetPanelId = firstUnlockedPanel.id;
+            const firstUnlockedDockedPanel = allPanels.find(panel => !panel.undocked && !panel.locked);
+            if (firstUnlockedDockedPanel) {
+                targetPanelId = firstUnlockedDockedPanel.id;
             } else {
-                mustCreateNewPanel = true;
+                const firstUnlockedUndockedPanel = allPanels.find(panel => panel.undocked && !panel.locked);
+                if (firstUnlockedUndockedPanel) {
+                    targetPanelId = firstUnlockedUndockedPanel.id;
+                } else {
+                    mustCreateNewPanel = true;
+                }
             }
         }
 
@@ -951,9 +931,9 @@ export class AppStateService implements OnDestroy {
                 features: featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
-                size: [DEFAULT_EM_WIDTH, newPanelUndocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
+                size: [DEFAULT_EM_WIDTH, DEFAULT_DOCKED_EM_HEIGHT],
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: newPanelUndocked
+                undocked: false
             });
             this.selectionState.next(allPanels);
             return newId;

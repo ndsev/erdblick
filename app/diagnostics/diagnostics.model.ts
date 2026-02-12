@@ -41,8 +41,6 @@ export interface DiagnosticsSnapshot {
     backend: BackendState;
 }
 
-export type SuspiciousLevel = 'ok' | 'warn' | 'bad';
-
 export interface PerfStat {
     key: string;
     path: string[];
@@ -50,7 +48,6 @@ export interface PerfStat {
     peak: number;
     average?: number;
     peakTileIds?: string[];
-    suspicious?: SuspiciousLevel;
 }
 
 export interface LogEntry {
