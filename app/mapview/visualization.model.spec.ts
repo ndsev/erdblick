@@ -157,6 +157,40 @@ describe('TileVisualization', () => {
         visu.destroy(viewer as any);
     });
 
+    it('marks visualization dirty when style options change', async () => {
+        const tile = createTile();
+        const pointMergeService = createPointMergeService();
+        const style = createStyle();
+        const viewer = createViewer();
+
+        const visu = new TileVisualization(
+            0,
+            tile as any,
+            pointMergeService as any,
+            () => null,
+            style as any,
+            true,
+            coreLib.HighlightMode.NO_HIGHLIGHT,
+            undefined,
+            false,
+            {roadColor: '#f00'},
+        );
+
+        await visu.render(viewer as any);
+        expect(visu.isDirty()).toBe(false);
+
+        visu.setStyleOption('roadColor', '#0f0');
+        expect(visu.isDirty()).toBe(true);
+
+        await visu.render(viewer as any);
+        expect(visu.isDirty()).toBe(false);
+
+        visu.setStyleOption('roadColor', '#0f0');
+        expect(visu.isDirty()).toBe(false);
+
+        visu.destroy(viewer as any);
+    });
+
     it('destroys visualizations and removes point-merge contributions', async () => {
         const tile = createTile();
         const removedTiles = [{remove: vi.fn()}];

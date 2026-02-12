@@ -443,8 +443,11 @@ export class MapDataService {
                 `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`
             );
             if (visu.tile.mapName === optionNode.mapId && visu.tile.layerName === optionNode.layerId) {
-                visu.setStyleOption(optionNode.id, optionValue);
-                viewState.visualizationQueue.unshift(visu);
+                const changed = visu.setStyleOption(optionNode.id, optionValue);
+                if (changed || visu.isDirty()) {
+                    visu.updateStatus(true);
+                    viewState.visualizationQueue.unshift(visu);
+                }
             }
         }
     }
