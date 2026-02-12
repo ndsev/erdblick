@@ -396,6 +396,9 @@ describe('MapDataService', () => {
         const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
         expect(tileSocket).toBeDefined();
         const body = JSON.parse(tileSocket.lastSent);
+        expect(body.flowControl).toBe(true);
+        expect(typeof body.requestId).toBe('number');
+        expect(body.requestId).toBeGreaterThan(0);
         expect(body.stringPoolOffsets).toEqual([0]);
         expect(body.requests).toEqual([
             {

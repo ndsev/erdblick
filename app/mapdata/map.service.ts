@@ -698,13 +698,7 @@ export class MapDataService {
             tileIds: entry.tileIds
         }));
 
-        const requestWasUpdated = await this.tileStream!.updateRequest(requests);
-        if (requestWasUpdated) {
-            // Make sure that there are no unparsed bytes lingering from the previous response stream.
-            // Parsing a tile layer now which we previously assumed as not-yet-arrived would lead to flickering
-            // or possibly even dangling data in the map.
-            this.tileStream!.clearPendingFrames();
-        }
+        await this.tileStream!.updateRequest(requests);
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
