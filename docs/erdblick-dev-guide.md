@@ -310,18 +310,23 @@ sequenceDiagram
   Note right of MapSvc: MapDataService compares visible tiles<br>with loaded tiles per view and style<br>and decides which tiles to keep or drop
 
   MapSvc->>TilesWS: open WebSocket /tiles (if needed)
-  MapSvc->>TilesWS: send request JSON<br>with requested map tile keys
+  MapSvc->>TilesWS: send request JSON<br>requestId + flowControl + requests + stringPoolOffsets
   TilesWS->>Backend: WebSocket /tiles
   Backend-->>TilesWS: VTLV tile stream frames
 
   loop for each received frame
-    alt fields chunk
+    alt request-context chunk
+      TilesWS->>TilesWS: update current backend request context id
+    else fields chunk
       TilesWS->>Core: readFieldDictUpdate for<br>field dictionary changes
     else features chunk
       TilesWS-->>MapSvc: feature payload bytes
       MapSvc->>Core: readTileFeatureLayer for<br>feature layer payload
       Core-->>MapSvc: TileFeatureLayer metadata<br>and feature data
       MapSvc->>MapSvc: update loadedTileLayers<br>and viewVisualizationState
+    else source-data chunk
+      TilesWS-->>MapSvc: source-data payload bytes
+      MapSvc->>Core: readTileSourceDataLayer<br>for inspection/source view
     else load-state chunk
       TilesWS-->>MapSvc: load-state payload
       MapSvc->>MapSvc: applyTileLoadState<br>update TileBoxVisualization
@@ -330,7 +335,8 @@ sequenceDiagram
     end
   end
 
-  Note over MapSvc: MapTileStreamClient processes frames immediately,<br>while processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive
+  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). After each slice,<br>client grants more flow credits (frames/bytes) to backend.
+  Note over MapSvc: processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive.
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
 ```
@@ -338,12 +344,34 @@ sequenceDiagram
 In `MapDataService` this flow is implemented roughly as follows:
 
 - `scheduleUpdate()` drives `runUpdate()`, which recalculates visible/high-detail tile IDs per view and then calls `updateMapDataRequest()`, `updateEvictLoadedLayers()`, and `updateVisualizations()`.
-- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs (so load-state updates have a target), and sends the request through `MapTileStreamClient.updateRequest()`. The request JSON includes `stringPoolOffsets` from the current `TileLayerParser` field dictionary so the backend can skip already-known strings.
-- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance. It deduplicates identical request payloads, decodes VTLV frames, and applies `readFieldDictUpdate()` immediately when `Fields` frames arrive.
+- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs (so load-state updates have a target), and sends the request through `MapTileStreamClient.updateRequest()`.
+- `MapTileStreamClient.updateRequest()` sends `{ flowControl, requestId, requests, stringPoolOffsets }`, where:
+  - `flowControl` is currently always `true`.
+  - `requestId` is a monotonically increasing client-side id.
+  - `stringPoolOffsets` comes from the shared `TileLayerParser` field dictionary so the backend can skip already-known strings.
+  - Request deduplication compares the request body without `requestId`, so identical logical requests are not resent.
+- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. WebSocket `onmessage` only enqueues; parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
+- At the end of each parsing slice, the client sends a flow-grant control message (`{ type: "mapget.tiles.flow-grant", frames, bytes }`) for all processed flow-controlled frames (Fields/Features/SourceData). This is the backpressure signal to mapget.
+- In current mapget builds, flow-controlled output is connection-scoped and gated by both frame credits and byte credits (`creditFrames > 0 && creditBytes > 0`). The default credit caps are 16 frames and 64 MiB per connection.
 - `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
-- `Status` frames (`mapget.tiles.status`) contain per-request results and `allDone` flags; the service uses these to resolve selection requests and surface failures.
-- `Load-state` frames (`mapget.tiles.load-state`) carry per-tile backend progress. `MapDataService` writes the state into `FeatureTile.status` and updates `TileVisualization` so `TileBoxVisualization` can display loading overlays.
+- `Fields` frames are applied immediately through `TileLayerParser.readFieldDictUpdate(...)` so subsequent Feature/SourceData payloads can resolve string references.
+- `Status` frames (`mapget.tiles.status`) contain per-request results, `allDone`, and optional `requestId`. Erdblick ignores stale status messages whose `requestId` does not match the most recent request.
+- `Load-state` frames (`mapget.tiles.load-state`) carry per-tile backend progress and optional `requestId`. Erdblick ignores stale load-state messages the same way.
+- `Request-context` frames (`mapget.tiles.request-context`) announce the server-side request id currently being streamed. Erdblick currently tracks this for protocol compatibility and diagnostics; data frames are not yet dropped by request context on the client side.
 - For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
+- `MapDataService` no longer flushes the tile-stream frame queue on each request update. Already queued data frames still parse, while stale status/load-state updates are filtered by `requestId`.
+
+Current `/tiles` frame type ids used by erdblick:
+
+| Type id | Name | Payload |
+| --- | --- | --- |
+| `1` | `Fields` | Binary frame for parser dictionary updates |
+| `2` | `Features` | Binary tile-feature-layer payload |
+| `3` | `SourceData` | Binary tile-source-data payload |
+| `4` | `Status` | JSON (`mapget.tiles.status`) |
+| `5` | `Load-state` | JSON (`mapget.tiles.load-state`) |
+| `6` | `Request-context` | JSON (`mapget.tiles.request-context`) |
+| `128` | `End-of-stream` | Marker frame (currently treated as no-op) |
 
 Tile metadata such as legal notices and scalar fields is also extracted through the parser and stored alongside `MapLayerTree` so it can be surfaced in the Maps & Layers panel and legal information dialogs.
 
@@ -533,7 +561,7 @@ Key points to understand:
 - `MapView` translates Cesium pick events into `TileFeatureId` structures (map/layer/tile/feature identifiers) and forwards them to `MapDataService.setHoveredFeatures` or into the selection machinery via `AppStateService`. Jumps and search results use the same identifiers.
 - `MapDataService.loadFeatures` ensures that the relevant tiles are present in `loadedTileLayers`, fetching them if necessary, and wraps them in `FeatureWrapper` objects that expose inspection helpers like `inspectionModel()`.
 - `selectionTopic` and `hoverTopic` hold the current panel models, including pinned state, color, and size. `InspectionContainerComponent` subscribes to them and re-renders the inspection tree and SourceData view accordingly.
-- SourceData is driven by the same tile streaming code but uses `CHUNK_TYPE_SOURCEDATA` and `TileLayerParser.readTileSourceDataLayer` instead of feature-layer parsing. SourceData selection reuses the same map and layer identifiers, so you can jump back and forth between features and their underlying blobs.
+- SourceData is driven by the same tile streaming code but uses `MAP_TILE_STREAM_TYPE_SOURCEDATA` and `TileLayerParser.readTileSourceDataLayer` instead of feature-layer parsing. SourceData selection reuses the same map and layer identifiers, so you can jump back and forth between features and their underlying blobs.
 
 If you change how selection is encoded or how tiles are keyed, make sure to keep `AppStateService`, `MapDataService`, and the inspection components in sync; otherwise, URL-based sharing and multi-panel inspection will drift out of alignment.
 

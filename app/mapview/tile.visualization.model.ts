@@ -41,6 +41,8 @@ export class TileVisualization {
     private readonly options: Record<string, boolean|number|string>;
     private readonly pointMergeService: PointMergeService;
     private renderQueued: boolean = false;
+    private styleOptionsVersion: number = 0;
+    private renderedStyleOptionsVersion: number = 0;
 
     /**
      * Create a tile visualization.
@@ -115,6 +117,8 @@ export class TileVisualization {
     async render(viewer: Viewer) {
         if (this.renderingInProgress || this.deleted)
             return false;
+
+        const renderStyleOptionsVersion = this.styleOptionsVersion;
 
         // Remove any previous render-result, as a new one is generated.
         this.destroy(viewer);
@@ -238,6 +242,7 @@ export class TileVisualization {
             this.showTileBorder);
         this.hasTileBorder = this.showTileBorder;
 
+        this.renderedStyleOptionsVersion = renderStyleOptionsVersion;
         this.renderingInProgress = false;
         this.updateStatus(false);
         if (this.deleted)
@@ -291,6 +296,7 @@ export class TileVisualization {
      */
     isDirty() {
         return (
+            this.styleOptionsVersion !== this.renderedStyleOptionsVersion ||
             this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
             this.showTileBorder != this.hasTileBorder ||
             !this.lowDetailVisu
@@ -306,7 +312,12 @@ export class TileVisualization {
         return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);
     }
 
-    public setStyleOption(optionId: string, value: string|number|boolean) {
+    public setStyleOption(optionId: string, value: string|number|boolean): boolean {
+        if (this.options[optionId] === value) {
+            return false;
+        }
         this.options[optionId] = value;
+        this.styleOptionsVersion++;
+        return true;
     }
 }

@@ -445,8 +445,11 @@ export class MapDataService {
                 `The viewIndex of the visualization must correspond to its visualization collection index. Expected ${viewIndex}, got ${visu.viewIndex}.`
             );
             if (visu.tile.mapName === optionNode.mapId && visu.tile.layerName === optionNode.layerId) {
-                visu.setStyleOption(optionNode.id, optionValue);
-                viewState.visualizationQueue.unshift(visu);
+                const changed = visu.setStyleOption(optionNode.id, optionValue);
+                if (changed || visu.isDirty()) {
+                    visu.updateStatus(true);
+                    viewState.visualizationQueue.unshift(visu);
+                }
             }
         }
     }
@@ -700,13 +703,7 @@ export class MapDataService {
             tileIds: entry.tileIds
         }));
 
-        const requestWasUpdated = await this.tileStream!.updateRequest(requests);
-        if (requestWasUpdated) {
-            // Make sure that there are no unparsed bytes lingering from the previous response stream.
-            // Parsing a tile layer now which we previously assumed as not-yet-arrived would lead to flickering
-            // or possibly even dangling data in the map.
-            this.tileStream!.clearPendingFrames();
-        }
+        await this.tileStream!.updateRequest(requests);
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
