@@ -4,7 +4,7 @@
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
 #include "../rule.h"
-#include "points.h"
+#include "cesium-points.h"
 
 namespace erdblick
 {

@@ -9,12 +9,12 @@
 
 using namespace erdblick;
 
-TEST_CASE("FeatureLayerVisualization", "[erdblick.renderer]")
+TEST_CASE("CesiumFeatureLayerVisualization", "[erdblick.renderer]")
 {
     TileLayerParser tlp;
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     auto style = TestDataProvider::style();
-    FeatureLayerVisualization visualization(0, "Features:Test:Test:0", style, {}, {});
+    CesiumFeatureLayerVisualization visualization(0, "Features:Test:Test:0", style, {}, {});
     visualization.addTileFeatureLayer(TileFeatureLayer(testLayer));
     visualization.run();
     auto result = visualization.primitiveCollection();

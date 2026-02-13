@@ -1,11 +1,11 @@
-import {FeatureTile} from "../mapdata/features.model";
-import {TileLoadState} from "../mapdata/tilestream";
-import {coreLib} from "../integrations/wasm";
-import {PrimitiveCollection, Viewer} from "../integrations/cesium";
-import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
-import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
-import {TileBoxVisualization} from "./tilebox.visualization.model";
-import {IRenderSceneHandle, ITileVisualization} from "./render-view.model";
+import {FeatureTile} from "../../mapdata/features.model";
+import {TileLoadState} from "../../mapdata/tilestream";
+import {coreLib} from "../../integrations/wasm";
+import {PrimitiveCollection, Viewer} from "../../integrations/cesium";
+import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../../build/libs/core/erdblick-core";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
+import {CesiumTileBoxVisualization} from "./cesium-tilebox.visualization.model";
+import {IRenderSceneHandle, ITileVisualization} from "../render-view.model";
 
 export interface LocateResolution {
     tileId: string,
@@ -23,25 +23,25 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
 
 function asCesiumViewer(sceneHandle: IRenderSceneHandle): Viewer | undefined {
     if (sceneHandle.renderer !== "cesium") {
-        console.warn(`TileVisualization expects a Cesium scene handle, got "${sceneHandle.renderer}".`);
+        console.warn(`CesiumTileVisualization expects a Cesium scene handle, got "${sceneHandle.renderer}".`);
         return undefined;
     }
     const viewer = sceneHandle.scene as Viewer;
     if (!viewer || !(viewer as any).scene) {
-        console.warn("TileVisualization received an invalid Cesium scene handle.");
+        console.warn("CesiumTileVisualization received an invalid Cesium scene handle.");
         return undefined;
     }
     return viewer;
 }
 
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
-export class TileVisualization implements ITileVisualization {
+export class CesiumTileVisualization implements ITileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
     readonly viewIndex: number;
 
-    private lowDetailVisu: TileBoxVisualization|null = null;
+    private lowDetailVisu: CesiumTileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
@@ -60,7 +60,7 @@ export class TileVisualization implements ITileVisualization {
 
     /**
      * Create a tile visualization.
-     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
+     * @param viewIndex Index of the MapView to which is CesiumTileVisualization is dedicated.
      * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
@@ -153,7 +153,8 @@ export class TileVisualization implements ITileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                const VisualizationCtor = (coreLib as any).CesiumFeatureLayerVisualization;
+                let wasmVisualization = new VisualizationCtor(
                     this.viewIndex,
                     this.tile.mapTileKey,
                     this.style,
@@ -250,7 +251,7 @@ export class TileVisualization implements ITileVisualization {
         }
 
         // Low-detail bounding box and load-state overlays.
-        this.lowDetailVisu = TileBoxVisualization.get(
+        this.lowDetailVisu = CesiumTileBoxVisualization.get(
             this.viewIndex,
             this.tile,
             this.tile.numFeatures,
@@ -328,7 +329,7 @@ export class TileVisualization implements ITileVisualization {
     /**
      * Combination of map name, layer name, style name and highlight mode which
      * (in combination with the tile id) uniquely identifies the rendered contents
-     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
+     * of this CesiumTileVisualization as expected by the surrounding MergedPointsTiles.
      */
     private mapViewLayerStyleId(): MapViewLayerStyleRule {
         return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);

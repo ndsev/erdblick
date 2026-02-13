@@ -1,4 +1,4 @@
-import {initializeLibrary, coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
+import {initializeLibrary, coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../../integrations/wasm";
 import {
     DeckPathRenderResult,
     DeckPathRenderTask,
@@ -14,8 +14,8 @@ function blobSignature(blob: Uint8Array): string {
     if (!blob.length) {
         return "0";
     }
-    const mid = blob[blob.length >> 1] ?? 0;
-    return `${blob.length}:${blob[0] ?? 0}:${mid}:${blob[blob.length - 1] ?? 0}`;
+    const mid = blob[blob.length >> 1];
+    return `${blob.length}:${blob[0]}:${mid}:${blob[blob.length - 1]}`;
 }
 
 function parserCacheKey(task: DeckPathRenderTask): string {
@@ -46,10 +46,7 @@ function getOrCreateStyle(styleSource: string): any {
         return cached;
     }
     const styleBytes = styleTextEncoder.encode(styleSource);
-    const parsed = uint8ArrayToWasm((data) => new coreLib.FeatureLayerStyle(data), styleBytes);
-    if (!parsed) {
-        return null;
-    }
+    const parsed = uint8ArrayToWasm((data) => new coreLib.FeatureLayerStyle(data), styleBytes) as any;
     styleCache.set(styleSource, parsed);
     return parsed;
 }
@@ -65,52 +62,25 @@ function resolveHighlightMode(modeValue: number): any {
 }
 
 function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
-    try {
-        return uint8ArrayFromWasm((shared) => {
-            deckVisu[accessorName](shared);
-            return true;
-        }) ?? new Uint8Array();
-    } catch (_err) {
-        return new Uint8Array();
-    }
+    return uint8ArrayFromWasm((shared) => {
+        deckVisu[accessorName](shared);
+        return true;
+    }) as Uint8Array;
 }
 
 function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
-    const empty: DeckPathRenderResult = {
-        type: "DeckPathRenderResult",
-        taskId: task.taskId,
-        tileKey: task.tileKey,
-        positions: new ArrayBuffer(0),
-        startIndices: new ArrayBuffer(0),
-        colors: new ArrayBuffer(0),
-        widths: new ArrayBuffer(0)
-    };
-    if (!task.tileBlob?.length) {
-        return empty;
-    }
-    if (!task.styleSource?.length) {
-        return {...empty, error: "Missing style source."};
-    }
-
     let tile: any = null;
     let deckVisu: any = null;
     try {
         const parser = getOrCreateParser(task);
         const style = getOrCreateStyle(task.styleSource);
-        if (!style) {
-            return {...empty, error: "Failed to parse style source."};
-        }
-
-        tile = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), task.tileBlob);
-        if (!tile) {
-            return {...empty, error: "Failed to parse tile blob."};
-        }
+        tile = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), task.tileBlob) as any;
 
         deckVisu = new coreLib.DeckFeatureLayerVisualization(
             task.viewIndex,
             task.tileKey,
             style,
-            task.styleOptions ?? {},
+            task.styleOptions,
             resolveHighlightMode(task.highlightModeValue),
             []
         );
@@ -131,9 +101,6 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             colors: colors.buffer,
             widths: widths.buffer
         };
-    } catch (exc) {
-        const message = exc instanceof Error ? `${exc.name}: ${exc.message}` : String(exc);
-        return {...empty, error: message};
     } finally {
         if (deckVisu && typeof deckVisu.delete === "function") {
             deckVisu.delete();
@@ -147,7 +114,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
 addEventListener("message", async ({data}) => {
     const message = data as DeckWorkerInboundMessage;
 
-    if (message?.type === "DeckWorkerInit") {
+    if (message.type === "DeckWorkerInit") {
         postMessage({
             type: "DeckWorkerReady",
             scriptUrl: self.location.href
@@ -155,12 +122,8 @@ addEventListener("message", async ({data}) => {
         return;
     }
 
-    if (message?.type !== "DeckPathRenderTask") {
-        return;
-    }
-
     await initializeLibrary();
 
-    const result = processPathRenderTask(message);
+    const result = processPathRenderTask(message as DeckPathRenderTask);
     postMessage(result, [result.positions, result.startIndices, result.colors, result.widths]);
 });

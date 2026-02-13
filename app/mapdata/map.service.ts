@@ -8,8 +8,8 @@ import {
 import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
-import {TileVisualization} from "../mapview/tile.visualization.model";
-import {DeckTileVisualization} from "../mapview/deck-tile.visualization.model";
+import {CesiumTileVisualization} from "../mapview/cesium/cesium-tile.visualization.model";
+import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
@@ -855,7 +855,7 @@ export class MapDataService {
                 options
             );
         }
-        return new TileVisualization(
+        return new CesiumTileVisualization(
             viewIndex,
             tile,
             this.pointMergeService,

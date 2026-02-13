@@ -1,6 +1,6 @@
 #include "search.h"
 
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "cesium-interface/point-conversion.h"
 #include "geometry.h"
 #include "simfil/diagnostics.h"

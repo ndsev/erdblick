@@ -8,16 +8,16 @@ import {
     PerspectiveFrustum,
     Rectangle,
     SceneMode
-} from "../integrations/cesium";
-import {CAMERA_CONSTANTS, MapView} from "./view";
-import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, CameraViewState} from "../shared/appstate.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {JumpTargetService} from "../search/jump.service";
-import {RightClickMenuService} from "./rightclickmenu.service";
-import {CoordinatesService} from "../coords/coordinates.service";
+} from "../../integrations/cesium";
+import {CAMERA_CONSTANTS, CesiumMapView} from "./cesium-map-view";
+import {MapDataService} from "../../mapdata/map.service";
+import {AppStateService, CameraViewState} from "../../shared/appstate.service";
+import {FeatureSearchService} from "../../search/feature.search.service";
+import {JumpTargetService} from "../../search/jump.service";
+import {RightClickMenuService} from "../rightclickmenu.service";
+import {CoordinatesService} from "../../coords/coordinates.service";
 
-export class CesiumMapView2D extends MapView {
+export class CesiumMapView2D extends CesiumMapView {
 
     constructor(id: number,
                 canvasId: string,
@@ -275,4 +275,3 @@ export class CesiumMapView2D extends MapView {
     }
 }
 
-export {CesiumMapView2D as MapView2D};

@@ -1,6 +1,6 @@
 #include <map>
 #include <iostream>
-#include "cesium-interface/primitive.h"
+#include "cesium-interface/cesium-primitive.h"
 #include "cesium-interface/cesium.h"
 #include "cesium-interface/point-conversion.h"
 

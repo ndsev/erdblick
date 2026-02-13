@@ -1,6 +1,5 @@
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
-import {TileVisualization} from "../mapview/tile.visualization.model";
 
 export enum MapTileRequestStatus {
     Open = 0,

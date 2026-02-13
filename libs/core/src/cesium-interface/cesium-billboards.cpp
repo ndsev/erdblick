@@ -1,4 +1,4 @@
-#include "cesium-interface/billboards.h"
+#include "cesium-interface/cesium-billboards.h"
 #include "cesium-interface/cesium.h"
 #include "simfil/model/model.h"
 

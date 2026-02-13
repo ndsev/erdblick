@@ -1,4 +1,4 @@
-#include "cesium-interface/points.h"
+#include "cesium-interface/cesium-points.h"
 #include "cesium-interface/cesium.h"
 #include "cesium-interface/point-conversion.h"
 #include "simfil/model/model.h"

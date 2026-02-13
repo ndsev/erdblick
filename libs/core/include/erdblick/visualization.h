@@ -4,10 +4,10 @@
 #include <vector>
 #include <unordered_set>
 #include "cesium-interface/point-conversion.h"
-#include "cesium-interface/points.h"
-#include "cesium-interface/primitive.h"
-#include "cesium-interface/labels.h"
-#include "cesium-interface/billboards.h"
+#include "cesium-interface/cesium-points.h"
+#include "cesium-interface/cesium-primitive.h"
+#include "cesium-interface/cesium-labels.h"
+#include "cesium-interface/cesium-billboards.h"
 #include "style.h"
 #include "simfil/overlay.h"
 #include "layer.h"
@@ -15,7 +15,7 @@
 namespace erdblick
 {
 
-class FeatureLayerVisualization;
+class CesiumFeatureLayerVisualization;
 class FeatureLayerVisualizationBase;
 
 /**
@@ -60,10 +60,10 @@ struct RecursiveRelationVisualizationState
     RecursiveRelationVisualizationState(
         FeatureStyleRule const& rule,
         mapget::model_ptr<mapget::Feature> f,
-        FeatureLayerVisualization& visu);
+        CesiumFeatureLayerVisualization& visu);
 
     FeatureStyleRule const& rule_;
-    FeatureLayerVisualization& visu_;
+    CesiumFeatureLayerVisualization& visu_;
 
     struct RelationToVisualize
     {
@@ -99,7 +99,7 @@ struct RecursiveRelationVisualizationState
 /**
  * Cesium Primitive Conversion for a TileFeatureLayer using a style.
  */
-class FeatureLayerVisualization : public FeatureLayerVisualizationBase
+class CesiumFeatureLayerVisualization : public FeatureLayerVisualizationBase
 {
     friend struct RecursiveRelationVisualizationState;
 
@@ -107,7 +107,7 @@ public:
     /**
      * Convert a TileFeatureLayer into Cesium primitives based on the provided style.
      */
-     FeatureLayerVisualization(
+     CesiumFeatureLayerVisualization(
         int viewIndex,
         std::string const& mapTileKey,
         const FeatureLayerStyle& style,
@@ -119,7 +119,7 @@ public:
      /**
       * Destructor for memory diagnostics.
       */
-     ~FeatureLayerVisualization();
+     ~CesiumFeatureLayerVisualization();
 
     /**
      * Add a tile which is considered for visualization. All tiles added after

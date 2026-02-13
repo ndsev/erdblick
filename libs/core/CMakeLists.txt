@@ -15,13 +15,13 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/search.h
   include/erdblick/layer.h
 
-  include/erdblick/cesium-interface/object.h
-  include/erdblick/cesium-interface/primitive.h
+  include/erdblick/cesium-interface/cesium-object.h
+  include/erdblick/cesium-interface/cesium-primitive.h
   include/erdblick/cesium-interface/cesium.h
   include/erdblick/cesium-interface/point-conversion.h
-  include/erdblick/cesium-interface/points.h
-  include/erdblick/cesium-interface/labels.h
-  include/erdblick/cesium-interface/billboards.h
+  include/erdblick/cesium-interface/cesium-points.h
+  include/erdblick/cesium-interface/cesium-labels.h
+  include/erdblick/cesium-interface/cesium-billboards.h
 
   src/visualization.cpp
   src/style.cpp
@@ -36,12 +36,12 @@ set(ERDBLICK_SOURCE_FILES
   src/layer.cpp
 
   src/cesium-interface/base64.h
-  src/cesium-interface/object.cpp
-  src/cesium-interface/primitive.cpp
+  src/cesium-interface/cesium-object.cpp
+  src/cesium-interface/cesium-primitive.cpp
   src/cesium-interface/cesium.cpp
-  src/cesium-interface/points.cpp
-  src/cesium-interface/labels.cpp
-  src/cesium-interface/billboards.cpp
+  src/cesium-interface/cesium-points.cpp
+  src/cesium-interface/cesium-labels.cpp
+  src/cesium-interface/cesium-billboards.cpp
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")

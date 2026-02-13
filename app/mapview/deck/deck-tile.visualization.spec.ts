@@ -19,7 +19,8 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             hasData: () => true,
-            peekAsync: async () => undefined
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
         } as any;
         const style = {
             name: () => "test-style",
@@ -35,11 +36,24 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => [{
-            path: [[11, 48, 0], [11.001, 48.001, 0]],
-            color: [32, 196, 255, 220],
-            width: 2
-        }];
+        visu.extractPathData = async () => ({
+            length: 1,
+            startIndices: new Uint32Array([0, 2]),
+            attributes: {
+                getPath: {
+                    value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
+                    size: 3
+                },
+                instanceColors: {
+                    value: new Uint8Array([32, 196, 255, 220]),
+                    size: 4
+                },
+                instanceStrokeWidths: {
+                    value: new Float32Array([2]),
+                    size: 1
+                }
+            }
+        });
 
         const rendered = await visu.render({
             renderer: "deck",
@@ -71,7 +85,8 @@ describe("DeckTileVisualization", () => {
             layerName: "Lane",
             tileId: 42n,
             numFeatures: 0,
-            hasData: () => hasData
+            hasData: () => hasData,
+            stats: new Map<string, number[]>()
         } as any;
         const style = {
             name: () => "test-style",
@@ -85,7 +100,10 @@ describe("DeckTileVisualization", () => {
             "",
             true,
             {value: 0} as any
-        );
+        ) as any;
+
+        visu.extractPathData = async () => null;
+        visu.extractPathDataOnMainThread = async () => null;
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
@@ -104,7 +122,10 @@ describe("DeckTileVisualization", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
-            tileId: 42n
+            tileId: 42n,
+            hasData: () => false,
+            numFeatures: 0,
+            stats: new Map<string, number[]>()
         } as any;
         const style = {
             name: () => "test-style",
@@ -118,7 +139,10 @@ describe("DeckTileVisualization", () => {
             "",
             true,
             {value: 0} as any
-        );
+        ) as any;
+
+        visu.extractPathData = async () => null;
+        visu.extractPathDataOnMainThread = async () => null;
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         registry.flush();
@@ -152,7 +176,7 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => [];
+        visu.extractPathData = async () => null;
 
         await visu.render({
             renderer: "deck",

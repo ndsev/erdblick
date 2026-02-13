@@ -22,25 +22,25 @@ import {
     ColorMaterialProperty,
     CallbackProperty,
     JulianDate
-} from "../integrations/cesium";
-import {AppStateService, CameraViewState, TileFeatureId} from "../shared/appstate.service";
-import {MapDataService} from "../mapdata/map.service";
+} from "../../integrations/cesium";
+import {AppStateService, CameraViewState, TileFeatureId} from "../../shared/appstate.service";
+import {MapDataService} from "../../mapdata/map.service";
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {
     FeatureSearchService, MAX_VISIBLE_TILES_PER_LEVEL,
     MAX_ZOOM_LEVEL,
     SAFE_ZOOM_LEVEL,
     SearchResultPrimitiveId
-} from "../search/feature.search.service";
-import {coreLib} from "../integrations/wasm";
-import {environment} from "../environments/environment";
-import {JumpTargetService} from "../search/jump.service";
-import {RightClickMenuService} from "./rightclickmenu.service";
-import {CoordinatesService} from "../coords/coordinates.service";
-import {SearchResultPosition} from "../search/search.worker";
-import {MergedPointsTile} from "./pointmerge.service";
-import {Viewport} from '../../build/libs/core/erdblick-core';
-import {IRenderSceneHandle, IRenderView, ITileVisualization} from "./render-view.model";
+} from "../../search/feature.search.service";
+import {coreLib} from "../../integrations/wasm";
+import {environment} from "../../environments/environment";
+import {JumpTargetService} from "../../search/jump.service";
+import {RightClickMenuService} from "../rightclickmenu.service";
+import {CoordinatesService} from "../../coords/coordinates.service";
+import {SearchResultPosition} from "../../search/search.worker";
+import {MergedPointsTile} from "../pointmerge.service";
+import {Viewport} from '../../../build/libs/core/erdblick-core';
+import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 
 /**
  * Camera constants object to centralize all numerical values for easier maintenance
@@ -1417,4 +1417,3 @@ export class CesiumMapView implements IRenderView {
     }
 }
 
-export {CesiumMapView as MapView};

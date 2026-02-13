@@ -1,7 +1,7 @@
 import {beforeAll, describe, expect, it, vi} from 'vitest';
-import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../integrations/wasm';
-import {FeatureTile} from '../mapdata/features.model';
-import {TileVisualization} from './tile.visualization.model';
+import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../../integrations/wasm';
+import {FeatureTile} from '../../mapdata/features.model';
+import {CesiumTileVisualization} from './cesium-tile.visualization.model';
 
 beforeAll(async () => {
     // Minimal polyfills for the jsdom test environment so Cesium's texture and image handling paths
@@ -41,7 +41,7 @@ beforeAll(async () => {
     await initializeLibrary();
 });
 
-describe('TileVisualization', () => {
+describe('CesiumTileVisualization', () => {
 
     const createViewer = () => {
         const primitives = {
@@ -99,7 +99,7 @@ describe('TileVisualization', () => {
         const viewer = createViewer();
         const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -132,7 +132,7 @@ describe('TileVisualization', () => {
         const viewer = createViewer();
         const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             1,
             createTile({tileId: 2n}) as any,
             pointMergeService as any,
@@ -164,8 +164,9 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -178,19 +179,19 @@ describe('TileVisualization', () => {
             {roadColor: '#f00'},
         );
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(visu.isDirty()).toBe(false);
 
         visu.setStyleOption('roadColor', '#0f0');
         expect(visu.isDirty()).toBe(true);
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(visu.isDirty()).toBe(false);
 
         visu.setStyleOption('roadColor', '#0f0');
         expect(visu.isDirty()).toBe(false);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('destroys visualizations and removes point-merge contributions', async () => {
@@ -205,7 +206,7 @@ describe('TileVisualization', () => {
         const viewer = createViewer();
         const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -239,7 +240,7 @@ describe('TileVisualization', () => {
         const viewer = createViewer();
         const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,

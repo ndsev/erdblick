@@ -1,6 +1,6 @@
 #pragma once
 
-#include "object.h"
+#include "cesium-object.h"
 
 namespace erdblick
 {

@@ -23,7 +23,7 @@ const char *__asan_default_options() {
 
 #include "aabb.h"
 #include "buffer.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/info.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/simfilutil.h"
@@ -38,7 +38,7 @@ const char *__asan_default_options() {
 #include "layer.h"
 
 #include "cesium-interface/point-conversion.h"
-#include "cesium-interface/primitive.h"
+#include "cesium-interface/cesium-primitive.h"
 #include "simfil/exception-handler.h"
 
 #include "mapget/log.h"
@@ -433,15 +433,15 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
         .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
 
-    ////////// FeatureLayerVisualization
-    em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
+    ////////// CesiumFeatureLayerVisualization
+    em::class_<CesiumFeatureLayerVisualization>("CesiumFeatureLayerVisualization")
         .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
-        .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
-        .function("run", &FeatureLayerVisualization::run)
-        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
-        .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
-        .function("externalReferences", &FeatureLayerVisualization::externalReferences)
-        .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
+        .function("addTileFeatureLayer", &CesiumFeatureLayerVisualization::addTileFeatureLayer)
+        .function("run", &CesiumFeatureLayerVisualization::run)
+        .function("primitiveCollection", &CesiumFeatureLayerVisualization::primitiveCollection)
+        .function("mergedPointFeatures", &CesiumFeatureLayerVisualization::mergedPointFeatures)
+        .function("externalReferences", &CesiumFeatureLayerVisualization::externalReferences)
+        .function("processResolvedExternalReferences", &CesiumFeatureLayerVisualization::processResolvedExternalReferences);
 
     ////////// DeckFeatureLayerVisualization
     em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")

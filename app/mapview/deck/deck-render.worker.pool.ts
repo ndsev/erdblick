@@ -39,18 +39,7 @@ export class DeckRenderWorkerPool {
     private initPromise: Promise<void> | null = null;
     private nextTaskId = 0;
 
-    private supportsWorkers(): boolean {
-        return typeof Worker !== "undefined";
-    }
-
-    isAvailable(): boolean {
-        return this.supportsWorkers();
-    }
-
     async renderPaths(request: DeckPathRenderRequest): Promise<DeckPathRenderBuffers> {
-        if (!this.supportsWorkers()) {
-            throw new Error("Workers are not available in this runtime.");
-        }
         await this.ensureInitialized();
         return await new Promise<DeckPathRenderBuffers>((resolve, reject) => {
             const task: DeckPathRenderTask = {
@@ -72,8 +61,8 @@ export class DeckRenderWorkerPool {
     }
 
     private async initializeWorkers(): Promise<void> {
-        const concurrency = Number((globalThis as any)?.navigator?.hardwareConcurrency ?? 2);
-        const maxWorkers = Math.max(1, Math.min(Number.isFinite(concurrency) ? Math.floor(concurrency) : 2, 8));
+        const concurrency = Math.floor((globalThis as any).navigator.hardwareConcurrency);
+        const maxWorkers = Math.max(1, Math.min(concurrency, 8));
         const firstWorker = new Worker(new URL("./deck-render.worker", import.meta.url), {type: "module"});
         const moduleUrl = await this.waitForWorkerReady(firstWorker);
         this.registerWorker(firstWorker, 0);
@@ -82,15 +71,11 @@ export class DeckRenderWorkerPool {
             return;
         }
 
-        console.log(`Creating ${maxWorkers} workers.`)
-        try {
-            const workerBlobUrl = await this.fetchWorkerBlobUrl(moduleUrl);
-            for (let i = 1; i < maxWorkers; i++) {
-                const worker = new Worker(workerBlobUrl, {type: "module"});
-                this.registerWorker(worker, i);
-            }
-        } catch (exc) {
-            console.warn("[deck] worker pool clone setup failed, continuing with a single worker:", exc);
+        console.log(`Creating ${maxWorkers} workers.`);
+        const workerBlobUrl = await this.fetchWorkerBlobUrl(moduleUrl);
+        for (let i = 1; i < maxWorkers; i++) {
+            const worker = new Worker(workerBlobUrl, {type: "module"});
+            this.registerWorker(worker, i);
         }
     }
 
@@ -132,12 +117,9 @@ export class DeckRenderWorkerPool {
         this.runningTaskIdByWorker[index] = null;
         worker.onmessage = (event: MessageEvent<DeckWorkerOutboundMessage>) => {
             const msg = event.data;
-            if (!msg || msg.type !== "DeckPathRenderResult") {
-                return;
-            }
             this.workerBusy[index] = false;
             this.runningTaskIdByWorker[index] = null;
-            this.handleTaskResult(msg);
+            this.handleTaskResult(msg as DeckPathRenderResult);
             this.scheduleWorker(index);
         };
         worker.onerror = (event) => {
@@ -146,21 +128,15 @@ export class DeckRenderWorkerPool {
             this.runningTaskIdByWorker[index] = null;
             if (runningTaskId) {
                 const inFlight = this.inFlightByTaskId.get(runningTaskId);
-                if (inFlight) {
-                    this.inFlightByTaskId.delete(runningTaskId);
-                    inFlight.reject(new Error(event.message || "Deck worker execution failed."));
-                }
+                this.inFlightByTaskId.delete(runningTaskId);
+                inFlight!.reject(new Error(event.message || "Deck worker execution failed."));
             }
-            console.error("[deck] worker error:", event.message || event);
             this.scheduleWorker(index);
         };
     }
 
     private handleTaskResult(result: DeckPathRenderResult): void {
-        const pending = this.inFlightByTaskId.get(result.taskId);
-        if (!pending) {
-            return;
-        }
+        const pending = this.inFlightByTaskId.get(result.taskId)!;
         this.inFlightByTaskId.delete(result.taskId);
         if (result.error) {
             pending.reject(new Error(result.error));
@@ -189,11 +165,7 @@ export class DeckRenderWorkerPool {
         if (!pendingTask) {
             return;
         }
-        const worker = this.workers[index];
-        if (!worker) {
-            pendingTask.reject(new Error("Deck worker is not available."));
-            return;
-        }
+        const worker = this.workers[index]!;
         this.workerBusy[index] = true;
         this.inFlightByTaskId.set(pendingTask.task.taskId, pendingTask);
         this.runningTaskIdByWorker[index] = pendingTask.task.taskId;
@@ -206,23 +178,14 @@ export class DeckRenderWorkerPool {
     }
 
     private toFloat32Array(buffer: ArrayBuffer): Float32Array {
-        if (!buffer || buffer.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Float32Array();
-        }
         return new Float32Array(buffer);
     }
 
     private toUint32Array(buffer: ArrayBuffer): Uint32Array {
-        if (!buffer || buffer.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
-            return new Uint32Array();
-        }
         return new Uint32Array(buffer);
     }
 
     private toUint8Array(buffer: ArrayBuffer): Uint8Array {
-        if (!buffer) {
-            return new Uint8Array();
-        }
         return new Uint8Array(buffer);
     }
 }

@@ -1,13 +1,13 @@
 #include "visualization.h"
 #include "cesium-interface/point-conversion.h"
-#include "cesium-interface/primitive.h"
+#include "cesium-interface/cesium-primitive.h"
 #include "geometry.h"
 
 #include <algorithm>
 #include <iostream>
 #include <type_traits>
 
-#include "cesium-interface/billboards.h"
+#include "cesium-interface/cesium-billboards.h"
 
 using namespace mapget;
 
@@ -79,7 +79,7 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
 
 FeatureLayerVisualizationBase::~FeatureLayerVisualizationBase() = default;
 
-FeatureLayerVisualization::FeatureLayerVisualization(
+CesiumFeatureLayerVisualization::CesiumFeatureLayerVisualization(
     int viewIndex,
     std::string const& mapTileKey,
     const FeatureLayerStyle& style,
@@ -104,9 +104,9 @@ FeatureLayerVisualization::FeatureLayerVisualization(
 {
 }
 
-FeatureLayerVisualization::~FeatureLayerVisualization() = default;
+CesiumFeatureLayerVisualization::~CesiumFeatureLayerVisualization() = default;
 
-void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
+void CesiumFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
 {
     if (!tile_) {
         tile_ = tile.model_;
@@ -133,7 +133,7 @@ void FeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile
     allTiles_.emplace_back(tile.model_);
 }
 
-void FeatureLayerVisualization::run()
+void CesiumFeatureLayerVisualization::run()
 {
     auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
     {
@@ -194,7 +194,7 @@ void FeatureLayerVisualization::run()
     }
 }
 
-std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex) const
+std::string CesiumFeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex) const
 {
     return fmt::format(
         "{}:{}:{}:{}:{}:{}",
@@ -206,7 +206,7 @@ std::string FeatureLayerVisualization::getMapLayerStyleRuleId(uint32_t ruleIndex
         ruleIndex);
 }
 
-NativeJsValue FeatureLayerVisualization::primitiveCollection() const
+NativeJsValue CesiumFeatureLayerVisualization::primitiveCollection() const
 {
     if (!featuresAdded_)
         return {};
@@ -246,7 +246,7 @@ NativeJsValue FeatureLayerVisualization::primitiveCollection() const
     return *collection;
 }
 
-NativeJsValue FeatureLayerVisualization::mergedPointFeatures() const
+NativeJsValue CesiumFeatureLayerVisualization::mergedPointFeatures() const
 {
     auto result = JsValue::Dict();
     for (auto const& [mapLayerStyleRuleId, primitives] : mergedPointsPerStyleRuleId_) {
@@ -285,12 +285,12 @@ void writeVectorToSharedBuffer(SharedUint8Array& out, const std::vector<T>& buff
 }
 }
 
-NativeJsValue FeatureLayerVisualization::externalReferences()
+NativeJsValue CesiumFeatureLayerVisualization::externalReferences()
 {
     return *externalRelationReferences_;
 }
 
-void FeatureLayerVisualization::processResolvedExternalReferences(
+void CesiumFeatureLayerVisualization::processResolvedExternalReferences(
     const NativeJsValue& extRefsResolvedNative)
 {
     JsValue extRefsResolved(extRefsResolvedNative);
@@ -340,7 +340,7 @@ void FeatureLayerVisualization::processResolvedExternalReferences(
     }
 }
 
-void FeatureLayerVisualization::addFeature(
+void CesiumFeatureLayerVisualization::addFeature(
     model_ptr<Feature>& feature,
     BoundEvalFun& evalFun,
     FeatureStyleRule const& rule,
@@ -412,7 +412,7 @@ void FeatureLayerVisualization::addFeature(
     }
 }
 
-void FeatureLayerVisualization::addGeometry(
+void CesiumFeatureLayerVisualization::addGeometry(
     model_ptr<Geometry> const& geom,
     std::string_view id,
     FeatureStyleRule const& rule,
@@ -426,7 +426,7 @@ void FeatureLayerVisualization::addGeometry(
     addGeometry(geom->toSelfContained(), geom->name(), id, rule, mapLayerStyleRuleId, evalFun, offset);
 }
 
-void FeatureLayerVisualization::addGeometry(
+void CesiumFeatureLayerVisualization::addGeometry(
     SelfContainedGeometry const& geom,
     std::optional<std::string_view> geometryName,
     std::string_view id,
@@ -545,7 +545,7 @@ void FeatureLayerVisualization::addGeometry(
     }
 }
 
-void FeatureLayerVisualization::addMergedPointGeometry(
+void CesiumFeatureLayerVisualization::addMergedPointGeometry(
     const std::string_view& id,
     const std::string& mapLayerStyleRuleId,
     const std::optional<glm::dvec3>& gridCellSize,
@@ -598,7 +598,7 @@ void FeatureLayerVisualization::addMergedPointGeometry(
 }
 
 JsValue
-FeatureLayerVisualization::encodeVerticesAsList(std::vector<mapget::Point> const& pointsCartesian)
+CesiumFeatureLayerVisualization::encodeVerticesAsList(std::vector<mapget::Point> const& pointsCartesian)
 {
     auto jsPoints = JsValue::List();
     for (auto const& pt : pointsCartesian) {
@@ -608,7 +608,7 @@ FeatureLayerVisualization::encodeVerticesAsList(std::vector<mapget::Point> const
 }
 
 std::pair<JsValue, JsValue>
-FeatureLayerVisualization::encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& pointsCartesian)
+CesiumFeatureLayerVisualization::encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& pointsCartesian)
 {
     if (pointsCartesian.empty() || pointsCartesian.size() < 2)
         return {};
@@ -639,7 +639,7 @@ FeatureLayerVisualization::encodeVerticesAsReversedSplitList(std::vector<mapget:
 }
 
 JsValue
-FeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& pointsCartesian)
+CesiumFeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& pointsCartesian)
 {
     std::vector<double> cartesianCoords;
     cartesianCoords.reserve(pointsCartesian.size() * 3);
@@ -651,7 +651,7 @@ FeatureLayerVisualization::encodeVerticesAsFloat64Array(std::vector<mapget::Poin
     return JsValue::Float64Array(cartesianCoords);
 }
 
-CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(
+CesiumPrimitive& CesiumFeatureLayerVisualization::getPrimitiveForDashMaterial(
     const FeatureStyleRule& rule,
     BoundEvalFun& evalFun)
 {
@@ -671,7 +671,7 @@ CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForDashMaterial(
         .first->second;
 }
 
-CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
+CesiumPrimitive& CesiumFeatureLayerVisualization::getPrimitiveForArrowMaterial(
     const FeatureStyleRule& rule,
     BoundEvalFun& evalFun)
 {
@@ -689,7 +689,7 @@ CesiumPrimitive& FeatureLayerVisualization::getPrimitiveForArrowMaterial(
         .first->second;
 }
 
-void erdblick::FeatureLayerVisualization::addLine(
+void erdblick::CesiumFeatureLayerVisualization::addLine(
     const Point& wgsA,
     const Point& wgsB,
     std::string_view const& id,
@@ -724,7 +724,7 @@ void erdblick::FeatureLayerVisualization::addLine(
     }
 }
 
-void FeatureLayerVisualization::addPolyLine(
+void CesiumFeatureLayerVisualization::addPolyLine(
     std::vector<mapget::Point> const& vertsCartesian,
     const FeatureStyleRule& rule,
     JsValue const& tileFeatureId,
@@ -762,7 +762,7 @@ void FeatureLayerVisualization::addPolyLine(
     }
 }
 
-simfil::Value FeatureLayerVisualization::evaluateExpression(
+simfil::Value CesiumFeatureLayerVisualization::evaluateExpression(
     const std::string& expression,
     const simfil::ModelNode& ctx,
     bool anyMode,
@@ -787,7 +787,7 @@ simfil::Value FeatureLayerVisualization::evaluateExpression(
     return simfil::Value::null();
 }
 
-void FeatureLayerVisualization::addAttribute(
+void CesiumFeatureLayerVisualization::addAttribute(
     model_ptr<Feature> const& feature,
     std::string_view const& layer,
     model_ptr<Attribute> const& attr,
@@ -877,7 +877,7 @@ void FeatureLayerVisualization::addAttribute(
     }
 }
 
-void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context)
+void CesiumFeatureLayerVisualization::addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context)
 {
     for (auto const& [key, value] : optionValues_) {
         auto keyId = internalStringPoolCopy_->emplace(key);
@@ -885,7 +885,7 @@ void FeatureLayerVisualization::addOptionsToSimfilContext(simfil::model_ptr<simf
     }
 }
 
-JsValue FeatureLayerVisualization::makeTileFeatureId(const std::string_view& featureId) const
+JsValue CesiumFeatureLayerVisualization::makeTileFeatureId(const std::string_view& featureId) const
 {
     return JsValue::Dict({
         {"mapTileKey", mapTileKey_},
@@ -896,7 +896,7 @@ JsValue FeatureLayerVisualization::makeTileFeatureId(const std::string_view& fea
 RecursiveRelationVisualizationState::RecursiveRelationVisualizationState(
     const FeatureStyleRule& rule,
     mapget::model_ptr<mapget::Feature> f,
-    FeatureLayerVisualization& visu)
+    CesiumFeatureLayerVisualization& visu)
     : rule_(rule), visu_(visu)
 {
     unexploredRelations_.emplace_back(std::move(f));

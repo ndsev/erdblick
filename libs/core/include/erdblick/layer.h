@@ -2,7 +2,7 @@
 
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/sourcedata.h"
 
 namespace erdblick

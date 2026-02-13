@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "buffer.h"
 #include "rule.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 
 #include <array>
 #include <string_view>

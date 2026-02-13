@@ -18,7 +18,7 @@ type Cartographic = {x: number, y: number, z: number};
  * Class which represents a set of merged point features for one location.
  * Each merged point feature may be visualized as a label or a point.
  * To this end, the visualization retains visualization parameters for
- * calls to either/both Cesium PointPrimitiveCollection.add() and/or LabelCollection.add().
+ * calls to either/both PointPrimitiveCollection.add() and/or LabelCollection.add().
  */
 export interface MergedPointVisualization {
     position: Cartographic,
@@ -274,8 +274,8 @@ export class PointMergeService
 
     /**
      * Clear all merged points for a particular mapViewLayerStyle prefix.
-     * Yields MergedPointsTiles which should be removed from the dedicated
-     * Cesium viewer.
+     * Yields MergedPointsTiles which should be removed from the active
+     * renderer scene.
      */
     *clear(mapViewLayerStyleId: string): Generator<MergedPointsTile> {
         for (let [mapViewLayerStyleRuleId, tiles] of this.mergedPointsTiles.entries()) {

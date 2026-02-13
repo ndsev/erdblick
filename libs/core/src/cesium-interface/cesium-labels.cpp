@@ -1,4 +1,4 @@
-#include "cesium-interface/labels.h"
+#include "cesium-interface/cesium-labels.h"
 #include "cesium-interface/cesium.h"
 #include "simfil/model/model.h"
 

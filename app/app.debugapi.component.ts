@@ -2,8 +2,6 @@ import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
 import {SceneMode, CesiumMath} from "./integrations/cesium";
-import {MapView} from "./mapview/view";
-import {MapView2D} from "./mapview/view2d";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
