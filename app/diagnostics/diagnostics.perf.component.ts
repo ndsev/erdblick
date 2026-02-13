@@ -553,9 +553,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return undefined;
         }
         if (unit === 'count') {
-            return mode === 'peak'
-                ? Math.round(value).toString()
-                : this.formatDecimal(value, 2);
+            return Math.round(value).toString();
         }
         if (unit === 'KB' || unit === 'MB') {
             const bytes = unit === 'KB' ? value * 1024 : value * 1024 * 1024;
@@ -573,8 +571,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return undefined;
         }
         if (unit === 'count') {
-            const formatted = mode === 'peak' ? Math.round(value).toString() : this.formatDecimal(value, 2);
-            return `${formatted} count`;
+            return `${Math.round(value)} count`;
         }
         if (unit) {
             const formatted = this.formatDecimal(value, 2);
