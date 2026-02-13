@@ -30,6 +30,7 @@ describe("DeckTileVisualization", () => {
             0,
             tile,
             style,
+            "",
             true,
             {value: 0} as any
         ) as any;
@@ -81,6 +82,7 @@ describe("DeckTileVisualization", () => {
             0,
             tile,
             style,
+            "",
             true,
             {value: 0} as any
         );
@@ -113,6 +115,7 @@ describe("DeckTileVisualization", () => {
             0,
             tile,
             style,
+            "",
             true,
             {value: 0} as any
         );
@@ -144,6 +147,7 @@ describe("DeckTileVisualization", () => {
             0,
             tile,
             style,
+            "",
             true,
             {value: 0} as any
         ) as any;

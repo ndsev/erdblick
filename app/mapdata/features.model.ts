@@ -1,4 +1,4 @@
-import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
+import {uint8ArrayFromWasm, uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
@@ -19,6 +19,8 @@ export class FeatureTile {
     numFeatures: number = 0;
     error?: string;
     private parser: TileLayerParser;
+    private fieldDictBlobCache: Uint8Array | null = null;
+    private dataSourceInfoBlobCache: Uint8Array | null = null;
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
     disposed: boolean = false;
@@ -63,6 +65,8 @@ export class FeatureTile {
         }, tileFeatureLayerBlob);
 
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
+        this.fieldDictBlobCache = null;
+        this.dataSourceInfoBlobCache = null;
         if (this.mapTileKey === "undefined") {
             this.mapTileKey = mapTileMetadata.id as string;
         } else if (this.mapTileKey !== mapTileMetadata.id) {
@@ -88,6 +92,50 @@ export class FeatureTile {
 
     hasData(): boolean {
         return !!this.tileFeatureLayerBlob;
+    }
+
+    getFieldDictBlob(): Uint8Array | null {
+        if (this.fieldDictBlobCache) {
+            return this.fieldDictBlobCache;
+        }
+        if (!this.nodeId.length) {
+            return null;
+        }
+        const parserWithFieldDict = this.parser as any;
+        if (typeof parserWithFieldDict.getFieldDict !== "function") {
+            return null;
+        }
+        const encoded = uint8ArrayFromWasm((buf) => {
+            parserWithFieldDict.getFieldDict(buf, this.nodeId);
+            return true;
+        });
+        if (!encoded) {
+            return null;
+        }
+        this.fieldDictBlobCache = encoded;
+        return encoded;
+    }
+
+    getDataSourceInfoBlob(): Uint8Array | null {
+        if (this.dataSourceInfoBlobCache) {
+            return this.dataSourceInfoBlobCache;
+        }
+        if (!this.mapName.length) {
+            return null;
+        }
+        const parserWithDataSourceInfo = this.parser as any;
+        if (typeof parserWithDataSourceInfo.getDataSourceInfo !== "function") {
+            return null;
+        }
+        const encoded = uint8ArrayFromWasm((buf) => {
+            parserWithDataSourceInfo.getDataSourceInfo(buf, this.mapName);
+            return true;
+        });
+        if (!encoded) {
+            return null;
+        }
+        this.dataSourceInfoBlobCache = encoded;
+        return encoded;
     }
 
     /**

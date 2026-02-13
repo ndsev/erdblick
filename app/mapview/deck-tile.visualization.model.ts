@@ -4,6 +4,7 @@ import {ITileVisualization, IRenderSceneHandle} from "./render-view.model";
 import {PathLayer} from "@deck.gl/layers";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
+import {deckRenderWorkerPool} from "./deck-render.worker.pool";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
@@ -32,6 +33,7 @@ export class DeckTileVisualization implements ITileVisualization {
     public readonly styleId: string;
 
     private readonly style: StyleWithIsDeleted;
+    private readonly styleSource: string;
     private readonly highlightMode: HighlightMode;
     private readonly options: Record<string, boolean | number | string>;
     private renderQueued = false;
@@ -45,12 +47,14 @@ export class DeckTileVisualization implements ITileVisualization {
     constructor(viewIndex: number,
                 tile: FeatureTile,
                 style: FeatureLayerStyle,
+                styleSource: string,
                 highDetail: boolean,
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 boxGrid?: boolean,
                 options?: Record<string, boolean | number | string>) {
         this.tile = tile;
         this.style = style as StyleWithIsDeleted;
+        this.styleSource = styleSource;
         this.styleId = this.style.name();
         this.isHighDetail = highDetail;
         this.highlightMode = highlightMode;
@@ -73,6 +77,9 @@ export class DeckTileVisualization implements ITileVisualization {
         });
         try {
             const pathData = await this.extractPathData();
+            if (this.deleted || this.style.isDeleted()) {
+                return false;
+            }
             if (pathData.length > 0) {
                 const pathLayer = new PathLayer({
                     id: pathLayerKey,
@@ -157,16 +164,75 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private async extractPathData(): Promise<DeckPathData[]> {
-        if (typeof this.tile.peekAsync !== "function") {
-            return [];
-        }
         if (typeof this.tile.hasData === "function" && !this.tile.hasData()) {
             return [];
         }
         if (typeof (coreLib as any).DeckFeatureLayerVisualization !== "function") {
             return [];
         }
+        const workerResult = await this.extractPathDataInWorker();
+        if (workerResult) {
+            return workerResult;
+        }
+        return await this.extractPathDataOnMainThread();
+    }
 
+    private async extractPathDataInWorker(): Promise<DeckPathData[] | null> {
+        const tileBlob = this.tile.tileFeatureLayerBlob;
+        if (!tileBlob || !tileBlob.length) {
+            return null;
+        }
+        if (!this.styleSource.length) {
+            return null;
+        }
+
+        const tileWithParserContext = this.tile as FeatureTile & {
+            getFieldDictBlob?: () => Uint8Array | null;
+            getDataSourceInfoBlob?: () => Uint8Array | null;
+        };
+        if (typeof tileWithParserContext.getFieldDictBlob !== "function" ||
+            typeof tileWithParserContext.getDataSourceInfoBlob !== "function") {
+            return null;
+        }
+        const fieldDictBlob = tileWithParserContext.getFieldDictBlob();
+        const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob();
+        if (!fieldDictBlob || !dataSourceInfoBlob) {
+            return null;
+        }
+
+        const pool = deckRenderWorkerPool();
+        if (!pool.isAvailable()) {
+            return null;
+        }
+        try {
+            const result = await pool.renderPaths({
+                viewIndex: this.viewIndex,
+                tileKey: this.tile.mapTileKey,
+                tileBlob,
+                fieldDictBlob,
+                dataSourceInfoBlob,
+                nodeId: this.tile.nodeId,
+                mapName: this.tile.mapName,
+                styleSource: this.styleSource,
+                styleOptions: this.copyStyleOptions(),
+                highlightModeValue: this.highlightMode.value
+            });
+            return this.buildPathDataFromTypedArrays(
+                result.positions,
+                result.startIndices,
+                result.colors,
+                result.widths
+            );
+        } catch (err) {
+            console.warn(`[deck] worker extraction fallback for ${this.tile.mapTileKey}:`, err);
+            return null;
+        }
+    }
+
+    private async extractPathDataOnMainThread(): Promise<DeckPathData[]> {
+        if (typeof this.tile.peekAsync !== "function") {
+            return [];
+        }
         let deckVisu: any;
         let stage = "constructor";
         try {
@@ -192,44 +258,7 @@ export class DeckTileVisualization implements ITileVisualization {
             const startIndices = this.readUint32Array(deckVisu, "pathStartIndicesRaw", "pathStartIndices");
             const colors = this.readUint8Array(deckVisu, "pathColorsRaw", "pathColors");
             const widths = this.readFloat32Array(deckVisu, "pathWidthsRaw", "pathWidths");
-            if (positions.length === 0 || startIndices.length < 2) {
-                return [];
-            }
-
-            const paths: DeckPathData[] = [];
-            for (let pathIndex = 0; pathIndex < startIndices.length - 1; pathIndex++) {
-                const start = startIndices[pathIndex];
-                const end = startIndices[pathIndex + 1];
-                if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 2) {
-                    continue;
-                }
-
-                const path: [number, number, number][] = [];
-                for (let vertexIndex = start; vertexIndex < end; vertexIndex++) {
-                    const offset = vertexIndex * 3;
-                    const lon = positions[offset];
-                    const lat = positions[offset + 1];
-                    const alt = positions[offset + 2] ?? 0;
-                    if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(alt)) {
-                        continue;
-                    }
-                    path.push([lon, lat, alt]);
-                }
-                if (path.length < 2) {
-                    continue;
-                }
-
-                const colorOffset = pathIndex * 4;
-                const color: [number, number, number, number] = [
-                    this.clampByte(colors[colorOffset] ?? 32),
-                    this.clampByte(colors[colorOffset + 1] ?? 196),
-                    this.clampByte(colors[colorOffset + 2] ?? 255),
-                    this.clampByte(colors[colorOffset + 3] ?? 220)
-                ];
-                const width = Math.max(1, Number(widths[pathIndex] ?? 2));
-                paths.push({path, color, width});
-            }
-            return paths;
+            return this.buildPathDataFromTypedArrays(positions, startIndices, colors, widths);
         } catch (e) {
             console.error(`[deck] extractPathData failed @${stage} for ${this.tile.mapTileKey}:`, e);
             return [];
@@ -238,6 +267,51 @@ export class DeckTileVisualization implements ITileVisualization {
                 deckVisu.delete();
             }
         }
+    }
+
+    private buildPathDataFromTypedArrays(
+        positions: ArrayLike<number>,
+        startIndices: ArrayLike<number>,
+        colors: ArrayLike<number>,
+        widths: ArrayLike<number>
+    ): DeckPathData[] {
+        if (positions.length === 0 || startIndices.length < 2) {
+            return [];
+        }
+        const paths: DeckPathData[] = [];
+        for (let pathIndex = 0; pathIndex < startIndices.length - 1; pathIndex++) {
+            const start = Number(startIndices[pathIndex]);
+            const end = Number(startIndices[pathIndex + 1]);
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 2) {
+                continue;
+            }
+
+            const path: [number, number, number][] = [];
+            for (let vertexIndex = start; vertexIndex < end; vertexIndex++) {
+                const offset = vertexIndex * 3;
+                const lon = Number(positions[offset]);
+                const lat = Number(positions[offset + 1]);
+                const alt = Number(positions[offset + 2] ?? 0);
+                if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(alt)) {
+                    continue;
+                }
+                path.push([lon, lat, alt]);
+            }
+            if (path.length < 2) {
+                continue;
+            }
+
+            const colorOffset = pathIndex * 4;
+            const color: [number, number, number, number] = [
+                this.clampByte(Number(colors[colorOffset] ?? 32)),
+                this.clampByte(Number(colors[colorOffset + 1] ?? 196)),
+                this.clampByte(Number(colors[colorOffset + 2] ?? 255)),
+                this.clampByte(Number(colors[colorOffset + 3] ?? 220))
+            ];
+            const width = Math.max(1, Number(widths[pathIndex] ?? 2));
+            paths.push({path, color, width});
+        }
+        return paths;
     }
 
     private readFloat32Array(deckVisu: any, rawAccessor: string, legacyAccessor: string): Float32Array {
@@ -329,6 +403,10 @@ export class DeckTileVisualization implements ITileVisualization {
     private tileFeatureCount(): number {
         const value = Number((this.tile as any).numFeatures ?? 0);
         return Number.isFinite(value) ? value : 0;
+    }
+
+    private copyStyleOptions(): Record<string, boolean | number | string> {
+        return {...this.options};
     }
 
     private recordRenderTimeSample(durationMs: number): void {
