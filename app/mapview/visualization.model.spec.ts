@@ -97,6 +97,7 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
         const visu = new TileVisualization(
             0,
@@ -113,7 +114,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(true);
         expect(addSpy).toHaveBeenCalledTimes(2);
@@ -122,13 +123,14 @@ describe('TileVisualization', () => {
         visu.isHighDetail = false;
         expect(visu.isDirty()).toBe(true);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('renders only a low-detail tile border when high-detail is disabled', async () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
         const visu = new TileVisualization(
             1,
@@ -145,7 +147,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(true);
         expect(addSpy).toHaveBeenCalledTimes(1);
@@ -154,7 +156,7 @@ describe('TileVisualization', () => {
         visu.showTileBorder = false;
         expect(visu.isDirty()).toBe(true);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('marks visualization dirty when style options change', async () => {
@@ -201,6 +203,7 @@ describe('TileVisualization', () => {
         };
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
         const visu = new TileVisualization(
             0,
@@ -218,10 +221,10 @@ describe('TileVisualization', () => {
         const addSpy = vi.spyOn(primitives, 'add');
         const removeSpy = vi.spyOn(primitives, 'remove');
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(addSpy).toHaveBeenCalledTimes(2);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
 
         expect(pointMergeService.remove).toHaveBeenCalledWith(tile.tileId, 'rule');
         expect(removedTiles[0].remove).toHaveBeenCalledWith(viewer);
@@ -234,6 +237,7 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle({isDeleted: () => true});
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
         const visu = new TileVisualization(
             0,
@@ -247,7 +251,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(false);
         expect(addSpy).not.toHaveBeenCalled();

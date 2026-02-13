@@ -3,7 +3,13 @@ import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSPECTIONS, AppStateService} from "../shared/appstate.service";
+import {
+    MAX_NUM_TILES_TO_LOAD,
+    MAX_NUM_TILES_TO_VISUALIZE,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    AppStateService,
+    RendererMode
+} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
@@ -41,6 +47,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             </div>
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
+            <div class="button-container">
+                <label>Renderer:</label>
+                <p-selectButton [options]="rendererModeOptions"
+                                [(ngModel)]="rendererModeSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setRendererMode($event)"></p-selectButton>
+            </div>
             <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
@@ -100,6 +114,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
+    rendererModeSetting: RendererMode = 'cesium';
+    rendererModeOptions = [
+        {label: 'Cesium', value: 'cesium'},
+        {label: 'Deck', value: 'deck'}
+    ];
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -130,6 +149,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.rendererModeState.subscribe(mode => {
+            this.rendererModeSetting = mode;
         }));
     }
 
@@ -180,6 +202,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
+    }
+
+    setRendererMode(mode: RendererMode) {
+        this.rendererModeSetting = mode;
+        this.stateService.rendererMode = mode;
     }
 
     setDarkMode(setting: 'off' | 'on' | 'auto') {

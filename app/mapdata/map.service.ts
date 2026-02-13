@@ -9,17 +9,19 @@ import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {TileVisualization} from "../mapview/tile.visualization.model";
+import {DeckTileVisualization} from "../mapview/deck-tile.visualization.model";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
-import {Feature, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
+import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
 import {AppStateService, InspectionPanelModel, TileFeatureId, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
 import {ViewVisualizationState} from "../mapview/view.visualization.model";
-import {Cartesian3, Viewer, Rectangle} from "../integrations/cesium";
+import {Cartesian3} from "../integrations/cesium";
 import {deepEquals} from "../shared/app-state";
+import {IRenderSceneHandle, ITileVisualization, RenderRectangle, RenderVector3} from "../mapview/render-view.model";
 
 interface SelectionTileRequest {
     remoteRequest: {
@@ -50,8 +52,9 @@ export class MapDataService {
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private tileStream: MapTileStreamClient|null = null;
-    private selectionVisualizations: TileVisualization[];
-    private hoverVisualizations: TileVisualization[];
+    private featureLayerParsingQueue: Uint8Array[] = [];
+    private selectionVisualizations: ITileVisualization[];
+    private hoverVisualizations: ITileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
     private GeometryType?: typeof coreLib.GeomType;
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,12 +67,12 @@ export class MapDataService {
     private dataSourceInfoJson: string | null = null;
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
-    tileVisualizationTopic: Subject<TileVisualization>;
-    tileVisualizationDestructionTopic: Subject<TileVisualization>;
+    tileVisualizationTopic: Subject<ITileVisualization>;
+    tileVisualizationDestructionTopic: Subject<ITileVisualization>;
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
-    moveToRectangleTopic: Subject<{ targetView: number, rectangle: Rectangle }>;
-    originAndNormalForFeatureZoomTopic: Subject<{ targetView: number, origin: Cartesian3, normal: Cartesian3}> = new Subject();
+    moveToRectangleTopic: Subject<{ targetView: number, rectangle: RenderRectangle }>;
+    originAndNormalForFeatureZoomTopic: Subject<{ targetView: number, origin: RenderVector3, normal: RenderVector3}> = new Subject();
     hoverTopic = new BehaviorSubject<FeatureWrapper[]>([]);
     selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     styleOptionChangedTopic: Subject<[StyleOptionNode, number]> = new Subject<[StyleOptionNode, number]>();
@@ -102,15 +105,15 @@ export class MapDataService {
         this.viewVisualizationState = [];
 
         // Triggered when a tile layer is freshly rendered and should be added to the frontend.
-        this.tileVisualizationTopic = new Subject<TileVisualization>();
+        this.tileVisualizationTopic = new Subject<ITileVisualization>();
 
         // Triggered when a tile layer is being removed.
-        this.tileVisualizationDestructionTopic = new Subject<TileVisualization>();
+        this.tileVisualizationDestructionTopic = new Subject<ITileVisualization>();
         this.mergedTileVisualizationDestructionTopic = new Subject<MergedPointsTile>();
 
         // Triggered when the user requests to zoom to a map layer.
-        this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number }>();
-        this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: Rectangle }>();
+        this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
+        this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
 
         this.stateService.numViewsState.subscribe(numViews => {
             const diff = numViews - this.viewVisualizationState.length;
@@ -829,6 +832,41 @@ export class MapDataService {
         }
     }
 
+    private createTileVisualization(
+        viewIndex: number,
+        tile: FeatureTile,
+        style: FeatureLayerStyle,
+        highDetail: boolean,
+        highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
+        featureIdSubset: string[] = [],
+        boxGrid = false,
+        options: Record<string, boolean | number | string> = {}
+    ): ITileVisualization {
+        if (this.stateService.rendererMode === "deck") {
+            return new DeckTileVisualization(
+                viewIndex,
+                tile,
+                style,
+                highDetail,
+                highlightMode,
+                boxGrid,
+                options
+            );
+        }
+        return new TileVisualization(
+            viewIndex,
+            tile,
+            this.pointMergeService,
+            (tileKey: string) => this.getFeatureTile(tileKey),
+            style,
+            highDetail,
+            highlightMode,
+            featureIdSubset,
+            boxGrid,
+            options
+        );
+    }
+
     private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         const wasmStyle = style.featureLayerStyle;
         if (!wasmStyle) {
@@ -856,17 +894,16 @@ export class MapDataService {
             }
             return;
         }
-        let visu = new TileVisualization(
+        let visu = this.createTileVisualization(
             viewIndex,
             tileLayer,
-            this.pointMergeService,
-            (tileKey: string) => this.getFeatureTile(tileKey),
             wasmStyle,
             tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId),
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.maps.getViewTileBorderState(viewIndex),
-            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId));
+            this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
+        );
         visu.updateStatus(true);
         viewState.visualizationQueue.push(visu);
         viewState.putVisualization(styleId, tileKey, visu);
@@ -1083,8 +1120,8 @@ export class MapDataService {
                 runForTargetViewOrAllAffected(vi =>
                     this.originAndNormalForFeatureZoomTopic.next({
                         targetView: vi,
-                        origin: centerCartesian,
-                        normal: normal
+                        origin: {x: centerCartesian.x, y: centerCartesian.y, z: centerCartesian.z},
+                        normal: {x: normal.x, y: normal.y, z: normal.z}
                     }));
             }
 
@@ -1155,17 +1192,16 @@ export class MapDataService {
                             if (group.color) {
                                 styleOptions["selectableFeatureHighlightColor"] = group.color;
                             }
-                            let visualization = new TileVisualization(
+                            let visualization = this.createTileVisualization(
                                 viewIndex,
                                 featureTile,
-                                this.pointMergeService,
-                                (tileKey: string) => this.getFeatureTile(tileKey),
                                 style.featureLayerStyle,
                                 true,
                                 mode,
                                 featureIds,
                                 false,
-                                styleOptions);
+                                styleOptions
+                            );
                             this.tileVisualizationTopic.next(visualization);
                             visualizationCollection.push(visualization);
                         }
@@ -1187,13 +1223,13 @@ export class MapDataService {
     /**
      * Clean up all tile visualizations - used during viewer deletion.
      */
-    clearAllTileVisualizations(viewIndex: number, viewer: Viewer): void {
+    clearAllTileVisualizations(viewIndex: number, sceneHandle: IRenderSceneHandle): void {
         if (viewIndex >= this.stateService.numViews) {
             return;
         }
         for (const tileVisu of this.viewVisualizationState[viewIndex].removeVisualizations()) {
             try {
-                tileVisu.destroy(viewer);
+                tileVisu.destroy(sceneHandle);
             } catch (error) {
                 console.warn('Error destroying tile visualization:', error);
             }

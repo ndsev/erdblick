@@ -7,7 +7,7 @@ import {JumpTargetService} from "../search/jump.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 
-export class MapView3D extends MapView {
+export class CesiumMapView3D extends MapView {
 
     constructor(id: number,
                 canvasId: string,
@@ -104,3 +104,5 @@ export class MapView3D extends MapView {
         }
     }
 }
+
+export {CesiumMapView3D as MapView3D};

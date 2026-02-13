@@ -1,4 +1,11 @@
-import {AppStateService, VIEW_SYNC_LAYERS, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION} from "../shared/appstate.service";
+import {
+    AppStateService,
+    RendererMode,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION
+} from "../shared/appstate.service";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -19,9 +26,11 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {MapView} from "./view";
-import {MapView2D} from "./view2d";
-import {MapView3D} from "./view3d";
+import {CesiumMapView2D} from "./view2d";
+import {CesiumMapView3D} from "./view3d";
+import {DeckMapView2D} from "./deck-view2d";
+import {DeckMapView3D} from "./deck-view3d";
+import {IRenderView} from "./render-view.model";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
@@ -76,7 +85,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
-    mapView?: MapView;
+    rendererMode: RendererMode = 'cesium';
+    mapView?: IRenderView;
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
@@ -90,6 +100,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
 
     private modeSubscription?: Subscription;
+    private hoverSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
 
@@ -155,12 +166,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     ngAfterViewInit() {
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
-            this.stateService.mode2dState.pipe(this.viewIndex())
-        ]).subscribe(([_, mode2d]) => {
-            const needsRebuild = this.is2DMode !== mode2d || !this.mapView;
+            this.stateService.mode2dState.pipe(this.viewIndex()),
+            this.stateService.rendererModeState
+        ]).subscribe(([_, mode2d, rendererMode]) => {
+            const needsRebuild =
+                this.is2DMode !== mode2d || this.rendererMode !== rendererMode || !this.mapView;
             this.is2DMode = mode2d;
+            this.rendererMode = rendererMode;
             if (needsRebuild) {
-                this.initializeViewer(mode2d);
+                this.initializeViewer(mode2d, rendererMode);
             }
         });
     }
@@ -175,19 +189,36 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Recreate the viewer with different projection for 2D/3D modes
      * This is necessary because Cesium doesn't support dynamic projection switching
      */
-    private async createViewerForMode(is2D: boolean) {
+    private async createViewerForMode(is2D: boolean, rendererMode: RendererMode) {
+        this.hoverSubscription?.unsubscribe();
+        this.hoverSubscription = undefined;
         if (this.mapView) {
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
         }
-        const mapView = is2D
-            ? new MapView2D(
-                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.menuService, this.coordinatesService, this.stateService)
-            : new MapView3D(
-                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                this.jumpService, this.menuService, this.coordinatesService, this.stateService);
-        // Cesium registers high-frequency input and animation callbacks.
-        // Keep it out of Angular's zone to prevent global change detection on every pointer move.
+        const mapView: IRenderView = rendererMode === 'deck'
+            ? (
+                is2D
+                    ? new DeckMapView2D(
+                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                    )
+                    : new DeckMapView3D(
+                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                    )
+            )
+            : (
+                is2D
+                    ? new CesiumMapView2D(
+                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                    )
+                    : new CesiumMapView3D(
+                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
+                    )
+            );
+        // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
         this.mapView = mapView;
     }
@@ -204,13 +235,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
         }
         this.modeSubscription?.unsubscribe();
+        this.hoverSubscription?.unsubscribe();
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
     }
 
-    private initializeViewer(mode2d: boolean) {
-        this.createViewerForMode(mode2d).catch((error) => {
+    private initializeViewer(mode2d: boolean, rendererMode: RendererMode) {
+        this.createViewerForMode(mode2d, rendererMode).catch((error) => {
             console.error('Failed to initialize viewer:', error);
             alert('Failed to initialize the map viewer. Please refresh the page.');
         }).finally(() => {
@@ -223,56 +255,53 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.showSyncMenu = this.stateService.numViews > 1 && this.mapView!.viewIndex > 0;
             const currentSyncState = new Set(this.stateService.viewSync);
             this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
-            this.subscriptions.push(
-                this.mapView!.hoveredFeatureIds.subscribe(result => {
-                    if (!result || !result.featureIds.length) {
-                        this.featureIdsContent = [];
-                        this.featureIdsPopover.hide();
+            this.hoverSubscription = this.mapView!.hoveredFeatureIds.subscribe(result => {
+                this.featureIdsContent = [];
+                if (!result || !result.featureIds.length) {
+                    this.featureIdsPopover.hide();
+                    return;
+                }
+                const featureIdsContent: string[] = [];
+                result.featureIds.forEach((featureId) => {
+                    if (!featureId) {
                         return;
                     }
-                    const featureIdsContent: string[] = [];
-                    result.featureIds.forEach((featureId) => {
-                        if (!featureId) {
-                            return;
+                    if (typeof featureId === "string") {
+                        if (featureId !== 'hover-highlight') {
+                            featureIdsContent.push(featureId);
                         }
-                        if (typeof featureId === "string") {
-                            if (featureId !== 'hover-highlight') {
-                                featureIdsContent.push(featureId);
-                            }
-                            return;
-                        }
-                        if (typeof featureId === 'object' && 'featureId' in featureId) {
-                            if (typeof featureId.featureId === 'string' && featureId.featureId.length > 0) {
-                                featureIdsContent.push(featureId.featureId);
-                            }
-                        }
-                    });
-                    if (!featureIdsContent.length) {
-                        this.featureIdsContent = [];
-                        this.featureIdsPopover.hide();
-                        return;
-                    }
-                    this.featureIdsContent = featureIdsContent;
-                    const canvasRect = this.mapView!.viewer.canvas.getBoundingClientRect();
-                    const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
-                    const y = result.position.y + canvasRect.top;
-                    const anchor = this.anchorRef.nativeElement;
-                    anchor.style.position = 'fixed';
-                    anchor.style.left = `${x - 16}px`;
-                    anchor.style.top = `${y - 4}px`;
-                    anchor.style.width = '1px';
-                    anchor.style.height = '1px';
-                    anchor.style.pointerEvents = 'none';
-
-                    if (this.featureIdsPopover.overlayVisible) {
-                        this.featureIdsPopover.target = anchor;
-                        this.featureIdsPopover.align();
                     } else {
-                        this.featureIdsPopover.show(null, anchor);
+                        if (featureId.featureId) {
+                            featureIdsContent.push(featureId.featureId);
+                        }
                     }
+                });
+                if (!featureIdsContent.length) {
+                    this.featureIdsContent = [];
+                    this.featureIdsPopover.hide();
+                    return;
+                }
+                this.featureIdsContent = featureIdsContent;
+                const canvasRect = this.mapView!.getCanvasClientRect();
+                const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
+                const y = result.position.y + canvasRect.top;
+                const anchor = this.anchorRef.nativeElement;
+                anchor.style.position = 'fixed';
+                anchor.style.left = `${x - 16}px`;
+                anchor.style.top = `${y - 4}px`;
+                anchor.style.width = '1px';
+                anchor.style.height = '1px';
+                anchor.style.pointerEvents = 'none';
 
-                })
-            );
+                if (this.featureIdsPopover.overlayVisible) {
+                    this.featureIdsPopover.target = anchor;
+                    this.featureIdsPopover.align();
+                } else {
+                    this.featureIdsPopover.show(null, anchor);
+                }
+
+            });
+            this.mapService.scheduleUpdate();
             this.cdr.markForCheck();
         });
     }

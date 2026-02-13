@@ -16,12 +16,38 @@ namespace erdblick
 {
 
 class FeatureLayerVisualization;
+class FeatureLayerVisualizationBase;
 
 /**
  * Feature ID which is used when the rendered representation is not
  * supposed to be selectable.
  */
 static std::string UnselectableId;
+
+/**
+ * Shared state and initialization logic for frontend-specific visualization adapters.
+ */
+class FeatureLayerVisualizationBase
+{
+public:
+    FeatureLayerVisualizationBase(
+        int viewIndex,
+        std::string const& mapTileKey,
+        const FeatureLayerStyle& style,
+        NativeJsValue const& rawOptionValues,
+        FeatureStyleRule::HighlightMode const& highlightMode,
+        NativeJsValue const& rawFeatureIdSubset = {});
+    virtual ~FeatureLayerVisualizationBase();
+
+protected:
+    int viewIndex_;
+    JsValue mapTileKey_;
+    FeatureLayerStyle const& style_;
+    std::set<std::string> featureIdSubset_;
+    std::set<std::string> featureIdBaseSubset_;
+    std::map<std::string, simfil::Value> optionValues_;
+    FeatureStyleRule::HighlightMode highlightMode_;
+};
 
 /**
  * Covers the state for the visualization of a single Relation-Style+Feature
@@ -73,7 +99,7 @@ struct RecursiveRelationVisualizationState
 /**
  * Cesium Primitive Conversion for a TileFeatureLayer using a style.
  */
-class FeatureLayerVisualization
+class FeatureLayerVisualization : public FeatureLayerVisualizationBase
 {
     friend struct RecursiveRelationVisualizationState;
 
@@ -271,8 +297,6 @@ private:
 
     /// =========== Generic Members ===========
 
-    int viewIndex_;
-    JsValue mapTileKey_;
     bool featuresAdded_ = false;
     CesiumPrimitive coloredLines_;
     std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, CesiumPrimitive> dashLines_;
@@ -294,14 +318,9 @@ private:
             std::pair<std::unordered_set<std::string>, std::optional<JsValue>>>> mergedPointsPerStyleRuleId_;
     JsValue featureMergeService_;
 
-    FeatureLayerStyle const& style_;
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
-    std::set<std::string> featureIdSubset_;
-    std::set<std::string> featureIdBaseSubset_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
-    std::map<std::string, simfil::Value> optionValues_;
-    FeatureStyleRule::HighlightMode highlightMode_;
 
     /// ===== Relation Processing Members =====
 
@@ -313,6 +332,88 @@ private:
     std::deque<RecursiveRelationVisualizationState> relationStyleState_;
 
     std::vector<FeatureStyleRule> labelStyles{};
+};
+
+/**
+ * Deck ABI v1 visualization scaffold.
+ * This class exposes typed-array accessors with stable names used by the deck renderer path.
+ */
+class DeckFeatureLayerVisualization : public FeatureLayerVisualizationBase
+{
+public:
+    DeckFeatureLayerVisualization(
+        int viewIndex,
+        std::string const& mapTileKey,
+        const FeatureLayerStyle& style,
+        NativeJsValue const& rawOptionValues,
+        FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
+        NativeJsValue const& rawFeatureIdSubset = {});
+    ~DeckFeatureLayerVisualization() override;
+
+    void addTileFeatureLayer(TileFeatureLayer const& tile);
+    void run();
+    [[nodiscard]] uint32_t abiVersion() const;
+
+    [[nodiscard]] NativeJsValue pointPositions() const;
+    [[nodiscard]] NativeJsValue pointColors() const;
+    [[nodiscard]] NativeJsValue pointRadii() const;
+    [[nodiscard]] NativeJsValue pointFeatureStart() const;
+    [[nodiscard]] NativeJsValue pointFeatureIds() const;
+
+    [[nodiscard]] NativeJsValue iconPositions() const;
+    [[nodiscard]] NativeJsValue iconSizes() const;
+    [[nodiscard]] NativeJsValue iconAtlasIndex() const;
+    [[nodiscard]] NativeJsValue iconFeatureStart() const;
+    [[nodiscard]] NativeJsValue iconFeatureIds() const;
+
+    [[nodiscard]] NativeJsValue pathPositions() const;
+    [[nodiscard]] NativeJsValue pathStartIndices() const;
+    [[nodiscard]] NativeJsValue pathColors() const;
+    [[nodiscard]] NativeJsValue pathWidths() const;
+    [[nodiscard]] NativeJsValue pathFeatureStart() const;
+    [[nodiscard]] NativeJsValue pathFeatureIds() const;
+    [[nodiscard]] NativeJsValue pathDashArray() const;
+    [[nodiscard]] NativeJsValue pathDashOffsets() const;
+
+    [[nodiscard]] NativeJsValue arrowPositions() const;
+    [[nodiscard]] NativeJsValue arrowAngles() const;
+    [[nodiscard]] NativeJsValue arrowFeatureStart() const;
+    [[nodiscard]] NativeJsValue arrowFeatureIds() const;
+
+    [[nodiscard]] NativeJsValue polygonPositions() const;
+    [[nodiscard]] NativeJsValue polygonRingStartIndices() const;
+    [[nodiscard]] NativeJsValue polygonPolygonStartIndices() const;
+    [[nodiscard]] NativeJsValue polygonFillColors() const;
+    [[nodiscard]] NativeJsValue polygonLineColors() const;
+    [[nodiscard]] NativeJsValue polygonFeatureStart() const;
+    [[nodiscard]] NativeJsValue polygonFeatureIds() const;
+
+    [[nodiscard]] NativeJsValue meshPositions() const;
+    [[nodiscard]] NativeJsValue meshIndices() const;
+    [[nodiscard]] NativeJsValue meshColors() const;
+    [[nodiscard]] NativeJsValue meshFeatureStart() const;
+    [[nodiscard]] NativeJsValue meshFeatureIds() const;
+
+    [[nodiscard]] NativeJsValue labelPositions() const;
+    [[nodiscard]] NativeJsValue labelTextUtf8() const;
+    [[nodiscard]] NativeJsValue labelTextStartIndices() const;
+    [[nodiscard]] NativeJsValue labelSizes() const;
+    [[nodiscard]] NativeJsValue labelColors() const;
+    [[nodiscard]] NativeJsValue labelFeatureStart() const;
+    [[nodiscard]] NativeJsValue labelFeatureIds() const;
+
+private:
+    mapget::TileFeatureLayer::Ptr tile_;
+    std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
+    std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
+    std::vector<float> pathPositionsBuffer_;
+    std::vector<uint32_t> pathStartIndicesBuffer_;
+    std::vector<uint8_t> pathColorsBuffer_;
+    std::vector<float> pathWidthsBuffer_;
+    std::vector<uint32_t> pathFeatureStartBuffer_;
+    std::vector<uint32_t> pathFeatureIdsBuffer_;
+    std::vector<float> pathDashArrayBuffer_;
+    std::vector<float> pathDashOffsetsBuffer_;
 };
 
 }  // namespace erdblick

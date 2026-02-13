@@ -5,6 +5,7 @@ import {PrimitiveCollection, Viewer} from "../integrations/cesium";
 import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
 import {TileBoxVisualization} from "./tilebox.visualization.model";
+import {IRenderSceneHandle, ITileVisualization} from "./render-view.model";
 
 export interface LocateResolution {
     tileId: string,
@@ -20,8 +21,21 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
 }
 
+function asCesiumViewer(sceneHandle: IRenderSceneHandle): Viewer | undefined {
+    if (sceneHandle.renderer !== "cesium") {
+        console.warn(`TileVisualization expects a Cesium scene handle, got "${sceneHandle.renderer}".`);
+        return undefined;
+    }
+    const viewer = sceneHandle.scene as Viewer;
+    if (!viewer || !(viewer as any).scene) {
+        console.warn("TileVisualization received an invalid Cesium scene handle.");
+        return undefined;
+    }
+    return viewer;
+}
+
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
-export class TileVisualization {
+export class TileVisualization implements ITileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
@@ -111,17 +125,21 @@ export class TileVisualization {
 
     /**
      * Actually create the visualization.
-     * @param viewer {Viewer} The viewer to add the rendered entity to.
+     * @param sceneHandle Renderer scene handle.
      * @return True if anything was rendered, false otherwise.
      */
-    async render(viewer: Viewer) {
+    async render(sceneHandle: IRenderSceneHandle) {
+        const viewer = asCesiumViewer(sceneHandle);
+        if (!viewer) {
+            return false;
+        }
         if (this.renderingInProgress || this.deleted)
             return false;
 
         const renderStyleOptionsVersion = this.styleOptionsVersion;
 
         // Remove any previous render-result, as a new one is generated.
-        this.destroy(viewer);
+        this.destroy(sceneHandle);
         this.deleted = false;
 
         // Do not continue if the style was deleted while we were waiting.
@@ -246,17 +264,21 @@ export class TileVisualization {
         this.renderingInProgress = false;
         this.updateStatus(false);
         if (this.deleted)
-            this.destroy(viewer);
+            this.destroy(sceneHandle);
         return returnValue;
     }
 
     /**
      * Destroy any current visualization.
-     * @param viewer {Viewer} The viewer to remove the rendered entity from.
+     * @param sceneHandle Renderer scene handle.
      */
-    destroy(viewer: Viewer) {
+    destroy(sceneHandle: IRenderSceneHandle) {
         this.deleted = true;
         if (this.renderingInProgress) {
+            return;
+        }
+        const viewer = asCesiumViewer(sceneHandle);
+        if (!viewer) {
             return;
         }
 

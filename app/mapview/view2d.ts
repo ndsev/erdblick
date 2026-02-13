@@ -17,7 +17,7 @@ import {JumpTargetService} from "../search/jump.service";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {CoordinatesService} from "../coords/coordinates.service";
 
-export class MapView2D extends MapView {
+export class CesiumMapView2D extends MapView {
 
     constructor(id: number,
                 canvasId: string,
@@ -274,3 +274,5 @@ export class MapView2D extends MapView {
         return rectangle;
     }
 }
+
+export {CesiumMapView2D as MapView2D};

@@ -20,6 +20,7 @@
         "target": "ESNext",
         "module": "ESNext",
         "useDefineForClassFields": false,
+        "skipLibCheck": true,
         "lib": [
             "ESNext",
             "dom",

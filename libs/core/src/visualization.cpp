@@ -42,25 +42,17 @@ std::string_view stripFeatureIdSuffix(std::string_view featureId) {
 }
 }
 
-FeatureLayerVisualization::FeatureLayerVisualization(
+FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     int viewIndex,
     std::string const& mapTileKey,
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
-    NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
     NativeJsValue const& rawFeatureIdSubset)
     : viewIndex_(viewIndex),
       mapTileKey_(mapTileKey),
-      coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
-      coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
-      coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
-      coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
-      coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
-      featureMergeService_(rawFeatureMergeService),
       style_(style),
-      highlightMode_(highlightMode),
-      externalRelationReferences_(JsValue::List())
+      highlightMode_(highlightMode)
 {
     // Convert option values dict to simfil values.
     auto optionValues = JsValue(rawOptionValues);
@@ -83,6 +75,33 @@ FeatureLayerVisualization::FeatureLayerVisualization(
         featureIdSubset_.insert(featureId);
         featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
     }
+}
+
+FeatureLayerVisualizationBase::~FeatureLayerVisualizationBase() = default;
+
+FeatureLayerVisualization::FeatureLayerVisualization(
+    int viewIndex,
+    std::string const& mapTileKey,
+    const FeatureLayerStyle& style,
+    NativeJsValue const& rawOptionValues,
+    NativeJsValue const& rawFeatureMergeService,
+    FeatureStyleRule::HighlightMode const& highlightMode,
+    NativeJsValue const& rawFeatureIdSubset)
+    : FeatureLayerVisualizationBase(
+          viewIndex,
+          mapTileKey,
+          style,
+          rawOptionValues,
+          highlightMode,
+          rawFeatureIdSubset),
+      coloredLines_(CesiumPrimitive::withPolylineColorAppearance(false)),
+      coloredNontrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(false, false)),
+      coloredTrivialMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true)),
+      coloredGroundLines_(CesiumPrimitive::withPolylineColorAppearance(true)),
+      coloredGroundMeshes_(CesiumPrimitive::withPerInstanceColorAppearance(true, true)),
+      featureMergeService_(rawFeatureMergeService),
+      externalRelationReferences_(JsValue::List())
+{
 }
 
 FeatureLayerVisualization::~FeatureLayerVisualization() = default;
@@ -240,6 +259,35 @@ NativeJsValue FeatureLayerVisualization::mergedPointFeatures() const
         result.set(mapLayerStyleRuleId, pointList);
     }
     return *result;
+}
+
+namespace {
+NativeJsValue makeEmptyTypedArray(const char* ctorName) {
+#ifdef EMSCRIPTEN
+    return emscripten::val::global(ctorName).new_(0);
+#else
+    (void) ctorName;
+    return *JsValue::List();
+#endif
+}
+
+template <typename T>
+NativeJsValue makeTypedArrayCopy(const char* ctorName, const std::vector<T>& buffer) {
+#ifdef EMSCRIPTEN
+    if (buffer.empty()) {
+        return makeEmptyTypedArray(ctorName);
+    }
+    auto typedView = emscripten::typed_memory_view(buffer.size(), buffer.data());
+    return emscripten::val::global(ctorName).new_(typedView);
+#else
+    (void) ctorName;
+    auto values = JsValue::List();
+    for (auto const& entry : buffer) {
+        values.push(JsValue(entry));
+    }
+    return *values;
+#endif
+}
 }
 
 NativeJsValue FeatureLayerVisualization::externalReferences()
@@ -1071,5 +1119,206 @@ bool RecursiveRelationVisualizationState::RelationToVisualize::readyToRender() c
 {
     return relation_ && sourceFeature_ && targetFeature_ && !rendered_;
 }
+
+DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
+    int viewIndex,
+    std::string const& mapTileKey,
+    const FeatureLayerStyle& style,
+    NativeJsValue const& rawOptionValues,
+    FeatureStyleRule::HighlightMode const& highlightMode,
+    NativeJsValue const& rawFeatureIdSubset)
+    : FeatureLayerVisualizationBase(
+          viewIndex,
+          mapTileKey,
+          style,
+          rawOptionValues,
+          highlightMode,
+          rawFeatureIdSubset)
+{
+}
+
+DeckFeatureLayerVisualization::~DeckFeatureLayerVisualization() = default;
+
+void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
+{
+    if (!tile_) {
+        tile_ = tile.model_;
+        internalStringPoolCopy_ = std::make_shared<simfil::StringPool>(*tile.model_->strings());
+    }
+
+    tile.model_->setStrings(internalStringPoolCopy_);
+    allTiles_.emplace_back(tile.model_);
+}
+
+void DeckFeatureLayerVisualization::run()
+{
+    pathPositionsBuffer_.clear();
+    pathStartIndicesBuffer_.clear();
+    pathColorsBuffer_.clear();
+    pathWidthsBuffer_.clear();
+    pathFeatureStartBuffer_.clear();
+    pathFeatureIdsBuffer_.clear();
+    pathDashArrayBuffer_.clear();
+    pathDashOffsetsBuffer_.clear();
+
+    if (!tile_) {
+        return;
+    }
+
+    uint32_t vertexCursor = 0;
+    uint32_t lineIndex = 0;
+    auto processFeature = [&](mapget::model_ptr<mapget::Feature>& feature)
+    {
+        try {
+            if (!featureIdBaseSubset_.empty()) {
+                auto featureIdPtr = feature->id();
+                if (!featureIdPtr) {
+                    return;
+                }
+                auto featureId = featureIdPtr->toString();
+                if (!featureIdBaseSubset_.contains(featureId)) {
+                    return;
+                }
+            }
+
+            auto geom = feature->geomOrNull();
+            if (!geom) {
+                return;
+            }
+
+            geom->forEachGeometry([&](auto&& geomEntry)
+            {
+                try {
+                    if (geomEntry->geomType() != mapget::GeomType::Line) {
+                        return true;
+                    }
+                    auto line = geomEntry->toSelfContained();
+                    if (line.points_.size() < 2) {
+                        return true;
+                    }
+
+                    pathStartIndicesBuffer_.push_back(vertexCursor);
+                    for (auto const& point : line.points_) {
+                        pathPositionsBuffer_.push_back(static_cast<float>(point.x));
+                        pathPositionsBuffer_.push_back(static_cast<float>(point.y));
+                        pathPositionsBuffer_.push_back(static_cast<float>(point.z));
+                        vertexCursor++;
+                    }
+
+                    // Keep style simple and stable for the first line-only rollout.
+                    pathColorsBuffer_.insert(pathColorsBuffer_.end(), {32, 196, 255, 220});
+                    pathWidthsBuffer_.push_back(2.0f);
+                    pathFeatureStartBuffer_.push_back(lineIndex);
+                    pathFeatureIdsBuffer_.push_back(lineIndex);
+                    pathDashArrayBuffer_.insert(pathDashArrayBuffer_.end(), {1.0f, 0.0f});
+                    pathDashOffsetsBuffer_.push_back(0.0f);
+                    lineIndex++;
+                } catch (...) {
+                    // Keep rendering resilient: skip malformed line geometry entries.
+                }
+                return true;
+            });
+        } catch (...) {
+            // Keep rendering resilient: skip malformed features.
+        }
+    };
+
+    if (featureIdBaseSubset_.empty()) {
+        for (auto&& feature : *tile_) {
+            processFeature(feature);
+        }
+    } else {
+        for (auto const& featureId : featureIdBaseSubset_) {
+            if (auto feature = tile_->find(featureId)) {
+                processFeature(feature);
+            }
+        }
+    }
+
+    pathStartIndicesBuffer_.push_back(vertexCursor);
+}
+
+uint32_t DeckFeatureLayerVisualization::abiVersion() const
+{
+    return 1u;
+}
+
+#define DECK_EMPTY_F32_ACCESSOR(name) \
+    NativeJsValue DeckFeatureLayerVisualization::name() const { return makeEmptyTypedArray("Float32Array"); }
+#define DECK_EMPTY_U8_ACCESSOR(name) \
+    NativeJsValue DeckFeatureLayerVisualization::name() const { return makeEmptyTypedArray("Uint8Array"); }
+#define DECK_EMPTY_U16_ACCESSOR(name) \
+    NativeJsValue DeckFeatureLayerVisualization::name() const { return makeEmptyTypedArray("Uint16Array"); }
+#define DECK_EMPTY_U32_ACCESSOR(name) \
+    NativeJsValue DeckFeatureLayerVisualization::name() const { return makeEmptyTypedArray("Uint32Array"); }
+
+DECK_EMPTY_F32_ACCESSOR(pointPositions)
+DECK_EMPTY_U8_ACCESSOR(pointColors)
+DECK_EMPTY_F32_ACCESSOR(pointRadii)
+DECK_EMPTY_U32_ACCESSOR(pointFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(pointFeatureIds)
+
+DECK_EMPTY_F32_ACCESSOR(iconPositions)
+DECK_EMPTY_F32_ACCESSOR(iconSizes)
+DECK_EMPTY_U16_ACCESSOR(iconAtlasIndex)
+DECK_EMPTY_U32_ACCESSOR(iconFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(iconFeatureIds)
+
+NativeJsValue DeckFeatureLayerVisualization::pathPositions() const {
+    return makeTypedArrayCopy("Float32Array", pathPositionsBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathStartIndices() const {
+    return makeTypedArrayCopy("Uint32Array", pathStartIndicesBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathColors() const {
+    return makeTypedArrayCopy("Uint8Array", pathColorsBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathWidths() const {
+    return makeTypedArrayCopy("Float32Array", pathWidthsBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathFeatureStart() const {
+    return makeTypedArrayCopy("Uint32Array", pathFeatureStartBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathFeatureIds() const {
+    return makeTypedArrayCopy("Uint32Array", pathFeatureIdsBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathDashArray() const {
+    return makeTypedArrayCopy("Float32Array", pathDashArrayBuffer_);
+}
+NativeJsValue DeckFeatureLayerVisualization::pathDashOffsets() const {
+    return makeTypedArrayCopy("Float32Array", pathDashOffsetsBuffer_);
+}
+
+DECK_EMPTY_F32_ACCESSOR(arrowPositions)
+DECK_EMPTY_F32_ACCESSOR(arrowAngles)
+DECK_EMPTY_U32_ACCESSOR(arrowFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(arrowFeatureIds)
+
+DECK_EMPTY_F32_ACCESSOR(polygonPositions)
+DECK_EMPTY_U32_ACCESSOR(polygonRingStartIndices)
+DECK_EMPTY_U32_ACCESSOR(polygonPolygonStartIndices)
+DECK_EMPTY_U8_ACCESSOR(polygonFillColors)
+DECK_EMPTY_U8_ACCESSOR(polygonLineColors)
+DECK_EMPTY_U32_ACCESSOR(polygonFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(polygonFeatureIds)
+
+DECK_EMPTY_F32_ACCESSOR(meshPositions)
+DECK_EMPTY_U32_ACCESSOR(meshIndices)
+DECK_EMPTY_U8_ACCESSOR(meshColors)
+DECK_EMPTY_U32_ACCESSOR(meshFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(meshFeatureIds)
+
+DECK_EMPTY_F32_ACCESSOR(labelPositions)
+DECK_EMPTY_U8_ACCESSOR(labelTextUtf8)
+DECK_EMPTY_U32_ACCESSOR(labelTextStartIndices)
+DECK_EMPTY_F32_ACCESSOR(labelSizes)
+DECK_EMPTY_U8_ACCESSOR(labelColors)
+DECK_EMPTY_U32_ACCESSOR(labelFeatureStart)
+DECK_EMPTY_U32_ACCESSOR(labelFeatureIds)
+
+#undef DECK_EMPTY_F32_ACCESSOR
+#undef DECK_EMPTY_U8_ACCESSOR
+#undef DECK_EMPTY_U16_ACCESSOR
+#undef DECK_EMPTY_U32_ACCESSOR
 
 }  // namespace erdblick

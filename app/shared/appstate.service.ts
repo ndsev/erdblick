@@ -23,6 +23,7 @@ export const VIEW_SYNC_LAYERS = "lay";
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
+export type RendererMode = "cesium" | "deck";
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -323,6 +324,14 @@ export class AppStateService implements OnDestroy {
         defaultValue: false,
         schema: Boolish,
         urlParamName: 'm2d',
+        urlIncludeInVisualizationOnly: false
+    });
+
+    readonly rendererModeState = this.createState<RendererMode>({
+        name: 'rendererMode',
+        defaultValue: 'cesium',
+        schema: z.union([z.literal('cesium'), z.literal('deck')]),
+        urlParamName: 'rdr',
         urlIncludeInVisualizationOnly: false
     });
 
@@ -748,6 +757,8 @@ export class AppStateService implements OnDestroy {
 
     get numViews() {return this.numViewsState.getValue();}
     set numViews(val: number) {this.numViewsState.next(val);};
+    get rendererMode() {return this.rendererModeState.getValue();}
+    set rendererMode(val: RendererMode) {this.rendererModeState.next(val);};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}
