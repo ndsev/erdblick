@@ -373,6 +373,29 @@ diagnostics-indicator {
   justify-content: flex-end;
 }
 
+.diagnostics-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.diagnostics-progress-item {
+  display: grid;
+  grid-template-columns: 7em 1fr 5em;
+  gap: 0.5em;
+  align-items: center;
+}
+
+.diagnostics-stage-label {
+  font-size: 0.85em;
+}
+
+.diagnostics-stage-count {
+  font-size: 0.8em;
+  text-align: right;
+  color: var(--p-text-muted-color);
+}
+
 .diagnostics-perf-table {
   margin-bottom: 0.5em;
 }
@@ -381,6 +404,13 @@ diagnostics-indicator {
   display: flex;
   align-items: center;
   gap: 0.35em;
+  width: 100%;
+}
+
+.diagnostics-key-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .diagnostics-warn {
@@ -402,9 +432,9 @@ diagnostics-indicator {
 }
 
 .diagnostics-ellipsis {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .diagnostics-log-controls {
@@ -884,6 +914,11 @@ map-view {
     min-height: 0;
   }
 
+  .diagnostics-perf-progress,
+  .diagnostics-perf-filter {
+    margin: 0.25em 0.25em 0.5em 0.25em;
+  }
+
   .diagnostics-perf-table {
     flex: 1 1 auto;
     min-height: 0;
@@ -902,6 +937,9 @@ map-view {
     th {
       padding: 0.25em;
       font-size: 0.9em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 
@@ -912,9 +950,9 @@ map-view {
     td {
       padding: 0.25em !important;
       height: 1.5em;
-      white-space: normal;
-      overflow-wrap: anywhere;
-      word-break: break-word;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     th {
@@ -926,6 +964,23 @@ map-view {
       margin: 0;
       width: 1.25em;
       height: 1.25em;
+    }
+
+    tr.diagnostics-perf-parent > td {
+      font-weight: 600;
+    }
+
+    tr.diagnostics-perf-root > td {
+      font-weight: 700;
+      background: color-mix(in srgb, var(--p-primary-100) 50%, transparent);
+    }
+
+    tr.diagnostics-perf-stripe-even:not(.diagnostics-perf-root) > td {
+      background: color-mix(in srgb, var(--p-content-background) 80%, var(--p-surface-50) 20%);
+    }
+
+    tr.diagnostics-perf-stripe-odd:not(.diagnostics-perf-root) > td {
+      background: color-mix(in srgb, var(--p-content-background) 92%, transparent);
     }
   }
 }

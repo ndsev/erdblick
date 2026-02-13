@@ -101,6 +101,7 @@ import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.com
 import {Ripple} from "primeng/ripple";
 import {SurveyComponent} from "./auxiliaries/survey.component";
 import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
+import {DiagnosticsProgressComponent} from "./diagnostics/diagnostics.progress.component";
 import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
 import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
@@ -191,6 +192,7 @@ export const initializeServices = () => {
         InspectionComparisonDialogComponent,
         SurveyComponent,
         DiagnosticsIndicatorComponent,
+        DiagnosticsProgressComponent,
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
         DiagnosticsExportDialogComponent

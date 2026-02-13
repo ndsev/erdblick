@@ -2,12 +2,7 @@ import {Component, ViewChild} from '@angular/core';
 import {combineLatest, map, scan} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {DiagnosticsSnapshot, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
-
-interface ProgressStage {
-    key: keyof TilePipelineProgress;
-    label: string;
-}
+import {DiagnosticsSnapshot, ProgressCounter} from './diagnostics.model';
 
 @Component({
     selector: 'diagnostics-indicator',
@@ -41,15 +36,7 @@ interface ProgressStage {
                                 <span class="diagnostics-label">Backend</span>
                                 <span>{{ snapshot.backend.connected ? 'connected' : 'disconnected' }}</span>
                             </div>
-                            <div class="diagnostics-progress-list">
-                                @for (stage of progressStages; track stage.key) {
-                                    <div class="diagnostics-progress-item">
-                                        <span class="diagnostics-stage-label">{{ stage.label }}</span>
-                                        <p-progressBar [value]="progressPercent(snapshot.progress[stage.key])" [showValue]="false"></p-progressBar>
-                                        <span class="diagnostics-stage-count">{{ snapshot.progress[stage.key].done }} / {{ snapshot.progress[stage.key].total }}</span>
-                                    </div>
-                                }
-                            </div>
+                            <diagnostics-progress [progress]="snapshot.progress"></diagnostics-progress>
                             <div class="diagnostics-popover-actions">
                                 <div class="open-actions">
                                     <p-button size="small" label="Open Statistics" (click)="openPerformance()" />
@@ -81,14 +68,6 @@ export class DiagnosticsIndicatorComponent {
         scan((hasSeenError, hasError) => hasSeenError || hasError, false)
     );
 
-    readonly progressStages: ProgressStage[] = [
-        {key: 'requested', label: 'Requested'},
-        {key: 'fetched', label: 'Fetched'},
-        {key: 'converted', label: 'Converted'},
-        {key: 'received', label: 'Received'},
-        {key: 'rendered', label: 'Rendered'}
-    ];
-
     constructor(private readonly diagnostics: DiagnosticsFacadeService) {}
 
     togglePopover(event: MouseEvent) {
@@ -117,17 +96,6 @@ export class DiagnosticsIndicatorComponent {
     openErrors(event: MouseEvent) {
         event.stopPropagation();
         this.diagnostics.openLogDialog(true);
-    }
-
-    progressPercent(counter: ProgressCounter): number {
-        if (!counter.total) {
-            return 0;
-        }
-        if (counter.done >= counter.total) {
-            return 100;
-        }
-        const percent = Math.floor((counter.done / counter.total) * 100);
-        return Math.max(0, Math.min(99, percent));
     }
 
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {

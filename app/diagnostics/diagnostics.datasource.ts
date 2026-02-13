@@ -108,7 +108,6 @@ export class DiagnosticsDatasource implements OnDestroy {
         let loaded = 0;
         let errors = 0;
         let fetched = 0;
-        let converted = 0;
 
         for (const tile of tiles) {
             const status = tile.status;
@@ -123,9 +122,6 @@ export class DiagnosticsDatasource implements OnDestroy {
             if (rank >= 1 || hasData) {
                 fetched += 1;
             }
-            if (rank >= 2 || hasData) {
-                converted += 1;
-            }
         }
 
         const tilesSummary: TileStateCounts = {
@@ -138,8 +134,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         const progress: TilePipelineProgress = {
             requested: {done: expected, total: expected},
             fetched: {done: fetched, total: expected},
-            converted: {done: converted, total: expected},
-            received: {done: loaded, total: expected},
+            converted: {done: loaded, total: expected},
             rendered: this.mapService.getVisualizationCounts()
         };
 
@@ -328,7 +323,7 @@ type AggregatedPerfAccumulator = {
 
 const isFiniteNumber = (value: number) => Number.isFinite(value);
 
-function buildAggregatedPerfStats(tiles: Iterable<FeatureTile>, maxPeakTileIds: number = 5): PerfStat[] {
+export function buildAggregatedPerfStats(tiles: Iterable<FeatureTile>, maxPeakTileIds: number = 5): PerfStat[] {
     const statsByKey = new Map<string, AggregatedPerfAccumulator>();
 
     for (const tile of tiles) {
