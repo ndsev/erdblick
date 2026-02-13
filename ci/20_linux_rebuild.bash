@@ -12,4 +12,7 @@ cd "$ci_dir/.."
 
 CMAKE_PRESET="${1:-release}"
 
+# Reconfigure on each rebuild so preset switches (e.g. release -> debug) update CMAKE_BUILD_TYPE
+# in the existing build directory before invoking the build.
+emcmake cmake --preset "$CMAKE_PRESET"
 cmake --build --preset "$CMAKE_PRESET" -- -j"$(nproc)"

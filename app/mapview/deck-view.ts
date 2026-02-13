@@ -24,6 +24,11 @@ interface DeckCameraState {
  * Detailed deck tile rendering is introduced in later migration tasks.
  */
 export abstract class DeckMapView implements IRenderView {
+    private static readonly EARTH_RADIUS_METERS = 6378137;
+    private static readonly WEB_MERCATOR_TILE_SIZE = 512;
+    private static readonly ASSUMED_VERTICAL_FOV_RADIANS = CesiumMath.toRadians(60);
+    private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
+
     protected readonly _viewIndex: number;
     readonly canvasId: string;
     protected deck: any = null;
@@ -195,14 +200,14 @@ export abstract class DeckMapView implements IRenderView {
             return undefined;
         }
         const [lon, lat] = viewport.unproject([screenPos.x, screenPos.y]);
-        return {lon, lat, alt: this.zoomToAltitude(this.viewState.zoom)};
+        return {lon, lat, alt: this.zoomToAltitude(this.viewState.zoom, lat)};
     }
 
     setViewFromState(cameraData: CameraViewState): void {
         const next: DeckCameraState = {
             longitude: cameraData.destination.lon,
             latitude: cameraData.destination.lat,
-            zoom: this.altitudeToZoom(cameraData.destination.alt),
+            zoom: this.altitudeToZoom(cameraData.destination.alt, cameraData.destination.lat),
             pitch: this.allowPitchAndBearing
                 ? Math.max(0, Math.min(60, CesiumMath.toDegrees(cameraData.orientation.pitch) + 90))
                 : 0,
@@ -318,7 +323,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
-                const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom);
+                const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
                 this.stateService.setView(
                     this._viewIndex,
                     Cartographic.fromDegrees(value.x, value.y, alt),
@@ -377,7 +382,9 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         this.stateService.focusedView = this._viewIndex;
-        this.updateViewState(rawViewState as DeckCameraState, false, true);
+        // Deck is wired in controlled mode (`viewState` prop). User interactions only
+        // take effect if we feed the updated camera state back via `setProps`.
+        this.updateViewState(rawViewState as DeckCameraState, true, true);
         this.pushViewStateToAppState();
     }
 
@@ -420,7 +427,7 @@ export abstract class DeckMapView implements IRenderView {
             Cartographic.fromDegrees(
                 this.viewState.longitude,
                 this.viewState.latitude,
-                this.zoomToAltitude(this.viewState.zoom)
+                this.zoomToAltitude(this.viewState.zoom, this.viewState.latitude)
             ),
             {
                 heading: CesiumMath.toRadians(this.viewState.bearing),
@@ -478,13 +485,45 @@ export abstract class DeckMapView implements IRenderView {
         return (value % 360 + 360) % 360;
     }
 
-    private altitudeToZoom(altitude: number): number {
+    private altitudeToZoom(altitude: number, latitude: number): number {
         const safeAltitude = Math.max(1, altitude);
-        return 18 - Math.log2(safeAltitude / 50);
+        const viewportHeight = this.getViewportHeightPixels();
+        const latitudeCos = Math.max(0.01, Math.cos(CesiumMath.toRadians(latitude)));
+        const visibleHeightMeters = 2 * safeAltitude * Math.tan(DeckMapView.ASSUMED_VERTICAL_FOV_RADIANS / 2);
+        const metersPerPixel = Math.max(1e-6, visibleHeightMeters / viewportHeight);
+        const worldMetersAtLatitude = latitudeCos * 2 * Math.PI * DeckMapView.EARTH_RADIUS_METERS;
+        return Math.max(
+            0,
+            Math.min(
+                22,
+                Math.log2(worldMetersAtLatitude / (DeckMapView.WEB_MERCATOR_TILE_SIZE * metersPerPixel))
+            )
+        );
     }
 
-    private zoomToAltitude(zoom: number): number {
-        return Math.max(1, 50 * Math.pow(2, 18 - zoom));
+    private zoomToAltitude(zoom: number, latitude: number = this.viewState.latitude): number {
+        const viewportHeight = this.getViewportHeightPixels();
+        const latitudeCos = Math.max(0.01, Math.cos(CesiumMath.toRadians(latitude)));
+        const worldMetersAtLatitude = latitudeCos * 2 * Math.PI * DeckMapView.EARTH_RADIUS_METERS;
+        const metersPerPixel =
+            worldMetersAtLatitude / (DeckMapView.WEB_MERCATOR_TILE_SIZE * Math.pow(2, zoom));
+        const visibleHeightMeters = metersPerPixel * viewportHeight;
+        const altitude =
+            visibleHeightMeters / (2 * Math.tan(DeckMapView.ASSUMED_VERTICAL_FOV_RADIANS / 2));
+        return Math.max(1, altitude);
+    }
+
+    private getViewportHeightPixels(): number {
+        const canvasHeight = Number(this.deck?.getCanvas?.()?.clientHeight ?? 0);
+        if (Number.isFinite(canvasHeight) && canvasHeight > 0) {
+            return canvasHeight;
+        }
+        const containerHeight =
+            Number((document.getElementById(this.canvasId) as HTMLDivElement | null)?.clientHeight ?? 0);
+        if (Number.isFinite(containerHeight) && containerHeight > 0) {
+            return containerHeight;
+        }
+        return DeckMapView.FALLBACK_VIEWPORT_HEIGHT_PX;
     }
 
     private applyPan(xFactor: number, yFactor: number): void {

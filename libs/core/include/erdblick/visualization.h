@@ -366,14 +366,14 @@ public:
     [[nodiscard]] NativeJsValue iconFeatureStart() const;
     [[nodiscard]] NativeJsValue iconFeatureIds() const;
 
-    [[nodiscard]] NativeJsValue pathPositions() const;
-    [[nodiscard]] NativeJsValue pathStartIndices() const;
-    [[nodiscard]] NativeJsValue pathColors() const;
-    [[nodiscard]] NativeJsValue pathWidths() const;
-    [[nodiscard]] NativeJsValue pathFeatureStart() const;
-    [[nodiscard]] NativeJsValue pathFeatureIds() const;
-    [[nodiscard]] NativeJsValue pathDashArray() const;
-    [[nodiscard]] NativeJsValue pathDashOffsets() const;
+    void pathPositionsRaw(SharedUint8Array& out) const;
+    void pathStartIndicesRaw(SharedUint8Array& out) const;
+    void pathColorsRaw(SharedUint8Array& out) const;
+    void pathWidthsRaw(SharedUint8Array& out) const;
+    void pathFeatureStartRaw(SharedUint8Array& out) const;
+    void pathFeatureIdsRaw(SharedUint8Array& out) const;
+    void pathDashArrayRaw(SharedUint8Array& out) const;
+    void pathDashOffsetsRaw(SharedUint8Array& out) const;
 
     [[nodiscard]] NativeJsValue arrowPositions() const;
     [[nodiscard]] NativeJsValue arrowAngles() const;

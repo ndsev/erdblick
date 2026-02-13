@@ -272,21 +272,16 @@ NativeJsValue makeEmptyTypedArray(const char* ctorName) {
 }
 
 template <typename T>
-NativeJsValue makeTypedArrayCopy(const char* ctorName, const std::vector<T>& buffer) {
-#ifdef EMSCRIPTEN
+void writeVectorToSharedBuffer(SharedUint8Array& out, const std::vector<T>& buffer) {
+    static_assert(std::is_trivially_copyable_v<T>);
     if (buffer.empty()) {
-        return makeEmptyTypedArray(ctorName);
+        static const char kEmpty = 0;
+        out.writeToArray(&kEmpty, &kEmpty);
+        return;
     }
-    auto typedView = emscripten::typed_memory_view(buffer.size(), buffer.data());
-    return emscripten::val::global(ctorName).new_(typedView);
-#else
-    (void) ctorName;
-    auto values = JsValue::List();
-    for (auto const& entry : buffer) {
-        values.push(JsValue(entry));
-    }
-    return *values;
-#endif
+    auto const* start = reinterpret_cast<const char*>(buffer.data());
+    auto const* end = start + (buffer.size() * sizeof(T));
+    out.writeToArray(start, end);
 }
 }
 
@@ -1264,29 +1259,29 @@ DECK_EMPTY_U16_ACCESSOR(iconAtlasIndex)
 DECK_EMPTY_U32_ACCESSOR(iconFeatureStart)
 DECK_EMPTY_U32_ACCESSOR(iconFeatureIds)
 
-NativeJsValue DeckFeatureLayerVisualization::pathPositions() const {
-    return makeTypedArrayCopy("Float32Array", pathPositionsBuffer_);
+void DeckFeatureLayerVisualization::pathPositionsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathPositionsBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathStartIndices() const {
-    return makeTypedArrayCopy("Uint32Array", pathStartIndicesBuffer_);
+void DeckFeatureLayerVisualization::pathStartIndicesRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathStartIndicesBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathColors() const {
-    return makeTypedArrayCopy("Uint8Array", pathColorsBuffer_);
+void DeckFeatureLayerVisualization::pathColorsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathColorsBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathWidths() const {
-    return makeTypedArrayCopy("Float32Array", pathWidthsBuffer_);
+void DeckFeatureLayerVisualization::pathWidthsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathWidthsBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathFeatureStart() const {
-    return makeTypedArrayCopy("Uint32Array", pathFeatureStartBuffer_);
+void DeckFeatureLayerVisualization::pathFeatureStartRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathFeatureStartBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathFeatureIds() const {
-    return makeTypedArrayCopy("Uint32Array", pathFeatureIdsBuffer_);
+void DeckFeatureLayerVisualization::pathFeatureIdsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathFeatureIdsBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathDashArray() const {
-    return makeTypedArrayCopy("Float32Array", pathDashArrayBuffer_);
+void DeckFeatureLayerVisualization::pathDashArrayRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathDashArrayBuffer_);
 }
-NativeJsValue DeckFeatureLayerVisualization::pathDashOffsets() const {
-    return makeTypedArrayCopy("Float32Array", pathDashOffsetsBuffer_);
+void DeckFeatureLayerVisualization::pathDashOffsetsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pathDashOffsetsBuffer_);
 }
 
 DECK_EMPTY_F32_ACCESSOR(arrowPositions)

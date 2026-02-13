@@ -3,7 +3,7 @@ import {FeatureLayerStyle, HighlightMode} from "../../build/libs/core/erdblick-c
 import {ITileVisualization, IRenderSceneHandle} from "./render-view.model";
 import {PathLayer} from "@deck.gl/layers";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
-import {coreLib} from "../integrations/wasm";
+import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
@@ -64,38 +64,43 @@ export class DeckTileVisualization implements ITileVisualization {
         if (!registry || this.deleted || this.style.isDeleted()) {
             return false;
         }
+        const startTime = performance.now();
         const pathLayerKey = makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
             kind: "path"
         });
-        const pathData = await this.extractPathData();
-        if (pathData.length > 0) {
-            const pathLayer = new PathLayer({
-                id: pathLayerKey,
-                data: pathData,
-                getPath: (d: DeckPathData) => d.path,
-                getColor: (d: DeckPathData) => d.color,
-                getWidth: (d: DeckPathData) => d.width,
-                widthUnits: "pixels",
-                capRounded: true,
-                jointRounded: true,
-                pickable: false
-            });
-            registry.upsert(pathLayerKey, pathLayer as any, 400);
-            this.pathLayerKey = pathLayerKey;
-        } else if (this.pathLayerKey) {
-            registry.remove(this.pathLayerKey);
-            this.pathLayerKey = null;
+        try {
+            const pathData = await this.extractPathData();
+            if (pathData.length > 0) {
+                const pathLayer = new PathLayer({
+                    id: pathLayerKey,
+                    data: pathData,
+                    getPath: (d: DeckPathData) => d.path,
+                    getColor: (d: DeckPathData) => d.color,
+                    getWidth: (d: DeckPathData) => d.width,
+                    widthUnits: "pixels",
+                    capRounded: true,
+                    jointRounded: true,
+                    pickable: false
+                });
+                registry.upsert(pathLayerKey, pathLayer as any, 400);
+                this.pathLayerKey = pathLayerKey;
+            } else if (this.pathLayerKey) {
+                registry.remove(this.pathLayerKey);
+                this.pathLayerKey = null;
+            }
+            this.rendered = true;
+            this.renderQueued = false;
+            this.deleted = false;
+            this.lastSignature = this.renderSignature();
+            this.hadTileDataAtLastRender = this.tileHasData();
+            this.tileFeatureCountAtLastRender = this.tileFeatureCount();
+            return true;
+        } finally {
+            this.recordRenderTimeSample(performance.now() - startTime);
         }
-        this.rendered = true;
-        this.renderQueued = false;
-        this.deleted = false;
-        this.lastSignature = this.renderSignature();
-        this.hadTileDataAtLastRender = this.tileHasData();
-        this.tileFeatureCountAtLastRender = this.tileFeatureCount();
-        return true;
     }
 
     destroy(sceneHandle: IRenderSceneHandle): void {
@@ -125,8 +130,9 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
-    setStyleOption(optionId: string, value: string | number | boolean): void {
+    setStyleOption(optionId: string, value: string | number | boolean): boolean {
         this.options[optionId] = value;
+        return true;
     }
 
     private highlightModeLabel(): string {
@@ -182,10 +188,10 @@ export class DeckTileVisualization implements ITileVisualization {
             });
 
             stage = "accessors";
-            const positions = this.asNumberArray(deckVisu.pathPositions());
-            const startIndices = this.asNumberArray(deckVisu.pathStartIndices());
-            const colors = this.asNumberArray(deckVisu.pathColors());
-            const widths = this.asNumberArray(deckVisu.pathWidths());
+            const positions = this.readFloat32Array(deckVisu, "pathPositionsRaw", "pathPositions");
+            const startIndices = this.readUint32Array(deckVisu, "pathStartIndicesRaw", "pathStartIndices");
+            const colors = this.readUint8Array(deckVisu, "pathColorsRaw", "pathColors");
+            const widths = this.readFloat32Array(deckVisu, "pathWidthsRaw", "pathWidths");
             if (positions.length === 0 || startIndices.length < 2) {
                 return [];
             }
@@ -233,6 +239,69 @@ export class DeckTileVisualization implements ITileVisualization {
             }
         }
     }
+
+    private readFloat32Array(deckVisu: any, rawAccessor: string, legacyAccessor: string): Float32Array {
+        const raw = this.readRawBytes(deckVisu, rawAccessor);
+        if (raw) {
+            if (raw.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+                console.warn(`[deck] ${rawAccessor} returned invalid byte length ${raw.byteLength}`);
+                return new Float32Array();
+            }
+            if (raw.byteOffset % Float32Array.BYTES_PER_ELEMENT === 0) {
+                return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / Float32Array.BYTES_PER_ELEMENT);
+            }
+            const aligned = new Uint8Array(raw);
+            return new Float32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / Float32Array.BYTES_PER_ELEMENT);
+        }
+        return Float32Array.from(this.asNumberArray(this.callAccessor(deckVisu, legacyAccessor)));
+    }
+
+    private readUint32Array(deckVisu: any, rawAccessor: string, legacyAccessor: string): Uint32Array {
+        const raw = this.readRawBytes(deckVisu, rawAccessor);
+        if (raw) {
+            if (raw.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
+                console.warn(`[deck] ${rawAccessor} returned invalid byte length ${raw.byteLength}`);
+                return new Uint32Array();
+            }
+            if (raw.byteOffset % Uint32Array.BYTES_PER_ELEMENT === 0) {
+                return new Uint32Array(raw.buffer, raw.byteOffset, raw.byteLength / Uint32Array.BYTES_PER_ELEMENT);
+            }
+            const aligned = new Uint8Array(raw);
+            return new Uint32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / Uint32Array.BYTES_PER_ELEMENT);
+        }
+        return Uint32Array.from(this.asNumberArray(this.callAccessor(deckVisu, legacyAccessor)));
+    }
+
+    private readUint8Array(deckVisu: any, rawAccessor: string, legacyAccessor: string): Uint8Array {
+        const raw = this.readRawBytes(deckVisu, rawAccessor);
+        if (raw) {
+            return raw;
+        }
+        return Uint8Array.from(this.asNumberArray(this.callAccessor(deckVisu, legacyAccessor)));
+    }
+
+    private readRawBytes(deckVisu: any, rawAccessor: string): Uint8Array | null {
+        if (!deckVisu || typeof deckVisu[rawAccessor] !== "function") {
+            return null;
+        }
+        try {
+            return uint8ArrayFromWasm((shared) => {
+                deckVisu[rawAccessor](shared);
+                return true;
+            }) ?? new Uint8Array();
+        } catch (e) {
+            console.warn(`[deck] failed to read raw accessor ${rawAccessor}:`, e);
+            return null;
+        }
+    }
+
+    private callAccessor(deckVisu: any, accessorName: string): unknown {
+        if (!deckVisu || typeof deckVisu[accessorName] !== "function") {
+            return [];
+        }
+        return deckVisu[accessorName]();
+    }
+
     private asNumberArray(raw: unknown): number[] {
         if (!raw) {
             return [];
@@ -260,6 +329,31 @@ export class DeckTileVisualization implements ITileVisualization {
     private tileFeatureCount(): number {
         const value = Number((this.tile as any).numFeatures ?? 0);
         return Number.isFinite(value) ? value : 0;
+    }
+
+    private recordRenderTimeSample(durationMs: number): void {
+        if (!Number.isFinite(durationMs)) {
+            return;
+        }
+        const tileWithStats = this.tile as unknown as { stats?: Map<string, number[]> };
+        if (!(tileWithStats.stats instanceof Map)) {
+            tileWithStats.stats = new Map<string, number[]>();
+        }
+        const timingListKey = `Rendering/${this.statsHighlightModeLabel()}/${this.styleId}#ms`;
+        const timingList = tileWithStats.stats.get(timingListKey) ?? [];
+        timingList.push(durationMs);
+        tileWithStats.stats.set(timingListKey, timingList);
+    }
+
+    private statsHighlightModeLabel(): string {
+        switch (this.highlightMode.value) {
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT.value:
+                return "Hover";
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT.value:
+                return "Selection";
+            default:
+                return "Basic";
+        }
     }
 
     private resolveRegistry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry | undefined {

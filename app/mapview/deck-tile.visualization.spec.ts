@@ -123,4 +123,42 @@ describe("DeckTileVisualization", () => {
         expect(deck.commits).toHaveLength(0);
         expect(registry.size).toBe(0);
     });
+
+    it("records render-time samples in tile stats using Cesium-compatible keys", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            style,
+            true,
+            {value: 0} as any
+        ) as any;
+
+        visu.extractPathData = async () => [];
+
+        await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+
+        const samples = tile.stats.get("Rendering/Basic/test-style#ms");
+        expect(samples).toBeDefined();
+        expect(samples!.length).toBe(1);
+        expect(Number.isFinite(samples![0])).toBe(true);
+        expect(samples![0]).toBeGreaterThanOrEqual(0);
+    });
 });

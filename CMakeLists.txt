@@ -25,14 +25,14 @@ message("Building for ${CMAKE_SYSTEM_NAME}.")
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
-    GIT_TAG        "99c55266cca4285599133366fe63caf915827473"
+    GIT_TAG        "release/2026.1.0"
     GIT_SHALLOW    OFF)
   FetchContent_MakeAvailable(mapget)
 endif()
 
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "aa8d4e4750ec9fe9f8cc680eb90f1b15955c817e"
+  GIT_TAG        "aa8d4e"
   GIT_SHALLOW    OFF)
 FetchContent_MakeAvailable(yaml-cpp)
 
