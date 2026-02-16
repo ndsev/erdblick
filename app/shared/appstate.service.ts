@@ -455,7 +455,7 @@ export class AppStateService implements OnDestroy {
 
     readonly dockAutoCollapse = this.createState<boolean>({
         name: 'dockAutoCollapse',
-        defaultValue: false,
+        defaultValue: true,
         schema: Boolish
     });
 
@@ -873,7 +873,10 @@ export class AppStateService implements OnDestroy {
         const allPanels = this.selectionState.getValue();
         const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
+        const isSourceDataSelection = sourceDataSelection !== undefined;
         let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
+        const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
+        const isSourceDataPanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData !== undefined;
         const isClearSourceDataRequest =
             originPanel !== undefined &&
             sourceDataSelection === undefined &&
@@ -884,6 +887,7 @@ export class AppStateService implements OnDestroy {
         if (featureSelection.length) {
             featureSelection = featureSelection.filter(feature =>
                 !allPanels.some(panel =>
+                    isFeaturePanel(panel) &&
                     panel.features.some(otherFeature =>
                         feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
             if (!featureSelection.length && !isClearSourceDataRequest) {
@@ -896,21 +900,39 @@ export class AppStateService implements OnDestroy {
         let targetPanelId: number | undefined = undefined;
         let mustCreateNewPanel = forceNewPanel;
 
-        // Explicit updates from an unlocked origin panel should stay in that panel.
-        if (!forceNewPanel && originPanel && (isClearSourceDataRequest || !originPanel.locked)) {
+        // Explicit SourceData updates from a SourceData panel stay in that panel, even when locked.
+        if (!forceNewPanel && originPanel && isSourceDataSelection && isSourceDataPanel(originPanel)) {
+            targetPanelId = originPanel.id;
+        }
+
+        // Explicit feature updates from an unlocked feature panel stay in that panel.
+        if (!forceNewPanel &&
+            targetPanelId === undefined &&
+            originPanel &&
+            !isSourceDataSelection &&
+            isFeaturePanel(originPanel) &&
+            (isClearSourceDataRequest || !originPanel.locked)) {
             targetPanelId = originPanel.id;
         }
 
         // New inspection strategy:
-        // 1) reuse unlocked docked panel
-        // 2) otherwise reuse unlocked undocked dialog
-        // 3) otherwise create a new docked panel
+        // 1) reuse unlocked docked panel of the same inspection type
+        // 2) otherwise reuse unlocked undocked dialog of the same inspection type
+        // 3) otherwise create a new panel (Feature: docked, SourceData: undocked dialog)
         if (!mustCreateNewPanel && targetPanelId === undefined) {
-            const firstUnlockedDockedPanel = allPanels.find(panel => !panel.undocked && !panel.locked);
+            const firstUnlockedDockedPanel = allPanels.find(panel =>
+                !panel.undocked &&
+                !panel.locked &&
+                (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
+            );
             if (firstUnlockedDockedPanel) {
                 targetPanelId = firstUnlockedDockedPanel.id;
             } else {
-                const firstUnlockedUndockedPanel = allPanels.find(panel => panel.undocked && !panel.locked);
+                const firstUnlockedUndockedPanel = allPanels.find(panel =>
+                    panel.undocked &&
+                    !panel.locked &&
+                    (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
+                );
                 if (firstUnlockedUndockedPanel) {
                     targetPanelId = firstUnlockedUndockedPanel.id;
                 } else {
@@ -928,12 +950,12 @@ export class AppStateService implements OnDestroy {
             const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
             allPanels.push({
                 id: newId,
-                features: featureSelection,
+                features: isSourceDataSelection ? [] : featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
-                size: [DEFAULT_EM_WIDTH, DEFAULT_DOCKED_EM_HEIGHT],
+                size: [DEFAULT_EM_WIDTH, isSourceDataSelection ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
                 color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: false
+                undocked: isSourceDataSelection
             });
             this.selectionState.next(allPanels);
             return newId;
@@ -946,12 +968,13 @@ export class AppStateService implements OnDestroy {
                 return;
             }
             if (sourceDataSelection !== undefined) {
+                allPanels[panelIndex].features = [];
                 allPanels[panelIndex].sourceData = sourceDataSelection;
             } else {
                 if (featureSelection.length) {
                     allPanels[panelIndex].features = featureSelection;
                 }
-                allPanels[panelIndex].sourceData = sourceDataSelection;
+                allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
             return targetPanelId;
@@ -1075,7 +1098,9 @@ export class AppStateService implements OnDestroy {
     }
 
     unsetUnlockedSelections() {
-        const nextSelection = this.selectionState.getValue().filter(panel => panel.locked);
+        const nextSelection = this.selectionState.getValue().filter(panel =>
+            panel.locked || panel.sourceData !== undefined
+        );
         this.selectionState.next(nextSelection);
     }
 
