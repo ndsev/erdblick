@@ -26,7 +26,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                                (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
                                 </p-colorpicker>
-                            } @else if (!panel().locked) {
+                            } @else if (!panel().locked && panel().features.length > 0) {
                                 <!-- TODO: Render only if the panel was opened in the locked inspection dialog -->
                                 <p-button icon="pi pi-chevron-left" (click)="onGoBack($event)"
                                           (mousedown)="$event.stopPropagation()"/>

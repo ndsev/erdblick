@@ -419,7 +419,7 @@ export class InspectionTreeComponent implements OnDestroy {
             this.stateService.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
                 address: sourceDataRef.address
-            } as SelectedSourceData, this.panelId());
+            } as SelectedSourceData);
         } catch (e) {
             this.messageService.showError(`Encountered error: ${e}`);
         }

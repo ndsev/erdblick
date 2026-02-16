@@ -6,7 +6,8 @@ import {FeatureWrapper} from "../mapdata/features.model";
 @Component({
     selector: 'inspection-container',
     template: `
-        <div #dockContainer class="inspection-container" [ngClass]="{'reordering': isReordering}">
+        <div #dockContainer class="inspection-container"
+             [ngClass]="{'reordering': isReordering, 'single-panel': dockedPanels.length === 1, 'multi-panel': dockedPanels.length > 1}">
             @if (dockedPanels.length > 0) {
                 <div class="dock-filter">
                     <p-iconfield class="input-container">
@@ -76,6 +77,8 @@ export class InspectionContainerComponent implements OnDestroy {
     private dropIndex?: number;
     private detachMove?: () => void;
     private detachUp?: () => void;
+    private dragPreviewElement?: HTMLDivElement;
+    private dragPreviewOffset = {x: 0, y: 0};
 
     constructor(private stateService: AppStateService,
                 private mapService: MapDataService,
@@ -117,6 +120,7 @@ export class InspectionContainerComponent implements OnDestroy {
         this.dropIndex = undefined;
         this.dropBeforeId = undefined;
         this.dropAfterId = undefined;
+        this.clearDragPreview();
         this.detachMove?.();
         this.detachUp?.();
         this.detachMove = this.renderer.listen('window', 'pointermove', (ev: PointerEvent) => this.onDockDragMove(ev));
@@ -138,6 +142,8 @@ export class InspectionContainerComponent implements OnDestroy {
             this.dragActive = true;
             document.body.classList.add('dialog-dragging');
         }
+        this.ensureDragPreview(event);
+        this.positionDragPreview(event.clientX, event.clientY);
         if (!this.dragMode) {
             this.dragMode = this.isPointInDock(event.clientX, event.clientY) ? 'reorder' : 'undock';
             if (this.dragMode === 'reorder') {
@@ -246,11 +252,65 @@ export class InspectionContainerComponent implements OnDestroy {
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
+    private ensureDragPreview(event: PointerEvent) {
+        if (this.dragPreviewElement || !this.dockContainerRef || this.dragPanelId === undefined) {
+            return;
+        }
+        const panelElement = this.dockContainerRef.nativeElement
+            .querySelector<HTMLElement>(`inspection-panel[data-panel-id="${this.dragPanelId}"]`);
+        if (!panelElement) {
+            return;
+        }
+        const panelRect = panelElement.getBoundingClientRect();
+        const pointerStartX = this.dragStart?.x ?? event.clientX;
+        const pointerStartY = this.dragStart?.y ?? event.clientY;
+        this.dragPreviewOffset = {
+            x: Math.min(Math.max(pointerStartX - panelRect.left, 0), panelRect.width),
+            y: Math.min(Math.max(pointerStartY - panelRect.top, 0), panelRect.height)
+        };
+
+        const previewElement = this.renderer.createElement('div') as HTMLDivElement;
+        this.renderer.addClass(previewElement, 'inspection-drag-preview');
+        this.renderer.setStyle(previewElement, 'width', `${Math.round(panelRect.width)}px`);
+        this.renderer.setStyle(previewElement, 'height', `${Math.round(panelRect.height)}px`);
+
+        const headerElement = panelElement.querySelector<HTMLElement>('.p-accordionheader');
+        if (headerElement) {
+            const headerClone = headerElement.cloneNode(true) as HTMLElement;
+            this.renderer.addClass(headerClone, 'inspection-drag-preview-header');
+            this.renderer.appendChild(previewElement, headerClone);
+        }
+        const fillElement = this.renderer.createElement('div') as HTMLDivElement;
+        this.renderer.addClass(fillElement, 'inspection-drag-preview-fill');
+        this.renderer.appendChild(previewElement, fillElement);
+
+        this.renderer.appendChild(document.body, previewElement);
+        this.dragPreviewElement = previewElement;
+    }
+
+    private positionDragPreview(clientX: number, clientY: number) {
+        if (!this.dragPreviewElement) {
+            return;
+        }
+        this.renderer.setStyle(this.dragPreviewElement, 'left', `${Math.round(clientX - this.dragPreviewOffset.x)}px`);
+        this.renderer.setStyle(this.dragPreviewElement, 'top', `${Math.round(clientY - this.dragPreviewOffset.y)}px`);
+    }
+
+    private clearDragPreview() {
+        if (!this.dragPreviewElement) {
+            return;
+        }
+        this.dragPreviewElement.remove();
+        this.dragPreviewElement = undefined;
+        this.dragPreviewOffset = {x: 0, y: 0};
+    }
+
     private resetDockDrag() {
         this.detachMove?.();
         this.detachUp?.();
         this.detachMove = undefined;
         this.detachUp = undefined;
+        this.clearDragPreview();
         this.dragStart = undefined;
         this.dragPointerId = undefined;
         this.dragMode = undefined;
