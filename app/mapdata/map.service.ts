@@ -1198,11 +1198,10 @@ export class MapDataService {
      */
     layerNameForSourceDataLayerId(layerId: string, isMetadata: boolean = false) {
         const match = isMetadata ?
-            layerId.match(/^Metadata-(.+)-(.+)/) :
-            layerId.match(/^SourceData-(.+\.)([^.]+)/);
+            layerId.match(/^Metadata-(.+)-(.+)/) : layerId.match(/^SourceData-(.+-[^-]+)/);
         if (!match) {
             return layerId;
         }
-        return `${match[2]}`.replace('-', '.');
+        return isMetadata ? match[2] :`${match[1]}`.replace('-', '.');
     }
 }
