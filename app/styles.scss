@@ -1232,6 +1232,17 @@ map-view {
   }
 }
 
+.p-popover.feature-hover-popover {
+  pointer-events: none;
+  background: color-mix(in srgb, var(--p-content-background) 68%, transparent);
+  border-color: color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
+  backdrop-filter: blur(2px);
+
+  .p-popover-content {
+    background: transparent;
+  }
+}
+
 .card {
   background-color: var(--p-content-background);
   border-radius: 10px;
@@ -1779,6 +1790,51 @@ body.dialog-dragging * {
     height: fit-content;
   }
 
+  &.single-panel {
+    overflow-y: hidden;
+
+    inspection-panel {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      height: 100%;
+    }
+
+    .inspect-panel {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .inspect-panel .p-accordionpanel,
+    .inspect-panel .p-accordioncontent,
+    .inspect-panel .p-accordioncontent-content {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .inspect-panel .resizable-container {
+      height: 100% !important;
+      max-height: none;
+      min-height: 0;
+      resize: none;
+      padding-bottom: 0;
+    }
+  }
+
+  &.multi-panel {
+    overflow-y: auto;
+
+    .inspect-panel .resizable-container {
+      height: 15em !important;
+      min-height: 15em;
+      resize: none;
+    }
+  }
+
   &.reordering {
     p-accordion-content {
       visibility: collapse;
@@ -1991,6 +2047,80 @@ body.dialog-dragging * {
       }
     }
   }
+}
+
+.inspection-drag-preview {
+  position: fixed;
+  z-index: 120000;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--p-primary-500) 75%, black);
+  border-radius: 6px;
+  overflow: hidden;
+  opacity: 0.8;
+  box-shadow: 0 0.5em 1.2em rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--p-content-background) 70%, transparent);
+
+  .inspection-drag-preview-header {
+    padding: 0.25em 0.25em 0.25em 0.5em;
+    overflow: visible;
+
+    .p-colorpicker-panel {
+      z-index: 9500;
+    }
+
+    .p-colorpicker input {
+      height: 1.5em;
+      width: 1.5em;
+    }
+  }
+
+  .inspection-drag-preview-header .inspector-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-right: 0.5em;
+    cursor: grabbing;
+  }
+
+  .inspection-drag-preview-header .inspector-title > * {
+    display: flex;
+    gap: 0.25em;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .inspection-drag-preview-header .inspector-title .title {
+    max-width: 20em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: flex;
+    gap: 0.125em;
+    align-items: center;
+    cursor: pointer;
+
+    .material-symbols-outlined {
+      font-size: 1.25em;
+    }
+  }
+
+  .inspection-drag-preview-header .inspector-title .p-button {
+    width: 1.75em !important;
+    height: 1.75em !important;
+    margin: 0;
+  }
+}
+
+.inspection-drag-preview-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+                  135deg,
+                  rgba(0, 0, 0, 0.05) 0,
+                  rgba(0, 0, 0, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 0.5em,
+                  rgba(255, 255, 255, 0.05) 1em
+  );
 }
 
 .search-wrapper {
