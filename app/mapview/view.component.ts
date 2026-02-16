@@ -54,7 +54,7 @@ import {Popover} from "primeng/popover";
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
         <div #popoverAnchor class="popover-anchor"></div>
-        <p-popover #popover>
+        <p-popover #popover styleClass="feature-hover-popover">
             <ng-template pTemplate="content">
                 @for (content of featureIdsContent; track $index) {
                     {{ content }}<br>
@@ -251,7 +251,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     anchor.style.height = '1px';
                     anchor.style.pointerEvents = 'none';
 
-                    this.featureIdsPopover.show({ currentTarget: anchor } as unknown as MouseEvent);
+                    if (this.featureIdsPopover.overlayVisible) {
+                        this.featureIdsPopover.target = anchor;
+                        this.featureIdsPopover.align();
+                    } else {
+                        this.featureIdsPopover.show(null, anchor);
+                    }
 
                 })
             );

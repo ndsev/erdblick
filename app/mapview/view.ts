@@ -139,6 +139,7 @@ export class MapView {
         featureIds: (TileFeatureId | null | string)[],
         position: {x: number, y: number}
     } | undefined>(undefined);
+    private hoverUpdateSequence = 0;
 
     // While there are ongoing animation requests, enable the cesium
     // animation clock explicitly. Afterward we reset it to the saved state.
@@ -422,6 +423,7 @@ export class MapView {
 
         const hoverHandler = (movement: any) => {
             const position = movement.endPosition; // Notice that for MOUSE_MOVE, it's endPosition
+            const hoverRequestId = ++this.hoverUpdateSequence;
             // Do not handle mouse move here if the first element
             // under the cursor is not the Cesium view, or the mouse is outside the view.
             const canvasRect = this.viewer.canvas.getBoundingClientRect();
@@ -433,10 +435,16 @@ export class MapView {
                 mouseX > canvasRect.right ||
                 mouseY < canvasRect.top ||
                 mouseY > canvasRect.bottom) {
+                if (this.hoveredFeatureIds.getValue() !== undefined) {
+                    this.hoveredFeatureIds.next(undefined);
+                }
                 return;
             }
             // Do not handle mouse move here if the camera is currently being moved.
             if (this.cameraIsMoving) {
+                if (this.hoveredFeatureIds.getValue() !== undefined) {
+                    this.hoveredFeatureIds.next(undefined);
+                }
                 return;
             }
 
@@ -449,11 +457,17 @@ export class MapView {
                 const feature = this.viewer.scene.pick(position);
                 if (defined(feature)) {
                     const featureIdsArray = Array.isArray(feature.id) ? feature.id : [feature.id];
+                    const hoverPosition = {x: position.x, y: position.y};
                     this.mapService.setHoveredFeatures(featureIdsArray).then(() => {
-                        this.hoveredFeatureIds.next({featureIds: featureIdsArray, position: position});
+                        if (hoverRequestId !== this.hoverUpdateSequence) {
+                            return;
+                        }
+                        this.hoveredFeatureIds.next({featureIds: featureIdsArray, position: hoverPosition});
                     });
                 } else {
-                    this.hoveredFeatureIds.next(undefined);
+                    if (this.hoveredFeatureIds.getValue() !== undefined) {
+                        this.hoveredFeatureIds.next(undefined);
+                    }
                 }
             }
         };

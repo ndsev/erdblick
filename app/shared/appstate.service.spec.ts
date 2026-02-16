@@ -76,6 +76,7 @@ const createRouterStub = (queryParams: Record<string, unknown> = {}): RouterStub
 };
 
 const feature = (id: string, mapTileKey = 'map/layer/tile') => ({ featureId: id, mapTileKey });
+const sourceData = (mapTileKey = 'SourceData:m1:SourceData-LAYER:1', address?: bigint) => ({ mapTileKey, address });
 
 describe('AppStateService', () => {
     beforeEach(() => {
@@ -281,6 +282,148 @@ describe('AppStateService', () => {
         expect(newPanel?.features).toEqual(selected);
         expect(newPanel?.undocked).toBe(false);
         expect(newPanel?.locked).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('does not replace unlocked SourceData with a feature inspection', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:1'), locked: false, size: [30, 40], color: '#111111', undocked: true },
+            { id: 2, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#222222', undocked: false },
+        ];
+
+        const selected = [feature('new-feature', 'map/layer/new-tile')];
+        const targetPanelId = service.setSelection(selected);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(2);
+        expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:1'));
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual(selected);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('reuses an unlocked SourceData inspection before creating a new SourceData dialog', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const nextSourceData = sourceData('SourceData:m1:SourceData-LAYER:3');
+        const targetPanelId = service.setSelection(nextSourceData);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(2);
+        expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(nextSourceData);
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('creates a new undocked SourceData dialog when no unlocked SourceData inspection exists', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const targetPanelId = service.setSelection(sourceData('SourceData:m1:SourceData-LAYER:9'));
+        const panels = service.selection;
+        const newPanel = panels.find(panel => panel.id === targetPanelId);
+
+        expect(targetPanelId).toBe(3);
+        expect(newPanel?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:9'));
+        expect(newPanel?.undocked).toBe(true);
+        expect(newPanel?.locked).toBe(false);
+        expect(newPanel?.features).toEqual([]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps SourceData selection in the same panel when requested by SourceData panel id even if locked', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:3'), locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const targetPanelId = service.setSelection(sourceData('SourceData:m1:SourceData-LAYER:7'), 1);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(1);
+        expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:7'));
+        expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:3'));
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('ignores SourceData panels when deduplicating feature selection', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        const duplicated = feature('same-feature');
+        service.selection = [
+            {
+                id: 1,
+                features: [duplicated],
+                sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'),
+                locked: false,
+                size: [30, 40],
+                color: '#111111',
+                undocked: true,
+            },
+        ];
+
+        const targetPanelId = service.setSelection([duplicated]);
+        const panels = service.selection;
+        const created = panels.find(panel => panel.id === targetPanelId);
+
+        expect(targetPanelId).toBe(2);
+        expect(created?.features).toEqual([duplicated]);
+        expect(created?.sourceData).toBeUndefined();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps unlocked SourceData inspections when clearing unlocked selections', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('remove-me')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
+            { id: 3, features: [feature('stay-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
+        ];
+
+        service.unsetUnlockedSelections();
+        const panels = service.selection;
+
+        expect(panels).toHaveLength(2);
+        expect(panels.find(panel => panel.id === 1)).toBeUndefined();
+        expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:2'));
+        expect(panels.find(panel => panel.id === 3)?.features).toEqual([feature('stay-locked')]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
