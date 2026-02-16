@@ -8,6 +8,7 @@ import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
 import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {Title} from "@angular/platform-browser";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -70,9 +71,11 @@ export class AppComponent implements OnDestroy {
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
-                public diagnostics: DiagnosticsFacadeService) {
+                public diagnostics: DiagnosticsFacadeService,
+                private titleService: Title) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
+        this.titleService.setTitle(this.capitalizeTitle(this.title));
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
@@ -92,6 +95,11 @@ export class AppComponent implements OnDestroy {
                                 .then((plugin) => plugin.default() as Array<Versions>)
                                 .then((versions: Array<Versions>) => {
                                     this.stateService.distributionVersions.next(versions);
+                                    if (versions[0].name.trim()) {
+                                        this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
+                                    } else {
+                                        this.titleService.setTitle(this.capitalizeTitle(this.title));
+                                    }
                                 })
                                 .catch((error) => {
                                     console.error(error);
@@ -215,7 +223,12 @@ export class AppComponent implements OnDestroy {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
                 this.stateService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
+    }
+
+    private capitalizeTitle(title: string) {
+        return `${title.charAt(0).toUpperCase()}${title.slice(1)}`;
     }
 
     protected readonly environment = environment;
