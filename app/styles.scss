@@ -263,6 +263,13 @@ diagnostics-indicator {
       padding: 0;
     }
 
+    .diagnostics-spinner-paused {
+      .p-progressspinner-spin,
+      .p-progressspinner-circle {
+        animation-play-state: paused !important;
+      }
+    }
+
     .diagnostics-indicator-badge {
       border: none;
       background: transparent;
@@ -302,29 +309,6 @@ diagnostics-indicator {
       font-weight: 600;
     }
 
-    .diagnostics-progress-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4em;
-    }
-
-    .diagnostics-progress-item {
-      display: grid;
-      grid-template-columns: 7em 1fr 5em;
-      gap: 0.5em;
-      align-items: center;
-    }
-
-    .diagnostics-stage-label {
-      font-size: 0.85em;
-    }
-
-    .diagnostics-stage-count {
-      font-size: 0.8em;
-      text-align: right;
-      color: var(--p-text-muted-color);
-    }
-
     .diagnostics-popover-actions {
       display: flex;
       flex-direction: row;
@@ -341,41 +325,6 @@ diagnostics-indicator {
         gap: 0.25em;
       }
     }
-
-    .diagnostics-progress-content {
-      display: flex;
-      flex-direction: column;
-      gap: 1em;
-    }
-
-    .diagnostics-progress-summary {
-      display: flex;
-      align-items: center;
-      gap: 1em;
-    }
-
-    .diagnostics-progress-summary-text {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25em;
-    }
-
-    .diagnostics-progress-title {
-      font-weight: 600;
-    }
-
-    .diagnostics-progress-bars {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75em;
-    }
-
-    .diagnostics-stage-header {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.9em;
-      margin-bottom: 0.25em;
-    }
   }
 }
 
@@ -389,27 +338,93 @@ diagnostics-indicator {
   justify-content: flex-end;
 }
 
-.diagnostics-progress-list {
+.diagnostics-progress {
   display: flex;
-  flex-direction: column;
-  gap: 0.4em;
-}
-
-.diagnostics-progress-item {
-  display: grid;
-  grid-template-columns: 7em 1fr 5em;
-  gap: 0.5em;
+  flex-direction: row;
+  gap: 1em;
   align-items: center;
-}
+  width: 100%;
 
-.diagnostics-stage-label {
-  font-size: 0.85em;
-}
+  .diagnostics-progress-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+    width: 100%;
+  }
 
-.diagnostics-stage-count {
-  font-size: 0.8em;
-  text-align: right;
-  color: var(--p-text-muted-color);
+  .diagnostics-progress-item {
+    display: grid;
+    grid-template-columns: 5em 1fr;
+    gap: 0.5em;
+    align-items: center;
+  }
+
+  .diagnostics-stage-label {
+    font-size: 0.85em;
+  }
+
+  .diagnostics-stage-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 1.2em;
+
+    p-progressbar {
+      display: block;
+      width: 100%;
+    }
+
+    .p-progressbar {
+      width: 100%;
+    }
+
+    .p-progressbar-value {
+      transition: none !important;
+    }
+  }
+
+  .diagnostics-stage-bar-value {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    font-size: 0.8em;
+    color: #111;
+    font-weight: 500;
+  }
+
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .diagnostics-stage-bar-value {
+      background-image: linear-gradient(
+        90deg,
+        #fff 0%,
+        #fff calc(var(--diagnostics-progress) - 0.75%),
+        #d0d0d0 var(--diagnostics-progress),
+        #111 calc(var(--diagnostics-progress) + 0.75%),
+        #111 100%
+      );
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+  }
+
+  .diagnostics-progress-actions {
+    display: flex;
+    align-self: stretch;
+
+    p-button {
+      display: flex;
+      height: 100%;
+    }
+
+    .p-button {
+      height: 100%;
+    }
+  }
 }
 
 .diagnostics-perf-table {

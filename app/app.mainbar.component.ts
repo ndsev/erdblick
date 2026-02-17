@@ -88,14 +88,14 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             icon: 'build',
             items: [
                 {
-                    name: 'Performance Statistics',
-                    icon: 'insights',
-                    command: () => { this.openDiagnosticsPerformance(); }
-                },
-                {
                     name: 'Logs',
                     icon: 'list_alt',
                     command: () => { this.openDiagnosticsLog(); }
+                },
+                {
+                    name: 'Performance Statistics',
+                    icon: 'insights',
+                    command: () => { this.openDiagnosticsPerformance(); }
                 },
                 {
                     name: 'Export Diagnostics',

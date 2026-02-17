@@ -10,34 +10,31 @@ interface ProgressStage {
 @Component({
     selector: 'diagnostics-progress',
     template: `
-        <div class="diagnostics-progress-list">
-            @for (stage of progressStages; track stage.key) {
-                <div class="diagnostics-progress-item">
-                    <span class="diagnostics-stage-label">{{ stage.label }}</span>
-                    <p-progressBar [value]="progressPercent(progress[stage.key])" [showValue]="false"></p-progressBar>
-                    <span class="diagnostics-stage-count">{{ progress[stage.key].done }} / {{ progress[stage.key].total }}</span>
-                </div>
-            }
-        </div>
-        <div class="diagnostics-progress-actions">
-            @if (paused$ | async) {
-                <p-button
-                    size="small"
-                    label="Resume"
-                    icon="pi pi-play"
-                    pTooltip="Resume tile requesting/loading/rendering"
-                    tooltipPosition="top"
-                    (click)="togglePause()"></p-button>
-            } @else {
-                <p-button
-                    size="small"
-                    label="Pause"
-                    icon="pi pi-pause"
-                    [disabled]="isProgressComplete"
-                    pTooltip="Pause tile requesting/loading/rendering"
-                    tooltipPosition="top"
-                    (click)="togglePause()"></p-button>
-            }
+        <div class="diagnostics-progress">
+            <div class="diagnostics-progress-list">
+                @for (stage of progressStages; track stage.key) {
+                    <div class="diagnostics-progress-item">
+                        <span class="diagnostics-stage-label">{{ stage.label }}</span>
+                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(progress[stage.key]) + '%'">
+                            <p-progressBar [value]="progressPercent(progress[stage.key])" [showValue]="false"></p-progressBar>
+                            <span class="diagnostics-stage-bar-value">
+                                {{ progress[stage.key].done }} / {{ progress[stage.key].total }}
+                            </span>
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="diagnostics-progress-actions">
+                @if (paused$ | async) {
+                    <p-button size="small" label="" icon="pi pi-play" pTooltip="Resume tile requesting/loading/rendering"
+                            tooltipPosition="top" (click)="togglePause()">
+                    </p-button>
+                } @else {
+                    <p-button size="small" label="" icon="pi pi-pause" pTooltip="Pause tile requesting/loading/rendering" 
+                              tooltipPosition="top" [disabled]="isProgressComplete" (click)="togglePause()">
+                    </p-button>
+                }
+            </div>
         </div>
     `,
     styles: [``],

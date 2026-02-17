@@ -3,6 +3,7 @@ import {combineLatest, map, scan} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
 import {DiagnosticsSnapshot, ProgressCounter} from './diagnostics.model';
+import {MapDataService} from '../mapdata/map.service';
 
 @Component({
     selector: 'diagnostics-indicator',
@@ -10,7 +11,9 @@ import {DiagnosticsSnapshot, ProgressCounter} from './diagnostics.model';
         <div class="diagnostics-indicator">
             <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)" pTooltip="Open progress statistics" tooltipPosition="left">
                 @if (showSpinner$ | async) {
-                    <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s" [style]="{ width: '1.75em', height: '1.75em' }" />
+                    <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s"
+                                        [style]="{ width: '1.75em', height: '1.75em' }"
+                                        [styleClass]="(paused$ | async) ? 'diagnostics-spinner-paused' : ''" />
                 } @else {
                     <i class="pi pi-circle-fill" [class.disconnected]="!(backendConnected$ | async)"></i>
                 }
@@ -57,6 +60,7 @@ export class DiagnosticsIndicatorComponent {
     @ViewChild('popover') popover?: Popover;
 
     readonly snapshot$ = this.diagnostics.snapshot$;
+    readonly paused$ = this.mapService.tilePipelinePaused$;
     readonly showSpinner$ = this.snapshot$.pipe(
         map(snapshot => this.shouldShowSpinner(snapshot))
     );
@@ -68,7 +72,8 @@ export class DiagnosticsIndicatorComponent {
         scan((hasSeenError, hasError) => hasSeenError || hasError, false)
     );
 
-    constructor(private readonly diagnostics: DiagnosticsFacadeService) {}
+    constructor(private readonly diagnostics: DiagnosticsFacadeService,
+                private readonly mapService: MapDataService) {}
 
     togglePopover(event: MouseEvent) {
         this.popover?.toggle(event);
