@@ -181,12 +181,12 @@ describe('AppStateService', () => {
         const config = service.mapLayerConfig('m1', 'layerA', false, 9);
 
         expect(config).toEqual([
-            { visible: false, level: 9, tileBorders: false },
+            { visible: false, level: 9, tileBorders: true },
         ]);
         expect(service.layerNamesState.getValue()).toEqual(['m1/layerA']);
         expect(service.layerVisibilityState.getValue(0)).toEqual([false]);
         expect(service.layerZoomLevelState.getValue(0)).toEqual([9]);
-        expect(service.layerTileBordersState.getValue(0)).toEqual([false]);
+        expect(service.layerTileBordersState.getValue(0)).toEqual([true]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -473,6 +473,7 @@ describe('AppStateService', () => {
         service.openInspectionComparison({
             base: {
                 panelId: 5,
+                mapId: 'map',
                 label: 'base',
                 featureIds: [{ mapTileKey: 'map/layer/tile', featureId: 'f1' }]
             },
@@ -487,6 +488,142 @@ describe('AppStateService', () => {
         service.closeInspectionComparison();
         await flushMicrotasks();
         expect(service.inspectionComparison).toBeNull();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('removes a compared other panel when unsetPanel is called', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
+        ];
+        service.openInspectionComparison({
+            base: {
+                panelId: 1,
+                mapId: 'map',
+                label: 'map.f1',
+                featureIds: [feature('f1')]
+            },
+            others: [{
+                panelId: 2,
+                mapId: 'map',
+                label: 'map.f2',
+                featureIds: [feature('f2')]
+            }]
+        });
+
+        service.unsetPanel(2);
+
+        expect(service.inspectionComparison).toEqual({
+            base: {
+                panelId: 1,
+                mapId: 'map',
+                label: 'map.f1',
+                featureIds: [feature('f1')]
+            },
+            others: []
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('promotes another comparison entry to base when the current base panel is removed', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
+            { id: 3, features: [feature('f3')], locked: true, size: [30, 20], color: '#333333', undocked: false },
+        ];
+        service.openInspectionComparison({
+            base: {
+                panelId: 1,
+                mapId: 'map',
+                label: 'map.f1',
+                featureIds: [feature('f1')]
+            },
+            others: [
+                {
+                    panelId: 2,
+                    mapId: 'map',
+                    label: 'map.f2',
+                    featureIds: [feature('f2')]
+                },
+                {
+                    panelId: 3,
+                    mapId: 'map',
+                    label: 'map.f3',
+                    featureIds: [feature('f3')]
+                }
+            ]
+        });
+
+        service.unsetPanel(1);
+
+        expect(service.inspectionComparison).toEqual({
+            base: {
+                panelId: 2,
+                mapId: 'map',
+                label: 'map.f2',
+                featureIds: [feature('f2')]
+            },
+            others: [
+                {
+                    panelId: 3,
+                    mapId: 'map',
+                    label: 'map.f3',
+                    featureIds: [feature('f3')]
+                }
+            ]
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('removes cleared unlocked panels from comparison during bulk close', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('f2')], locked: false, size: [30, 20], color: '#222222', undocked: false },
+        ];
+        service.openInspectionComparison({
+            base: {
+                panelId: 1,
+                mapId: 'map',
+                label: 'map.f1',
+                featureIds: [feature('f1')]
+            },
+            others: [{
+                panelId: 2,
+                mapId: 'map',
+                label: 'map.f2',
+                featureIds: [feature('f2')]
+            }]
+        });
+
+        service.unsetUnlockedSelections();
+
+        expect(service.inspectionComparison).toEqual({
+            base: {
+                panelId: 1,
+                mapId: 'map',
+                label: 'map.f1',
+                featureIds: [feature('f1')]
+            },
+            others: []
+        });
 
         service.ngOnDestroy();
         routerStub.events.complete();

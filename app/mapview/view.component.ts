@@ -225,21 +225,34 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.syncOptions.forEach(option => option.value = currentSyncState.has(option.code));
             this.subscriptions.push(
                 this.mapView!.hoveredFeatureIds.subscribe(result => {
-                    this.featureIdsContent = [];
                     if (!result || !result.featureIds.length) {
+                        this.featureIdsContent = [];
                         this.featureIdsPopover.hide();
                         return;
                     }
+                    const featureIdsContent: string[] = [];
                     result.featureIds.forEach((featureId) => {
                         if (!featureId) {
                             return;
                         }
                         if (typeof featureId === "string") {
-                            this.featureIdsContent.push(featureId)
-                        } else {
-                            this.featureIdsContent.push(featureId.featureId);
+                            if (featureId !== 'hover-highlight') {
+                                featureIdsContent.push(featureId);
+                            }
+                            return;
+                        }
+                        if (typeof featureId === 'object' && 'featureId' in featureId) {
+                            if (typeof featureId.featureId === 'string' && featureId.featureId.length > 0) {
+                                featureIdsContent.push(featureId.featureId);
+                            }
                         }
                     });
+                    if (!featureIdsContent.length) {
+                        this.featureIdsContent = [];
+                        this.featureIdsPopover.hide();
+                        return;
+                    }
+                    this.featureIdsContent = featureIdsContent;
                     const canvasRect = this.mapView!.viewer.canvas.getBoundingClientRect();
                     const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
                     const y = result.position.y + canvasRect.top;

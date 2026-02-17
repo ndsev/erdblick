@@ -89,50 +89,64 @@ mapview-container {
   width: 100%;
 }
 
-.main-bar {
+main-bar {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: calc(100% - 0.35em);
-  height: 2.25em;
-  margin: 0.15em;
-  padding: 0 !important;
+  top: 0.15em;
+  left: 0.15em;
+  display: flex;
+  gap: 0.15em;
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
 
-  .p-menubar-root-list {
-    padding: 0 0 0 15.5em;
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-    background: color-mix(in srgb, var(--p-menubar-background) 70%, transparent);
-    height: 2em;
-    gap: 0.5em;
-
-    &:hover {
-      background: var(--p-menubar-background);
+  .maps-button {
+    button {
+      height: 2.25em;
+      width: 2.25em;
     }
+  }
 
-    p-menubarsub {
-      z-index: 101;
-    }
+  .main-bar {
+    width: calc(100% - 2.75em);
+    height: 2.25em;
+    padding: 0 !important;
 
-    .p-menubar-item-link {
-      padding: 0.25em !important;
-      font-size: 0.9em;
-      gap: 0.25em;
+    .p-menubar-root-list {
+      padding: 0 0 0 15.5em;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      background: color-mix(in srgb, var(--p-menubar-background) 70%, transparent);
+      height: 2em;
+      gap: 0.5em;
 
-      .material-symbols-outlined {
-        font-size: 1.2em;
+      &:hover {
+        background: var(--p-menubar-background);
+      }
+
+      p-menubarsub {
+        z-index: 101;
+      }
+
+      .p-menubar-item-link {
+        padding: 0.25em !important;
+        font-size: 0.9em;
+        gap: 0.25em;
+
+        .material-symbols-outlined {
+          font-size: 1.2em;
+        }
       }
     }
   }
-}
 
-.p-menubar-mobile {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  margin: 0 !important;
-  height: 3.1em;
-  width: 100%;
+  .p-menubar-mobile {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    margin: 0 !important;
+    height: 3.1em;
+    width: 100%;
+  }
 }
 
 .dock-toggle {
@@ -1628,8 +1642,21 @@ body.dialog-dragging * {
   }
 
   .comparison-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35em;
+
     .p-multiselect {
       width: 100%;
+    }
+
+    .comparison-filter-input {
+      width: 100%;
+
+      .p-inputtext {
+        width: 100%;
+      }
     }
   }
 
@@ -1648,7 +1675,41 @@ body.dialog-dragging * {
     min-width: 12em;
   }
 
+  .comparison-column-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.25em;
+    background: transparent;
+
+    .comparison-column-header-left,
+    .comparison-column-header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.25em;
+      min-width: 0;
+    }
+
+    .comparison-column-header-left {
+      flex: 1 1 auto;
+    }
+
+    .p-colorpicker input {
+      height: 1.5em;
+      width: 1.5em;
+    }
+
+    .p-button {
+      width: 1.75em !important;
+      height: 1.75em !important;
+      margin: 0;
+    }
+  }
+
   .comparison-column-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15em;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2126,7 +2187,7 @@ body.dialog-dragging * {
 .search-wrapper {
   position: fixed;
   top: 0.35em;
-  left: 0.35em;
+  left: 2.75em;
   min-width: 15em;
   max-width: calc(100vw - 5em);
   max-height: calc(100vh - 5em);

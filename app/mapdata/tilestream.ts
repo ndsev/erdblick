@@ -80,6 +80,7 @@ export class MapTileStreamClient {
     private frameQueue: Array<ArrayBuffer | Blob> = [];
     private frameQueueTimer: ReturnType<typeof setTimeout> | null = null;
     private processingFrameQueue: boolean = false;
+    private frameProcessingPaused: boolean = false;
     private readonly frameTimeBudgetMs: number = 10;
     private readonly flowControlEnabled: boolean = true;
 
@@ -176,6 +177,17 @@ export class MapTileStreamClient {
     clearPendingFrames() {
         console.log(`Clearing ${this.frameQueue.length} frames.`)
         this.frameQueue = [];
+    }
+
+    setFrameProcessingPaused(paused: boolean) {
+        this.frameProcessingPaused = paused;
+        if (!paused && this.frameQueue.length) {
+            this.scheduleFrameProcessing(0);
+        }
+    }
+
+    get isFrameProcessingPaused(): boolean {
+        return this.frameProcessingPaused;
     }
 
     sendRequest(body: object | string) {
@@ -368,10 +380,16 @@ export class MapTileStreamClient {
 
     private enqueueFrame(data: ArrayBuffer | Blob) {
         this.frameQueue.push(data);
+        if (this.frameProcessingPaused) {
+            return;
+        }
         this.scheduleFrameProcessing(0);
     }
 
     private scheduleFrameProcessing(delayMs: number) {
+        if (this.frameProcessingPaused) {
+            return;
+        }
         if (this.frameQueueTimer) {
             return;
         }
@@ -384,7 +402,7 @@ export class MapTileStreamClient {
     }
 
     private async processFrameQueue() {
-        if (this.processingFrameQueue) {
+        if (this.processingFrameQueue || this.frameProcessingPaused) {
             return;
         }
         this.processingFrameQueue = true;

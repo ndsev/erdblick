@@ -1,4 +1,4 @@
-import {Component} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, OnDestroy, ViewChild} from '@angular/core';
 import {map, timer} from 'rxjs';
 import {MapDataService} from './mapdata/map.service';
 import {StyleService} from './styledata/style.service';
@@ -6,18 +6,28 @@ import {AppStateService} from './shared/appstate.service';
 import {EditorService} from './shared/editor.service';
 import {environment} from './environments/environment';
 import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
+import {MenuItem} from "primeng/api";
 
 @Component({
     selector: 'main-bar',
     template: `
-        <p-menubar class="main-bar" [model]="menuItems">
+        @if (stateService.mapsDialogVisible) {
+            <p-button class="maps-button" (click)="closeMapsPanel()" label="" [tooltipPosition]="'right'" pTooltip="Close maps configuration panel">
+                <span class="material-symbols-outlined">close</span>
+            </p-button>
+        } @else {
+            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" [tooltipPosition]="'right'" pTooltip="Open maps configuration panel">
+                <span class="material-symbols-outlined">stacks</span>
+            </p-button>
+        }
+        <p-menubar #mainBarMenubar class="main-bar" [model]="menuItems">
             <ng-template #start>
                 @if (!environment.visualizationOnly) {
                     <search-panel></search-panel>
                 }
             </ng-template>
             <ng-template #item let-item>
-                <a pRipple class="p-menubar-item-link" (click)="item.command()">
+                <a pRipple class="p-menubar-item-link" (click)="item.command?.()">
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
                     <span>{{ item.name }}</span>
                 </a>
@@ -46,27 +56,20 @@ import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service
     ],
     standalone: false
 })
-export class MainBarComponent {
+export class MainBarComponent implements AfterViewInit, OnDestroy {
+    @ViewChild('mainBarMenubar', {read: ElementRef})
+    private menubarRef?: ElementRef<HTMLElement>;
+    private menubarClassObserver?: MutationObserver;
 
-    menuItems = [
+    menuItems: MenuItem[] = [
         {
-            name: 'Maps',
-            icon: 'stacks',
-            command: () => { this.showMapsPanel(); }
-        },
-        {
-            name: 'Styles',
-            icon: 'palette',
-            command: () => { this.openStylesDialog(); }
-        },
-        {
-            name: 'Settings',
-            icon: 'settings',
+            name: 'Edit',
+            icon: 'tune',
             items: [
                 {
-                    name: 'Preferences',
-                    icon: 'settings',
-                    command: () => { this.showPreferencesDialog(); },
+                    name: 'Styles Configurator',
+                    icon: 'palette',
+                    command: () => { this.openStylesDialog(); }
                 },
                 {
                     name: 'Datasources',
@@ -74,9 +77,30 @@ export class MainBarComponent {
                     command: () => { this.openDatasources(); }
                 },
                 {
-                    name: 'Controls',
-                    icon: 'keyboard',
-                    command: () => { this.showControlsDialog(); }
+                    name: 'Settings',
+                    icon: 'settings',
+                    command: () => { this.showPreferencesDialog(); },
+                }
+            ]
+        },
+        {
+            name: 'Tools',
+            icon: 'build',
+            items: [
+                {
+                    name: 'Performance Statistics',
+                    icon: 'insights',
+                    command: () => { this.openDiagnosticsPerformance(); }
+                },
+                {
+                    name: 'Logs',
+                    icon: 'list_alt',
+                    command: () => { this.openDiagnosticsLog(); }
+                },
+                {
+                    name: 'Export Diagnostics',
+                    icon: 'download',
+                    command: () => { this.openDiagnosticsExport(); }
                 }
             ]
         },
@@ -85,24 +109,14 @@ export class MainBarComponent {
             icon: 'question_mark',
             items: [
                 {
-                    name: 'Performance Statistics',
-                    icon: 'insights',
-                    command: () => { this.openDiagnosticsPerformance(); }
-                },
-                {
-                    name: 'Log',
-                    icon: 'list_alt',
-                    command: () => { this.openDiagnosticsLog(); }
-                },
-                {
-                    name: 'Export Diagnostics',
-                    icon: 'download',
-                    command: () => { this.openDiagnosticsExport(); }
-                },
-                {
                     name: 'Help',
                     icon: 'question_mark',
                     command: () => { this.openHelp(); }
+                },
+                {
+                    name: 'Controls',
+                    icon: 'keyboard',
+                    command: () => { this.showControlsDialog(); }
                 },
                 {
                     name: 'About',
@@ -129,21 +143,32 @@ export class MainBarComponent {
         });
     }
 
+    ngAfterViewInit() {
+        const menubar = this.menubarRef?.nativeElement;
+        if (!menubar) {
+            return;
+        }
+        this.syncMobileMapsMenuItem(menubar.classList.contains('p-menubar-mobile'));
+        this.menubarClassObserver = new MutationObserver(records => {
+            for (const record of records) {
+                if (record.type === 'attributes' && record.attributeName === 'class') {
+                    this.syncMobileMapsMenuItem(menubar.classList.contains('p-menubar-mobile'));
+                }
+            }
+        });
+        this.menubarClassObserver.observe(menubar, {attributes: true, attributeFilter: ['class']});
+    }
+
+    ngOnDestroy() {
+        this.menubarClassObserver?.disconnect();
+    }
+
     showPreferencesDialog() {
         this.stateService.preferencesDialogVisible = true;
     }
 
     showControlsDialog() {
         this.stateService.controlsDialogVisible = true;
-    }
-
-    showStatsDialog() {
-        this.mapService.statsDialogVisible = true;
-        this.mapService.statsDialogNeedsUpdate.next();
-    }
-
-    openDiagnosticsProgress() {
-        this.diagnostics.openProgressDialog();
     }
 
     openDiagnosticsPerformance() {
@@ -179,12 +204,31 @@ export class MainBarComponent {
         this.styleService.stylesDialogVisible = true;
     }
 
-    private showMapsPanel() {
-        this.stateService.mapsOpenState.next(true);
+    protected showMapsPanel() {
+        this.stateService.mapsDialogVisible = true;
+    }
+
+    protected closeMapsPanel() {
+        this.stateService.mapsDialogVisible = false;
     }
 
     protected openLegalInfo() {
         this.stateService.legalInfoDialogVisible = true;
+    }
+
+    private syncMobileMapsMenuItem(isMobileMenubar: boolean) {
+        const hasMobileMapsMenuItem = this.menuItems[0]["name"] === 'Maps';
+        if (isMobileMenubar && !hasMobileMapsMenuItem) {
+            this.menuItems = [{
+                name: 'Maps',
+                icon: 'stacks',
+                command: () => { this.showMapsPanel(); }
+            }, ...this.menuItems];
+            return;
+        }
+        if (!isMobileMenubar && hasMobileMapsMenuItem) {
+            this.menuItems = this.menuItems.slice(1);
+        }
     }
 
     protected readonly environment = environment;

@@ -57,9 +57,12 @@ export class MapDataService {
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
     private updateInProgress: boolean = false;
     private updatePending: boolean = false;
+    private updateRequestedWhilePaused: boolean = false;
+    private blockedTileLoadInfoShown: boolean = false;
     private readonly updateDebounceMs: number = 50;
     private lastUpdateAt: number = 0;
     private dataSourceInfoJson: string | null = null;
+    readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
     tileVisualizationTopic: Subject<TileVisualization>;
     tileVisualizationDestructionTopic: Subject<TileVisualization>;
@@ -74,6 +77,10 @@ export class MapDataService {
     maps$: BehaviorSubject<MapLayerTree> = new BehaviorSubject<MapLayerTree>(new MapLayerTree([], this.selectionTopic, this.stateService, this.styleService));
     get maps() {
         return this.maps$.getValue();
+    }
+
+    get tilePipelinePaused(): boolean {
+        return this.tilePipelinePaused$.getValue();
     }
 
     getDataSourceInfoJson(): string | null {
@@ -125,6 +132,7 @@ export class MapDataService {
 
         // Setup TileLayerStream
         this.tileStream = new MapTileStreamClient("/tiles");
+        this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
         this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);
         this.tileStream.onLoadState = (payload) => this.handleTilesLoadState(payload);
@@ -240,6 +248,11 @@ export class MapDataService {
     }
 
     private processVisualizationTasks() {
+        if (this.tilePipelinePaused) {
+            setTimeout((_: any) => this.processVisualizationTasks(), 100);
+            return;
+        }
+
         const startTime = Date.now();
         const timeBudget = 20; // milliseconds
         let currentQueueLength = this.viewVisualizationState.reduce(
@@ -295,6 +308,48 @@ export class MapDataService {
         return this.tileStream?.isOpen() ?? false;
     }
 
+    pauseTilePipeline(source: 'diagnostics' | string = 'diagnostics') {
+        if (this.tilePipelinePaused) {
+            return;
+        }
+        this.tilePipelinePaused$.next(true);
+        if (this.updateTimer) {
+            clearTimeout(this.updateTimer);
+            this.updateTimer = null;
+        }
+        this.updateRequestedWhilePaused = this.updateRequestedWhilePaused || this.updatePending;
+        this.tileStream?.setFrameProcessingPaused(true);
+        this.messageService.showInfo('Tile pipeline paused');
+        console.info(`Tile pipeline paused (${source})`);
+    }
+
+    resumeTilePipeline(source: 'diagnostics' | string = 'diagnostics') {
+        if (!this.tilePipelinePaused) {
+            return;
+        }
+        this.tilePipelinePaused$.next(false);
+        this.blockedTileLoadInfoShown = false;
+        this.tileStream?.setFrameProcessingPaused(false);
+        this.messageService.showInfo('Tile pipeline resumed');
+        console.info(`Tile pipeline resumed (${source})`);
+
+        const needsUpdate = this.updatePending
+            || this.updateRequestedWhilePaused
+            || this.selectionTileRequests.length > 0;
+        this.updateRequestedWhilePaused = false;
+        if (needsUpdate) {
+            setTimeout(() => this.scheduleUpdate(), 0);
+        }
+    }
+
+    toggleTilePipelinePause(source: 'diagnostics' | string = 'diagnostics') {
+        if (this.tilePipelinePaused) {
+            this.resumeTilePipeline(source);
+        } else {
+            this.pauseTilePipeline(source);
+        }
+    }
+
     private handleTilesRequestStatus(status: MapTileStreamStatusPayload) {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
@@ -339,6 +394,10 @@ export class MapDataService {
 
     public scheduleUpdate() {
         this.updatePending = true;
+        if (this.tilePipelinePaused) {
+            this.updateRequestedWhilePaused = true;
+            return;
+        }
         if (this.updateTimer) {
             return;
         }
@@ -351,6 +410,11 @@ export class MapDataService {
     }
 
     private async runUpdate() {
+        if (this.tilePipelinePaused) {
+            this.updatePending = true;
+            this.updateRequestedWhilePaused = true;
+            return;
+        }
         if (this.updateInProgress) {
             this.updatePending = true;
             return;
@@ -366,6 +430,11 @@ export class MapDataService {
             });
 
             await this.updateMapDataRequest();
+            if (this.tilePipelinePaused) {
+                this.updatePending = true;
+                this.updateRequestedWhilePaused = true;
+                return;
+            }
             this.updateEvictLoadedLayers();
             this.updateVisualizations();
         } finally {
@@ -620,6 +689,10 @@ export class MapDataService {
     }
 
     private async updateMapDataRequest() {
+        if (this.tilePipelinePaused) {
+            return;
+        }
+
         // Request non-present required tile layers.
         const requestByLayer = new Map<string, {mapId: string, layerId: string, tileIds: number[], tileIdSet: Set<number>}>();
         const queueTiles = (mapId: string, layerId: string, tileIds: Array<number>) => {
@@ -703,6 +776,9 @@ export class MapDataService {
             tileIds: entry.tileIds
         }));
 
+        if (this.tilePipelinePaused) {
+            return;
+        }
         await this.tileStream!.updateRequest(requests);
     }
 
@@ -832,6 +908,14 @@ export class MapDataService {
         return tile;
     }
 
+    private showPausedTileLoadInfoOnce() {
+        if (this.blockedTileLoadInfoShown) {
+            return;
+        }
+        this.blockedTileLoadInfoShown = true;
+        this.messageService.showInfo('Tile pipeline is paused; cannot load additional tiles');
+    }
+
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
         const result = new Map<string, FeatureTile>();
 
@@ -846,6 +930,11 @@ export class MapDataService {
             let tile = this.loadedTileLayers.get(tileKey);
             if (tile && tile.hasData()) {
                 result.set(tileKey, tile);
+                continue;
+            }
+
+            if (this.tilePipelinePaused) {
+                this.showPausedTileLoadInfoOnce();
                 continue;
             }
 

@@ -235,14 +235,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                 }
             </ng-container>
         </p-dialog>
-        @if (closeButtonVisible) {
-            <p-button class="maps-close-button" icon="" severity="secondary" (click)="closeMapsPanel()" 
-                      pTooltip="Close maps panel" tooltipPosition="right">
-            <span class="material-symbols-outlined" style="margin: 0 auto;">
-                close
-            </span>
-            </p-button>
-        }
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
     `,
@@ -260,7 +252,6 @@ export class MapPanelComponent {
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
 
-    isMainButtonHovered: boolean = false;
     mapsCollapsed: boolean[] = [];
 
     osmEnabled: boolean[] = [true];
@@ -269,7 +260,6 @@ export class MapPanelComponent {
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
-    closeButtonVisible: boolean = false;
 
     @ViewChild('menu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -363,7 +353,6 @@ export class MapPanelComponent {
     }
 
     onMapLayerDialogShow() {
-        this.closeButtonVisible = true;
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
@@ -583,10 +572,5 @@ export class MapPanelComponent {
         const numViews = this.stateService.numViews;
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
             this.mapService.isSyncOptionsForViewEnabled(index));
-    }
-
-    closeMapsPanel() {
-        this.closeButtonVisible = false;
-        this.stateService.mapsOpenState.next(false);
     }
 }

@@ -76,6 +76,7 @@ export interface InspectionDialogLayoutEntry {
 
 export interface InspectionComparisonEntry {
     panelId: number;
+    mapId: string;
     label: string;
     featureIds: TileFeatureId[];
 }
@@ -485,6 +486,7 @@ export class AppStateService implements OnDestroy {
             z.object({
                 base: z.object({
                     panelId: z.coerce.number(),
+                    mapId: z.string().optional().default(''),
                     label: z.string(),
                     featureIds: z.array(z.object({
                         featureId: z.string(),
@@ -493,6 +495,7 @@ export class AppStateService implements OnDestroy {
                 }),
                 others: z.array(z.object({
                     panelId: z.coerce.number(),
+                    mapId: z.string().optional().default(''),
                     label: z.string(),
                     featureIds: z.array(z.object({
                         featureId: z.string(),
@@ -724,6 +727,8 @@ export class AppStateService implements OnDestroy {
     set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
     get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
+    get mapsDialogVisible() {return this.mapsOpenState.getValue();};
+    set mapsDialogVisible(val: boolean) {this.mapsOpenState.next(val);};
     get legalInfoDialogVisible() {return this.legalInfoDialogVisibleState.getValue();}
     set legalInfoDialogVisible(val: boolean) {this.legalInfoDialogVisibleState.next(val);};
     get aboutDialogVisible() {return this.aboutDialogVisibleState.getValue();}
@@ -958,6 +963,7 @@ export class AppStateService implements OnDestroy {
                 undocked: isSourceDataSelection
             });
             this.selectionState.next(allPanels);
+            this.sanitizeInspectionComparisonForSelection(allPanels);
             return newId;
         }
 
@@ -977,6 +983,7 @@ export class AppStateService implements OnDestroy {
                 allPanels[panelIndex].sourceData = undefined;
             }
             this.selectionState.next(allPanels);
+            this.sanitizeInspectionComparisonForSelection(allPanels);
             return targetPanelId;
         }
 
@@ -1102,6 +1109,7 @@ export class AppStateService implements OnDestroy {
             panel.locked || panel.sourceData !== undefined
         );
         this.selectionState.next(nextSelection);
+        this.sanitizeInspectionComparisonForSelection(nextSelection);
     }
 
     unsetPanel(id: number) {
@@ -1112,6 +1120,7 @@ export class AppStateService implements OnDestroy {
         }
         allPanels.splice(index, 1);
         this.selectionState.next(allPanels);
+        this.sanitizeInspectionComparisonForSelection(allPanels);
     }
 
     private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
@@ -1171,7 +1180,7 @@ export class AppStateService implements OnDestroy {
             result.push({
                 visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
-                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, false),
+                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, true),
             });
         }
         return result;
@@ -1201,7 +1210,7 @@ export class AppStateService implements OnDestroy {
         for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
             insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
             insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
-            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders,false);
+            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders, true);
         }
     }
 
@@ -1366,7 +1375,7 @@ export class AppStateService implements OnDestroy {
                     const borders = this.layerTileBordersState.getValue(v);
                     const levels = this.layerZoomLevelState.getValue(v);
                     this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
-                    this.layerTileBordersState.next(v, filterLayerArray<boolean>(borders ?? [], false));
+                    this.layerTileBordersState.next(v, filterLayerArray<boolean>(borders ?? [], true));
                     this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
                 }
             }
@@ -1492,9 +1501,42 @@ export class AppStateService implements OnDestroy {
         if (nextPanels.length !== panels.length) {
             this.selectionState.next(nextPanels);
         }
+        this.sanitizeInspectionComparisonForSelection(nextPanels);
 
         // Sync all states, so the URL is replaced.
         this.syncAllStates();
+    }
+
+    private sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
+        const model = this.inspectionComparisonState.getValue();
+        if (!model) {
+            return;
+        }
+        const eligiblePanelIds = new Set(
+            panels
+                .filter(panel => panel.sourceData === undefined && panel.features.length > 0)
+                .map(panel => panel.id)
+        );
+        const nextModel = this.sanitizeInspectionComparisonModel(model, eligiblePanelIds);
+        if (nextModel === model) {
+            return;
+        }
+        this.inspectionComparisonState.next(nextModel);
+    }
+
+    private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
+        const entries = [model.base, ...model.others];
+        const remainingEntries = entries.filter(entry => eligiblePanelIds.has(entry.panelId));
+        if (remainingEntries.length === entries.length) {
+            return model;
+        }
+        if (remainingEntries.length === 0) {
+            return null;
+        }
+        return {
+            base: remainingEntries[0],
+            others: remainingEntries.slice(1)
+        };
     }
 
     buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
@@ -1518,6 +1560,7 @@ export class AppStateService implements OnDestroy {
     private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
         return {
             panelId: panel.id,
+            mapId: panel.features[0]?.featureTile.mapName ?? '',
             label: this.formatFeatureLabel(panel.features),
             featureIds: panel.features.map(feature => ({
                 mapTileKey: feature.mapTileKey,

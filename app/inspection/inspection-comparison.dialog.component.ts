@@ -1,5 +1,8 @@
 import {Component, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren, effect, input} from '@angular/core';
 import {Dialog} from 'primeng/dialog';
+import {ContextMenu} from 'primeng/contextmenu';
+import {MenuItem} from 'primeng/api';
+import {Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
 import {
     AppStateService,
@@ -12,13 +15,14 @@ import {
 } from '../shared/appstate.service';
 import {FeatureWrapper} from '../mapdata/features.model';
 import {DialogStackService} from '../shared/dialog-stack.service';
-import {InspectionTreeComponent} from './inspection.tree.component';
+import {FeaturePanelComponent} from './feature.panel.component';
 
 interface ComparisonColumn {
     entry: InspectionComparisonEntry;
     panel: InspectionPanelModel<FeatureWrapper>;
     loading: boolean;
     localId: number;
+    selectionColor: string;
 }
 
 @Component({
@@ -42,17 +46,46 @@ interface ComparisonColumn {
                                        optionValue="value"
                                        [showClear]="true"
                                        [selectionLimit]="4"
+                                       [maxSelectedLabels]="4"
                                        placeholder="Compared features"
                                        appendTo="body"
                                        [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
+                        <p-iconfield class="input-container comparison-filter-input">
+                            <p-inputicon class="pi pi-filter"/>
+                            <input class="filter-input" type="text" pInputText placeholder="Filter compared inspections"
+                                   [(ngModel)]="comparisonFilter"/>
+                            @if (comparisonFilter) {
+                                <i (click)="comparisonFilter = ''" class="pi pi-times clear-icon"></i>
+                            }
+                        </p-iconfield>
                     </div>
                     <div class="comparison-grid">
                         @for (column of columns; track column.localId) {
                             <div class="comparison-column">
-                                <div class="comparison-column-title"
-                                     [pTooltip]="column.entry.label"
-                                     tooltipPosition="bottom">
-                                    {{ column.entry.label }}
+                                <div class="comparison-column-header">
+                                    <span class="comparison-column-header-left">
+                                        <p-colorpicker [(ngModel)]="column.selectionColor"
+                                                       (ngModelChange)="onSelectionColorChange(column, $event)"></p-colorpicker>
+                                        <div class="comparison-column-title"
+                                             [pTooltip]="column.entry.label"
+                                             tooltipPosition="bottom">
+                                            <span>{{ column.entry.mapId }}:</span>
+                                            <span>{{ column.entry.featureIds[0].featureId }}</span>
+                                        </div>
+                                    </span>
+                                    <span class="comparison-column-header-right">
+                                        <p-button icon="" (click)="openColumnMenu($event, column)"
+                                                  pTooltip="More actions" tooltipPosition="bottom">
+                                            <span class="material-symbols-outlined"
+                                                  style="font-size: 1.2em; margin: 0 auto;">more_vert</span>
+                                        </p-button>
+                                        <p-button icon="pi pi-times"
+                                                  severity="secondary"
+                                                  pTooltip="Remove from comparison"
+                                                  tooltipPosition="bottom"
+                                                  (click)="removeFromComparison(column.entry.panelId)">
+                                        </p-button>
+                                    </span>
                                 </div>
                                 <div class="resizable-container comparison-resizable"
                                      [style.height.em]="heightEm"
@@ -64,7 +97,8 @@ interface ComparisonColumn {
                                             </div>
                                         } @else {
                                             <feature-panel [panel]="column.panel"
-                                                           [(filterText)]="comparisonFilter"
+                                                           [filterText]="comparisonFilter"
+                                                           [showFilter]="false"
                                                            [enableSourceDataNavigation]="false">
                                             </feature-panel>
                                         }
@@ -76,6 +110,8 @@ interface ComparisonColumn {
                 </div>
             </ng-template>
         </p-dialog>
+        <p-contextMenu #columnMenu [model]="columnMenuItems" [baseZIndex]="30000" appendTo="body"
+                       [style]="{'font-size': '0.9em'}"></p-contextMenu>
     `,
     styles: [``],
     standalone: false
@@ -86,13 +122,16 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     columns: ComparisonColumn[] = [];
+    columnMenuItems: MenuItem[] = [];
     heightEm = DEFAULT_EM_HEIGHT;
     comparisonFilter = '';
 
     @ViewChild('dialog') dialog?: Dialog;
-    @ViewChildren(InspectionTreeComponent) inspectionTrees!: QueryList<InspectionTreeComponent>;
+    @ViewChild('columnMenu') columnMenu!: ContextMenu;
+    @ViewChildren(FeaturePanelComponent) featurePanels!: QueryList<FeaturePanelComponent>;
 
     private detachPointerUpListener?: () => void;
+    private selectionTopicSubscription: Subscription;
 
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService,
@@ -104,10 +143,15 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             this.refreshCompareOptions();
             this.buildColumns(model);
         });
+        this.selectionTopicSubscription = this.mapService.selectionTopic.subscribe(() => {
+            this.refreshCompareOptions();
+            this.refreshColumnSelectionColors();
+        });
     }
 
     ngOnDestroy() {
         this.endDrag();
+        this.selectionTopicSubscription.unsubscribe();
         this.columns = [];
     }
 
@@ -168,12 +212,67 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.stateService.inspectionComparison = nextModel;
     }
 
+    removeFromComparison(panelId: number): void {
+        const model = this.comparison();
+        const remainingEntries = [model.base, ...model.others].filter(entry => entry.panelId !== panelId);
+        if (!remainingEntries.length) {
+            this.stateService.closeInspectionComparison();
+            return;
+        }
+        this.stateService.inspectionComparison = {
+            base: remainingEntries[0],
+            others: remainingEntries.slice(1)
+        };
+    }
+
+    onSelectionColorChange(column: ComparisonColumn, color: string): void {
+        column.selectionColor = color;
+        this.stateService.setInspectionPanelColor(column.entry.panelId, color);
+    }
+
+    openColumnMenu(event: MouseEvent, column: ComparisonColumn): void {
+        event.stopPropagation();
+        this.columnMenuItems = this.buildColumnMenuItems(column);
+        this.columnMenu.toggle(event);
+    }
+
     refreshCompareOptions() {
         const options = this.stateService.buildCompareOptions(this.mapService.selectionTopic.getValue());
         this.compareOptions = options;
-        this.selectedCompareIds = this.selectedCompareIds.filter(id =>
-            options.some(option => option.value === id)
-        );
+        const model = this.stateService.inspectionComparison;
+        if (!model) {
+            return;
+        }
+        const modelPanelIds = [model.base.panelId, ...model.others.map(entry => entry.panelId)];
+        if (options.length === 0) {
+            this.selectedCompareIds = modelPanelIds;
+            return;
+        }
+
+        const availablePanelIds = new Set(options.map(option => option.value));
+        const normalizedPanelIds = modelPanelIds.filter(panelId => availablePanelIds.has(panelId));
+
+        if (!normalizedPanelIds.length) {
+            this.stateService.closeInspectionComparison();
+            return;
+        }
+
+        if (!this.panelIdOrderEquals(modelPanelIds, normalizedPanelIds)) {
+            const nextModel = this.stateService.createComparisonModel(
+                normalizedPanelIds[0],
+                normalizedPanelIds.slice(1),
+                this.mapService.selectionTopic.getValue()
+            );
+            if (!nextModel) {
+                this.stateService.closeInspectionComparison();
+                return;
+            }
+            this.stateService.inspectionComparison = nextModel;
+            this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
+            return;
+        }
+
+        this.selectedCompareIds = normalizedPanelIds;
     }
 
     onResize(event: MouseEvent) {
@@ -186,11 +285,11 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private freezeTrees(): void {
-        this.inspectionTrees?.forEach(tree => tree.freeze());
+        this.featurePanels?.forEach(panel => panel.freezeTree());
     }
 
     private unfreezeTrees(): void {
-        this.inspectionTrees?.forEach(tree => tree.unfreeze());
+        this.featurePanels?.forEach(panel => panel.unfreezeTree());
     }
 
     private buildColumns(model: InspectionComparisonModel) {
@@ -201,7 +300,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 entry,
                 panel: this.buildPanel([], localId),
                 loading: true,
-                localId
+                localId,
+                selectionColor: this.selectionColorForPanel(entry.panelId)
             };
         });
         this.columns = columns;
@@ -232,7 +332,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         }
         const grid = container.querySelector('.comparison-grid') as HTMLElement | null;
         const column = container.querySelector('.comparison-column') as HTMLElement | null;
-        const title = container.querySelector('.comparison-column-title') as HTMLElement | null;
+        const title = container.querySelector('.comparison-column-header') as HTMLElement | null;
         if (!grid || !column || !title) {
             return;
         }
@@ -252,6 +352,90 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     private async resolveFeatures(entry: InspectionComparisonEntry): Promise<FeatureWrapper[]> {
         return await this.mapService.loadFeatures(entry.featureIds);
+    }
+
+    private buildColumnMenuItems(column: ComparisonColumn): MenuItem[] {
+        const focusFeature = column.panel.features[0];
+        const featurePanel = this.featurePanelForColumn(column.localId);
+        const disableGeoJsonActions = featurePanel === undefined;
+        return [
+            {
+                label: 'Focus on feature',
+                icon: 'pi pi-bullseye',
+                disabled: !focusFeature,
+                command: () => {
+                    if (!focusFeature) {
+                        return;
+                    }
+                    this.mapService.zoomToFeature(undefined, focusFeature);
+                }
+            },
+            {
+                label: 'GeoJSON Actions',
+                icon: 'pi pi-download',
+                items: [
+                    {
+                        label: 'Open in new tab',
+                        icon: 'pi pi-external-link',
+                        disabled: disableGeoJsonActions,
+                        command: () => featurePanel?.openGeoJsonInNewTab()
+                    },
+                    {
+                        label: 'Download (.geojson)',
+                        icon: 'pi pi-download',
+                        disabled: disableGeoJsonActions,
+                        command: () => featurePanel?.downloadGeoJson()
+                    },
+                    {
+                        label: 'Copy to clipboard',
+                        icon: 'pi pi-copy',
+                        disabled: disableGeoJsonActions,
+                        command: () => featurePanel?.copyGeoJson()
+                    }
+                ]
+            }
+        ];
+    }
+
+    private featurePanelForColumn(localId: number): FeaturePanelComponent | undefined {
+        return this.featurePanels?.toArray().find(panel => panel.panel().id === localId);
+    }
+
+    private selectionColorForPanel(panelId: number): string {
+        return this.mapService.selectionTopic.getValue().find(panel => panel.id === panelId)?.color ?? '#ffffff';
+    }
+
+    private panelIdOrderEquals(a: number[], b: number[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private refreshColumnSelectionColors(): void {
+        if (!this.columns.length) {
+            return;
+        }
+        let changed = false;
+        const nextColumns = this.columns.map(column => {
+            const nextColor = this.selectionColorForPanel(column.entry.panelId);
+            if (nextColor === column.selectionColor) {
+                return column;
+            }
+            changed = true;
+            return {
+                ...column,
+                selectionColor: nextColor
+            };
+        });
+        if (changed) {
+            this.columns = nextColumns;
+        }
     }
 
     private buildPanel(features: FeatureWrapper[], localId: number): InspectionPanelModel<FeatureWrapper> {

@@ -456,7 +456,31 @@ export class MapView {
 
                 const feature = this.viewer.scene.pick(position);
                 if (defined(feature)) {
-                    const featureIdsArray = Array.isArray(feature.id) ? feature.id : [feature.id];
+                    let hasDisplayableFeatureId = false;
+                    const featureIdsArray = (Array.isArray(feature.id) ? feature.id : [feature.id]).flatMap((id: any) => {
+                        if (typeof id === 'string') {
+                            const trimmedId = id.trim();
+                            if (!trimmedId) {
+                                return [];
+                            }
+                            if (trimmedId !== 'hover-highlight') {
+                                hasDisplayableFeatureId = true;
+                            }
+                            return [trimmedId];
+                        } else if (id && typeof id === 'object' && typeof id.featureId === 'string') {
+                            const trimmedId = id.featureId.trim();
+                            if (!trimmedId) {
+                                return [];
+                            }
+                            hasDisplayableFeatureId = true;
+                            return [{...id, featureId: trimmedId}];
+                        }
+                        return [id];
+                    });
+                    if (!hasDisplayableFeatureId && this.hoveredFeatureIds.getValue() !== undefined) {
+                        this.hoveredFeatureIds.next(undefined);
+                        return;
+                    }
                     const hoverPosition = {x: position.x, y: position.y};
                     this.mapService.setHoveredFeatures(featureIdsArray).then(() => {
                         if (hoverRequestId !== this.hoverUpdateSequence) {

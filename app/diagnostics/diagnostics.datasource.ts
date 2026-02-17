@@ -43,15 +43,26 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.patchConsoleLogging();
         this.refreshPerfStats();
         this.refreshLogs();
+        let wasPaused = this.mapService.tilePipelinePaused;
 
         this.subscriptions.push(
             interval(SNAPSHOT_INTERVAL_MS).subscribe(() => {
+                if (this.mapService.tilePipelinePaused) {
+                    return;
+                }
                 this.snapshot$.next(this.buildSnapshot());
             }),
             interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStats()),
             this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshPerfStats()),
             interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshLogs())
+            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshLogs()),
+            this.mapService.tilePipelinePaused$.subscribe(paused => {
+                if (wasPaused && !paused) {
+                    this.snapshot$.next(this.buildSnapshot());
+                    this.refreshPerfStats();
+                }
+                wasPaused = paused;
+            })
         );
     }
 
@@ -60,6 +71,9 @@ export class DiagnosticsDatasource implements OnDestroy {
     }
 
     refreshPerfStats() {
+        if (this.mapService.tilePipelinePaused) {
+            return;
+        }
         const stats = buildAggregatedPerfStats(this.mapService.loadedTileLayers.values(), PEAK_TILE_LIMIT);
         this.perfStats$.next(stats);
     }

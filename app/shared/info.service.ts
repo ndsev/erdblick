@@ -22,6 +22,10 @@ export class InfoMessageService {
         this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: message });
     }
 
+    showInfo(message: string) {
+        this.messageService.add({ key: 'tc', severity: 'info', summary: 'Info', detail: message });
+    }
+
     registerDefaultContainer(ref: ViewContainerRef) {
         this.defaultViewContainerRef = ref;
     }

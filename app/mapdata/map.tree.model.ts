@@ -369,7 +369,7 @@ export class MapLayerTree {
             }
             return layer.viewConfig[viewIndex].tileBorders;
         }
-        return false;
+        return true;
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
@@ -407,10 +407,6 @@ export class MapLayerTree {
             return 13;
         }
         return layer.viewConfig[viewIndex].level;
-    }
-
-    getMapLayerBorderState(viewIndex: number, mapId: string, layerId: string) {
-        return this.getViewTileBorderState(viewIndex);
     }
 
     getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
