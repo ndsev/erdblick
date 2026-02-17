@@ -82,24 +82,32 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             style,
             task.styleOptions,
             resolveHighlightMode(task.highlightModeValue),
-            []
+            task.featureIdSubset
         );
         deckVisu.addTileFeatureLayer(tile);
         deckVisu.run();
 
+        const coordinateOrigin = readRawBytes(deckVisu, "pathCoordinateOriginRaw");
         const positions = readRawBytes(deckVisu, "pathPositionsRaw");
         const startIndices = readRawBytes(deckVisu, "pathStartIndicesRaw");
         const colors = readRawBytes(deckVisu, "pathColorsRaw");
         const widths = readRawBytes(deckVisu, "pathWidthsRaw");
+        const featureIds = readRawBytes(deckVisu, "pathFeatureIdsRaw");
+        const dashArrays = readRawBytes(deckVisu, "pathDashArrayRaw");
+        const dashOffsets = readRawBytes(deckVisu, "pathDashOffsetsRaw");
 
         return {
             type: "DeckPathRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
+            coordinateOrigin: coordinateOrigin.buffer,
             positions: positions.buffer,
             startIndices: startIndices.buffer,
             colors: colors.buffer,
-            widths: widths.buffer
+            widths: widths.buffer,
+            featureIds: featureIds.buffer,
+            dashArrays: dashArrays.buffer,
+            dashOffsets: dashOffsets.buffer
         };
     } finally {
         if (deckVisu && typeof deckVisu.delete === "function") {
@@ -125,5 +133,14 @@ addEventListener("message", async ({data}) => {
     await initializeLibrary();
 
     const result = processPathRenderTask(message as DeckPathRenderTask);
-    postMessage(result, [result.positions, result.startIndices, result.colors, result.widths]);
+    postMessage(result, [
+        result.coordinateOrigin,
+        result.positions,
+        result.startIndices,
+        result.colors,
+        result.widths,
+        result.featureIds,
+        result.dashArrays,
+        result.dashOffsets
+    ]);
 });

@@ -3,6 +3,192 @@ import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
 
+interface WasmFeatureTileCacheEntry {
+    tileBlob: Uint8Array;
+    layer: TileFeatureLayer;
+    pinCount: number;
+    evictWhenReleased: boolean;
+}
+
+class WasmFeatureTileCache {
+    private readonly entries = new Map<string, WasmFeatureTileCacheEntry>();
+    private readonly maxEntries: number;
+
+    constructor(maxEntries: number = 1000) {
+        this.maxEntries = Math.max(1, maxEntries);
+    }
+
+    withLayer<T>(
+        tileKey: string,
+        tileBlob: Uint8Array,
+        deserialize: () => TileFeatureLayer | null,
+        callback: (layer: TileFeatureLayer) => T
+    ): T | null {
+        const cachedEntry = this.getUsableEntry(tileKey, tileBlob);
+        if (cachedEntry) {
+            cachedEntry.pinCount += 1;
+            try {
+                return callback(cachedEntry.layer);
+            } finally {
+                this.releaseEntry(tileKey, cachedEntry);
+            }
+        }
+
+        const layer = deserialize();
+        if (!layer) {
+            return null;
+        }
+
+        const existing = this.entries.get(tileKey);
+        if (existing && existing.pinCount > 0) {
+            // Do not replace an in-use entry. Use a temporary layer without caching.
+            try {
+                return callback(layer);
+            } finally {
+                layer.delete();
+            }
+        }
+        if (existing) {
+            this.deleteEntry(tileKey, existing);
+        }
+
+        const entry: WasmFeatureTileCacheEntry = {
+            tileBlob,
+            layer,
+            pinCount: 1,
+            evictWhenReleased: false
+        };
+        this.entries.set(tileKey, entry);
+        this.evictIfNeeded();
+        try {
+            return callback(layer);
+        } finally {
+            this.releaseEntry(tileKey, entry);
+        }
+    }
+
+    async withLayerAsync<T>(
+        tileKey: string,
+        tileBlob: Uint8Array,
+        deserialize: () => TileFeatureLayer | null,
+        callback: (layer: TileFeatureLayer) => Promise<T>
+    ): Promise<T | null> {
+        const cachedEntry = this.getUsableEntry(tileKey, tileBlob);
+        if (cachedEntry) {
+            cachedEntry.pinCount += 1;
+            try {
+                return await callback(cachedEntry.layer);
+            } finally {
+                this.releaseEntry(tileKey, cachedEntry);
+            }
+        }
+
+        const layer = deserialize();
+        if (!layer) {
+            return null;
+        }
+
+        const existing = this.entries.get(tileKey);
+        if (existing && existing.pinCount > 0) {
+            // Do not replace an in-use entry. Use a temporary layer without caching.
+            try {
+                return await callback(layer);
+            } finally {
+                layer.delete();
+            }
+        }
+        if (existing) {
+            this.deleteEntry(tileKey, existing);
+        }
+
+        const entry: WasmFeatureTileCacheEntry = {
+            tileBlob,
+            layer,
+            pinCount: 1,
+            evictWhenReleased: false
+        };
+        this.entries.set(tileKey, entry);
+        this.evictIfNeeded();
+        try {
+            return await callback(layer);
+        } finally {
+            this.releaseEntry(tileKey, entry);
+        }
+    }
+
+    invalidate(tileKey: string): void {
+        const entry = this.entries.get(tileKey);
+        if (!entry) {
+            return;
+        }
+        if (entry.pinCount > 0) {
+            entry.evictWhenReleased = true;
+            return;
+        }
+        this.deleteEntry(tileKey, entry);
+    }
+
+    private getUsableEntry(tileKey: string, tileBlob: Uint8Array): WasmFeatureTileCacheEntry | null {
+        const entry = this.entries.get(tileKey);
+        if (!entry) {
+            return null;
+        }
+        if (entry.tileBlob !== tileBlob) {
+            if (entry.pinCount > 0) {
+                entry.evictWhenReleased = true;
+            } else {
+                this.deleteEntry(tileKey, entry);
+            }
+            return null;
+        }
+        this.touchEntry(tileKey, entry);
+        return entry;
+    }
+
+    private releaseEntry(tileKey: string, entry: WasmFeatureTileCacheEntry): void {
+        if (entry.pinCount > 0) {
+            entry.pinCount -= 1;
+        }
+        if (entry.pinCount > 0) {
+            return;
+        }
+        if (entry.evictWhenReleased) {
+            this.deleteEntry(tileKey, entry);
+            return;
+        }
+        this.evictIfNeeded();
+    }
+
+    private touchEntry(tileKey: string, entry: WasmFeatureTileCacheEntry): void {
+        this.entries.delete(tileKey);
+        this.entries.set(tileKey, entry);
+    }
+
+    private deleteEntry(tileKey: string, entry: WasmFeatureTileCacheEntry): void {
+        const current = this.entries.get(tileKey);
+        if (current !== entry) {
+            return;
+        }
+        this.entries.delete(tileKey);
+        entry.layer.delete();
+    }
+
+    private evictIfNeeded(): void {
+        if (this.entries.size <= this.maxEntries) {
+            return;
+        }
+        for (const [key, entry] of this.entries) {
+            if (this.entries.size <= this.maxEntries) {
+                return;
+            }
+            if (entry.pinCount > 0) {
+                continue;
+            }
+            this.deleteEntry(key, entry);
+        }
+    }
+}
+
 /**
  * JS interface of a WASM TileFeatureLayer.
  * The WASM TileFeatureLayer object is stored as a blob when not needed,
@@ -21,6 +207,7 @@ export class FeatureTile {
     private parser: TileLayerParser;
     private fieldDictBlobCache: Uint8Array | null = null;
     private dataSourceInfoBlobCache: Uint8Array | null = null;
+    private featureIdByIndexCache: Map<number, string> = new Map<number, string>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
     disposed: boolean = false;
@@ -29,6 +216,9 @@ export class FeatureTile {
 
     static statTileSize = "Size/Feature-Model#kb";
     static statParseTime = "Rendering/Feature-Model-Parsing#ms";
+    private static readonly WASM_FEATURE_TILE_CACHE_LIMIT = 50;
+    private static readonly wasmFeatureTileCache =
+        new WasmFeatureTileCache(FeatureTile.WASM_FEATURE_TILE_CACHE_LIMIT);
 
     /**
      * Construct a FeatureTile object.
@@ -60,6 +250,7 @@ export class FeatureTile {
     }
 
     hydrateFromBlob(tileFeatureLayerBlob: Uint8Array) {
+        FeatureTile.wasmFeatureTileCache.invalidate(this.cacheKey());
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return this.parser.readTileLayerMetadata(wasmBlob);
         }, tileFeatureLayerBlob);
@@ -67,6 +258,7 @@ export class FeatureTile {
         this.tileFeatureLayerBlob = tileFeatureLayerBlob;
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
+        this.featureIdByIndexCache.clear();
         if (this.mapTileKey === "undefined") {
             this.mapTileKey = mapTileMetadata.id as string;
         } else if (this.mapTileKey !== mapTileMetadata.id) {
@@ -138,67 +330,74 @@ export class FeatureTile {
         return encoded;
     }
 
+    private cacheKey(): string {
+        if (this.mapTileKey !== "undefined" && this.mapTileKey.length > 0) {
+            return this.mapTileKey;
+        }
+        return `${this.mapName}/${this.layerName}/${this.tileId.toString()}`;
+    }
+
+    private recordParseTime(durationMs: number): void {
+        const parseTimes = this.stats.get(FeatureTile.statParseTime);
+        if (parseTimes) {
+            parseTimes.push(durationMs);
+        } else {
+            this.stats.set(FeatureTile.statParseTime, [durationMs]);
+        }
+    }
+
+    private deserializeTileFeatureLayer(tileBlob: Uint8Array): TileFeatureLayer | null {
+        return uint8ArrayToWasm((bufferToRead: any) => {
+            const startTime = performance.now();
+            const deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            const endTime = performance.now();
+            if (!deserializedLayer) {
+                return null;
+            }
+            this.recordParseTime(endTime - startTime);
+            return deserializedLayer;
+        }, tileBlob);
+    }
+
     /**
-     * Deserialize the wrapped TileFeatureLayer, run a callback, then
-     * delete the deserialized WASM representation.
+     * Provide temporary access to a deserialized TileFeatureLayer.
+     * Layers are cached in an LRU cache to avoid repeated deserialization.
      * @returns The value returned by the callback.
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
-        if (!this.tileFeatureLayerBlob) {
+        const tileBlob = this.tileFeatureLayerBlob;
+        if (!tileBlob) {
             return null;
         }
-        // Deserialize the WASM tileFeatureLayer from the blob.
-        let result = uint8ArrayToWasm((bufferToRead: any) => {
-            let startTime = performance.now();
-            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            let endTime = performance.now();
-            if (!deserializedLayer)
-                return null;
-            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
-
-            // Run the callback with the deserialized layer, and
-            // provide the result as the return value.
-            let result = null;
-            if (callback) {
-                result = callback(deserializedLayer);
-            }
-            deserializedLayer.delete();
-            return result;
-        }, this.tileFeatureLayerBlob);
-        return result;
+        return FeatureTile.wasmFeatureTileCache.withLayer(
+            this.cacheKey(),
+            tileBlob,
+            () => this.deserializeTileFeatureLayer(tileBlob),
+            callback
+        );
     }
 
     /**
      * Async version of the above function.
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
-        if (!this.tileFeatureLayerBlob) {
+        const tileBlob = this.tileFeatureLayerBlob;
+        if (!tileBlob) {
             return null;
         }
-        // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
-            let startTime = performance.now();
-            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            let endTime = performance.now();
-            if (!deserializedLayer)
-                return null;
-            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
-
-            // Run the callback with the deserialized layer, and
-            // provide the result as the return value.
-            let result = null;
-            if (callback) {
-                result = await callback(deserializedLayer);
-            }
-            deserializedLayer.delete();
-            return result;
-        }, this.tileFeatureLayerBlob);
+        return await FeatureTile.wasmFeatureTileCache.withLayerAsync(
+            this.cacheKey(),
+            tileBlob,
+            () => this.deserializeTileFeatureLayer(tileBlob),
+            callback
+        );
     }
 
     /**
      * Mark this tile as "not available anymore".
      */
     dispose() {
+        FeatureTile.wasmFeatureTileCache.invalidate(this.cacheKey());
         this.disposed = true;
     }
 
@@ -258,6 +457,32 @@ export class FeatureTile {
             feature.delete();
             return result;
         });
+    }
+
+    featureIdByIndex(featureIndex: number): string | null {
+        if (!Number.isInteger(featureIndex) || featureIndex < 0) {
+            return null;
+        }
+        if (featureIndex >= this.numFeatures) {
+            return null;
+        }
+        const cached = this.featureIdByIndexCache.get(featureIndex);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const featureId = this.peek((tileFeatureLayer: TileFeatureLayer) => {
+            const layerAny = tileFeatureLayer as any;
+            if (typeof layerAny.featureIdByIndex !== "function") {
+                return null;
+            }
+            const result = layerAny.featureIdByIndex(featureIndex);
+            return (typeof result === "string" && result.length > 0) ? result : null;
+        });
+        if (typeof featureId === "string" && featureId.length > 0) {
+            this.featureIdByIndexCache.set(featureIndex, featureId);
+            return featureId;
+        }
+        return null;
     }
 }
 

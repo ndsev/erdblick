@@ -15,13 +15,18 @@ export interface DeckPathRenderRequest {
     styleSource: string;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
+    featureIdSubset: string[];
 }
 
 export interface DeckPathRenderBuffers {
+    coordinateOrigin: Float64Array;
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
     widths: Float32Array;
+    featureIds: Uint32Array;
+    dashArrays: Float32Array;
+    dashOffsets: Float32Array;
 }
 
 type PendingTask = {
@@ -144,10 +149,14 @@ export class DeckRenderWorkerPool {
         }
 
         pending.resolve({
+            coordinateOrigin: this.toFloat64Array(result.coordinateOrigin),
             positions: this.toFloat32Array(result.positions),
             startIndices: this.toUint32Array(result.startIndices),
             colors: this.toUint8Array(result.colors),
-            widths: this.toFloat32Array(result.widths)
+            widths: this.toFloat32Array(result.widths),
+            featureIds: this.toUint32Array(result.featureIds),
+            dashArrays: this.toFloat32Array(result.dashArrays),
+            dashOffsets: this.toFloat32Array(result.dashOffsets)
         });
     }
 
@@ -178,10 +187,23 @@ export class DeckRenderWorkerPool {
     }
 
     private toFloat32Array(buffer: ArrayBuffer): Float32Array {
+        if (buffer.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+            return new Float32Array();
+        }
         return new Float32Array(buffer);
     }
 
+    private toFloat64Array(buffer: ArrayBuffer): Float64Array {
+        if (buffer.byteLength % Float64Array.BYTES_PER_ELEMENT !== 0) {
+            return new Float64Array();
+        }
+        return new Float64Array(buffer);
+    }
+
     private toUint32Array(buffer: ArrayBuffer): Uint32Array {
+        if (buffer.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
+            return new Uint32Array();
+        }
         return new Uint32Array(buffer);
     }
 

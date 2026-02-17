@@ -1,5 +1,6 @@
-import {BehaviorSubject, distinctUntilChanged, Subscription} from "rxjs";
+import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
+import {BitmapLayer} from "@deck.gl/layers";
 import {Cartographic, CesiumMath, SceneMode} from "../../integrations/cesium";
 import {MapDataService} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -10,6 +11,7 @@ import {AppStateService, CameraViewState, TileFeatureId} from "../../shared/apps
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
+import {environment} from "../../environments/environment";
 
 interface DeckCameraState {
     longitude: number;
@@ -43,10 +45,10 @@ export abstract class DeckMapView implements IRenderView {
     };
 
     hoveredFeatureIds: BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[];
+        featureIds: (TileFeatureId | null)[];
         position: {x: number; y: number};
     } | undefined> = new BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[];
+        featureIds: (TileFeatureId | null)[];
         position: {x: number; y: number};
     } | undefined>(undefined);
 
@@ -54,6 +56,7 @@ export abstract class DeckMapView implements IRenderView {
     private suppressDeckViewStateEvent = false;
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
+    private osmLayerKeys = new Set<string>();
 
     get viewIndex() {
         return this._viewIndex;
@@ -95,7 +98,8 @@ export abstract class DeckMapView implements IRenderView {
                 keyboard: false
             },
             onViewStateChange: ({viewState}: {viewState: any}) => this.onViewStateChange(viewState),
-            onHover: (info: any) => this.onHover(info)
+            onHover: (info: any) => this.onHover(info),
+            onClick: (info: any, event: any) => this.onClick(info, event)
         } as any);
         this.layerRegistry.setDeck(this.deck as any);
 
@@ -110,6 +114,7 @@ export abstract class DeckMapView implements IRenderView {
         this.stopTickLoop();
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
+        this.osmLayerKeys.clear();
         this.layerRegistry.destroy();
         this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
 
@@ -175,7 +180,7 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
-    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null | string)[] {
+    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[] {
         if (!this.deck) {
             return [];
         }
@@ -184,14 +189,57 @@ export abstract class DeckMapView implements IRenderView {
             y: screenPos.y,
             radius: 4
         }) as any;
-        if (!picked || picked.object === undefined || picked.object === null) {
+        if (!picked) {
             return [];
         }
-        const id = picked.object.id ?? picked.object.featureId;
-        if (id === undefined || id === null) {
-            return [];
+
+        const resolveFeatureIndex = (
+            tileKey: string | undefined,
+            value: unknown
+        ): TileFeatureId | null => {
+            if (!Number.isInteger(value)) {
+                return null;
+            }
+            if (!tileKey) {
+                return null;
+            }
+            return this.mapService.resolveTileFeatureIdByIndex(tileKey, value as number);
+        };
+
+        const objectTileKey = (picked.layer?.props as {tileKey?: string} | undefined)?.tileKey;
+        const pickedObject = picked.object;
+        const objectId = pickedObject?.id ?? pickedObject?.featureId;
+        if (objectId !== undefined && objectId !== null) {
+            if (Array.isArray(objectId)) {
+                return objectId
+                    .map(value => resolveFeatureIndex(objectTileKey, value))
+                    .filter((value): value is TileFeatureId => value !== null);
+            }
+            const resolved = resolveFeatureIndex(objectTileKey, objectId);
+            return resolved ? [resolved] : [];
         }
-        return Array.isArray(id) ? id : [id];
+
+        const pickedIndex = Number(picked.index);
+        const layerProps = (
+            picked.layer?.props as {
+                tileKey?: string;
+                featureIds?: Array<number | null>;
+                featureIdsByVertex?: Array<number | null>;
+            } | undefined
+        );
+        if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
+            const featureIds = layerProps?.featureIds;
+            if (Array.isArray(featureIds) && pickedIndex < featureIds.length) {
+                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIds[pickedIndex]);
+                return resolved ? [resolved] : [];
+            }
+            const featureIdsByVertex = layerProps?.featureIdsByVertex;
+            if (Array.isArray(featureIdsByVertex) && pickedIndex < featureIdsByVertex.length) {
+                const resolved = resolveFeatureIndex(layerProps?.tileKey, featureIdsByVertex[pickedIndex]);
+                return resolved ? [resolved] : [];
+            }
+        }
+        return [];
     }
 
     pickCartographic(screenPos: {x: number; y: number}): { lon: number; lat: number; alt: number } | undefined {
@@ -249,7 +297,8 @@ export abstract class DeckMapView implements IRenderView {
             height: sizeLat + expandLat * 2,
             camPosLon: this.viewState.longitude,
             camPosLat: this.viewState.latitude,
-            orientation: CesiumMath.toRadians(this.viewState.bearing)
+            // Keep tile-priority orientation consistent with Cesium's viewport contract.
+            orientation: -CesiumMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
     }
 
@@ -316,6 +365,15 @@ export abstract class DeckMapView implements IRenderView {
                     }
                     this.setViewFromState(cameraViewData);
                 })
+        );
+
+        this.subscriptions.push(
+            combineLatest([
+                this.stateService.osmEnabledState.pipe(this._viewIndex),
+                this.stateService.osmOpacityState.pipe(this._viewIndex)
+            ]).subscribe(([osmEnabled, osmOpacity]) => {
+                this.updateOsmLayers(osmEnabled, osmOpacity / 100);
+            })
         );
 
         this.subscriptions.push(
@@ -393,6 +451,14 @@ export abstract class DeckMapView implements IRenderView {
             this.hoveredFeatureIds.next(undefined);
             return;
         }
+        if (!environment.visualizationOnly) {
+            const cartographic = this.pickCartographic({x: info.x, y: info.y});
+            if (cartographic) {
+                this.coordinatesService.mouseMoveCoordinates.next(
+                    Cartographic.fromDegrees(cartographic.lon, cartographic.lat, cartographic.alt)
+                );
+            }
+        }
         const featureIds = this.pickFeature({x: info.x, y: info.y});
         if (!featureIds.length) {
             this.hoveredFeatureIds.next(undefined);
@@ -406,6 +472,40 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
+    private onClick(info: any, event: any): void {
+        if (environment.visualizationOnly) {
+            return;
+        }
+
+        this.stateService.focusedView = this._viewIndex;
+        if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
+            this.stateService.unsetUnlockedSelections();
+            this.menuService.tileOutline.next(null);
+            return;
+        }
+
+        const cartographic = this.pickCartographic({x: info.x, y: info.y});
+        if (cartographic) {
+            this.coordinatesService.mouseClickCoordinates.next(
+                Cartographic.fromDegrees(cartographic.lon, cartographic.lat, cartographic.alt)
+            );
+        }
+
+        const featureIds = this.pickFeature({x: info.x, y: info.y})
+            .filter((id): id is TileFeatureId => !!id);
+        if (!featureIds.length) {
+            this.stateService.unsetUnlockedSelections();
+            this.menuService.tileOutline.next(null);
+            return;
+        }
+
+        const shouldPinPanel = !!event?.srcEvent?.ctrlKey;
+        const panelId = this.stateService.setSelection(featureIds, undefined, shouldPinPanel);
+        if (shouldPinPanel && panelId !== undefined) {
+            this.stateService.setInspectionPanelLockedState(panelId, true);
+        }
+    }
+
     private updateViewState(nextState: DeckCameraState, setDeckProps: boolean, updateViewport: boolean): void {
         const sanitized = this.sanitizeViewState(nextState);
         this.viewState = sanitized;
@@ -417,6 +517,10 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (updateViewport) {
             this.updateViewport();
+            this.updateOsmLayers(
+                this.stateService.osmEnabledState.getValue(this._viewIndex),
+                this.stateService.osmOpacityState.getValue(this._viewIndex) / 100
+            );
         }
     }
 
@@ -468,6 +572,97 @@ export abstract class DeckMapView implements IRenderView {
             pitch: this.viewState.pitch,
             bearing: this.viewState.bearing
         });
+    }
+
+    private updateOsmLayers(enabled: boolean, opacity: number): void {
+        const prefix = "osm/";
+        if (!enabled || !this.deck) {
+            for (const key of this.osmLayerKeys) {
+                this.layerRegistry.remove(key);
+            }
+            this.osmLayerKeys.clear();
+            return;
+        }
+
+        const viewport = this.createWebMercatorViewport();
+        if (!viewport) {
+            return;
+        }
+
+        const width = Math.max(1, viewport.width);
+        const height = Math.max(1, viewport.height);
+        const [westRaw, northRaw] = viewport.unproject([0, 0]);
+        const [eastRaw, southRaw] = viewport.unproject([width, height]);
+
+        const north = Math.max(southRaw, northRaw);
+        const south = Math.min(southRaw, northRaw);
+        let west = Math.min(westRaw, eastRaw);
+        let east = Math.max(westRaw, eastRaw);
+        if (east - west > 360) {
+            west = -180;
+            east = 180;
+        }
+
+        const zoom = Math.max(0, Math.min(19, Math.floor(this.viewState.zoom)));
+        const minY = this.latToTileY(north, zoom);
+        const maxY = this.latToTileY(south, zoom);
+        const yStart = Math.max(0, Math.floor(Math.min(minY, maxY)));
+        const yEnd = Math.min((1 << zoom) - 1, Math.floor(Math.max(minY, maxY)));
+
+        const n = 1 << zoom;
+        const xStart = Math.floor(this.lonToTileX(west, zoom));
+        const xEnd = Math.floor(this.lonToTileX(east, zoom));
+        const nextKeys = new Set<string>();
+
+        for (let x = xStart; x <= xEnd; x++) {
+            const wrappedX = ((x % n) + n) % n;
+            const tileWest = this.tileXToLon(x, zoom);
+            const tileEast = this.tileXToLon(x + 1, zoom);
+            for (let y = yStart; y <= yEnd; y++) {
+                const key = `${prefix}${zoom}/${wrappedX}/${y}`;
+                nextKeys.add(key);
+
+                const tileNorth = this.tileYToLat(y, zoom);
+                const tileSouth = this.tileYToLat(y + 1, zoom);
+                const layer = new BitmapLayer({
+                    id: key,
+                    image: `https://a.tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+                    bounds: [tileWest, tileSouth, tileEast, tileNorth],
+                    opacity: Math.max(0, Math.min(1, opacity)),
+                    pickable: false,
+                    parameters: {depthTest: false}
+                } as any);
+                this.layerRegistry.upsert(key, layer as any, -1000);
+            }
+        }
+
+        for (const existingKey of this.osmLayerKeys) {
+            if (!nextKeys.has(existingKey)) {
+                this.layerRegistry.remove(existingKey);
+            }
+        }
+        this.osmLayerKeys = nextKeys;
+    }
+
+    private lonToTileX(lon: number, zoom: number): number {
+        return ((lon + 180) / 360) * (1 << zoom);
+    }
+
+    private latToTileY(lat: number, zoom: number): number {
+        const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+        const latRad = clampedLat * Math.PI / 180;
+        return (
+            (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2
+        ) * (1 << zoom);
+    }
+
+    private tileXToLon(x: number, zoom: number): number {
+        return x / (1 << zoom) * 360 - 180;
+    }
+
+    private tileYToLat(y: number, zoom: number): number {
+        const n = Math.PI - 2 * Math.PI * y / (1 << zoom);
+        return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
     }
 
     private normalizeLongitude(lon: number): number {

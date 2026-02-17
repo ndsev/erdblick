@@ -11,6 +11,7 @@ export interface DeckPathRenderTask {
     styleSource: string;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
+    featureIdSubset: string[];
 }
 
 export interface DeckWorkerInitMessage {
@@ -26,10 +27,14 @@ export interface DeckPathRenderResult {
     type: "DeckPathRenderResult";
     taskId: string;
     tileKey: string;
+    coordinateOrigin: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
     colors: ArrayBuffer;
     widths: ArrayBuffer;
+    featureIds: ArrayBuffer;
+    dashArrays: ArrayBuffer;
+    dashOffsets: ArrayBuffer;
     error?: string;
 }
 

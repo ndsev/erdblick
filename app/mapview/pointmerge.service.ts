@@ -7,7 +7,6 @@ import {
     BillboardCollection
 } from "../integrations/cesium";
 import {coreLib} from "../integrations/wasm";
-import {TileFeatureId} from "../shared/appstate.service";
 import {HighlightMode} from "../../build/libs/core/erdblick-core";
 
 export type MapViewLayerStyleRule = string;
@@ -25,7 +24,8 @@ export interface MergedPointVisualization {
     positionHash: PositionHash,
     pointParameters: any,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
     labelParameters: any,  // Label Visualization Parameters for call to LabelCollection.add().
-    featureIds: Array<TileFeatureId>
+    featureIds: Array<number>,
+    idTileKeys?: Array<string>
 }
 
 /**
@@ -52,16 +52,35 @@ export class MergedPointsTile {
         this.viewIndex = Number(mapViewLayerStyleRuleId.split(":")[0]);
     }
 
-    add(point: MergedPointVisualization) {
+    add(point: MergedPointVisualization, sourceTileKey: string) {
+        const normalizedFeatureIds = point.featureIds
+            .filter((featureId): featureId is number =>
+                Number.isInteger(featureId) && featureId >= 0);
+        const normalizedIdTileKeys = normalizedFeatureIds.map((_, i) => {
+            const idTileKey = point.idTileKeys?.[i];
+            return typeof idTileKey === "string" ? idTileKey : sourceTileKey;
+        });
+
         let existingPoint = this.features.get(point.positionHash);
         if (!existingPoint) {
-            this.features.set(point.positionHash, point);
+            this.features.set(point.positionHash, {
+                ...point,
+                featureIds: normalizedFeatureIds,
+                idTileKeys: normalizedIdTileKeys,
+            });
         }
         else {
             let anyNewFeatureIdAdded = false;
-            for (let fid of point.featureIds) {
-                if (existingPoint.featureIds.findIndex(v => v.featureId == fid.featureId) == -1) {
+            if (!Array.isArray(existingPoint.idTileKeys)) {
+                existingPoint.idTileKeys = existingPoint.featureIds.map(() => sourceTileKey);
+            }
+            for (let i = 0; i < normalizedFeatureIds.length; i++) {
+                const fid = normalizedFeatureIds[i];
+                const idTileKey = normalizedIdTileKeys[i];
+                if (existingPoint.featureIds.findIndex((v, idx) =>
+                    v === fid && existingPoint.idTileKeys?.[idx] === idTileKey) == -1) {
                     existingPoint.featureIds.push(fid);
+                    existingPoint.idTileKeys!.push(idTileKey);
                     anyNewFeatureIdAdded = true;
                 }
             }
@@ -92,6 +111,7 @@ export class MergedPointsTile {
         for (let [_, feature] of this.features) {
             if (feature.pointParameters) {
                 feature.pointParameters["id"] = feature.featureIds;
+                feature.pointParameters["idTileKeys"] = feature.idTileKeys ?? [];
                 if (feature.pointParameters.hasOwnProperty("image")) {
                     this.billboardPrimitives.add(feature.pointParameters);
                 }
@@ -101,6 +121,7 @@ export class MergedPointsTile {
             }
             if (feature.labelParameters) {
                 feature.labelParameters["id"] = feature.featureIds;
+                feature.labelParameters["idTileKeys"] = feature.idTileKeys ?? [];
                 this.labelPrimitives.add(feature.labelParameters);
             }
         }
@@ -230,12 +251,12 @@ export class PointMergeService
      * the missingTiles of each. MergedPointsTiles with empty referencingTiles (requiring render)
      * are yielded. The sourceTileId is also added to the MergedPointsTiles referencingTiles set.
      */
-    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
+    *insert(points: Array<MergedPointVisualization>, sourceTileId: bigint, sourceTileKey: string, mapViewLayerStyleRuleId: MapViewLayerStyleRule): Generator<MergedPointsTile> {
         // Insert the points into the relevant corner tiles.
         let level = coreLib.getTileLevel(sourceTileId);
         for (let point of points) {
             let mergedPointsTile = this.getCornerTileByPosition(point.position, level, mapViewLayerStyleRuleId);
-            mergedPointsTile.add(point);
+            mergedPointsTile.add(point, sourceTileKey);
         }
 
         // Add the sourceTileId as a reference to the affected corner tile IDs.

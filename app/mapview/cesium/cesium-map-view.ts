@@ -133,10 +133,10 @@ export class CesiumMapView implements IRenderView {
     private ignoreNextCamAppStateUpdate: boolean = false;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     hoveredFeatureIds: BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[],
+        featureIds: (TileFeatureId | null)[],
         position: {x: number, y: number}
     } | undefined> = new BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[],
+        featureIds: (TileFeatureId | null)[],
         position: {x: number, y: number}
     } | undefined>(undefined);
     private hoverUpdateSequence = 0;
@@ -310,7 +310,7 @@ export class CesiumMapView implements IRenderView {
         };
     }
 
-    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null | string)[] {
+    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[] {
         if (!this.isAvailable()) {
             return [];
         }
@@ -318,8 +318,39 @@ export class CesiumMapView implements IRenderView {
         if (!defined(picked)) {
             return [];
         }
-        const pickedId = picked.id;
-        return Array.isArray(pickedId) ? pickedId : [pickedId];
+        return this.resolvePickedFeatureIds(picked);
+    }
+
+    private resolvePickedFeatureIds(picked: any): TileFeatureId[] {
+        const tileKeyFromPrimitive = (picked?.primitive as any)?.tileKey;
+        const tileKey = typeof tileKeyFromPrimitive === "string" ? tileKeyFromPrimitive : undefined;
+        const idTileKeysRaw = (picked?.primitive as any)?.idTileKeys;
+        const idTileKeys = Array.isArray(idTileKeysRaw) ? idTileKeysRaw : undefined;
+        const pickedId = picked?.id;
+
+        const resolve = (rawId: unknown, fallbackTileKey: string | undefined): TileFeatureId | null => {
+            if (!Number.isInteger(rawId) || !fallbackTileKey) {
+                return null;
+            }
+            return this.mapService.resolveTileFeatureIdByIndex(fallbackTileKey, rawId as number);
+        };
+
+        if (Array.isArray(pickedId)) {
+            const result: TileFeatureId[] = [];
+            for (let i = 0; i < pickedId.length; i++) {
+                const idTileKey = typeof idTileKeys?.[i] === "string"
+                    ? idTileKeys[i] as string
+                    : tileKey;
+                const resolved = resolve(pickedId[i], idTileKey);
+                if (resolved) {
+                    result.push(resolved);
+                }
+            }
+            return result;
+        }
+
+        const resolved = resolve(pickedId, tileKey);
+        return resolved ? [resolved] : [];
     }
 
     pickCartographic(screenPos: {x: number; y: number}): { lon: number; lat: number; alt: number } | undefined {
@@ -513,7 +544,10 @@ export class CesiumMapView implements IRenderView {
                     }
                 } else {
                     // Just select the feature.
-                    this.selectFeatureFromPick(feature, false);
+                    const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
+                    if (selectedFeatureIds.length) {
+                        this.stateService.setSelection(selectedFeatureIds);
+                    }
                 }
             } else {
                 // No new feature to select. Unset existing locked selections.
@@ -539,7 +573,13 @@ export class CesiumMapView implements IRenderView {
             const feature = this.viewer.scene.pick(position);
             if (defined(feature) && !(feature.primitive instanceof Billboard)) {
                 // Select the feature and pin the panel immediately.
-                this.selectFeatureFromPick(feature, true);
+                const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
+                if (selectedFeatureIds.length) {
+                    const id = this.stateService.setSelection(selectedFeatureIds, undefined, true);
+                    if (id !== undefined) {
+                        this.stateService.setInspectionPanelLockedState(id, true);
+                    }
+                }
             }
 
             // Handle position update after highlighting.
@@ -586,29 +626,11 @@ export class CesiumMapView implements IRenderView {
 
                 const feature = this.viewer.scene.pick(position);
                 if (defined(feature)) {
-                    let hasDisplayableFeatureId = false;
-                    const featureIdsArray = (Array.isArray(feature.id) ? feature.id : [feature.id]).flatMap((id: any) => {
-                        if (typeof id === 'string') {
-                            const trimmedId = id.trim();
-                            if (!trimmedId) {
-                                return [];
-                            }
-                            if (trimmedId !== 'hover-highlight') {
-                                hasDisplayableFeatureId = true;
-                            }
-                            return [trimmedId];
-                        } else if (id && typeof id === 'object' && typeof id.featureId === 'string') {
-                            const trimmedId = id.featureId.trim();
-                            if (!trimmedId) {
-                                return [];
-                            }
-                            hasDisplayableFeatureId = true;
-                            return [{...id, featureId: trimmedId}];
+                    const featureIdsArray = this.resolvePickedFeatureIds(feature);
+                    if (!featureIdsArray.length) {
+                        if (this.hoveredFeatureIds.getValue() !== undefined) {
+                            this.hoveredFeatureIds.next(undefined);
                         }
-                        return [id];
-                    });
-                    if (!hasDisplayableFeatureId && this.hoveredFeatureIds.getValue() !== undefined) {
-                        this.hoveredFeatureIds.next(undefined);
                         return;
                     }
                     const hoverPosition = {x: position.x, y: position.y};
@@ -1416,4 +1438,3 @@ export class CesiumMapView implements IRenderView {
         }
     }
 }
-

@@ -36,9 +36,12 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => ({
+        visu.renderWasm = async () => ({
             length: 1,
+            coordinateOrigin: [11, 48, 0] as [number, number, number],
             startIndices: new Uint32Array([0, 2]),
+            featureIds: [null],
+            featureIdsByVertex: [null, null],
             attributes: {
                 getPath: {
                     value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
@@ -51,6 +54,10 @@ describe("DeckTileVisualization", () => {
                 instanceStrokeWidths: {
                     value: new Float32Array([2]),
                     size: 1
+                },
+                instanceDashArrays: {
+                    value: new Float32Array([1, 0]),
+                    size: 2
                 }
             }
         });
@@ -102,8 +109,8 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => null;
-        visu.extractPathDataOnMainThread = async () => null;
+        visu.renderWasm = async () => null;
+        visu.renderWasmOnMainThread = async () => null;
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
@@ -141,8 +148,8 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => null;
-        visu.extractPathDataOnMainThread = async () => null;
+        visu.renderWasm = async () => null;
+        visu.renderWasmOnMainThread = async () => null;
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         registry.flush();
@@ -176,7 +183,7 @@ describe("DeckTileVisualization", () => {
             {value: 0} as any
         ) as any;
 
-        visu.extractPathData = async () => null;
+        visu.renderWasm = async () => null;
 
         await visu.render({
             renderer: "deck",
@@ -188,5 +195,63 @@ describe("DeckTileVisualization", () => {
         expect(samples!.length).toBe(1);
         expect(Number.isFinite(samples![0])).toBe(true);
         expect(samples![0]).toBeGreaterThanOrEqual(0);
+    });
+
+    it("maps raw WASM line style buffers without hardcoded fallback colors", () => {
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            style,
+            "",
+            true,
+            {value: 0} as any
+        ) as any;
+
+        const pathData = visu.buildPathLayerData({
+            coordinateOrigin: new Float64Array([11, 48, 0]),
+            positions: new Float32Array([
+                11, 48, 0,
+                11.001, 48.001, 0,
+                11.01, 48.01, 0,
+                11.02, 48.02, 0
+            ]),
+            startIndices: new Uint32Array([0, 2, 4]),
+            colors: new Uint8Array([
+                255, 228, 181, 255,
+                1, 2, 3, 4
+            ]),
+            widths: new Float32Array([3, 7]),
+            featureIds: new Uint32Array([101, 202]),
+            dashArrays: new Float32Array([6, 2, 1, 0]),
+            dashOffsets: new Float32Array([0, 0])
+        });
+
+        expect(pathData).toBeTruthy();
+        expect(pathData!.featureIds).toEqual([101, 202]);
+        expect(pathData!.featureIdsByVertex).toEqual([101, 101, 202, 202]);
+        expect(Array.from(pathData!.attributes.instanceColors.value.slice(0, 8))).toEqual([
+            255, 228, 181, 255,
+            255, 228, 181, 255
+        ]);
+        expect(Array.from(pathData!.attributes.instanceColors.value.slice(8, 16))).toEqual([
+            1, 2, 3, 4,
+            1, 2, 3, 4
+        ]);
+        expect(Array.from(pathData!.attributes.instanceStrokeWidths.value)).toEqual([3, 3, 7, 7]);
+        expect(Array.from(pathData!.attributes.instanceDashArrays.value)).toEqual([
+            6, 2, 6, 2,
+            1, 0, 1, 0
+        ]);
     });
 });

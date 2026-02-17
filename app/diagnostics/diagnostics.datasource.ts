@@ -1,5 +1,5 @@
 import {Injectable, OnDestroy} from '@angular/core';
-import {BehaviorSubject, interval, Subscription} from 'rxjs';
+import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
 import {TileLoadState} from '../mapdata/tilestream';
 import {FeatureTile} from '../mapdata/features.model';
@@ -13,6 +13,7 @@ import {
     SNAPSHOT_INTERVAL_MS,
     UNIT_SUFFIXES
 } from './diagnostics.constants';
+const UPDATE_EVENT_DEBOUNCE_MS = 1000;
 
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
@@ -41,16 +42,17 @@ export class DiagnosticsDatasource implements OnDestroy {
                 this.snapshot$.next(this.buildSnapshot());
             }),
             interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStats()),
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshPerfStats()),
             interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshLogs()),
             this.mapService.tilePipelinePaused$.subscribe(paused => {
                 if (wasPaused && !paused) {
                     this.snapshot$.next(this.buildSnapshot());
                     this.refreshPerfStats();
                 }
                 wasPaused = paused;
-            })
+            }),
+            this.mapService.statsDialogNeedsUpdate
+                .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
+                .subscribe(() => this.refreshOnDemand())
         );
     }
 
@@ -102,6 +104,11 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
 
         this.appendLogEntries(newEntries);
+    }
+
+    private refreshOnDemand() {
+        this.refreshPerfStats();
+        this.refreshLogs();
     }
 
     private buildSnapshot(): DiagnosticsSnapshot {

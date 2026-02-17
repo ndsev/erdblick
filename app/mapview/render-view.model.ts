@@ -4,7 +4,7 @@ import {Viewport} from "../../build/libs/core/erdblick-core";
 import {FeatureTile} from "../mapdata/features.model";
 
 export interface HoveredFeatureIds {
-    featureIds: (TileFeatureId | null | string)[];
+    featureIds: (TileFeatureId | null)[];
     position: {x: number, y: number};
 }
 
@@ -58,7 +58,7 @@ export interface IRenderView {
     getSceneMode(): unknown;
     getSceneHandle(): IRenderSceneHandle;
 
-    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null | string)[];
+    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[];
     pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
 
     setViewFromState(cameraData: CameraViewState): void;

@@ -17,13 +17,10 @@ describe('MergedPointsTile', () => {
             positionHash: hash,
             pointParameters: {p: 1},
             labelParameters: {l: 1},
-            featureIds: [
-                {mapTileKey: 'k', featureId: 'f1'},
-                {mapTileKey: 'k', featureId: 'f2'},
-            ],
+            featureIds: [1, 2],
         } as any;
 
-        tile.add(point1);
+        tile.add(point1, 'k');
         expect(tile.features.size).toBe(1);
         expect(tile.count(hash)).toBe(2);
 
@@ -36,16 +33,13 @@ describe('MergedPointsTile', () => {
             positionHash: hash,
             pointParameters: {p: 2},
             labelParameters: {l: 2},
-            featureIds: [
-                {mapTileKey: 'k', featureId: 'f2'},
-                {mapTileKey: 'k', featureId: 'f3'},
-            ],
+            featureIds: [2, 3],
         } as any;
 
-        tile.add(point2);
+        tile.add(point2, 'k');
 
         const stored2 = tile.features.get(hash)!;
-        expect(stored2.featureIds.map((f: any) => f.featureId).sort()).toEqual(['f1', 'f2', 'f3']);
+        expect(stored2.featureIds.sort()).toEqual([1, 2, 3]);
         expect(stored2.pointParameters).toBe(point2.pointParameters);
         expect(stored2.labelParameters).toBe(point2.labelParameters);
         expect(tile.count('unknown-hash')).toBe(0);
@@ -61,11 +55,11 @@ describe('PointMergeService', () => {
             positionHash: 'h1',
             pointParameters: null,
             labelParameters: null,
-            featureIds: [{mapTileKey: 'k', featureId: 'f1'}],
+            featureIds: [1],
         } as any;
 
         const sourceTileId = 5n;
-        const yielded = Array.from(service.insert([point], sourceTileId, ruleId));
+        const yielded = Array.from(service.insert([point], sourceTileId, 'k', ruleId));
 
         const styleMap = service.mergedPointsTiles.get(ruleId)!;
         expect(styleMap).toBeDefined();

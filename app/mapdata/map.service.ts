@@ -13,7 +13,12 @@ import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.mod
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
-import {AppStateService, InspectionPanelModel, TileFeatureId, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
+import {
+    AppStateService,
+    InspectionPanelModel,
+    TileFeatureId,
+    VIEW_SYNC_LAYERS
+} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service";
 import {KeyboardService} from "../shared/keyboard.service";
@@ -470,7 +475,6 @@ export class MapDataService {
             tileId: tileId,
         });
         this.loadedTileLayers.set(tileKey, placeholder);
-        this.statsDialogNeedsUpdate.next();
 
         return true;
     }
@@ -692,6 +696,7 @@ export class MapDataService {
 
         // Request non-present required tile layers.
         const requestByLayer = new Map<string, {mapId: string, layerId: string, tileIds: number[], tileIdSet: Set<number>}>();
+        let placeholdersAdded = false;
         const queueTiles = (mapId: string, layerId: string, tileIds: Array<number>) => {
             if (!tileIds.length) {
                 return;
@@ -721,11 +726,11 @@ export class MapDataService {
                     selectionTileRequest.remoteRequest.layerId,
                     selectionTileRequest.remoteRequest.tileIds);
                 for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
-                    this.ensureTilePlaceholder(
+                    placeholdersAdded = this.ensureTilePlaceholder(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
-                        true);
+                        true) || placeholdersAdded;
                 }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
@@ -755,7 +760,7 @@ export class MapDataService {
                         if ((!existingTile || !existingTile.hasData()) && !requestTilesForMapLayerSet.has(tileId)) {
                             requestTilesForMapLayer.push(Number(tileId)); // TODO: Get rid of type casting after new tile ids are available
                             requestTilesForMapLayerSet.add(tileId);
-                            this.ensureTilePlaceholder(mapName, layer.id, tileId, false)
+                            placeholdersAdded = this.ensureTilePlaceholder(mapName, layer.id, tileId, false) || placeholdersAdded;
                         }
                     }
                 }
@@ -772,6 +777,10 @@ export class MapDataService {
             layerId: entry.layerId,
             tileIds: entry.tileIds
         }));
+
+        if (placeholdersAdded) {
+            this.statsDialogNeedsUpdate.next();
+        }
 
         if (this.tilePipelinePaused) {
             return;
@@ -820,8 +829,56 @@ export class MapDataService {
             }
         }
 
-        // Ensure that visualizations which now have data are queued for rendering.
-        this.updateVisualizations();
+        // Fast path: only wake visualizations already waiting on this tile.
+        // Fall back to full recomputation when no matching waiting visualization exists.
+        const waitingUpdate = this.updateWaitingVisualizationsForTile(tileLayer);
+        if (waitingUpdate.visibleInAnyView && !waitingUpdate.foundWaitingVisualization) {
+            this.updateVisualizations();
+        }
+    }
+
+    private updateWaitingVisualizationsForTile(tileLayer: FeatureTile): {
+        foundWaitingVisualization: boolean;
+        visibleInAnyView: boolean;
+    } {
+        const tileKey = tileLayer.mapTileKey;
+        let foundWaitingVisualization = false;
+        let visibleInAnyView = false;
+
+        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+            if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
+                continue;
+            }
+            visibleInAnyView = true;
+
+            const viewState = this.viewVisualizationState[viewIndex];
+            const queuedVisualizations = new Set(viewState.visualizationQueue);
+            for (const visu of viewState.getVisualizations(undefined, tileKey)) {
+                const isQueued = queuedVisualizations.has(visu);
+                const isDirty = visu.isDirty();
+
+                visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
+                visu.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
+
+                if (isQueued || isDirty) {
+                    foundWaitingVisualization = true;
+                }
+                if (!isDirty) {
+                    continue;
+                }
+
+                visu.updateStatus(true);
+                if (!isQueued) {
+                    viewState.visualizationQueue.push(visu);
+                    queuedVisualizations.add(visu);
+                }
+            }
+        }
+
+        return {
+            foundWaitingVisualization,
+            visibleInAnyView
+        };
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
@@ -851,6 +908,7 @@ export class MapDataService {
                 styleSource,
                 highDetail,
                 highlightMode,
+                featureIdSubset,
                 boxGrid,
                 options
             );
@@ -950,6 +1008,27 @@ export class MapDataService {
         this.messageService.showInfo('Tile pipeline is paused; cannot load additional tiles');
     }
 
+    resolveTileFeatureIdByIndex(tileKey: string, featureIndex: number): TileFeatureId | null {
+        if (!Number.isInteger(featureIndex) || featureIndex < 0) {
+            return null;
+        }
+        const tile = this.loadedTileLayers.get(tileKey);
+        if (!tile || !tile.hasData()) {
+            return null;
+        }
+        if (featureIndex >= tile.numFeatures) {
+            return null;
+        }
+        const featureId = tile.featureIdByIndex(featureIndex);
+        if (!featureId) {
+            return null;
+        }
+        return {
+            mapTileKey: tileKey,
+            featureId
+        };
+    }
+
     async loadTiles(tileKeys: Set<string | null>): Promise<Map<string, FeatureTile>> {
         const result = new Map<string, FeatureTile>();
 
@@ -998,50 +1077,60 @@ export class MapDataService {
         return result;
     }
 
-    async loadFeatures(tileFeatureIds: (TileFeatureId | null | string)[]): Promise<FeatureWrapper[]> {
+    async loadFeatures(tileFeatureIds: (TileFeatureId | null)[]): Promise<FeatureWrapper[]> {
+        const normalizedIds = tileFeatureIds.filter((tileFeatureId): tileFeatureId is TileFeatureId => !!tileFeatureId);
+
         // Load the tiles.
-        const tiles = await this.loadTiles(new Set(tileFeatureIds.filter(s =>
-                s && typeof s !== "string"
-            ).map(s =>
-                (s as TileFeatureId).mapTileKey
-            )
-        ));
+        const tiles = await this.loadTiles(new Set(normalizedIds.map(id => id.mapTileKey)));
 
         // Ensure that the feature really exists in the tile.
         const features: FeatureWrapper[] = [];
-        for (const id of tileFeatureIds) {
-            if (typeof id === "string") {
-                // When clicking on geometry that represents a highlight,
-                // this is reflected in the feature id. By processing this
-                // info here, a hover highlight can be turned into a selection.
-                if (id === "hover-highlight") {
-                    return this.hoverTopic.getValue();
-                }
-                continue;
-            }
-
-            if (!id?.featureId) {
-                continue;
-            }
-
+        for (const id of normalizedIds) {
             const tile = tiles.get(id?.mapTileKey || "");
             if (!tile) {
                 console.error(`Could not load tile ${id?.mapTileKey} for highlighting!`);
                 continue;
             }
-            if (!tile.has(id?.featureId || "")) {
+
+            const maybeResolveByIndex = (featureIndex: number | undefined): string | null => {
+                if (!Number.isInteger(featureIndex) || featureIndex === undefined || featureIndex < 0) {
+                    return null;
+                }
+                return tile.featureIdByIndex(featureIndex);
+            };
+
+            let resolvedFeatureId = id?.featureId || "";
+            const idWithOptionalIndex = id as TileFeatureId & { featureIndex?: number };
+            const resolvedFromExplicitIndex = maybeResolveByIndex(idWithOptionalIndex.featureIndex);
+            if (resolvedFromExplicitIndex) {
+                resolvedFeatureId = resolvedFromExplicitIndex;
+            } else {
+                const numericFeatureId = Number(resolvedFeatureId);
+                if (Number.isInteger(numericFeatureId) && numericFeatureId >= 0) {
+                    const resolvedFromNumericId = maybeResolveByIndex(numericFeatureId);
+                    if (resolvedFromNumericId) {
+                        resolvedFeatureId = resolvedFromNumericId;
+                    }
+                }
+            }
+
+            if (!resolvedFeatureId) {
+                continue;
+            }
+
+            if (!tile.has(resolvedFeatureId)) {
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(id?.mapTileKey || "");
                 this.messageService.showError(
                     `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                 continue;
             }
 
-            features.push(new FeatureWrapper(id!.featureId, tile));
+            features.push(new FeatureWrapper(resolvedFeatureId, tile));
         }
         return features;
     }
 
-    async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null | string)[]) {
+    async setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[]) {
         const features = await this.loadFeatures(tileFeatureIds);
         if (!features.length) {
             this.hoverTopic.next(features);

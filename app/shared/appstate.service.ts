@@ -46,6 +46,7 @@ export interface Versions {
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
+    featureIndex?: number;
 }
 
 export interface SelectedSourceData {

@@ -34,6 +34,23 @@ function asCesiumViewer(sceneHandle: IRenderSceneHandle): Viewer | undefined {
     return viewer;
 }
 
+function annotatePrimitiveTileKey(primitive: any, tileKey: string): void {
+    if (!primitive || typeof primitive !== "object") {
+        return;
+    }
+    try {
+        primitive.tileKey = tileKey;
+    } catch (_) {
+        return;
+    }
+    if (typeof primitive.length !== "number" || typeof primitive.get !== "function") {
+        return;
+    }
+    for (let i = 0; i < primitive.length; i++) {
+        annotatePrimitiveTileKey(primitive.get(i), tileKey);
+    }
+}
+
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
 export class CesiumTileVisualization implements ITileVisualization {
     tile: FeatureTile;
@@ -225,8 +242,13 @@ export class CesiumTileVisualization implements ITileVisualization {
 
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
+                    annotatePrimitiveTileKey(this.primitiveCollection, this.tile.mapTileKey);
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
-                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(
+                            mergedPointVisualizations as MergedPointVisualization[],
+                            this.tile.tileId,
+                            this.tile.mapTileKey,
+                            mapLayerStyleRuleId)) {
                             finishedCornerTile.render(viewer);
                         }
                     }
