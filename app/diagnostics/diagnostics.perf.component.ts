@@ -12,6 +12,11 @@ interface LayerOption {
     label: string;
 }
 
+interface TileIdOption {
+    label: string;
+    tileId: string;
+}
+
 interface PerfTreeRowData {
     key: string;
     pathKey: string;
@@ -23,10 +28,14 @@ interface PerfTreeRowData {
     basePeakTooltip?: string;
     baseAverageTooltip?: string;
     peakTileIds?: string;
+    peakClass?: string;
+    averageClass?: string;
     rowClass?: string;
 }
 
 type SupportedUnit = 'ms' | 'count';
+type DurationDisplayUnit = 'ms' | 's' | 'm' | 'h';
+type BytesDisplayUnit = 'B' | 'KB' | 'MB' | 'GB';
 
 interface ParentAggregate {
     hasNumeric: boolean;
@@ -51,6 +60,7 @@ const unitSuffixes: Array<{suffix: string; unit: string}> = [
     {suffix: '-count', unit: 'count'},
 ];
 const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
+const DISPLAY_DECIMALS = 3;
 
 @Component({
     selector: 'diagnostics-performance-dialog',
@@ -70,8 +80,20 @@ const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
                     (ngModelChange)="onLayerSelectionChange()"
                     optionLabel="label"
                     placeholder="Select Map Layers"
+                    [selectionLimit]="20"
+                    [maxSelectedLabels]="20"
                     [showHeader]="false"
                     [style]="{'width': '100%'}">
+                </p-multiSelect>
+                <p-multiSelect
+                    [options]="availableTileIds"
+                    [(ngModel)]="selectedTileIds"
+                    (ngModelChange)="onTileIdSelectionChange()"
+                    optionLabel="label"
+                    placeholder="Select Tile IDs"
+                    [selectionLimit]="20"
+                    [maxSelectedLabels]="20"
+                    [style]="{'width': '100%', 'margin-top': '0.25em'}">
                 </p-multiSelect>
             </div>
 
@@ -88,10 +110,10 @@ const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
                          (onNodeCollapse)="onNodeCollapse($event.node)">
                 <ng-template pTemplate="header">
                     <tr>
-                        <th ttResizableColumn style="width: 58%;">Key</th>
-                        <th ttResizableColumn style="width: 14%;">Peak</th>
-                        <th ttResizableColumn style="width: 14%;">Average</th>
-                        <th ttResizableColumn style="width: 14%;">Peak Tile IDs</th>
+                        <th ttResizableColumn style="width: 50%;">Key</th>
+                        <th ttResizableColumn style="width: 15%;" class="diagnostics-perf-value">Peak</th>
+                        <th ttResizableColumn style="width: 15%;" class="diagnostics-perf-value">Average</th>
+                        <th ttResizableColumn style="width: 20%;" class="diagnostics-perf-value">Peak Tile IDs</th>
                     </tr>
                 </ng-template>
                 <ng-template pTemplate="colgroup">
@@ -104,7 +126,7 @@ const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
                 </ng-template>
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                     <tr [ttRow]="rowNode" [ngClass]="rowData.rowClass">
-                        <td class="diagnostics-cell" style="width: 58%;">
+                        <td class="diagnostics-cell" style="width: 50%;">
                             <div class="diagnostics-key-cell diagnostics-ellipsis">
                                 <p-treeTableToggler [rowNode]="rowNode"></p-treeTableToggler>
                                 <span class="diagnostics-key-text"
@@ -115,26 +137,28 @@ const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
                                 </span>
                             </div>
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis"
-                            style="width: 14%;"
+                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                            [ngClass]="rowData.peakClass"
+                            style="width: 15%;"
                             [pTooltip]="rowData.basePeakTooltip"
                             tooltipPosition="top"
                             [tooltipDisabled]="!rowData.basePeakTooltip">
                             {{ rowData.displayPeak ?? '' }}
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis"
-                            style="width: 14%;"
+                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                            [ngClass]="rowData.averageClass"
+                            style="width: 15%;"
                             [pTooltip]="rowData.baseAverageTooltip"
                             tooltipPosition="top"
                             [tooltipDisabled]="!rowData.baseAverageTooltip">
                             {{ rowData.displayAverage ?? '' }}
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis"
-                            style="width: 14%;"
+                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                            style="width: 20%;"
                             [pTooltip]="rowData.peakTileIds ?? ''"
                             tooltipPosition="left"
                             [tooltipDisabled]="!rowData.peakTileIds">
-                            {{ rowData.peakTileIds ?? '' }}
+                            {{ rowData.peakTileIds.join('\\n') ?? '' }}
                         </td>
                     </tr>
                 </ng-template>
@@ -156,7 +180,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
     availableMapLayers: LayerOption[] = [];
     selectedMapLayers: LayerOption[] = [];
+    availableTileIds: TileIdOption[] = [];
+    selectedTileIds: TileIdOption[] = [];
     treeNodes: TreeTableNode[] = [];
+    private durationDisplayUnit: DurationDisplayUnit = 'ms';
+    private bytesDisplayUnit: BytesDisplayUnit = 'B';
     private readonly expansionStateByPath = new Map<string, boolean>();
     private readonly subscriptions: Subscription[] = [];
 
@@ -166,6 +194,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();
+                this.refreshAvailableTileIds();
                 this.rebuildTreeNodes();
             })
         );
@@ -178,6 +207,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     onDialogShow() {
         this.diagnostics.refreshPerfStats();
         this.refreshAvailableMapLayers();
+        this.refreshAvailableTileIds();
         this.rebuildTreeNodes();
         this.dialogStack.bringToFront(this.dialog);
     }
@@ -191,6 +221,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     onLayerSelectionChange() {
+        this.refreshAvailableTileIds();
+        this.rebuildTreeNodes();
+    }
+
+    onTileIdSelectionChange() {
         this.rebuildTreeNodes();
     }
 
@@ -280,6 +315,41 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         this.selectedMapLayers = validSelection;
     }
 
+    private refreshAvailableTileIds() {
+        const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
+        if (!selectedLabels.size) {
+            this.availableTileIds = [];
+            this.selectedTileIds = [];
+            return;
+        }
+
+        const tileIdSet = new Set<string>();
+        for (const tile of this.mapService.loadedTileLayers.values()) {
+            if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
+                continue;
+            }
+            if (!tile.hasData() || tile.numFeatures <= 0) {
+                continue;
+            }
+            tileIdSet.add(tile.tileId.toString());
+        }
+
+        const nextTileIds = Array.from(tileIdSet)
+            .sort((left, right) => this.compareTileIdStrings(left, right))
+            .map(tileId => ({label: tileId, tileId}));
+
+        const hasSameOptions = this.isSameTileIdList(nextTileIds, this.availableTileIds);
+        if (!hasSameOptions) {
+            this.availableTileIds = nextTileIds;
+        }
+
+        const selectedTileIdSet = new Set(this.selectedTileIds.map(option => option.tileId));
+        const validSelectedTileIds = nextTileIds.filter(option => selectedTileIdSet.has(option.tileId));
+        if (!this.isSameTileIdList(validSelectedTileIds, this.selectedTileIds)) {
+            this.selectedTileIds = validSelectedTileIds;
+        }
+    }
+
     private isSameLayerList(left: LayerOption[], right: LayerOption[]): boolean {
         if (left.length !== right.length) {
             return false;
@@ -292,8 +362,38 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return true;
     }
 
+    private isSameTileIdList(left: TileIdOption[], right: TileIdOption[]): boolean {
+        if (left.length !== right.length) {
+            return false;
+        }
+        for (let index = 0; index < left.length; index += 1) {
+            if (left[index].tileId !== right[index].tileId) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private compareTileIdStrings(left: string, right: string): number {
+        try {
+            const leftValue = BigInt(left);
+            const rightValue = BigInt(right);
+            if (leftValue < rightValue) {
+                return -1;
+            }
+            if (leftValue > rightValue) {
+                return 1;
+            }
+            return 0;
+        } catch (_err) {
+            return left.localeCompare(right);
+        }
+    }
+
     private rebuildTreeNodes() {
-        const nextTreeNodes = this.buildPerfTreeNodes(this.computeFilteredPerfStats());
+        const filteredStats = this.computeFilteredPerfStats();
+        this.computeDisplayUnits(filteredStats);
+        const nextTreeNodes = this.buildPerfTreeNodes(filteredStats);
         this.treeNodes = nextTreeNodes;
     }
 
@@ -303,9 +403,50 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return [];
         }
 
-        const filteredTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile =>
-            selectedLabels.has(`${tile.mapName} - ${tile.layerName}`));
+        const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
+        const hasTileIdSelection = selectedTileIdSet.size > 0;
+
+        const filteredTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
+            if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
+                return false;
+            }
+            if (!tile.hasData() || tile.numFeatures <= 0) {
+                return false;
+            }
+            if (!hasTileIdSelection) {
+                return true;
+            }
+            return selectedTileIdSet.has(tile.tileId.toString());
+        });
         return buildAggregatedPerfStats(filteredTiles);
+    }
+
+    private computeDisplayUnits(stats: PerfStat[]) {
+        let maxAbsDurationMs = 0;
+        let maxAbsBytes = 0;
+
+        for (const stat of stats) {
+            const unit = stat.unit ?? this.parsePerfUnit(stat.key) ?? this.inferCountUnitFromKey(stat.key);
+            if (unit === 'ms') {
+                if (this.isFiniteNumber(stat.peak)) {
+                    maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.peak));
+                }
+                if (this.isFiniteNumber(stat.average)) {
+                    maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.average));
+                }
+            }
+            if (unit === 'KB' || unit === 'MB') {
+                if (this.isFiniteNumber(stat.peak)) {
+                    maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.peak, unit)));
+                }
+                if (this.isFiniteNumber(stat.average)) {
+                    maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.average, unit)));
+                }
+            }
+        }
+
+        this.durationDisplayUnit = this.resolveDurationDisplayUnit(maxAbsDurationMs);
+        this.bytesDisplayUnit = this.resolveBytesDisplayUnit(maxAbsBytes);
     }
 
     private buildPerfTreeNodes(stats: PerfStat[]): TreeTableNode[] {
@@ -369,10 +510,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                         peak: peakNumber,
                         average: averageNumber,
                         unit,
-                        displayPeak: this.formatValueWithUnit(peakNumber, unit, 'peak'),
-                        displayAverage: this.formatValueWithUnit(averageNumber, unit, 'average'),
-                        basePeakTooltip: this.formatBaseTooltip(peakNumber, unit, 'peak'),
-                        baseAverageTooltip: this.formatBaseTooltip(averageNumber, unit, 'average'),
+                        displayPeak: this.formatValueWithUnit(peakNumber, unit),
+                        displayAverage: this.formatValueWithUnit(averageNumber, unit),
+                        basePeakTooltip: this.formatBaseTooltip(peakNumber, unit),
+                        baseAverageTooltip: this.formatBaseTooltip(averageNumber, unit),
                         peakTileIds: stat.peakTileIds?.join(', ')
                     };
                 }
@@ -391,6 +532,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         sortNodes(rootNodes);
         this.propagateParentStats(rootNodes);
+        this.assignTimeHighlightClasses(rootNodes);
         this.assignRowClasses(rootNodes);
         for (const pathKey of Array.from(this.expansionStateByPath.keys())) {
             if (!activePathKeys.has(pathKey)) {
@@ -405,7 +547,6 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     private assignRowClasses(nodes: TreeTableNode[]) {
-        let stripeIndex = 0;
         const visit = (items: TreeTableNode[], depth: number) => {
             for (const node of items) {
                 const rowData = this.getRowData(node);
@@ -495,10 +636,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         rowData.unit = unit;
         rowData.peak = peak;
         rowData.average = average;
-        rowData.displayPeak = this.formatValueWithUnit(peak, unit, 'peak');
-        rowData.displayAverage = this.formatValueWithUnit(average, unit, 'average');
-        rowData.basePeakTooltip = this.formatBaseTooltip(peak, unit, 'peak');
-        rowData.baseAverageTooltip = this.formatBaseTooltip(average, unit, 'average');
+        rowData.displayPeak = this.formatValueWithUnit(peak, unit);
+        rowData.displayAverage = this.formatValueWithUnit(average, unit);
+        rowData.basePeakTooltip = this.formatBaseTooltip(peak, unit);
+        rowData.baseAverageTooltip = this.formatBaseTooltip(average, unit);
         if (hasChildren) {
             rowData.peakTileIds = undefined;
         }
@@ -546,64 +687,188 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         return typeof value === 'number' && Number.isFinite(value);
     }
 
-    private formatValueWithUnit(value: number | undefined, unit: string | undefined, mode: 'peak' | 'average'): string | undefined {
+    private assignTimeHighlightClasses(nodes: TreeTableNode[]) {
+        const leafValues: number[] = [];
+        const parentValuesByDepth = new Map<number, number[]>();
+
+        const collect = (items: TreeTableNode[], depth: number) => {
+            for (const node of items) {
+                const rowData = this.getRowData(node);
+                rowData.peakClass = undefined;
+                rowData.averageClass = undefined;
+                const hasChildren = !!node.children?.length;
+                if (rowData.unit === 'ms') {
+                    const target = hasChildren
+                        ? parentValuesByDepth.get(depth) ?? []
+                        : leafValues;
+                    if (hasChildren && !parentValuesByDepth.has(depth)) {
+                        parentValuesByDepth.set(depth, target);
+                    }
+                    this.collectPositiveFiniteValue(target, rowData.peak);
+                    this.collectPositiveFiniteValue(target, rowData.average);
+                }
+                if (hasChildren) {
+                    collect(node.children!, depth + 1);
+                }
+            }
+        };
+        collect(nodes, 0);
+
+        const leafMedian = this.computeMedian(leafValues);
+        const parentMediansByDepth = new Map<number, number>();
+        parentValuesByDepth.forEach((values, depth) => {
+            const median = this.computeMedian(values);
+            if (this.isFiniteNumber(median)) {
+                parentMediansByDepth.set(depth, median);
+            }
+        });
+
+        const apply = (items: TreeTableNode[], depth: number) => {
+            for (const node of items) {
+                const rowData = this.getRowData(node);
+                const hasChildren = !!node.children?.length;
+                if (rowData.unit === 'ms') {
+                    const median = hasChildren ? parentMediansByDepth.get(depth) : leafMedian;
+                    rowData.peakClass = this.resolveSuspiciousClass(rowData.peak, median);
+                    rowData.averageClass = this.resolveSuspiciousClass(rowData.average, median);
+                }
+                if (hasChildren) {
+                    apply(node.children!, depth + 1);
+                }
+            }
+        };
+        apply(nodes, 0);
+    }
+
+    private collectPositiveFiniteValue(target: number[], value: number | undefined) {
+        if (!this.isFiniteNumber(value) || value <= 0) {
+            return;
+        }
+        target.push(value);
+    }
+
+    private computeMedian(values: number[]): number | undefined {
+        if (!values.length) {
+            return undefined;
+        }
+        const sortedValues = [...values].sort((left, right) => left - right);
+        const midpoint = Math.floor(sortedValues.length / 2);
+        if (sortedValues.length % 2 === 1) {
+            return sortedValues[midpoint];
+        }
+        return (sortedValues[midpoint - 1] + sortedValues[midpoint]) / 2;
+    }
+
+    private resolveSuspiciousClass(value: number | undefined, median: number | undefined): string | undefined {
+        if (!this.isFiniteNumber(value) || !this.isFiniteNumber(median) || median <= 0) {
+            return undefined;
+        }
+        if (value >= median * 3) {
+            return 'diagnostics-suspicious-bad';
+        }
+        if (value >= median * 2) {
+            return 'diagnostics-suspicious-warn';
+        }
+        return undefined;
+    }
+
+    private resolveDurationDisplayUnit(maxAbsDurationMs: number): DurationDisplayUnit {
+        if (maxAbsDurationMs >= 3_600_000) {
+            return 'h';
+        }
+        if (maxAbsDurationMs >= 60_000) {
+            return 'm';
+        }
+        if (maxAbsDurationMs >= 1_000) {
+            return 's';
+        }
+        return 'ms';
+    }
+
+    private resolveBytesDisplayUnit(maxAbsBytes: number): BytesDisplayUnit {
+        if (maxAbsBytes >= 1024 * 1024 * 1024) {
+            return 'GB';
+        }
+        if (maxAbsBytes >= 1024 * 1024) {
+            return 'MB';
+        }
+        if (maxAbsBytes >= 1024) {
+            return 'KB';
+        }
+        return 'B';
+    }
+
+    private toBytes(value: number, unit: 'KB' | 'MB'): number {
+        return unit === 'KB' ? value * 1024 : value * 1024 * 1024;
+    }
+
+    private fromBytesToDisplayUnit(bytes: number, unit: BytesDisplayUnit): number {
+        switch (unit) {
+            case 'B':
+                return bytes;
+            case 'KB':
+                return bytes / 1024;
+            case 'MB':
+                return bytes / (1024 * 1024);
+            case 'GB':
+                return bytes / (1024 * 1024 * 1024);
+        }
+    }
+
+    private fromMsToDisplayUnit(ms: number, unit: DurationDisplayUnit): number {
+        switch (unit) {
+            case 'ms':
+                return ms;
+            case 's':
+                return ms / 1000;
+            case 'm':
+                return ms / 60_000;
+            case 'h':
+                return ms / 3_600_000;
+        }
+    }
+
+    private formatValueWithUnit(value: number | undefined, unit: string | undefined): string | undefined {
         if (value === undefined || value === null) {
             return undefined;
         }
         if (unit === 'count') {
-            return Math.round(value).toString();
+            return Math.round(value).toLocaleString();
         }
         if (unit === 'KB' || unit === 'MB') {
-            const bytes = unit === 'KB' ? value * 1024 : value * 1024 * 1024;
-            return this.formatBytes(bytes);
+            const bytes = this.toBytes(value, unit);
+            const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
+            return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
         }
         if (unit === 'ms') {
-            return this.formatDurationMs(value);
+            const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);
+            return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.durationDisplayUnit}`;
         }
-        const formatted = this.formatDecimal(value, 2);
+        const formatted = this.formatDecimal(value, DISPLAY_DECIMALS);
         return unit ? `${formatted} ${unit}` : formatted;
     }
 
-    private formatBaseTooltip(value: number | undefined, unit: string | undefined, mode: 'peak' | 'average'): string | undefined {
+    private formatBaseTooltip(value: number | undefined, unit: string | undefined): string | undefined {
         if (value === undefined || value === null) {
             return undefined;
         }
         if (unit === 'count') {
-            return `${Math.round(value)} count`;
+            return `${Math.round(value).toLocaleString()} count`;
+        }
+        if (unit === 'KB' || unit === 'MB') {
+            const bytes = this.toBytes(value, unit);
+            const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
+            return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
+        }
+        if (unit === 'ms') {
+            const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);
+            return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.durationDisplayUnit}`;
         }
         if (unit) {
-            const formatted = this.formatDecimal(value, 2);
+            const formatted = this.formatDecimal(value, DISPLAY_DECIMALS);
             return `${formatted} ${unit}`;
         }
-        return this.formatDecimal(value, 2);
-    }
-
-    private formatBytes(bytes: number): string {
-        const abs = Math.abs(bytes);
-        if (abs < 1024) {
-            return `${this.formatDecimal(bytes, 1)} B`;
-        }
-        if (abs < 1024 * 1024) {
-            return `${this.formatDecimal(bytes / 1024, 1)} KB`;
-        }
-        if (abs < 1024 * 1024 * 1024) {
-            return `${this.formatDecimal(bytes / (1024 * 1024), 1)} MB`;
-        }
-        return `${this.formatDecimal(bytes / (1024 * 1024 * 1024), 1)} GB`;
-    }
-
-    private formatDurationMs(ms: number): string {
-        const abs = Math.abs(ms);
-        if (abs < 1000) {
-            return `${this.formatDecimal(ms, 1)} ms`;
-        }
-        if (abs < 60_000) {
-            return `${this.formatDecimal(ms / 1000, 1)} s`;
-        }
-        if (abs < 3_600_000) {
-            return `${this.formatDecimal(ms / 60_000, 1)} m`;
-        }
-        return `${this.formatDecimal(ms / 3_600_000, 1)} h`;
+        return this.formatDecimal(value, DISPLAY_DECIMALS);
     }
 
     private formatDecimal(value: number, decimals: number): string {

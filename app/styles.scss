@@ -341,7 +341,7 @@ diagnostics-indicator {
 .diagnostics-progress {
   display: flex;
   flex-direction: row;
-  gap: 1em;
+  gap: 0.5em;
   align-items: center;
   width: 100%;
 
@@ -354,7 +354,7 @@ diagnostics-indicator {
 
   .diagnostics-progress-item {
     display: grid;
-    grid-template-columns: 5em 1fr;
+    grid-template-columns: 4.5em 1fr;
     gap: 0.5em;
     align-items: center;
   }
@@ -455,11 +455,11 @@ diagnostics-indicator {
 }
 
 .diagnostics-suspicious-warn {
-  background: color-mix(in srgb, var(--p-yellow-100) 35%, transparent);
+  color: var(--p-badge-warn-background);
 }
 
 .diagnostics-suspicious-bad {
-  background: color-mix(in srgb, var(--p-red-100) 35%, transparent);
+  color: var(--p-badge-danger-background);
 }
 
 .diagnostics-ellipsis {
@@ -948,6 +948,11 @@ map-view {
   .diagnostics-perf-progress,
   .diagnostics-perf-filter {
     margin: 0.25em 0.25em 0.5em 0.25em;
+  }
+
+  .diagnostics-perf-value {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
   }
 
   .diagnostics-perf-table {
