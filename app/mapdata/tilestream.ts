@@ -392,14 +392,12 @@ export class MapTileStreamClient {
             const startTime = Date.now();
             let handledMessages = 0;
             let grantFrames = 0;
-            let grantBytes = 0;
             while (this.frameQueue.length) {
                 const data = this.frameQueue.shift()!;
                 try {
                     const flowAccounting = await this.handleMessage(data);
                     if (flowAccounting.isFlowControlledDataFrame) {
                         grantFrames += 1;
-                        grantBytes += flowAccounting.frameBytes;
                     }
                     ++handledMessages;
                 } catch (err) {
@@ -409,7 +407,7 @@ export class MapTileStreamClient {
                     break;
                 }
             }
-            this.sendFlowGrant(grantFrames, grantBytes);
+            this.sendFlowGrant(grantFrames);
         } finally {
             this.processingFrameQueue = false;
         }
@@ -419,7 +417,7 @@ export class MapTileStreamClient {
         }
     }
 
-    private async handleMessage(data: ArrayBuffer | Blob): Promise<{ isFlowControlledDataFrame: boolean; frameBytes: number; }> {
+    private async handleMessage(data: ArrayBuffer | Blob): Promise<{ isFlowControlledDataFrame: boolean; }> {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
@@ -428,18 +426,18 @@ export class MapTileStreamClient {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
             console.warn("Unexpected WebSocket message payload.");
-            return {isFlowControlledDataFrame: false, frameBytes: 0};
+            return {isFlowControlledDataFrame: false};
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
             console.warn("Tile stream frame too small.");
-            return {isFlowControlledDataFrame: false, frameBytes: 0};
+            return {isFlowControlledDataFrame: false};
         }
 
         const type = bytes[6];
         const isFlowControlledDataFrame = this.isFlowControlledDataFrameType(type);
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
-            return {isFlowControlledDataFrame, frameBytes: bytes.length};
+            return {isFlowControlledDataFrame};
         }
 
         try {
@@ -454,7 +452,7 @@ export class MapTileStreamClient {
                 try {
                     const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
                     if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                        return {isFlowControlledDataFrame};
                     }
                     if (this.onStatus) {
                         this.onStatus(payload);
@@ -467,7 +465,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles status payload:", err);
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (type === MAP_TILE_STREAM_TYPE_LOAD_STATE) {
@@ -476,7 +474,7 @@ export class MapTileStreamClient {
                 try {
                     const payload = JSON.parse(payloadText) as MapTileStreamLoadStatePayload;
                     if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                        return {isFlowControlledDataFrame};
                     }
                     if (this.onLoadState) {
                         this.onLoadState(payload);
@@ -484,7 +482,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles load-state payload:", err);
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
@@ -499,7 +497,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles request-context payload:", err);
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
@@ -509,21 +507,21 @@ export class MapTileStreamClient {
                 if (this.onFields) {
                     this.onFields(bytes);
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
                 if (this.onFeatures) {
                     this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame, frameBytes: bytes.length};
+                return {isFlowControlledDataFrame};
             }
 
             if (this.onFrame) {
@@ -532,7 +530,7 @@ export class MapTileStreamClient {
         } catch (err) {
             console.error("Tile stream message handler failed.", err);
         }
-        return {isFlowControlledDataFrame, frameBytes: bytes.length};
+        return {isFlowControlledDataFrame};
     }
 
     private isFlowControlledDataFrameType(type: number): boolean {
@@ -551,11 +549,11 @@ export class MapTileStreamClient {
         return requestId === this.latestRequestedRequestId;
     }
 
-    private sendFlowGrant(frames: number, bytes: number) {
+    private sendFlowGrant(frames: number) {
         if (!this.flowControlEnabled) {
             return;
         }
-        if (frames <= 0 && bytes <= 0) {
+        if (frames <= 0) {
             return;
         }
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -564,7 +562,6 @@ export class MapTileStreamClient {
         const payload = {
             type: MAP_TILE_STREAM_FLOW_GRANT_TYPE,
             frames: Math.max(0, Math.floor(frames)),
-            bytes: Math.max(0, Math.floor(bytes)),
         };
         try {
             this.socket.send(JSON.stringify(payload));

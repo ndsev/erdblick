@@ -335,7 +335,7 @@ sequenceDiagram
     end
   end
 
-  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). After each slice,<br>client grants more flow credits (frames/bytes) to backend.
+  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). After each slice,<br>client grants more frame credits to backend.
   Note over MapSvc: processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive.
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
@@ -351,8 +351,9 @@ In `MapDataService` this flow is implemented roughly as follows:
   - `stringPoolOffsets` comes from the shared `TileLayerParser` field dictionary so the backend can skip already-known strings.
   - Request deduplication compares the request body without `requestId`, so identical logical requests are not resent.
 - `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. WebSocket `onmessage` only enqueues; parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
-- At the end of each parsing slice, the client sends a flow-grant control message (`{ type: "mapget.tiles.flow-grant", frames, bytes }`) for all processed flow-controlled frames (Fields/Features/SourceData). This is the backpressure signal to mapget.
-- In current mapget builds, flow-controlled output is connection-scoped and gated by both frame credits and byte credits (`creditFrames > 0 && creditBytes > 0`). The default credit caps are 16 frames and 64 MiB per connection.
+- At the end of each parsing slice, the client sends a flow-grant control message (`{ type: "mapget.tiles.flow-grant", frames }`) for all processed flow-controlled frames (Fields/Features/SourceData). This is the backpressure signal to mapget.
+- In current mapget builds, flow-controlled output is connection-scoped and gated by frame credits (`creditFrames > 0`). The default frame credit cap is 2 per connection.
+- On each request update, mapget keeps the same WebSocket session, drops queued tile frames that are no longer requested, and avoids re-requesting tiles that are already queued or already sent but not yet granted.
 - `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
 - `Fields` frames are applied immediately through `TileLayerParser.readFieldDictUpdate(...)` so subsequent Feature/SourceData payloads can resolve string references.
 - `Status` frames (`mapget.tiles.status`) contain per-request results, `allDone`, and optional `requestId`. Erdblick ignores stale status messages whose `requestId` does not match the most recent request.
