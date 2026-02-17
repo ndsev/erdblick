@@ -32,24 +32,24 @@ interface SourceLayerMenuItem {
                                                (mousedown)="$event.stopPropagation()"
                                                (ngModelChange)="stateService.setInspectionPanelColor(panel().id, panel().color)">
                                 </p-colorpicker>
+                            } @else if (isMetadata) {
+                                <p-tag severity="info" value="META" [rounded]="true" />
+                            } @else if (panel().sourceData !== undefined) {
+                                <p-tag severity="success" value="DATA" [rounded]="true" />
                             }
-                            <div class="title" [pTooltip]="title" tooltipPosition="bottom"
-                                 (mousedown)="$event.stopPropagation()"
+                            <div class="title" [pTooltip]="panel().locked ? 'Unlock panel' : 'Lock panel'" 
+                                 tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
                                  (click)="toggleLockedState($event)">
-                                @if (panel().locked) {
-                                    <span class="material-symbols-outlined">
+                                <span class="material-symbols-outlined">
+                                    @if (panel().locked) {
                                         lock
-                                    </span>
-                                } @else {
-                                    <span class="material-symbols-outlined">
+                                    } @else {
                                         lock_open_right
-                                    </span>
-                                }
-                                @if (panel().sourceData !== undefined) {
-                                    <span>Data.{{ title }}</span>
-                                } @else {
-                                    <span>{{ title }}</span>
-                                }
+                                    }
+                                </span>
+                                <span>
+                                    {{ title }}
+                                </span>
                             </div>
                             @if (panel().sourceData !== undefined) {
                                 <p-select class="source-layer-dropdown" [options]="layerMenuItems"
@@ -166,9 +166,9 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
     @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
     @ViewChild('extraMenu') extraMenu!: ContextMenu;
     extraMenuItems: MenuItem[] = [];
-    private lastExtraMenuEvent?: MouseEvent;
     private lastExtraMenuTarget?: HTMLElement;
     private autoExpandTimer?: number;
+    isMetadata: boolean = false;
 
     constructor(private mapService: MapDataService,
                 public stateService: AppStateService,
@@ -179,14 +179,15 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;
                 const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
-                this.title = tileId === 0n ? `Metadata for ${mapId}: ` : `${tileId}.`;
+                this.isMetadata = tileId === 0n;
+                this.title = this.isMetadata ? `${mapId}:` : `${tileId}.`;
                 const map = this.mapService.maps.maps.get(mapId);
                 if (map) {
                     this.layerMenuItems = Array.from(map.layers.values())
                         .filter(item => item.type === "SourceData")
                         .filter(item => {
-                            return (item.id.startsWith("SourceData") && tileId !== 0n) ||
-                                (item.id.startsWith("Metadata") && tileId === 0n);
+                            return (item.id.startsWith("SourceData") && !this.isMetadata) ||
+                                (item.id.startsWith("Metadata") && this.isMetadata);
                         })
                         .map(item => {
                             return {
@@ -319,7 +320,6 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
 
     protected openExtraMenu(event: MouseEvent) {
         event.stopPropagation();
-        this.lastExtraMenuEvent = event;
         this.lastExtraMenuTarget = (event.currentTarget || event.target) as HTMLElement | undefined;
         this.extraMenuItems = [
             {

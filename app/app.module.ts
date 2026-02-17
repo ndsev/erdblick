@@ -105,6 +105,7 @@ import {DiagnosticsProgressComponent} from "./diagnostics/diagnostics.progress.c
 import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
 import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
 import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
+import {Tag} from "primeng/tag";
 
 export const ErdblickTheme = definePreset(Aura, {
     semantic: {
@@ -252,7 +253,8 @@ export const initializeServices = () => {
         ToggleSwitch,
         ToggleButton,
         Menubar,
-        Ripple
+        Ripple,
+        Tag
     ],
     providers: [
         provideAppInitializer(initializeServices),

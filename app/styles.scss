@@ -1361,9 +1361,12 @@ body.dialog-dragging * {
         gap: 0.125em;
         align-items: center;
         cursor: pointer;
+        padding: 0.15em 0.15em 0.15em 0;
 
         &:hover {
-          color: var(--p-primary-color);
+          color: var(--p-primary-contrast-color);
+          border-radius: 6px;
+          background-color: var(--p-primary-color);
 
           span {
             color: inherit;
@@ -1981,9 +1984,12 @@ body.dialog-dragging * {
         gap: 0.125em;
         align-items: center;
         cursor: pointer;
+        padding: 0.15em 0.15em 0.15em 0;
 
         &:hover {
-          color: var(--p-primary-color);
+          color: var(--p-primary-contrast-color);
+          border-radius: 6px;
+          background-color: var(--p-primary-color);
 
           span {
             color: inherit;

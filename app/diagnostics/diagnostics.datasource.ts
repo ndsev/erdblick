@@ -341,7 +341,7 @@ export function buildAggregatedPerfStats(tiles: Iterable<FeatureTile>, maxPeakTi
     const statsByKey = new Map<string, AggregatedPerfAccumulator>();
 
     for (const tile of tiles) {
-        if (!tile || typeof tile.hasData !== 'function' || !tile.hasData()) {
+        if (!tile || typeof tile.hasData !== 'function' || !tile.hasData() || tile.numFeatures <= 0) {
             continue;
         }
         const tileId = tile.tileId?.toString?.() ?? tile.mapTileKey ?? '';

@@ -88,11 +88,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             icon: 'build',
             items: [
                 {
-                    name: 'Logs',
-                    icon: 'list_alt',
-                    command: () => { this.openDiagnosticsLog(); }
-                },
-                {
                     name: 'Performance Statistics',
                     icon: 'insights',
                     command: () => { this.openDiagnosticsPerformance(); }
@@ -101,6 +96,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     name: 'Export Diagnostics',
                     icon: 'download',
                     command: () => { this.openDiagnosticsExport(); }
+                },
+                {
+                    name: 'Logs',
+                    icon: 'list_alt',
+                    command: () => { this.openDiagnosticsLog(); }
                 }
             ]
         },
@@ -109,14 +109,14 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             icon: 'question_mark',
             items: [
                 {
-                    name: 'Help',
-                    icon: 'question_mark',
-                    command: () => { this.openHelp(); }
-                },
-                {
                     name: 'Controls',
                     icon: 'keyboard',
                     command: () => { this.showControlsDialog(); }
+                },
+                {
+                    name: 'Help',
+                    icon: 'question_mark',
+                    command: () => { this.openHelp(); }
                 },
                 {
                     name: 'About',
