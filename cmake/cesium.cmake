@@ -21,10 +21,9 @@ set(CESIUM_LIBS
 # isolation.
 FetchContent_Declare(cesiumnative_src
   GIT_REPOSITORY "https://github.com/Klebert-Engineering/cesium-native.git"
-  GIT_TAG "main"
+  GIT_TAG "c9f1966"
   GIT_SUBMODULES_RECURSE YES
   GIT_PROGRESS YES
-  PATCH_COMMAND git reset --hard HEAD && git -C extern/draco reset --hard HEAD && git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cesium.patch"
   UPDATE_DISCONNECTED YES
   UPDATE_COMMAND "")
 
@@ -57,10 +56,17 @@ if (CMAKE_TOOLCHAIN_FILE)
   list(APPEND CESIUM_EXTRA_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
 endif()
 
+set(CESIUM_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Cesium uses GLM_FORCE_INTRINSICS, which disables GLM constexpr support.
+  # GCC then emits -Winvalid-constexpr in Cesium headers; do not make it fatal.
+  string(APPEND CESIUM_CXX_FLAGS " -Wno-error=invalid-constexpr")
+endif()
+
 ExternalProject_Add(cesiumnative
   SOURCE_DIR ${cesiumnative_src_SOURCE_DIR}
   CMAKE_ARGS
-    -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+    "-DCMAKE_CXX_FLAGS=${CESIUM_CXX_FLAGS}"
     -DCESIUM_TESTS_ENABLED=OFF
     -DCESIUM_GLM_STRICT_ENABLED=OFF
     -DCESIUM_TRACING_ENABLED=OFF

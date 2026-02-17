@@ -22,6 +22,13 @@ endif()
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
+
+FetchContent_Declare(yaml-cpp
+  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
+  GIT_TAG        "yaml-cpp-0.9.0"
+  GIT_SHALLOW    OFF)
+FetchContent_MakeAvailable(yaml-cpp)
+
 if (NOT TARGET mapget)
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
@@ -29,12 +36,6 @@ if (NOT TARGET mapget)
     GIT_SHALLOW    OFF)
   FetchContent_MakeAvailable(mapget)
 endif()
-
-FetchContent_Declare(yaml-cpp
-  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "aa8d4e"
-  GIT_SHALLOW    OFF)
-FetchContent_MakeAvailable(yaml-cpp)
 
 include(cmake/cesium.cmake)
 
