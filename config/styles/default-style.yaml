@@ -53,6 +53,14 @@ rules:
     width: 10.0
     mode: hover
     offset: [0, 0, -0.01]
+  - aspect: attribute
+    attribute-validity-geom: required
+    geometry: ["line"]
+    color: green
+    opacity: 0.8
+    width: 10.0
+    mode: hover
+    offset: [0, 0, -0.01]
   - geometry: ["point"]
     color: green
     opacity: 0.8

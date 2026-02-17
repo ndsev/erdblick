@@ -69,12 +69,16 @@ function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
 }
 
 function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
+    const totalStart = performance.now();
+    let deserializeMs = 0;
     let tile: any = null;
     let deckVisu: any = null;
     try {
         const parser = getOrCreateParser(task);
         const style = getOrCreateStyle(task.styleSource);
+        const deserializeStart = performance.now();
         tile = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), task.tileBlob) as any;
+        deserializeMs = performance.now() - deserializeStart;
 
         deckVisu = new coreLib.DeckFeatureLayerVisualization(
             task.viewIndex,
@@ -84,6 +88,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             resolveHighlightMode(task.highlightModeValue),
             task.featureIdSubset
         );
+        const renderStart = performance.now();
         deckVisu.addTileFeatureLayer(tile);
         deckVisu.run();
 
@@ -95,6 +100,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const featureIds = readRawBytes(deckVisu, "pathFeatureIdsRaw");
         const dashArrays = readRawBytes(deckVisu, "pathDashArrayRaw");
         const dashOffsets = readRawBytes(deckVisu, "pathDashOffsetsRaw");
+        const renderMs = performance.now() - renderStart;
 
         return {
             type: "DeckPathRenderResult",
@@ -107,7 +113,12 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             widths: widths.buffer,
             featureIds: featureIds.buffer,
             dashArrays: dashArrays.buffer,
-            dashOffsets: dashOffsets.buffer
+            dashOffsets: dashOffsets.buffer,
+            timings: {
+                deserializeMs,
+                renderMs,
+                totalMs: performance.now() - totalStart
+            }
         };
     } finally {
         if (deckVisu && typeof deckVisu.delete === "function") {
@@ -117,6 +128,26 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             tile.delete();
         }
     }
+}
+
+function emptyResultBuffers() {
+    return {
+        coordinateOrigin: new ArrayBuffer(0),
+        positions: new ArrayBuffer(0),
+        startIndices: new ArrayBuffer(0),
+        colors: new ArrayBuffer(0),
+        widths: new ArrayBuffer(0),
+        featureIds: new ArrayBuffer(0),
+        dashArrays: new ArrayBuffer(0),
+        dashOffsets: new ArrayBuffer(0)
+    };
+}
+
+function toErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message || error.toString();
+    }
+    return String(error);
 }
 
 addEventListener("message", async ({data}) => {
@@ -130,17 +161,30 @@ addEventListener("message", async ({data}) => {
         return;
     }
 
-    await initializeLibrary();
+    const task = message as DeckPathRenderTask;
+    try {
+        await initializeLibrary();
 
-    const result = processPathRenderTask(message as DeckPathRenderTask);
-    postMessage(result, [
-        result.coordinateOrigin,
-        result.positions,
-        result.startIndices,
-        result.colors,
-        result.widths,
-        result.featureIds,
-        result.dashArrays,
-        result.dashOffsets
-    ]);
+        const result = processPathRenderTask(task);
+        postMessage(result, [
+            result.coordinateOrigin,
+            result.positions,
+            result.startIndices,
+            result.colors,
+            result.widths,
+            result.featureIds,
+            result.dashArrays,
+            result.dashOffsets
+        ]);
+    } catch (error) {
+        const buffers = emptyResultBuffers();
+        const failure: DeckPathRenderResult = {
+            type: "DeckPathRenderResult",
+            taskId: task.taskId,
+            tileKey: task.tileKey,
+            ...buffers,
+            error: toErrorMessage(error)
+        };
+        postMessage(failure);
+    }
 });

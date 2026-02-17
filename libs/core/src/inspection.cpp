@@ -200,9 +200,8 @@ void InspectionConverter::convertAttributeLayer(
         }
 
         attrScope->mapId_ = JsValue(tile_->mapId());
-        attrScope->hoverId_ = featureId_+":attribute#"+std::to_string(nextAttributeIndex_);
-
-        ++nextAttributeIndex_;
+        attrScope->hoverId_ = featureId_ + ":attribute#" +
+                              std::to_string(static_cast<uint32_t>(attr->addr().index()));
         return true;
     });
 }

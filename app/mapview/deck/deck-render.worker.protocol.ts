@@ -23,6 +23,12 @@ export interface DeckWorkerReadyMessage {
     scriptUrl: string;
 }
 
+export interface DeckWorkerTimings {
+    deserializeMs: number;
+    renderMs: number;
+    totalMs: number;
+}
+
 export interface DeckPathRenderResult {
     type: "DeckPathRenderResult";
     taskId: string;
@@ -35,6 +41,7 @@ export interface DeckPathRenderResult {
     featureIds: ArrayBuffer;
     dashArrays: ArrayBuffer;
     dashOffsets: ArrayBuffer;
+    timings?: DeckWorkerTimings;
     error?: string;
 }
 

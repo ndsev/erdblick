@@ -89,7 +89,6 @@ public:
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
-    uint32_t nextAttributeIndex_ = 0;
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;

@@ -6,9 +6,8 @@ import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
-import {deckRenderWorkerPool} from "./deck-render.worker.pool";
-
-const ENABLE_DECK_WORKER_POOL = false;
+import {deckRenderWorkerPool, isDeckRenderWorkerPoolEnabled} from "./deck-render.worker.pool";
+import {DeckWorkerTimings} from "./deck-render.worker.protocol";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
@@ -76,6 +75,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
+    private latestWorkerTimings: DeckWorkerTimings | null = null;
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
@@ -103,6 +103,7 @@ export class DeckTileVisualization implements ITileVisualization {
         if (this.deleted || this.style.isDeleted()) {
             return false;
         }
+        this.latestWorkerTimings = null;
         const startTime = performance.now();
         const pathLayerKey = makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
@@ -146,7 +147,10 @@ export class DeckTileVisualization implements ITileVisualization {
             this.tileFeatureCountAtLastRender = this.tileFeatureCount();
             return true;
         } finally {
-            this.recordRenderTimeSample(performance.now() - startTime);
+            const workerTimings = this.consumeLatestWorkerTimings();
+            const wallTimeMs = performance.now() - startTime;
+            this.recordRenderTimeSample(wallTimeMs, workerTimings?.totalMs);
+            this.recordWorkerParseTimeSample(workerTimings?.deserializeMs);
         }
     }
 
@@ -205,27 +209,40 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private async renderWasm(): Promise<DeckPathLayerData | null> {
-        if (ENABLE_DECK_WORKER_POOL) {
-            const workerResult = await this.renderWasmInWorker();
-            if (workerResult) {
-                return workerResult;
+        if (isDeckRenderWorkerPoolEnabled()) {
+            try {
+                const workerResult = await this.renderWasmInWorker();
+                if (workerResult) {
+                    return workerResult;
+                }
+            } catch (error) {
+                console.error("Deck worker rendering failed; falling back to main thread rendering.", error);
             }
         }
         return await this.renderWasmOnMainThread();
     }
 
     private async renderWasmInWorker(): Promise<DeckPathLayerData | null> {
+        const tileBlob = this.tile.tileFeatureLayerBlob;
+        if (!tileBlob) {
+            return null;
+        }
         const tileWithParserContext = this.tile as FeatureTile & {
             getFieldDictBlob?: () => Uint8Array | null;
             getDataSourceInfoBlob?: () => Uint8Array | null;
         };
+        const fieldDictBlob = tileWithParserContext.getFieldDictBlob?.();
+        const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob?.();
+        if (!fieldDictBlob || !dataSourceInfoBlob) {
+            return null;
+        }
         const pool = deckRenderWorkerPool();
         const result = await pool.renderPaths({
             viewIndex: this.viewIndex,
             tileKey: this.tile.mapTileKey,
-            tileBlob: this.tile.tileFeatureLayerBlob as Uint8Array,
-            fieldDictBlob: tileWithParserContext.getFieldDictBlob!() as Uint8Array,
-            dataSourceInfoBlob: tileWithParserContext.getDataSourceInfoBlob!() as Uint8Array,
+            tileBlob,
+            fieldDictBlob,
+            dataSourceInfoBlob,
             nodeId: this.tile.nodeId,
             mapName: this.tile.mapName,
             styleSource: this.styleSource,
@@ -233,10 +250,12 @@ export class DeckTileVisualization implements ITileVisualization {
             highlightModeValue: this.highlightMode.value,
             featureIdSubset: [...this.featureIdSubset]
         });
+        this.latestWorkerTimings = result.workerTimings ?? null;
         return this.buildPathLayerData(result);
     }
 
     private async renderWasmOnMainThread(): Promise<DeckPathLayerData | null> {
+        this.latestWorkerTimings = null;
         let deckVisu: any;
         try {
             deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
@@ -399,15 +418,31 @@ export class DeckTileVisualization implements ITileVisualization {
         return {...this.options};
     }
 
-    private recordRenderTimeSample(durationMs: number): void {
+    private recordRenderTimeSample(durationMs: number, measuredDurationMs?: number): void {
+        const sampleDuration = Number.isFinite(measuredDurationMs)
+            ? measuredDurationMs as number
+            : durationMs;
         const tileWithStats = this.tile as unknown as { stats: Map<string, number[]> };
         const timingListKey = `Rendering/${this.statsHighlightModeLabel()}/${this.styleId}#ms`;
         const timingList = tileWithStats.stats.get(timingListKey);
         if (timingList) {
-            timingList.push(durationMs);
+            timingList.push(sampleDuration);
             return;
         }
-        tileWithStats.stats.set(timingListKey, [durationMs]);
+        tileWithStats.stats.set(timingListKey, [sampleDuration]);
+    }
+
+    private recordWorkerParseTimeSample(durationMs?: number): void {
+        if (!Number.isFinite(durationMs)) {
+            return;
+        }
+        const tileWithStats = this.tile as unknown as { stats: Map<string, number[]> };
+        const parseTimes = tileWithStats.stats.get(FeatureTile.statParseTime);
+        if (parseTimes) {
+            parseTimes.push(durationMs as number);
+            return;
+        }
+        tileWithStats.stats.set(FeatureTile.statParseTime, [durationMs as number]);
     }
 
     private statsHighlightModeLabel(): string {
@@ -424,5 +459,11 @@ export class DeckTileVisualization implements ITileVisualization {
     private resolveRegistry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry {
         const scene = sceneHandle.scene as DeckSceneHandle;
         return scene.layerRegistry!;
+    }
+
+    private consumeLatestWorkerTimings(): DeckWorkerTimings | null {
+        const timings = this.latestWorkerTimings;
+        this.latestWorkerTimings = null;
+        return timings;
     }
 }

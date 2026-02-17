@@ -1,8 +1,13 @@
 import {
     DeckPathRenderResult,
     DeckPathRenderTask,
+    DeckWorkerTimings,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
+
+const AUTO_WORKER_CAP = 8;
+const AUTO_WORKER_FALLBACK = 4;
+const WORKER_OVERRIDE_CAP = 32;
 
 export interface DeckPathRenderRequest {
     viewIndex: number;
@@ -27,6 +32,12 @@ export interface DeckPathRenderBuffers {
     featureIds: Uint32Array;
     dashArrays: Float32Array;
     dashOffsets: Float32Array;
+    workerTimings?: DeckWorkerTimings;
+}
+
+export interface DeckRenderWorkerSettings {
+    enabled: boolean;
+    workerCountOverride: number | null;
 }
 
 type PendingTask = {
@@ -41,8 +52,11 @@ export class DeckRenderWorkerPool {
     private readonly runningTaskIdByWorker: Array<string | null> = [];
     private readonly pendingQueue: PendingTask[] = [];
     private readonly inFlightByTaskId = new Map<string, PendingTask>();
+    private workerBlobUrl: string | null = null;
     private initPromise: Promise<void> | null = null;
     private nextTaskId = 0;
+
+    constructor(private readonly maxWorkers: number) {}
 
     async renderPaths(request: DeckPathRenderRequest): Promise<DeckPathRenderBuffers> {
         await this.ensureInitialized();
@@ -60,25 +74,27 @@ export class DeckRenderWorkerPool {
 
     private async ensureInitialized(): Promise<void> {
         if (!this.initPromise) {
-            this.initPromise = this.initializeWorkers();
+            this.initPromise = this.initializeWorkers().catch((error) => {
+                this.initPromise = null;
+                throw error;
+            });
         }
         return await this.initPromise;
     }
 
     private async initializeWorkers(): Promise<void> {
-        const concurrency = Math.floor((globalThis as any).navigator.hardwareConcurrency);
-        const maxWorkers = Math.max(1, Math.min(concurrency, 8));
         const firstWorker = new Worker(new URL("./deck-render.worker", import.meta.url), {type: "module"});
         const moduleUrl = await this.waitForWorkerReady(firstWorker);
         this.registerWorker(firstWorker, 0);
 
-        if (maxWorkers <= 1) {
+        if (this.maxWorkers <= 1) {
             return;
         }
 
-        console.log(`Creating ${maxWorkers} workers.`);
         const workerBlobUrl = await this.fetchWorkerBlobUrl(moduleUrl);
-        for (let i = 1; i < maxWorkers; i++) {
+        this.workerBlobUrl = workerBlobUrl;
+        console.log(`Creating ${this.maxWorkers} workers.`);
+        for (let i = 1; i < this.maxWorkers; i++) {
             const worker = new Worker(workerBlobUrl, {type: "module"});
             this.registerWorker(worker, i);
         }
@@ -141,7 +157,10 @@ export class DeckRenderWorkerPool {
     }
 
     private handleTaskResult(result: DeckPathRenderResult): void {
-        const pending = this.inFlightByTaskId.get(result.taskId)!;
+        const pending = this.inFlightByTaskId.get(result.taskId);
+        if (!pending) {
+            return;
+        }
         this.inFlightByTaskId.delete(result.taskId);
         if (result.error) {
             pending.reject(new Error(result.error));
@@ -156,7 +175,8 @@ export class DeckRenderWorkerPool {
             widths: this.toFloat32Array(result.widths),
             featureIds: this.toUint32Array(result.featureIds),
             dashArrays: this.toFloat32Array(result.dashArrays),
-            dashOffsets: this.toFloat32Array(result.dashOffsets)
+            dashOffsets: this.toFloat32Array(result.dashOffsets),
+            workerTimings: result.timings
         });
     }
 
@@ -210,13 +230,84 @@ export class DeckRenderWorkerPool {
     private toUint8Array(buffer: ArrayBuffer): Uint8Array {
         return new Uint8Array(buffer);
     }
+
+    dispose(reason = "Deck render worker pool reset."): void {
+        const resetError = new Error(reason);
+        while (this.pendingQueue.length > 0) {
+            const pending = this.pendingQueue.shift()!;
+            pending.reject(resetError);
+        }
+        for (const pending of this.inFlightByTaskId.values()) {
+            pending.reject(resetError);
+        }
+        this.inFlightByTaskId.clear();
+        this.workerBusy.length = 0;
+        this.runningTaskIdByWorker.length = 0;
+        for (const worker of this.workers) {
+            worker.terminate();
+        }
+        this.workers.length = 0;
+        if (this.workerBlobUrl) {
+            URL.revokeObjectURL(this.workerBlobUrl);
+            this.workerBlobUrl = null;
+        }
+        this.initPromise = null;
+    }
 }
+
+let settings: DeckRenderWorkerSettings = {
+    enabled: false,
+    workerCountOverride: null
+};
 
 let singleton: DeckRenderWorkerPool | null = null;
 
+function sanitizeWorkerOverride(workerCountOverride: number | null): number | null {
+    if (workerCountOverride === null || workerCountOverride === undefined) {
+        return null;
+    }
+    if (!Number.isFinite(workerCountOverride)) {
+        return null;
+    }
+    return Math.max(1, Math.min(Math.floor(workerCountOverride), WORKER_OVERRIDE_CAP));
+}
+
+function resolveAutoWorkerCount(): number {
+    const rawConcurrency = Number((globalThis as any).navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK);
+    if (!Number.isFinite(rawConcurrency) || rawConcurrency < 1) {
+        return AUTO_WORKER_FALLBACK;
+    }
+    return Math.max(1, Math.min(Math.floor(rawConcurrency), AUTO_WORKER_CAP));
+}
+
+function resolveConfiguredWorkerCount(): number {
+    if (settings.workerCountOverride !== null) {
+        return settings.workerCountOverride;
+    }
+    return resolveAutoWorkerCount();
+}
+
+export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings): void {
+    const normalized: DeckRenderWorkerSettings = {
+        enabled: !!next.enabled,
+        workerCountOverride: sanitizeWorkerOverride(next.workerCountOverride)
+    };
+    const changed = settings.enabled !== normalized.enabled ||
+        settings.workerCountOverride !== normalized.workerCountOverride;
+    settings = normalized;
+    if (changed && singleton) {
+        singleton.dispose("Deck render worker pool reconfigured.");
+        singleton = null;
+    }
+}
+
+export function isDeckRenderWorkerPoolEnabled(): boolean {
+    return settings.enabled;
+}
+
 export function deckRenderWorkerPool(): DeckRenderWorkerPool {
     if (!singleton) {
-        singleton = new DeckRenderWorkerPool();
+        singleton = new DeckRenderWorkerPool(resolveConfiguredWorkerCount());
     }
     return singleton;
 }

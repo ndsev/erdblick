@@ -197,6 +197,56 @@ describe("DeckTileVisualization", () => {
         expect(samples![0]).toBeGreaterThanOrEqual(0);
     });
 
+    it("uses worker timing samples for render and parse stats when available", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            style,
+            "",
+            true,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async function() {
+            this.latestWorkerTimings = {
+                deserializeMs: 3.5,
+                renderMs: 7.25,
+                totalMs: 11.75
+            };
+            return null;
+        };
+
+        await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+
+        const renderSamples = tile.stats.get("Rendering/Basic/test-style#ms");
+        expect(renderSamples).toBeDefined();
+        expect(renderSamples!.length).toBe(1);
+        expect(renderSamples![0]).toBe(11.75);
+
+        const parseSamples = tile.stats.get("Rendering/Feature-Model-Parsing#ms");
+        expect(parseSamples).toBeDefined();
+        expect(parseSamples!.length).toBe(1);
+        expect(parseSamples![0]).toBe(3.5);
+    });
+
     it("maps raw WASM line style buffers without hardcoded fallback colors", () => {
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",

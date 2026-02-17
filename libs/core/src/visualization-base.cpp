@@ -421,23 +421,29 @@ void FeatureLayerVisualizationBase::addFeature(
             break;
         }
 
+        auto const hoverAttributeSubsetActive =
+            !featureIdSubset_.empty() &&
+            highlightMode_ == FeatureStyleRule::HoverHighlight;
+        std::string featureIdForAttributes;
+        if (hoverAttributeSubsetActive) {
+            featureIdForAttributes = resolveFeatureId();
+        }
+
         uint32_t offsetFactor = 0;
-        uint32_t attrIndex = 0;
         attrLayers->forEachLayer([&, this](auto&& layerName, auto&& layer){
             if (auto const& attrLayerTypeRegex = rule.attributeLayerType()) {
                 if (!std::regex_match(layerName.begin(), layerName.end(), *attrLayerTypeRegex)) {
-                    attrIndex += layer->size();
                     return true;
                 }
             }
             layer->forEachAttribute([&, this](auto&& attr){
-                if (!featureIdSubset_.empty() && highlightMode_ == FeatureStyleRule::HoverHighlight) {
-                     if (!featureIdSubset_.contains(fmt::format("{}:attribute#{}", resolveFeatureId(), attrIndex))) {
-                         attrIndex++;
+                if (hoverAttributeSubsetActive) {
+                     auto const attributeIndex = static_cast<uint32_t>(attr->addr().index());
+                     if (!featureIdSubset_.contains(
+                            fmt::format("{}:attribute#{}", featureIdForAttributes, attributeIndex))) {
                          return true;
                      }
                 }
-                attrIndex++;
                 addAttribute(
                     feature,
                     layerName,

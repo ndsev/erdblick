@@ -10,6 +10,7 @@ import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from 
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {CesiumTileVisualization} from "../mapview/cesium/cesium-tile.visualization.model";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
+import {configureDeckRenderWorkerSettings} from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
@@ -119,6 +120,19 @@ export class MapDataService {
         // Triggered when the user requests to zoom to a map layer.
         this.moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
         this.moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
+
+        const applyDeckWorkerSettings = () => {
+            configureDeckRenderWorkerSettings({
+                enabled: this.stateService.deckStyleWorkersEnabled,
+                workerCountOverride: this.stateService.deckStyleWorkersOverride
+                    ? this.stateService.deckStyleWorkersCount
+                    : null
+            });
+        };
+        applyDeckWorkerSettings();
+        this.stateService.deckStyleWorkersEnabledState.subscribe(applyDeckWorkerSettings);
+        this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
+        this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
 
         this.stateService.numViewsState.subscribe(numViews => {
             const diff = numViews - this.viewVisualizationState.length;
