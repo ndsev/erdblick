@@ -15,6 +15,8 @@
 .erdblick-dark {
   --erdblick-card-bg: rgba(0, 0, 0, 0.5);
   --erdblick-card-bg-hover: rgba(0, 0, 0, 0.65);
+  --p-treetable-row-hover-background: color-mix(in srgb, var(--p-primary-400) 20%, transparent) !important;
+  --p-highlight-background: color-mix(in srgb, var(--p-primary-400), transparent 75%) !important;
 }
 
 :root {
@@ -986,15 +988,7 @@ map-view {
 
     tr.diagnostics-perf-root > td {
       font-weight: 700;
-      background: color-mix(in srgb, var(--p-primary-100) 50%, transparent);
-    }
-
-    tr.diagnostics-perf-stripe-even:not(.diagnostics-perf-root) > td {
-      background: color-mix(in srgb, var(--p-content-background) 80%, var(--p-surface-50) 20%);
-    }
-
-    tr.diagnostics-perf-stripe-odd:not(.diagnostics-perf-root) > td {
-      background: color-mix(in srgb, var(--p-content-background) 92%, transparent);
+      background: var(--p-highlight-background);
     }
   }
 }

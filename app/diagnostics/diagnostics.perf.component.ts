@@ -83,6 +83,7 @@ const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
                          [resizableColumns]="true"
                          columnResizeMode="expand"
                          [rowTrackBy]="trackNodeByPath"
+                         [rowHover]="true"
                          (onNodeExpand)="onNodeExpand($event.node)"
                          (onNodeCollapse)="onNodeCollapse($event.node)">
                 <ng-template pTemplate="header">
@@ -416,9 +417,6 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 }
                 if (isRootParent) {
                     classes.push('diagnostics-perf-root');
-                } else {
-                    classes.push(stripeIndex % 2 === 0 ? 'diagnostics-perf-stripe-even' : 'diagnostics-perf-stripe-odd');
-                    stripeIndex += 1;
                 }
                 rowData.rowClass = classes.join(' ');
 

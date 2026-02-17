@@ -36,6 +36,7 @@ export class FeatureFilterOptions {
                      [autoLayout]="true"
                      [scrollable]="true"
                      [resizableColumns]="true"
+                     [rowHover]="true"
                      [virtualScroll]="true"
                      [virtualScrollItemSize]="'1.5em'"
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
