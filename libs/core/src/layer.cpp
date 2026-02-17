@@ -97,6 +97,24 @@ int32_t TileFeatureLayer::findFeatureIndex(std::string type, NativeJsValue idPar
     return -1;
 }
 
+std::string TileFeatureLayer::featureIdByIndex(uint32_t index) const
+{
+    if (index >= model_->numRoots()) {
+        return {};
+    }
+    uint32_t currentIndex = 0;
+    for (auto&& feature : *model_) {
+        if (currentIndex++ != index) {
+            continue;
+        }
+        if (auto featureId = feature->id()) {
+            return featureId->toString();
+        }
+        return {};
+    }
+    return {};
+}
+
 TileFeatureLayer::~TileFeatureLayer() = default;
 
 /**

@@ -15,7 +15,7 @@ CesiumPointPrimitiveCollection::CesiumPointPrimitiveCollection() :
 JsValue CesiumPointPrimitiveCollection::pointParams(
     const JsValue& position,
     const FeatureStyleRule& style,
-    const JsValue& id,
+    uint32_t id,
     const BoundEvalFun& evalFun)
 {
     auto const color = style.color(evalFun);
@@ -25,7 +25,7 @@ JsValue CesiumPointPrimitiveCollection::pointParams(
         {"position", position},
         {"color", Cesium().Color.New(color.r, color.g, color.b, color.a)},
         {"pixelSize", JsValue(style.width())},
-        {"id", id},
+        {"id", JsValue(id)},
         {"outlineColor", Cesium().Color.New(oColor.r, oColor.g, oColor.b, oColor.a)},
         {"outlineWidth", JsValue(style.outlineWidth())},
     });
@@ -42,7 +42,7 @@ JsValue CesiumPointPrimitiveCollection::pointParams(
 void CesiumPointPrimitiveCollection::addPoint(
     const JsValue& position,
     FeatureStyleRule const& style,
-    JsValue const& id,
+    uint32_t id,
     BoundEvalFun const& evalFun)
 {
     auto params = pointParams(position, style, id, evalFun);

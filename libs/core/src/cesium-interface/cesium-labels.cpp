@@ -13,7 +13,7 @@ JsValue CesiumLabelCollection::labelParams(
     const JsValue& position,
     const std::string& labelText,
     const FeatureStyleRule& style,
-    const JsValue& id,
+    uint32_t id,
     const BoundEvalFun& evalFun)
 {
     auto const &color = style.labelColor();
@@ -22,7 +22,7 @@ JsValue CesiumLabelCollection::labelParams(
     auto const &padding = style.labelBackgroundPadding();
 
     auto labelProperties = JsValue::Dict({
-        {"id", id},
+        {"id", JsValue(id)},
         {"position", position},
         {"show", JsValue(true)},
         {"text", JsValue(labelText)},
@@ -78,7 +78,7 @@ void CesiumLabelCollection::addLabel(
         JsValue const &position,
         const std::string &labelText,
         FeatureStyleRule const &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun)
 {
     auto params = labelParams(position, labelText, style, id, evalFun);

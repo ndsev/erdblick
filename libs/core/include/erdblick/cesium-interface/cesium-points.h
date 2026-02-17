@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "cesium.h"
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
@@ -18,7 +20,7 @@ struct CesiumPointPrimitiveCollection
     void addPoint(
         const JsValue& position,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -27,7 +29,7 @@ struct CesiumPointPrimitiveCollection
     static JsValue pointParams(
         const JsValue& position,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**

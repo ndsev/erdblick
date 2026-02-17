@@ -1,0 +1,189 @@
+#pragma once
+
+#include <functional>
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "layer.h"
+#include "simfil/overlay.h"
+#include "style.h"
+
+namespace erdblick
+{
+
+/**
+ * Shared state and initialization logic for frontend-specific visualization adapters.
+ */
+class FeatureLayerVisualizationBase
+{
+public:
+    FeatureLayerVisualizationBase(
+        int viewIndex,
+        std::string const& mapTileKey,
+        const FeatureLayerStyle& style,
+        NativeJsValue const& rawOptionValues,
+        FeatureStyleRule::HighlightMode const& highlightMode,
+        NativeJsValue const& rawFeatureIdSubset = {},
+        NativeJsValue const& rawFeatureMergeService = {});
+    virtual ~FeatureLayerVisualizationBase();
+    void addTileFeatureLayer(TileFeatureLayer const& tile);
+    virtual void run();
+
+protected:
+    static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
+
+    virtual mapget::Point projectWgsPoint(
+        mapget::Point const& wgsPoint,
+        glm::dvec3 const& wgsOffset) const = 0;
+
+    virtual std::string makeMapLayerStyleRuleId(uint32_t ruleIndex) const;
+    virtual void onRelationStyle(
+        mapget::model_ptr<mapget::Feature>& feature,
+        BoundEvalFun& evalFun,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId);
+
+    virtual void emitPolygon(
+        std::vector<mapget::Point> const& vertsCartesian,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitMesh(
+        std::vector<mapget::Point> const& vertsCartesian,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitPoint(
+        JsValue const& xyzPos,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitIcon(
+        JsValue const& xyzPos,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitLabel(
+        JsValue const& xyzPos,
+        std::string const& text,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitSolidPolyLine(
+        JsValue const& jsVerts,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitDashedPolyLine(
+        JsValue const& jsVerts,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual void emitArrowPolyLine(
+        JsValue const& jsVerts,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual JsValue makeMergedPointPointParams(
+        JsValue const& xyzPos,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual JsValue makeMergedPointIconParams(
+        JsValue const& xyzPos,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    virtual JsValue makeMergedPointLabelParams(
+        JsValue const& xyzPos,
+        std::string const& text,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+
+    void addFeature(
+        mapget::model_ptr<mapget::Feature>& feature,
+        BoundEvalFun& evalFun,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId);
+    void addAttribute(
+        mapget::model_ptr<mapget::Feature> const& feature,
+        std::string_view const& layer,
+        mapget::model_ptr<mapget::Attribute> const& attr,
+        uint32_t tileFeatureId,
+        const FeatureStyleRule& rule,
+        std::string const& mapLayerStyleRuleId,
+        uint32_t& offsetFactor,
+        glm::dvec3 const& offset);
+    void addGeometry(
+        mapget::SelfContainedGeometry const& geom,
+        std::optional<std::string_view> geometryName,
+        uint32_t tileFeatureId,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    void addGeometry(
+        mapget::model_ptr<mapget::Geometry> const& geom,
+        uint32_t tileFeatureId,
+        FeatureStyleRule const& rule,
+        std::string const& mapLayerStyleRuleId,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset = {.0, .0, .0});
+    void addLine(
+        mapget::Point const& wgsA,
+        mapget::Point const& wgsB,
+        uint32_t tileFeatureId,
+        FeatureStyleRule const& rule,
+        BoundEvalFun& evalFun,
+        glm::dvec3 const& offset,
+        double labelPositionHint = 0.5);
+    virtual void addPolyLine(
+        std::vector<mapget::Point> const& vertsCartesian,
+        const FeatureStyleRule& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    void addMergedPointGeometry(
+        uint32_t tileFeatureId,
+        const std::string& mapLayerStyleRuleId,
+        const std::optional<glm::dvec3>& gridCellSize,
+        mapget::Point const& pointCartographic,
+        const char* geomField,
+        BoundEvalFun& evalFun,
+        std::function<JsValue(BoundEvalFun&)> const& makeGeomParams);
+    simfil::Value evaluateExpression(
+        std::string const& expression,
+        simfil::ModelNode const& ctx,
+        bool anyMode,
+        bool autoWildcard) const;
+    void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
+    static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
+    static std::pair<JsValue, JsValue> encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points);
+    static JsValue encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points);
+
+    bool featuresAdded_ = false;
+    int viewIndex_;
+    FeatureLayerStyle const& style_;
+    std::set<std::string> featureIdSubset_;
+    std::set<std::string> featureIdBaseSubset_;
+    std::map<std::string, simfil::Value> optionValues_;
+    FeatureStyleRule::HighlightMode highlightMode_;
+    JsValue featureMergeService_;
+    std::map<std::string,
+        std::map<std::string,
+            std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>> mergedPointsPerStyleRuleId_;
+    mapget::TileFeatureLayer::Ptr tile_;
+    std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
+    std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
+};
+
+}  // namespace erdblick

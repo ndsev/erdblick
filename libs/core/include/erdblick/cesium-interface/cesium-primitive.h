@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "cesium-object.h"
 #include "mapget/model/tileid.h"
 #include "../rule.h"
@@ -64,7 +66,7 @@ struct CesiumPrimitive
     void addPolyLine(
         JsValue const& vertices,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -77,7 +79,7 @@ struct CesiumPrimitive
     void addPolygon(
         JsValue const& vertices,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -91,7 +93,7 @@ struct CesiumPrimitive
     void addTriangles(
         JsValue const& float64Array,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -111,7 +113,7 @@ private:
      */
     void addGeometryInstance(
         const FeatureStyleRule& style,
-        JsValue const& id,
+        uint32_t id,
         const JsValue& geom,
         BoundEvalFun const& evalFun);
 

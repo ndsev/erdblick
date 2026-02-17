@@ -425,6 +425,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("numFeatures", &TileFeatureLayer::numFeatures)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
+        .function("featureIdByIndex", &TileFeatureLayer::featureIdByIndex)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
     ////////// Highlight Modes
@@ -446,19 +447,21 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// DeckFeatureLayerVisualization
     em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
         .constructor<int, std::string, FeatureLayerStyle const&, em::val, FeatureStyleRule::HighlightMode, em::val>()
-        .function("addTileFeatureLayer", &DeckFeatureLayerVisualization::addTileFeatureLayer)
-        .function("run", &DeckFeatureLayerVisualization::run)
+        .function(
+            "addTileFeatureLayer",
+            std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(
+                [](DeckFeatureLayerVisualization& self, TileFeatureLayer const& tile)
+                {
+                    self.FeatureLayerVisualizationBase::addTileFeatureLayer(tile);
+                }))
+        .function(
+            "run",
+            std::function<void(DeckFeatureLayerVisualization&)>(
+                [](DeckFeatureLayerVisualization& self)
+                {
+                    self.FeatureLayerVisualizationBase::run();
+                }))
         .function("abiVersion", &DeckFeatureLayerVisualization::abiVersion)
-        .function("pointPositions", &DeckFeatureLayerVisualization::pointPositions)
-        .function("pointColors", &DeckFeatureLayerVisualization::pointColors)
-        .function("pointRadii", &DeckFeatureLayerVisualization::pointRadii)
-        .function("pointFeatureStart", &DeckFeatureLayerVisualization::pointFeatureStart)
-        .function("pointFeatureIds", &DeckFeatureLayerVisualization::pointFeatureIds)
-        .function("iconPositions", &DeckFeatureLayerVisualization::iconPositions)
-        .function("iconSizes", &DeckFeatureLayerVisualization::iconSizes)
-        .function("iconAtlasIndex", &DeckFeatureLayerVisualization::iconAtlasIndex)
-        .function("iconFeatureStart", &DeckFeatureLayerVisualization::iconFeatureStart)
-        .function("iconFeatureIds", &DeckFeatureLayerVisualization::iconFeatureIds)
         .function("pathPositionsRaw", &DeckFeatureLayerVisualization::pathPositionsRaw)
         .function("pathStartIndicesRaw", &DeckFeatureLayerVisualization::pathStartIndicesRaw)
         .function("pathColorsRaw", &DeckFeatureLayerVisualization::pathColorsRaw)
@@ -467,29 +470,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("pathFeatureIdsRaw", &DeckFeatureLayerVisualization::pathFeatureIdsRaw)
         .function("pathDashArrayRaw", &DeckFeatureLayerVisualization::pathDashArrayRaw)
         .function("pathDashOffsetsRaw", &DeckFeatureLayerVisualization::pathDashOffsetsRaw)
-        .function("arrowPositions", &DeckFeatureLayerVisualization::arrowPositions)
-        .function("arrowAngles", &DeckFeatureLayerVisualization::arrowAngles)
-        .function("arrowFeatureStart", &DeckFeatureLayerVisualization::arrowFeatureStart)
-        .function("arrowFeatureIds", &DeckFeatureLayerVisualization::arrowFeatureIds)
-        .function("polygonPositions", &DeckFeatureLayerVisualization::polygonPositions)
-        .function("polygonRingStartIndices", &DeckFeatureLayerVisualization::polygonRingStartIndices)
-        .function("polygonPolygonStartIndices", &DeckFeatureLayerVisualization::polygonPolygonStartIndices)
-        .function("polygonFillColors", &DeckFeatureLayerVisualization::polygonFillColors)
-        .function("polygonLineColors", &DeckFeatureLayerVisualization::polygonLineColors)
-        .function("polygonFeatureStart", &DeckFeatureLayerVisualization::polygonFeatureStart)
-        .function("polygonFeatureIds", &DeckFeatureLayerVisualization::polygonFeatureIds)
-        .function("meshPositions", &DeckFeatureLayerVisualization::meshPositions)
-        .function("meshIndices", &DeckFeatureLayerVisualization::meshIndices)
-        .function("meshColors", &DeckFeatureLayerVisualization::meshColors)
-        .function("meshFeatureStart", &DeckFeatureLayerVisualization::meshFeatureStart)
-        .function("meshFeatureIds", &DeckFeatureLayerVisualization::meshFeatureIds)
-        .function("labelPositions", &DeckFeatureLayerVisualization::labelPositions)
-        .function("labelTextUtf8", &DeckFeatureLayerVisualization::labelTextUtf8)
-        .function("labelTextStartIndices", &DeckFeatureLayerVisualization::labelTextStartIndices)
-        .function("labelSizes", &DeckFeatureLayerVisualization::labelSizes)
-        .function("labelColors", &DeckFeatureLayerVisualization::labelColors)
-        .function("labelFeatureStart", &DeckFeatureLayerVisualization::labelFeatureStart)
-        .function("labelFeatureIds", &DeckFeatureLayerVisualization::labelFeatureIds);
+        .function("pathCoordinateOriginRaw", &DeckFeatureLayerVisualization::pathCoordinateOriginRaw);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")

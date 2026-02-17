@@ -3,6 +3,9 @@ project(erdblick-core)
 # For WASM modules, add_executable is used instead of add_library.
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
+  include/erdblick/visualization-base.h
+  include/erdblick/visualization-cesium.h
+  include/erdblick/visualization-deck.h
   include/erdblick/style.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
@@ -23,7 +26,9 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/cesium-interface/cesium-labels.h
   include/erdblick/cesium-interface/cesium-billboards.h
 
-  src/visualization.cpp
+  src/visualization-base.cpp
+  src/visualization-cesium.cpp
+  src/visualization-deck.cpp
   src/style.cpp
   src/rule.cpp
   src/color.cpp
