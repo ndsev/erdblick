@@ -12,11 +12,11 @@ import {MenuItem} from "primeng/api";
     selector: 'main-bar',
     template: `
         @if (stateService.mapsDialogVisible) {
-            <p-button class="maps-button" (click)="closeMapsPanel()" label="" [tooltipPosition]="'right'" pTooltip="Close maps configuration panel">
+            <p-button class="maps-button" (click)="closeMapsPanel()" label="" tooltipPosition="right" pTooltip="Close maps configuration panel">
                 <span class="material-symbols-outlined">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" [tooltipPosition]="'right'" pTooltip="Open maps configuration panel">
+            <p-button class="maps-button" (click)="showMapsPanel()" icon="" label="" tooltipPosition="right" pTooltip="Open maps configuration panel">
                 <span class="material-symbols-outlined">stacks</span>
             </p-button>
         }

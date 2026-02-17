@@ -31,7 +31,7 @@ export class FeatureFilterOptions {
     selector: 'inspection-tree',
     changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
-        <p-treeTable #tt scrollHeight="flex" filterMode="strict"
+        <p-treeTable #tt class="inspection-tree-table" scrollHeight="flex" filterMode="strict"
                      [value]="data"
                      [autoLayout]="true"
                      [scrollable]="true"
@@ -82,10 +82,8 @@ export class FeatureFilterOptions {
             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                 <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)" [class]="rowData.styleClass || ''">
                     @for (col of columns(); track $index) {
-                        <td [class]="getStyleClassByType(rowData)"
-                            style="white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"
-                            pTooltip="{{rowData[col.key]}}" tooltipPosition="left"
-                            [tooltipOptions]="tooltipOptions">
+                        <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
+                            pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
                             <div style="display: flex; flex-direction: row; gap: 0.25em;">
                                 @if ($index === 0) {
                                     <p-treeTableToggler [rowNode]="rowNode"/>

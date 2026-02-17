@@ -225,7 +225,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     protected applyInspectionsLimits() {
-        this.stateService.inspectionsLimit = this.limitSimultaneousInspectionsInput;
+        const limit = Number(this.limitSimultaneousInspectionsInput);
+        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_SIMULTANEOUS_INSPECTIONS) {
+            this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
+            return;
+        }
+        this.stateService.inspectionsLimit = limit;
+        this.messageService.showSuccess("Successfully updated inspections limit!");
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;

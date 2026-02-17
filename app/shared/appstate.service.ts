@@ -19,7 +19,6 @@ export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
 export const VIEW_SYNC_LAYERS = "lay";
-export const MAX_NUM_SELECTIONS = 25;
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
@@ -436,12 +435,6 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
-    readonly unlimitNumSelections = this.createState<boolean>({
-        name: 'unlimitNumSelections',
-        defaultValue: false,
-        schema: Boolish
-    });
-
     readonly mapsOpenState = this.createState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
@@ -474,8 +467,8 @@ export class AppStateService implements OnDestroy {
 
     readonly inspectionsLimitState = this.createState<number>({
         name: 'inspectionsLimitState',
-        defaultValue: MAX_SIMULTANEOUS_INSPECTIONS / 5,
-        schema: z.coerce.number().int().positive()
+        defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
+        schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
     });
 
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
@@ -718,7 +711,14 @@ export class AppStateService implements OnDestroy {
     get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
     set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
-    set inspectionsLimit(val: number) {this.inspectionsLimitState.next(val);};
+    set inspectionsLimit(val: number) {
+        const numeric = Number(val);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        const normalized = Math.min(MAX_SIMULTANEOUS_INSPECTIONS, Math.max(1, Math.trunc(numeric)));
+        this.inspectionsLimitState.next(normalized);
+    };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get isDockOpen() {return this.dockOpenState.getValue();}
@@ -767,8 +767,6 @@ export class AppStateService implements OnDestroy {
     setLayerSyncOption(viewIndex: number, enabled: boolean): void {
         this.layerSyncOptionsState.next(viewIndex, enabled);
     }
-    get isNumSelectionsUnlimited() {return this.unlimitNumSelections.getValue();}
-    set isNumSelectionsUnlimited(val: boolean) {this.unlimitNumSelections.next(val);}
 
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
@@ -947,8 +945,9 @@ export class AppStateService implements OnDestroy {
         }
 
         if (mustCreateNewPanel) {
-            if (allPanels.length >= MAX_NUM_SELECTIONS) {
-                this.infoMessageService.showWarning(`Maximum of ${MAX_NUM_SELECTIONS} panels reached. Close an existing panel to add more.`);
+            const limit = this.inspectionsLimit;
+            if (allPanels.length >= limit) {
+                this.infoMessageService.showWarning(`Maximum of ${limit} inspections reached. Close an existing inspection to add more.`);
                 this._replaceUrl = true;
                 return;
             }

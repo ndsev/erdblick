@@ -380,7 +380,7 @@ export class MapView {
                     }
                 } else {
                     // Just select the feature.
-                    this.stateService.setSelection(Array.isArray(feature.id) ? feature.id : [feature.id]);
+                    this.selectFeatureFromPick(feature, false);
                 }
             } else {
                 // No new feature to select. Unset existing locked selections.
@@ -406,10 +406,7 @@ export class MapView {
             const feature = this.viewer.scene.pick(position);
             if (defined(feature) && !(feature.primitive instanceof Billboard)) {
                 // Select the feature and pin the panel immediately.
-                const id = this.stateService.setSelection(Array.isArray(feature?.id) ? feature.id : [feature.id], undefined, true);
-                if (id !== undefined) {
-                    this.stateService.setInspectionPanelLockedState(id, true);
-                }
+                this.selectFeatureFromPick(feature, true);
             }
 
             // Handle position update after highlighting.
@@ -511,6 +508,55 @@ export class MapView {
             this.stateService.focusedView = this._viewIndex;
         }, ScreenSpaceEventType.LEFT_DOWN);
 
+    }
+
+    private isTileFeatureId(value: any): value is TileFeatureId {
+        return value !== null &&
+            typeof value === 'object' &&
+            typeof value.featureId === 'string' &&
+            typeof value.mapTileKey === 'string';
+    }
+
+    private selectedFeatureIdsFromPick(feature: any): TileFeatureId[] {
+        const rawFeatureIds = Array.isArray(feature?.id) ? feature.id : [feature?.id];
+        return rawFeatureIds.filter((value: any) => this.isTileFeatureId(value));
+    }
+
+    private selectFeatureFromPick(feature: any, lockSelection: boolean) {
+        const featureIds = this.selectedFeatureIdsFromPick(feature);
+        if (!featureIds.length) {
+            return;
+        }
+
+        if (featureIds.length === 1) {
+            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
+            if (lockSelection && panelId !== undefined) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+            return;
+        }
+
+        // Merged picks should open one panel per feature and avoid warning spam at inspection limits.
+        const availableSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
+        if (availableSlots <= 0) {
+            this.stateService.setSelection([featureIds[0]], undefined, true);
+            return;
+        }
+
+        let remainingSlots = availableSlots;
+        for (const featureId of featureIds) {
+            if (remainingSlots <= 0) {
+                break;
+            }
+            const panelId = this.stateService.setSelection([featureId], undefined, true);
+            if (panelId === undefined) {
+                continue;
+            }
+            remainingSlots -= 1;
+            if (lockSelection) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+        }
     }
 
     /**

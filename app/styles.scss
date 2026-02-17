@@ -1285,6 +1285,20 @@ body.dialog-dragging * {
   color: var(--p-iconfield-icon-color);
 }
 
+.inspection-dialog,
+.inspection-container {
+  .inspection-tree-table {
+    .p-treetable-scrollable-body,
+    .p-virtualscroller.p-treetable-scrollable-body,
+    .p-scroller-viewport {
+      overflow-y: scroll !important;
+      overflow-x: hidden;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+    }
+  }
+}
+
 .inspection-dialog {
   .p-dialog {
     min-height: 20em;
@@ -1333,6 +1347,14 @@ body.dialog-dragging * {
         gap: 0.125em;
         align-items: center;
         cursor: pointer;
+
+        &:hover {
+          color: var(--p-primary-color);
+
+          span {
+            color: inherit;
+          }
+        }
 
         .material-symbols-outlined {
           font-size: 1.25em;
@@ -1753,7 +1775,7 @@ body.dialog-dragging * {
   display: flex;
   flex-direction: column;
   gap: 0.25em;
-  overflow-y: scroll;
+  overflow-x: clip;
   height: 100vh;
   width: 100%;
 
@@ -1890,9 +1912,9 @@ body.dialog-dragging * {
     overflow-y: auto;
 
     .inspect-panel .resizable-container {
-      height: 15em !important;
       min-height: 15em;
-      resize: none;
+      resize: vertical;
+      overflow: auto;
     }
   }
 
@@ -1945,6 +1967,14 @@ body.dialog-dragging * {
         gap: 0.125em;
         align-items: center;
         cursor: pointer;
+
+        &:hover {
+          color: var(--p-primary-color);
+
+          span {
+            color: inherit;
+          }
+        }
 
         .material-symbols-outlined {
           font-size: 1.25em;
