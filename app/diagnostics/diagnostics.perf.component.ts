@@ -66,7 +66,9 @@ const DISPLAY_DECIMALS = 3;
     selector: 'diagnostics-performance-dialog',
     template: `
         <p-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="diagnostics.performanceDialogVisible"
-                  [modal]="false" (onShow)="onDialogShow()">
+                  [modal]="false"
+                  [style]="dialogStyle"
+                  (onShow)="onDialogShow()">
             @if (diagnostics.snapshot$ | async; as snapshot) {
                 <div class="diagnostics-perf-progress">
                     <diagnostics-progress [progress]="snapshot.progress"></diagnostics-progress>
@@ -158,7 +160,7 @@ const DISPLAY_DECIMALS = 3;
                             [pTooltip]="rowData.peakTileIds ?? ''"
                             tooltipPosition="left"
                             [tooltipDisabled]="!rowData.peakTileIds">
-                            {{ rowData.peakTileIds.join('\\n') ?? '' }}
+                            {{ rowData.peakTileIds ?? '' }}
                         </td>
                     </tr>
                 </ng-template>
@@ -178,6 +180,9 @@ const DISPLAY_DECIMALS = 3;
 })
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
+    readonly dialogStyle: {[key: string]: string} = {
+        height: '75vh'
+    };
     availableMapLayers: LayerOption[] = [];
     selectedMapLayers: LayerOption[] = [];
     availableTileIds: TileIdOption[] = [];
