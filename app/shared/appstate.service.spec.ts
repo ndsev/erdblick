@@ -216,7 +216,7 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('replaces an unlocked docked inspection panel before dialogs', () => {
+    it('reuses the last unlocked feature inspection and closes other unlocked feature inspections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -224,22 +224,57 @@ describe('AppStateService', () => {
         service.selection = [
             { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+            { id: 3, features: [feature('locked-feature')], locked: true, size: [30, 20], color: '#333333', undocked: false },
+            {
+                id: 4,
+                features: [],
+                sourceData: sourceData('SourceData:m1:SourceData-LAYER:99'),
+                locked: false,
+                size: [30, 40],
+                color: '#444444',
+                undocked: true,
+            },
         ];
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = service.setSelection(selected);
         const panels = service.selection;
 
-        expect(targetPanelId).toBe(1);
-        expect(panels).toHaveLength(2);
-        expect(panels.find(panel => panel.id === 1)?.features).toEqual(selected);
-        expect(panels.find(panel => panel.id === 2)?.features).toEqual([feature('old-dialog')]);
+        expect(targetPanelId).toBe(2);
+        expect(panels).toHaveLength(3);
+        expect(panels.find(panel => panel.id === 1)).toBeUndefined();
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual(selected);
+        expect(panels.find(panel => panel.id === 3)?.features).toEqual([feature('locked-feature')]);
+        expect(panels.find(panel => panel.id === 4)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:99'));
 
         service.ngOnDestroy();
         routerStub.events.complete();
     });
 
-    it('replaces an unlocked inspection dialog when no unlocked docked panel exists', () => {
+    it('keeps other unlocked feature inspections when selection targets a specific panel id', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('old-first')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('old-second')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+        ];
+
+        const selected = [feature('new-feature', 'map/layer/new-tile')];
+        const targetPanelId = service.setSelection(selected, 1);
+        const panels = service.selection;
+
+        expect(targetPanelId).toBe(1);
+        expect(panels).toHaveLength(2);
+        expect(panels.find(panel => panel.id === 1)?.features).toEqual(selected);
+        expect(panels.find(panel => panel.id === 2)?.features).toEqual([feature('old-second')]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces an unlocked inspection dialog when it is the only unlocked feature inspection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
@@ -424,6 +459,42 @@ describe('AppStateService', () => {
         expect(panels.find(panel => panel.id === 1)).toBeUndefined();
         expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:2'));
         expect(panels.find(panel => panel.id === 3)?.features).toEqual([feature('stay-locked')]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('creates one new panel per feature after clearing unlocked selections', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.selection = [
+            { id: 1, features: [feature('remove-a')], locked: false, size: [30, 20], color: '#111111', undocked: false },
+            { id: 2, features: [feature('remove-b')], locked: false, size: [30, 40], color: '#222222', undocked: true },
+            { id: 3, features: [feature('keep-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
+            { id: 4, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:8'), locked: false, size: [30, 40], color: '#444444', undocked: true },
+        ];
+
+        service.unsetUnlockedSelections();
+
+        const mergedFeatures = [feature('merged-1'), feature('merged-2'), feature('merged-3')];
+        const createdIds = mergedFeatures.map(selected => service.setSelection([selected], undefined, true));
+        const definedIds = createdIds.filter((panelId): panelId is number => panelId !== undefined);
+        const panels = service.selection;
+
+        expect(definedIds).toHaveLength(mergedFeatures.length);
+        expect(panels.find(panel => panel.id === 1)).toBeUndefined();
+        expect(panels.find(panel => panel.id === 2)).toBeUndefined();
+        expect(panels.find(panel => panel.id === 3)?.features).toEqual([feature('keep-locked')]);
+        expect(panels.find(panel => panel.id === 4)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:8'));
+
+        definedIds.forEach((panelId, index) => {
+            const createdPanel = panels.find(panel => panel.id === panelId);
+            expect(createdPanel?.features).toEqual([mergedFeatures[index]]);
+            expect(createdPanel?.locked).toBe(false);
+            expect(createdPanel?.undocked).toBe(false);
+        });
 
         service.ngOnDestroy();
         routerStub.events.complete();

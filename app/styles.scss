@@ -33,10 +33,10 @@
 .source-layer-dropdown {
   height: 1.6em;
   z-index: 9999;
+  max-width: 50%;
 
   .p-select-label {
     padding: 0.2em;
-    min-width: 8em;
     height: 1.6em;
   }
 
@@ -1352,30 +1352,39 @@ body.dialog-dragging * {
         align-items: center;
       }
 
-      .title {
-        max-width: 20em;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-weight: bold;
-        display: flex;
-        gap: 0.125em;
-        align-items: center;
-        cursor: pointer;
-        padding: 0.15em 0.15em 0.15em 0;
+      .title-container {
+        max-width: calc(100% - 6.5em);
 
-        &:hover {
-          color: var(--p-primary-contrast-color);
-          border-radius: 6px;
-          background-color: var(--p-primary-color);
+        .title {
+          max-width: 100%;
+          white-space: nowrap;
+          font-weight: bold;
+          display: flex;
+          gap: 0.125em;
+          align-items: center;
+          cursor: pointer;
+          padding: 0.15em 0.15em 0.15em 0;
+          overflow: auto;
 
-          span {
-            color: inherit;
+          &:hover {
+            color: var(--p-primary-contrast-color);
+            border-radius: 6px;
+            background-color: var(--p-primary-color);
+
+            span {
+              color: inherit;
+            }
           }
-        }
 
-        .material-symbols-outlined {
-          font-size: 1.25em;
+          .material-symbols-outlined {
+            font-size: 1.25em;
+          }
+
+          .title-span {
+            min-width: 50%;
+            text-overflow: ellipsis;
+            overflow: hidden;
+          }
         }
       }
 
@@ -1908,16 +1917,22 @@ body.dialog-dragging * {
       min-height: 0;
     }
 
-    .inspect-panel .p-accordionpanel,
-    .inspect-panel .p-accordioncontent,
-    .inspect-panel .p-accordioncontent-content {
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent,
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active > .p-accordioncontent > .p-accordioncontent-content {
       display: flex;
       flex-direction: column;
       flex: 1 1 auto;
       min-height: 0;
     }
 
-    .inspect-panel .resizable-container {
+    .inspect-panel .p-accordionpanel:not(.p-accordionpanel-active) > .p-accordioncontent {
+      flex: 0 0 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .inspect-panel .p-accordionpanel.p-accordionpanel-active .resizable-container {
       height: 100% !important;
       max-height: none;
       min-height: 0;
@@ -1965,8 +1980,7 @@ body.dialog-dragging * {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      width: 100%;
-      margin-right: 0.5em;
+      width: calc(100% - 1.5em);
       cursor: grab;
 
       & > * {
@@ -1976,31 +1990,41 @@ body.dialog-dragging * {
         align-items: center;
       }
 
-      .title {
-        max-width: 20em;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        display: flex;
-        gap: 0.125em;
-        align-items: center;
-        cursor: pointer;
-        padding: 0.15em 0.15em 0.15em 0;
+      .title-container {
+        max-width: calc(100% - 6.5em);
 
-        &:hover {
-          color: var(--p-primary-contrast-color);
-          border-radius: 6px;
-          background-color: var(--p-primary-color);
+        .title {
+          max-width: 100%;
+          white-space: nowrap;
+          display: flex;
+          gap: 0.125em;
+          align-items: center;
+          cursor: pointer;
+          padding: 0.15em 0.15em 0.15em 0;
+          overflow: auto;
 
-          span {
-            color: inherit;
+          &:hover {
+            color: var(--p-primary-contrast-color);
+            border-radius: 6px;
+            background-color: var(--p-primary-color);
+
+            span {
+              color: inherit;
+            }
+          }
+
+          .material-symbols-outlined {
+            font-size: 1.25em;
+          }
+
+          .title-span {
+            min-width: 50%;
+            text-overflow: ellipsis;
+            overflow: hidden;
           }
         }
-
-        .material-symbols-outlined {
-          font-size: 1.25em;
-        }
       }
+
 
       .p-button {
         width: 1.75em !important;

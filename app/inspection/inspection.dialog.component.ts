@@ -20,7 +20,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
             @if (panel()) {
                 <ng-template #header>
                     <div class="inspector-title" (pointerdown)="beginDrag()">
-                        <span>
+                        <span class="title-container">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
                                                (mousedown)="$event.stopPropagation()"
@@ -31,7 +31,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                             } @else if (panel().sourceData !== undefined) {
                                 <p-tag severity="success" value="DATA" [rounded]="true" />
                             }
-                            <div class="title" [pTooltip]="panel().locked ? 'Unlock panel' : 'Lock panel'" 
+                            <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
                                  tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
                                  (click)="toggleLockedState($event)">
                                 <span class="material-symbols-outlined">
@@ -41,7 +41,7 @@ import {MenuItem, MenuItemCommandEvent} from "primeng/api";
                                         lock_open_right
                                     }
                                 </span>
-                                <span>
+                                <span class="title-span">
                                     {{ title }}
                                 </span>
                             </div>

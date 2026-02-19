@@ -873,7 +873,7 @@ export class AppStateService implements OnDestroy {
      */
     setSelection(newSelection: TileFeatureId[] | SelectedSourceData, id?: number, forceNewPanel: boolean = false) {
         this._replaceUrl = false;
-        const allPanels = this.selectionState.getValue();
+        let allPanels = this.selectionState.getValue();
         const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
         const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
         const isSourceDataSelection = sourceDataSelection !== undefined;
@@ -918,28 +918,49 @@ export class AppStateService implements OnDestroy {
             targetPanelId = originPanel.id;
         }
 
-        // New inspection strategy:
-        // 1) reuse unlocked docked panel of the same inspection type
-        // 2) otherwise reuse unlocked undocked dialog of the same inspection type
-        // 3) otherwise create a new panel (Feature: docked, SourceData: undocked dialog)
+        // Inspection strategy:
+        // Feature selection (default path): reuse the last unlocked feature panel and close all other unlocked feature panels.
+        // Otherwise: reuse unlocked docked panel of the same inspection type, then unlocked undocked dialog, else create new.
         if (!mustCreateNewPanel && targetPanelId === undefined) {
-            const firstUnlockedDockedPanel = allPanels.find(panel =>
-                !panel.undocked &&
-                !panel.locked &&
-                (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
-            );
-            if (firstUnlockedDockedPanel) {
-                targetPanelId = firstUnlockedDockedPanel.id;
+            const isDefaultFeatureSelectionRequest = !isSourceDataSelection && id === undefined;
+            if (isDefaultFeatureSelectionRequest) {
+                let lastUnlockedFeaturePanelId: number | undefined;
+                for (let index = allPanels.length - 1; index >= 0; index--) {
+                    const panel = allPanels[index];
+                    if (isFeaturePanel(panel) && !panel.locked) {
+                        lastUnlockedFeaturePanelId = panel.id;
+                        break;
+                    }
+                }
+                if (lastUnlockedFeaturePanelId !== undefined) {
+                    allPanels = allPanels.filter(panel =>
+                        !isFeaturePanel(panel) ||
+                        panel.locked ||
+                        panel.id === lastUnlockedFeaturePanelId
+                    );
+                    targetPanelId = lastUnlockedFeaturePanelId;
+                } else {
+                    mustCreateNewPanel = true;
+                }
             } else {
-                const firstUnlockedUndockedPanel = allPanels.find(panel =>
-                    panel.undocked &&
+                const firstUnlockedDockedPanel = allPanels.find(panel =>
+                    !panel.undocked &&
                     !panel.locked &&
                     (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
                 );
-                if (firstUnlockedUndockedPanel) {
-                    targetPanelId = firstUnlockedUndockedPanel.id;
+                if (firstUnlockedDockedPanel) {
+                    targetPanelId = firstUnlockedDockedPanel.id;
                 } else {
-                    mustCreateNewPanel = true;
+                    const firstUnlockedUndockedPanel = allPanels.find(panel =>
+                        panel.undocked &&
+                        !panel.locked &&
+                        (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
+                    );
+                    if (firstUnlockedUndockedPanel) {
+                        targetPanelId = firstUnlockedUndockedPanel.id;
+                    } else {
+                        mustCreateNewPanel = true;
+                    }
                 }
             }
         }

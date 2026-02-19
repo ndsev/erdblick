@@ -26,7 +26,7 @@ interface SourceLayerMenuItem {
             <p-accordion-panel value="0">
                 <p-accordion-header>
                     <div class="inspector-title" (pointerdown)="onHeaderPointerDown($event)">
-                        <span>
+                        <span class="title-container">
                             @if (panel().sourceData === undefined && panel().features.length > 0) {
                                 <p-colorpicker [(ngModel)]="panel().color" (click)="$event.stopPropagation()"
                                                (mousedown)="$event.stopPropagation()"
@@ -37,7 +37,7 @@ interface SourceLayerMenuItem {
                             } @else if (panel().sourceData !== undefined) {
                                 <p-tag severity="success" value="DATA" [rounded]="true" />
                             }
-                            <div class="title" [pTooltip]="panel().locked ? 'Unlock panel' : 'Lock panel'" 
+                            <div class="title" [pTooltip]="panel().locked ? 'Unlock ' + title : 'Lock ' + title" 
                                  tooltipPosition="bottom" (mousedown)="$event.stopPropagation()"
                                  (click)="toggleLockedState($event)">
                                 <span class="material-symbols-outlined">
@@ -47,7 +47,7 @@ interface SourceLayerMenuItem {
                                         lock_open_right
                                     }
                                 </span>
-                                <span>
+                                <span class="title-span">
                                     {{ title }}
                                 </span>
                             </div>

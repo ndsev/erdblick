@@ -536,7 +536,8 @@ export class MapView {
             return;
         }
 
-        // Merged picks should open one panel per feature and avoid warning spam at inspection limits.
+        // Merged picks should replace unlocked feature inspections and open one panel per feature.
+        this.stateService.unsetUnlockedSelections();
         const availableSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
         if (availableSlots <= 0) {
             this.stateService.setSelection([featureIds[0]], undefined, true);
