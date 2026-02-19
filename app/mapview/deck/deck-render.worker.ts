@@ -100,6 +100,11 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const featureIds = readRawBytes(deckVisu, "pathFeatureIdsRaw");
         const dashArrays = readRawBytes(deckVisu, "pathDashArrayRaw");
         const dashOffsets = readRawBytes(deckVisu, "pathDashOffsetsRaw");
+        const arrowPositions = readRawBytes(deckVisu, "arrowPositionsRaw");
+        const arrowStartIndices = readRawBytes(deckVisu, "arrowStartIndicesRaw");
+        const arrowColors = readRawBytes(deckVisu, "arrowColorsRaw");
+        const arrowWidths = readRawBytes(deckVisu, "arrowWidthsRaw");
+        const arrowFeatureIds = readRawBytes(deckVisu, "arrowFeatureIdsRaw");
         const renderMs = performance.now() - renderStart;
 
         return {
@@ -114,6 +119,11 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             featureIds: featureIds.buffer,
             dashArrays: dashArrays.buffer,
             dashOffsets: dashOffsets.buffer,
+            arrowPositions: arrowPositions.buffer,
+            arrowStartIndices: arrowStartIndices.buffer,
+            arrowColors: arrowColors.buffer,
+            arrowWidths: arrowWidths.buffer,
+            arrowFeatureIds: arrowFeatureIds.buffer,
             timings: {
                 deserializeMs,
                 renderMs,
@@ -139,7 +149,12 @@ function emptyResultBuffers() {
         widths: new ArrayBuffer(0),
         featureIds: new ArrayBuffer(0),
         dashArrays: new ArrayBuffer(0),
-        dashOffsets: new ArrayBuffer(0)
+        dashOffsets: new ArrayBuffer(0),
+        arrowPositions: new ArrayBuffer(0),
+        arrowStartIndices: new ArrayBuffer(0),
+        arrowColors: new ArrayBuffer(0),
+        arrowWidths: new ArrayBuffer(0),
+        arrowFeatureIds: new ArrayBuffer(0)
     };
 }
 
@@ -174,7 +189,12 @@ addEventListener("message", async ({data}) => {
             result.widths,
             result.featureIds,
             result.dashArrays,
-            result.dashOffsets
+            result.dashOffsets,
+            result.arrowPositions,
+            result.arrowStartIndices,
+            result.arrowColors,
+            result.arrowWidths,
+            result.arrowFeatureIds
         ]);
     } catch (error) {
         const buffers = emptyResultBuffers();

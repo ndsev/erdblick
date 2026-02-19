@@ -94,10 +94,8 @@ void TileLayerParser::reset()
 
 TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& buffer)
 {
-    auto str = buffer.toString();
-    std::istringstream inputStream(str, std::ios::binary);
     auto result = TileFeatureLayer(std::make_shared<mapget::TileFeatureLayer>(
-        inputStream,
+        buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
@@ -108,10 +106,8 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
 
 TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
-    auto str = buffer.toString();
-    std::istringstream inputStream(str, std::ios::binary);
     auto result = TileSourceDataLayer(std::make_shared<mapget::TileSourceDataLayer>(
-        inputStream,
+        buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
@@ -122,13 +118,11 @@ TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array co
 
 TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const SharedUint8Array& buffer)
 {
-    auto str = buffer.toString();
-    std::istringstream inputStream(str, std::ios::binary);
     // Parse just the TileLayer part of the blob, which is the base class of
     // e.g. the TileFeatureLayer. The base class blob always precedes the
     // blob from the derived class.
     TileLayer tileLayer(
-        inputStream,
+        buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
@@ -254,11 +248,10 @@ void TileLayerParser::getFieldDict(SharedUint8Array& out, std::string const& nod
 
 void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
 {
-    auto str = buffer.toString();
-    std::istringstream bufferStream(str, std::ios::binary);
-    auto nodeId = mapget::StringPool::readDataSourceNodeId(bufferStream);
+    size_t bytesRead;
+    auto nodeId = mapget::StringPool::readDataSourceNodeId(buffer.bytes(), 0, &bytesRead);
     auto fieldDict = cachedStrings_->getStringPool(nodeId);
-    fieldDict->read(bufferStream);
+    (void) fieldDict->read(buffer.bytes(), bytesRead);
 }
 
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const

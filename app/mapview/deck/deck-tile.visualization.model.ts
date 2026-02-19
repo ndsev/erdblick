@@ -44,8 +44,8 @@ interface DeckPathRawBuffers {
     colors: Uint8Array;
     widths: Float32Array;
     featureIds: Uint32Array;
-    dashArrays: Float32Array;
-    dashOffsets: Float32Array;
+    dashArrays?: Float32Array;
+    dashOffsets?: Float32Array;
 }
 
 const MAX_DECK_PATH_COUNT = 1_000_000;
@@ -72,10 +72,12 @@ export class DeckTileVisualization implements ITileVisualization {
     private deleted = false;
     private rendered = false;
     private pathLayerKey: string | null = null;
+    private arrowLayerKey: string | null = null;
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
     private latestWorkerTimings: DeckWorkerTimings | null = null;
+    private latestArrowLayerData: DeckPathLayerData | null = null;
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
@@ -111,8 +113,16 @@ export class DeckTileVisualization implements ITileVisualization {
             hoverMode: this.highlightModeLabel(),
             kind: "path"
         });
+        const arrowLayerKey = makeDeckLayerKey({
+            tileKey: this.tile.mapTileKey,
+            styleId: this.styleId,
+            hoverMode: this.highlightModeLabel(),
+            kind: "arrow"
+        });
         try {
+            this.latestArrowLayerData = null;
             const pathLayerData = await this.renderWasm();
+            const arrowLayerData = this.latestArrowLayerData as DeckPathLayerData | null;
             if (this.deleted || this.style.isDeleted()) {
                 return false;
             }
@@ -139,6 +149,27 @@ export class DeckTileVisualization implements ITileVisualization {
                 registry.remove(this.pathLayerKey);
                 this.pathLayerKey = null;
             }
+            if (arrowLayerData && arrowLayerData.length > 0) {
+                const arrowLayer = new PathLayer({
+                    id: arrowLayerKey,
+                    data: arrowLayerData as any,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: arrowLayerData.coordinateOrigin,
+                    _pathType: "open",
+                    widthUnits: "pixels",
+                    capRounded: true,
+                    jointRounded: true,
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    featureIds: arrowLayerData.featureIds,
+                    featureIdsByVertex: arrowLayerData.featureIdsByVertex
+                } as any);
+                registry.upsert(arrowLayerKey, arrowLayer as any, 450);
+                this.arrowLayerKey = arrowLayerKey;
+            } else if (this.arrowLayerKey) {
+                registry.remove(this.arrowLayerKey);
+                this.arrowLayerKey = null;
+            }
             this.rendered = true;
             this.renderQueued = false;
             this.deleted = false;
@@ -160,7 +191,11 @@ export class DeckTileVisualization implements ITileVisualization {
         if (this.pathLayerKey) {
             registry.remove(this.pathLayerKey);
         }
+        if (this.arrowLayerKey) {
+            registry.remove(this.arrowLayerKey);
+        }
         this.pathLayerKey = null;
+        this.arrowLayerKey = null;
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
@@ -251,6 +286,14 @@ export class DeckTileVisualization implements ITileVisualization {
             featureIdSubset: [...this.featureIdSubset]
         });
         this.latestWorkerTimings = result.workerTimings ?? null;
+        this.latestArrowLayerData = this.buildPathLayerData({
+            coordinateOrigin: result.coordinateOrigin,
+            positions: result.arrowPositions,
+            startIndices: result.arrowStartIndices,
+            colors: result.arrowColors,
+            widths: result.arrowWidths,
+            featureIds: result.arrowFeatureIds
+        });
         return this.buildPathLayerData(result);
     }
 
@@ -272,7 +315,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 deckVisu.run();
             });
 
-            return this.buildPathLayerData({
+            const lineLayerData = this.buildPathLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
                 positions: this.readFloat32Array(deckVisu, "pathPositionsRaw"),
                 startIndices: this.readUint32Array(deckVisu, "pathStartIndicesRaw"),
@@ -282,6 +325,15 @@ export class DeckTileVisualization implements ITileVisualization {
                 dashArrays: this.readFloat32Array(deckVisu, "pathDashArrayRaw"),
                 dashOffsets: this.readFloat32Array(deckVisu, "pathDashOffsetsRaw")
             });
+            this.latestArrowLayerData = this.buildPathLayerData({
+                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
+                positions: this.readFloat32Array(deckVisu, "arrowPositionsRaw"),
+                startIndices: this.readUint32Array(deckVisu, "arrowStartIndicesRaw"),
+                colors: this.readUint8Array(deckVisu, "arrowColorsRaw"),
+                widths: this.readFloat32Array(deckVisu, "arrowWidthsRaw"),
+                featureIds: this.readUint32Array(deckVisu, "arrowFeatureIdsRaw")
+            });
+            return lineLayerData;
         } finally {
             if (deckVisu && typeof deckVisu.delete === "function") {
                 deckVisu.delete();
@@ -311,8 +363,10 @@ export class DeckTileVisualization implements ITileVisualization {
         if (raw.positions.length < vertexCount * 3) {
             return null;
         }
-        if (raw.colors.length < pathCount * 4 || raw.widths.length < pathCount ||
-            raw.dashArrays.length < pathCount * 2) {
+        if (raw.colors.length < pathCount * 4 || raw.widths.length < pathCount) {
+            return null;
+        }
+        if (raw.dashArrays && raw.dashArrays.length < pathCount * 2) {
             return null;
         }
         if (raw.featureIds.length < pathCount) {
@@ -338,8 +392,8 @@ export class DeckTileVisualization implements ITileVisualization {
             const a = raw.colors[colorOffset + 3];
             const width = raw.widths[pathIndex];
             const dashArrayOffset = pathIndex * 2;
-            const dashA = raw.dashArrays[dashArrayOffset] ?? 1;
-            const dashB = raw.dashArrays[dashArrayOffset + 1] ?? 0;
+            const dashA = raw.dashArrays ? (raw.dashArrays[dashArrayOffset] ?? 1) : 1;
+            const dashB = raw.dashArrays ? (raw.dashArrays[dashArrayOffset + 1] ?? 0) : 0;
             const featureId = raw.featureIds[pathIndex];
             const normalizedFeatureId =
                 Number.isInteger(featureId) && featureId !== DECK_UNSELECTABLE_FEATURE_INDEX

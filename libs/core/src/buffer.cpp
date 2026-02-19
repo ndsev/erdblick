@@ -40,6 +40,11 @@ std::string SharedUint8Array::toString() const
     return {array_.begin(), array_.end()};
 }
 
+std::vector<uint8_t> const& SharedUint8Array::bytes() const
+{
+    return array_;
+}
+
 void SharedUint8Array::writeToArray(const std::vector<std::byte>& content)
 {
     array_.resize(content.size());

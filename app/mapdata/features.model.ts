@@ -14,7 +14,7 @@ class WasmFeatureTileCache {
     private readonly entries = new Map<string, WasmFeatureTileCacheEntry>();
     private readonly maxEntries: number;
 
-    constructor(maxEntries: number = 1000) {
+    constructor(maxEntries: number = 1) {
         this.maxEntries = Math.max(1, maxEntries);
     }
 

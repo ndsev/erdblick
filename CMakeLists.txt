@@ -30,9 +30,12 @@ FetchContent_Declare(yaml-cpp
 FetchContent_MakeAvailable(yaml-cpp)
 
 if (NOT TARGET mapget)
+  if (NOT DEFINED NOSERDE_DEFAULT_VECTOR_STORAGE)
+    set(NOSERDE_DEFAULT_VECTOR_STORAGE ON CACHE BOOL "Default noserde::Buffer storage policy to vector_byte_storage")
+  endif()
   FetchContent_Declare(mapget
     GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
-    GIT_TAG        "release/2026.1.0"
+    GIT_TAG        "noserde"
     GIT_SHALLOW    OFF)
   FetchContent_MakeAvailable(mapget)
 endif()

@@ -32,6 +32,11 @@ export interface DeckPathRenderBuffers {
     featureIds: Uint32Array;
     dashArrays: Float32Array;
     dashOffsets: Float32Array;
+    arrowPositions: Float32Array;
+    arrowStartIndices: Uint32Array;
+    arrowColors: Uint8Array;
+    arrowWidths: Float32Array;
+    arrowFeatureIds: Uint32Array;
     workerTimings?: DeckWorkerTimings;
 }
 
@@ -176,6 +181,11 @@ export class DeckRenderWorkerPool {
             featureIds: this.toUint32Array(result.featureIds),
             dashArrays: this.toFloat32Array(result.dashArrays),
             dashOffsets: this.toFloat32Array(result.dashOffsets),
+            arrowPositions: this.toFloat32Array(result.arrowPositions),
+            arrowStartIndices: this.toUint32Array(result.arrowStartIndices),
+            arrowColors: this.toUint8Array(result.arrowColors),
+            arrowWidths: this.toFloat32Array(result.arrowWidths),
+            arrowFeatureIds: this.toUint32Array(result.arrowFeatureIds),
             workerTimings: result.timings
         });
     }

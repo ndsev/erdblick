@@ -15,6 +15,11 @@ namespace erdblick
 namespace {
 constexpr uint32_t kUnselectableFeatureIndex = std::numeric_limits<uint32_t>::max();
 constexpr double kEarthRadiusMeters = 6378137.0;
+constexpr double kArrowHeadLengthMinMeters = 2.0;
+constexpr double kArrowHeadLengthMaxMeters = 24.0;
+constexpr double kArrowHeadLengthFraction = 0.35;
+constexpr double kArrowHeadWidthFraction = 0.55;
+constexpr double kArrowSegmentEpsilonMeters = 1e-6;
 
 template <typename T>
 void writeVectorToSharedBuffer(SharedUint8Array& out, std::vector<T> const& buffer)
@@ -47,6 +52,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           rawFeatureIdSubset)
 {
     pathStartIndicesBuffer_.push_back(0);
+    arrowStartIndicesBuffer_.push_back(0);
 }
 
 DeckFeatureLayerVisualization::~DeckFeatureLayerVisualization() = default;
@@ -103,6 +109,30 @@ void DeckFeatureLayerVisualization::pathCoordinateOriginRaw(SharedUint8Array& ou
     out.writeToArray(start, end);
 }
 
+void DeckFeatureLayerVisualization::arrowPositionsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowPositionsBuffer_);
+}
+
+void DeckFeatureLayerVisualization::arrowStartIndicesRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowStartIndicesBuffer_);
+}
+
+void DeckFeatureLayerVisualization::arrowColorsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowColorsBuffer_);
+}
+
+void DeckFeatureLayerVisualization::arrowWidthsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowWidthsBuffer_);
+}
+
+void DeckFeatureLayerVisualization::arrowFeatureStartRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowFeatureStartBuffer_);
+}
+
+void DeckFeatureLayerVisualization::arrowFeatureIdsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, arrowFeatureIdsBuffer_);
+}
+
 mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
     mapget::Point const& wgsPoint,
     glm::dvec3 const& wgsOffset) const
@@ -152,8 +182,40 @@ void DeckFeatureLayerVisualization::addPolyLine(
     if (pathStartIndicesBuffer_.empty()) {
         pathStartIndicesBuffer_.push_back(0);
     }
+    if (arrowStartIndicesBuffer_.empty()) {
+        arrowStartIndicesBuffer_.push_back(0);
+    }
 
-    appendPathGeometry(vertsCartesian, rule, tileFeatureId, width, evalFun);
+    auto const arrowType = rule.arrow(evalFun);
+    if (arrowType == FeatureStyleRule::NoArrow) {
+        appendPathGeometry(vertsCartesian, rule, tileFeatureId, width, evalFun, true);
+        return;
+    }
+
+    // Keep the original path visible and overlay directional arrow-head markers.
+    appendPathGeometry(vertsCartesian, rule, tileFeatureId, width, evalFun, false);
+
+    if (arrowType == FeatureStyleRule::ForwardArrow ||
+        arrowType == FeatureStyleRule::DoubleArrow) {
+        appendArrowHeadForSegment(
+            vertsCartesian.back(),
+            vertsCartesian[vertsCartesian.size() - 2],
+            rule,
+            tileFeatureId,
+            width,
+            evalFun);
+    }
+
+    if (arrowType == FeatureStyleRule::BackwardArrow ||
+        arrowType == FeatureStyleRule::DoubleArrow) {
+        appendArrowHeadForSegment(
+            vertsCartesian.front(),
+            vertsCartesian[1],
+            rule,
+            tileFeatureId,
+            width,
+            evalFun);
+    }
 }
 
 void DeckFeatureLayerVisualization::appendPathGeometry(
@@ -161,7 +223,8 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
     FeatureStyleRule const& rule,
     uint32_t tileFeatureId,
     float width,
-    BoundEvalFun& evalFun)
+    BoundEvalFun& evalFun,
+    bool enableDash)
 {
     for (auto const& point : vertsCartesian) {
         pathPositionsBuffer_.push_back(static_cast<float>(point.x));
@@ -183,7 +246,7 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
     pathFeatureIdsBuffer_.push_back(
         rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
 
-    if (rule.isDashed()) {
+    if (enableDash && rule.isDashed()) {
         const auto dashLength = static_cast<float>(std::max(1, rule.dashLength()));
         pathDashArrayBuffer_.push_back(dashLength);
         pathDashArrayBuffer_.push_back(dashLength);
@@ -196,6 +259,101 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
 
     featuresAdded_ = true;
 }
+
+void DeckFeatureLayerVisualization::appendArrowGeometry(
+    std::vector<mapget::Point> const& vertsCartesian,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    float width,
+    BoundEvalFun& evalFun)
+{
+    if (vertsCartesian.size() < 2) {
+        return;
+    }
+
+    for (auto const& point : vertsCartesian) {
+        arrowPositionsBuffer_.push_back(static_cast<float>(point.x));
+        arrowPositionsBuffer_.push_back(static_cast<float>(point.y));
+        arrowPositionsBuffer_.push_back(static_cast<float>(point.z));
+    }
+    arrowStartIndicesBuffer_.push_back(static_cast<uint32_t>(arrowPositionsBuffer_.size() / 3));
+
+    auto const color = rule.color(evalFun);
+    arrowColorsBuffer_.push_back(toColorByte(color.r));
+    arrowColorsBuffer_.push_back(toColorByte(color.g));
+    arrowColorsBuffer_.push_back(toColorByte(color.b));
+    arrowColorsBuffer_.push_back(toColorByte(color.a));
+
+    arrowWidthsBuffer_.push_back(std::max(1.0f, width));
+
+    const auto arrowIndex = static_cast<uint32_t>(arrowFeatureStartBuffer_.size());
+    arrowFeatureStartBuffer_.push_back(arrowIndex);
+    arrowFeatureIdsBuffer_.push_back(
+        rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
+
+    featuresAdded_ = true;
+}
+
+void DeckFeatureLayerVisualization::appendArrowHeadForSegment(
+    mapget::Point const& tip,
+    mapget::Point const& previous,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    float width,
+    BoundEvalFun& evalFun)
+{
+    auto const dx = tip.x - previous.x;
+    auto const dy = tip.y - previous.y;
+    auto const dz = tip.z - previous.z;
+    auto const segmentLength = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (segmentLength <= kArrowSegmentEpsilonMeters) {
+        return;
+    }
+
+    auto const dirX = dx / segmentLength;
+    auto const dirY = dy / segmentLength;
+    auto const dirZ = dz / segmentLength;
+
+    auto perpX = -dirY;
+    auto perpY = dirX;
+    auto perpZ = 0.0;
+
+    auto perpLength = std::sqrt(perpX * perpX + perpY * perpY + perpZ * perpZ);
+    if (perpLength <= kArrowSegmentEpsilonMeters) {
+        perpX = 1.0;
+        perpY = 0.0;
+        perpZ = 0.0;
+        perpLength = 1.0;
+    }
+    perpX /= perpLength;
+    perpY /= perpLength;
+    perpZ /= perpLength;
+
+    auto const headLength = std::clamp(
+        segmentLength * kArrowHeadLengthFraction,
+        kArrowHeadLengthMinMeters,
+        kArrowHeadLengthMaxMeters);
+    auto const halfHeadWidth = headLength * kArrowHeadWidthFraction;
+
+    mapget::Point const headBase{
+        tip.x - dirX * headLength,
+        tip.y - dirY * headLength,
+        tip.z - dirZ * headLength,
+    };
+    mapget::Point const left{
+        headBase.x + perpX * halfHeadWidth,
+        headBase.y + perpY * halfHeadWidth,
+        headBase.z + perpZ * halfHeadWidth,
+    };
+    mapget::Point const right{
+        headBase.x - perpX * halfHeadWidth,
+        headBase.y - perpY * halfHeadWidth,
+        headBase.z - perpZ * halfHeadWidth,
+    };
+
+    appendArrowGeometry({left, tip, right}, rule, tileFeatureId, width, evalFun);
+}
+
 std::uint8_t DeckFeatureLayerVisualization::toColorByte(float value)
 {
     const auto scaled = std::round(std::clamp(value, 0.0f, 1.0f) * 255.0f);

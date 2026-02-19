@@ -470,7 +470,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("pathFeatureIdsRaw", &DeckFeatureLayerVisualization::pathFeatureIdsRaw)
         .function("pathDashArrayRaw", &DeckFeatureLayerVisualization::pathDashArrayRaw)
         .function("pathDashOffsetsRaw", &DeckFeatureLayerVisualization::pathDashOffsetsRaw)
-        .function("pathCoordinateOriginRaw", &DeckFeatureLayerVisualization::pathCoordinateOriginRaw);
+        .function("pathCoordinateOriginRaw", &DeckFeatureLayerVisualization::pathCoordinateOriginRaw)
+        .function("arrowPositionsRaw", &DeckFeatureLayerVisualization::arrowPositionsRaw)
+        .function("arrowStartIndicesRaw", &DeckFeatureLayerVisualization::arrowStartIndicesRaw)
+        .function("arrowColorsRaw", &DeckFeatureLayerVisualization::arrowColorsRaw)
+        .function("arrowWidthsRaw", &DeckFeatureLayerVisualization::arrowWidthsRaw)
+        .function("arrowFeatureStartRaw", &DeckFeatureLayerVisualization::arrowFeatureStartRaw)
+        .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")

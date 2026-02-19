@@ -41,6 +41,11 @@ export interface DeckPathRenderResult {
     featureIds: ArrayBuffer;
     dashArrays: ArrayBuffer;
     dashOffsets: ArrayBuffer;
+    arrowPositions: ArrayBuffer;
+    arrowStartIndices: ArrayBuffer;
+    arrowColors: ArrayBuffer;
+    arrowWidths: ArrayBuffer;
+    arrowFeatureIds: ArrayBuffer;
     timings?: DeckWorkerTimings;
     error?: string;
 }
