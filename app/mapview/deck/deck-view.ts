@@ -1,6 +1,7 @@
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
 import {BitmapLayer} from "@deck.gl/layers";
+import {TileLayer} from "@deck.gl/geo-layers";
 import {Cartographic, CesiumMath, SceneMode} from "../../integrations/cesium";
 import {MapDataService} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -30,6 +31,8 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly WEB_MERCATOR_TILE_SIZE = 512;
     private static readonly ASSUMED_VERTICAL_FOV_RADIANS = CesiumMath.toRadians(60);
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
+    private static readonly OSM_LAYER_KEY = "osm/tile-layer";
+    private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
 
     protected readonly _viewIndex: number;
     readonly canvasId: string;
@@ -56,7 +59,8 @@ export abstract class DeckMapView implements IRenderView {
     private suppressDeckViewStateEvent = false;
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
-    private osmLayerKeys = new Set<string>();
+    private osmLayerEnabled = false;
+    private osmLayerOpacity = -1;
 
     get viewIndex() {
         return this._viewIndex;
@@ -114,7 +118,9 @@ export abstract class DeckMapView implements IRenderView {
         this.stopTickLoop();
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
-        this.osmLayerKeys.clear();
+        this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
+        this.osmLayerEnabled = false;
+        this.osmLayerOpacity = -1;
         this.layerRegistry.destroy();
         this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
 
@@ -575,94 +581,54 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     private updateOsmLayers(enabled: boolean, opacity: number): void {
-        const prefix = "osm/";
-        if (!enabled || !this.deck) {
-            for (const key of this.osmLayerKeys) {
-                this.layerRegistry.remove(key);
-            }
-            this.osmLayerKeys.clear();
+        if (!this.deck || !enabled) {
+            this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
+            this.osmLayerEnabled = false;
+            this.osmLayerOpacity = -1;
             return;
         }
 
-        const viewport = this.createWebMercatorViewport();
-        if (!viewport) {
+        const clampedOpacity = Math.max(0, Math.min(1, opacity));
+        if (this.osmLayerEnabled && this.osmLayerOpacity === clampedOpacity) {
             return;
         }
 
-        const width = Math.max(1, viewport.width);
-        const height = Math.max(1, viewport.height);
-        const [westRaw, northRaw] = viewport.unproject([0, 0]);
-        const [eastRaw, southRaw] = viewport.unproject([width, height]);
-
-        const north = Math.max(southRaw, northRaw);
-        const south = Math.min(southRaw, northRaw);
-        let west = Math.min(westRaw, eastRaw);
-        let east = Math.max(westRaw, eastRaw);
-        if (east - west > 360) {
-            west = -180;
-            east = 180;
-        }
-
-        const zoom = Math.max(0, Math.min(19, Math.floor(this.viewState.zoom)));
-        const minY = this.latToTileY(north, zoom);
-        const maxY = this.latToTileY(south, zoom);
-        const yStart = Math.max(0, Math.floor(Math.min(minY, maxY)));
-        const yEnd = Math.min((1 << zoom) - 1, Math.floor(Math.max(minY, maxY)));
-
-        const n = 1 << zoom;
-        const xStart = Math.floor(this.lonToTileX(west, zoom));
-        const xEnd = Math.floor(this.lonToTileX(east, zoom));
-        const nextKeys = new Set<string>();
-
-        for (let x = xStart; x <= xEnd; x++) {
-            const wrappedX = ((x % n) + n) % n;
-            const tileWest = this.tileXToLon(x, zoom);
-            const tileEast = this.tileXToLon(x + 1, zoom);
-            for (let y = yStart; y <= yEnd; y++) {
-                const key = `${prefix}${zoom}/${wrappedX}/${y}`;
-                nextKeys.add(key);
-
-                const tileNorth = this.tileYToLat(y, zoom);
-                const tileSouth = this.tileYToLat(y + 1, zoom);
-                const layer = new BitmapLayer({
-                    id: key,
-                    image: `https://a.tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
-                    bounds: [tileWest, tileSouth, tileEast, tileNorth],
-                    opacity: Math.max(0, Math.min(1, opacity)),
+        const layer = new TileLayer({
+            id: DeckMapView.OSM_LAYER_KEY,
+            data: DeckMapView.OSM_TILE_URL_TEMPLATE,
+            minZoom: 0,
+            maxZoom: 19,
+            tileSize: 256,
+            opacity: clampedOpacity,
+            pickable: false,
+            refinementStrategy: "no-overlap",
+            updateTriggers: {
+                renderSubLayers: [clampedOpacity]
+            },
+            renderSubLayers: (props: any) => {
+                const boundingBox = props.tile?.boundingBox;
+                if (!boundingBox || !props.data) {
+                    return null;
+                }
+                return new BitmapLayer(props, {
+                    id: `${props.id}-bitmap`,
+                    data: null,
+                    image: props.data,
+                    bounds: [
+                        boundingBox[0][0],
+                        boundingBox[0][1],
+                        boundingBox[1][0],
+                        boundingBox[1][1]
+                    ],
+                    opacity: clampedOpacity,
                     pickable: false,
                     parameters: {depthTest: false}
                 } as any);
-                this.layerRegistry.upsert(key, layer as any, -1000);
             }
-        }
-
-        for (const existingKey of this.osmLayerKeys) {
-            if (!nextKeys.has(existingKey)) {
-                this.layerRegistry.remove(existingKey);
-            }
-        }
-        this.osmLayerKeys = nextKeys;
-    }
-
-    private lonToTileX(lon: number, zoom: number): number {
-        return ((lon + 180) / 360) * (1 << zoom);
-    }
-
-    private latToTileY(lat: number, zoom: number): number {
-        const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
-        const latRad = clampedLat * Math.PI / 180;
-        return (
-            (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2
-        ) * (1 << zoom);
-    }
-
-    private tileXToLon(x: number, zoom: number): number {
-        return x / (1 << zoom) * 360 - 180;
-    }
-
-    private tileYToLat(y: number, zoom: number): number {
-        const n = Math.PI - 2 * Math.PI * y / (1 << zoom);
-        return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+        } as any);
+        this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer as any, -1000);
+        this.osmLayerEnabled = true;
+        this.osmLayerOpacity = clampedOpacity;
     }
 
     private normalizeLongitude(lon: number): number {
