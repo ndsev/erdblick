@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {DeckLayerLike, DeckLayerRegistry, DeckLike} from "./deck-layer-registry";
 import {DeckTileVisualization} from "./deck-tile.visualization.model";
+import {PointMergeService} from "../pointmerge.service";
 
 class DeckStub implements DeckLike {
     readonly commits: DeckLayerLike[][] = [];
@@ -26,10 +27,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -98,10 +101,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -198,10 +203,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -237,10 +244,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -272,10 +281,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -311,10 +322,12 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
 
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -358,9 +371,11 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -416,9 +431,11 @@ describe("DeckTileVisualization", () => {
             name: () => "test-style",
             isDeleted: () => false
         } as any;
+        const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
             0,
             tile,
+            pointMergeService,
             style,
             "",
             true,
@@ -465,5 +482,51 @@ describe("DeckTileVisualization", () => {
         expect(markers[0].sizePx).toBe(12);
         expect(Number.isFinite(markers[0].angleDeg)).toBe(true);
         expect(markers[0].position).toEqual([10, 20, 0]);
+    });
+
+    it("maps raw WASM point buffers into scatterplot attributes", () => {
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+        const pointMergeService = new PointMergeService();
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            true,
+            {value: 0} as any
+        ) as any;
+
+        const pointData = visu.buildPointLayerData({
+            coordinateOrigin: new Float64Array([11, 48, 0]),
+            positions: new Float32Array([
+                0, 0, 0,
+                10, 20, 0
+            ]),
+            colors: new Uint8Array([
+                255, 128, 0, 255,
+                32, 196, 255, 200
+            ]),
+            radii: new Float32Array([4, 6]),
+            featureIds: new Uint32Array([101, 0xffffffff])
+        });
+
+        expect(pointData).toBeTruthy();
+        expect(pointData!.length).toBe(2);
+        expect(pointData!.coordinateOrigin).toEqual([11, 48, 0]);
+        expect(pointData!.featureIds).toEqual([101, null]);
+        expect(Array.from(pointData!.attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
+        expect(Array.from(pointData!.attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
+        expect(Array.from(pointData!.attributes.getRadius.value)).toEqual([4, 6]);
     });
 });

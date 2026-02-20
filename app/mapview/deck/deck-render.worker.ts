@@ -61,6 +61,16 @@ function resolveHighlightMode(modeValue: number): any {
     return coreLib.HighlightMode.NO_HIGHLIGHT;
 }
 
+function createMergeCountProvider(snapshot: Record<string, number>): any {
+    const table = snapshot ?? {};
+    return {
+        count: (_geoPos: any, hashPos: string, _level: number, mapViewLayerStyleRuleId: string) => {
+            const value = table[`${mapViewLayerStyleRuleId}|${hashPos}`];
+            return Number.isInteger(value) ? value : 0;
+        }
+    };
+}
+
 function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
     return uint8ArrayFromWasm((shared) => {
         deckVisu[accessorName](shared);
@@ -85,6 +95,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             task.tileKey,
             style,
             task.styleOptions,
+            createMergeCountProvider(task.mergeCountSnapshot),
             resolveHighlightMode(task.highlightModeValue),
             task.featureIdSubset
         );
@@ -92,6 +103,10 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         deckVisu.addTileFeatureLayer(tile);
         deckVisu.run();
 
+        const pointPositions = readRawBytes(deckVisu, "pointPositionsRaw");
+        const pointColors = readRawBytes(deckVisu, "pointColorsRaw");
+        const pointRadii = readRawBytes(deckVisu, "pointRadiiRaw");
+        const pointFeatureIds = readRawBytes(deckVisu, "pointFeatureIdsRaw");
         const coordinateOrigin = readRawBytes(deckVisu, "pathCoordinateOriginRaw");
         const positions = readRawBytes(deckVisu, "pathPositionsRaw");
         const startIndices = readRawBytes(deckVisu, "pathStartIndicesRaw");
@@ -105,12 +120,17 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const arrowColors = readRawBytes(deckVisu, "arrowColorsRaw");
         const arrowWidths = readRawBytes(deckVisu, "arrowWidthsRaw");
         const arrowFeatureIds = readRawBytes(deckVisu, "arrowFeatureIdsRaw");
+        const mergedPointFeatures = deckVisu.mergedPointFeatures() as Record<string, any[]>;
         const renderMs = performance.now() - renderStart;
 
         return {
             type: "DeckPathRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
+            pointPositions: pointPositions.buffer,
+            pointColors: pointColors.buffer,
+            pointRadii: pointRadii.buffer,
+            pointFeatureIds: pointFeatureIds.buffer,
             coordinateOrigin: coordinateOrigin.buffer,
             positions: positions.buffer,
             startIndices: startIndices.buffer,
@@ -124,6 +144,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             arrowColors: arrowColors.buffer,
             arrowWidths: arrowWidths.buffer,
             arrowFeatureIds: arrowFeatureIds.buffer,
+            mergedPointFeatures,
             timings: {
                 deserializeMs,
                 renderMs,
@@ -142,6 +163,10 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
 
 function emptyResultBuffers() {
     return {
+        pointPositions: new ArrayBuffer(0),
+        pointColors: new ArrayBuffer(0),
+        pointRadii: new ArrayBuffer(0),
+        pointFeatureIds: new ArrayBuffer(0),
         coordinateOrigin: new ArrayBuffer(0),
         positions: new ArrayBuffer(0),
         startIndices: new ArrayBuffer(0),
@@ -154,7 +179,8 @@ function emptyResultBuffers() {
         arrowStartIndices: new ArrayBuffer(0),
         arrowColors: new ArrayBuffer(0),
         arrowWidths: new ArrayBuffer(0),
-        arrowFeatureIds: new ArrayBuffer(0)
+        arrowFeatureIds: new ArrayBuffer(0),
+        mergedPointFeatures: {} as Record<string, any[]>
     };
 }
 
@@ -182,6 +208,10 @@ addEventListener("message", async ({data}) => {
 
         const result = processPathRenderTask(task);
         postMessage(result, [
+            result.pointPositions,
+            result.pointColors,
+            result.pointRadii,
+            result.pointFeatureIds,
             result.coordinateOrigin,
             result.positions,
             result.startIndices,

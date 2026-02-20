@@ -446,13 +446,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// DeckFeatureLayerVisualization
     em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
-        .constructor<int, std::string, FeatureLayerStyle const&, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
         .function(
             "addTileFeatureLayer",
             std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(
                 [](DeckFeatureLayerVisualization& self, TileFeatureLayer const& tile)
                 {
-                    self.FeatureLayerVisualizationBase::addTileFeatureLayer(tile);
+                    self.addTileFeatureLayer(tile);
                 }))
         .function(
             "run",
@@ -462,6 +462,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
                     self.FeatureLayerVisualizationBase::run();
                 }))
         .function("abiVersion", &DeckFeatureLayerVisualization::abiVersion)
+        .function("pointPositionsRaw", &DeckFeatureLayerVisualization::pointPositionsRaw)
+        .function("pointColorsRaw", &DeckFeatureLayerVisualization::pointColorsRaw)
+        .function("pointRadiiRaw", &DeckFeatureLayerVisualization::pointRadiiRaw)
+        .function("pointFeatureStartRaw", &DeckFeatureLayerVisualization::pointFeatureStartRaw)
+        .function("pointFeatureIdsRaw", &DeckFeatureLayerVisualization::pointFeatureIdsRaw)
         .function("pathPositionsRaw", &DeckFeatureLayerVisualization::pathPositionsRaw)
         .function("pathStartIndicesRaw", &DeckFeatureLayerVisualization::pathStartIndicesRaw)
         .function("pathColorsRaw", &DeckFeatureLayerVisualization::pathColorsRaw)
@@ -476,7 +481,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("arrowColorsRaw", &DeckFeatureLayerVisualization::arrowColorsRaw)
         .function("arrowWidthsRaw", &DeckFeatureLayerVisualization::arrowWidthsRaw)
         .function("arrowFeatureStartRaw", &DeckFeatureLayerVisualization::arrowFeatureStartRaw)
-        .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw);
+        .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw)
+        .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")

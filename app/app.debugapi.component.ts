@@ -243,6 +243,7 @@ export class ErdblickDebugApi {
                     mapTileKey,
                     style.featureLayerStyle,
                     styleOptions,
+                    {count: () => 0},
                     modeValue,
                     featureIdSubset);
                 deckVis.addTileFeatureLayer(parsedTile);

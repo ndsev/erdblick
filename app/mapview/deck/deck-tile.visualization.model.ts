@@ -1,13 +1,14 @@
 import {FeatureTile} from "../../mapdata/features.model";
 import {FeatureLayerStyle, HighlightMode} from "../../../build/libs/core/erdblick-core";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
-import {IconLayer, PathLayer} from "@deck.gl/layers";
+import {IconLayer, PathLayer, ScatterplotLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
 import {deckRenderWorkerPool, isDeckRenderWorkerPoolEnabled} from "./deck-render.worker.pool";
 import {DeckWorkerTimings} from "./deck-render.worker.protocol";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
@@ -37,6 +38,17 @@ interface DeckPathLayerData {
     };
 }
 
+interface DeckPointLayerData {
+    length: number;
+    coordinateOrigin: [number, number, number];
+    featureIds: Array<number | null>;
+    attributes: {
+        getPosition: DeckBinaryAttribute<Float32Array>;
+        getFillColor: DeckBinaryAttribute<Uint8Array>;
+        getRadius: DeckBinaryAttribute<Float32Array>;
+    };
+}
+
 interface DeckPathRawBuffers {
     coordinateOrigin: Float64Array;
     positions: Float32Array;
@@ -48,8 +60,17 @@ interface DeckPathRawBuffers {
     dashOffsets?: Float32Array;
 }
 
+interface DeckPointRawBuffers {
+    coordinateOrigin: Float64Array;
+    positions: Float32Array;
+    colors: Uint8Array;
+    radii: Float32Array;
+    featureIds: Uint32Array;
+}
+
 const MAX_DECK_PATH_COUNT = 1_000_000;
 const MAX_DECK_VERTEX_COUNT = 20_000_000;
+const MAX_DECK_POINT_COUNT = 10_000_000;
 const DECK_UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
 const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
@@ -93,22 +114,27 @@ export class DeckTileVisualization implements ITileVisualization {
 
     private readonly style: StyleWithIsDeleted;
     private readonly styleSource: string;
+    private readonly pointMergeService: PointMergeService;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
     private readonly options: Record<string, boolean | number | string>;
     private renderQueued = false;
     private deleted = false;
     private rendered = false;
+    private pointLayerKey: string | null = null;
     private pathLayerKey: string | null = null;
     private arrowLayerKey: string | null = null;
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
     private latestWorkerTimings: DeckWorkerTimings | null = null;
+    private latestPointLayerData: DeckPointLayerData | null = null;
     private latestArrowLayerData: DeckPathLayerData | null = null;
+    private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
+                pointMergeService: PointMergeService,
                 style: FeatureLayerStyle,
                 styleSource: string,
                 highDetail: boolean,
@@ -117,6 +143,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 boxGrid?: boolean,
                 options?: Record<string, boolean | number | string>) {
         this.tile = tile;
+        this.pointMergeService = pointMergeService;
         this.style = style as StyleWithIsDeleted;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
@@ -141,6 +168,12 @@ export class DeckTileVisualization implements ITileVisualization {
             hoverMode: this.highlightModeLabel(),
             kind: "path"
         });
+        const pointLayerKey = makeDeckLayerKey({
+            tileKey: this.tile.mapTileKey,
+            styleId: this.styleId,
+            hoverMode: this.highlightModeLabel(),
+            kind: "point"
+        });
         const arrowLayerKey = makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
@@ -148,11 +181,41 @@ export class DeckTileVisualization implements ITileVisualization {
             kind: "arrow"
         });
         try {
+            for (const removedCornerTile of this.pointMergeService.remove(
+                this.tile.tileId,
+                this.mapViewLayerStyleId()
+            )) {
+                removedCornerTile.removeScene(sceneHandle);
+            }
+            this.latestPointLayerData = null;
             this.latestArrowLayerData = null;
+            this.latestMergedPointFeatures = null;
             const pathLayerData = await this.renderWasm();
+            const pointLayerData = this.latestPointLayerData as DeckPointLayerData | null;
             const arrowLayerData = this.latestArrowLayerData as DeckPathLayerData | null;
+            const mergedPointFeatures = this.latestMergedPointFeatures as
+                Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
             if (this.deleted || this.style.isDeleted()) {
                 return false;
+            }
+            if (pointLayerData && pointLayerData.length > 0) {
+                const pointLayer = new ScatterplotLayer({
+                    id: pointLayerKey,
+                    data: pointLayerData as any,
+                    coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+                    coordinateOrigin: pointLayerData.coordinateOrigin,
+                    filled: true,
+                    stroked: false,
+                    radiusUnits: "pixels",
+                    pickable: true,
+                    tileKey: this.tile.mapTileKey,
+                    featureIds: pointLayerData.featureIds
+                } as any);
+                registry.upsert(pointLayerKey, pointLayer as any, 425);
+                this.pointLayerKey = pointLayerKey;
+            } else if (this.pointLayerKey) {
+                registry.remove(this.pointLayerKey);
+                this.pointLayerKey = null;
             }
             if (pathLayerData && pathLayerData.length > 0) {
                 const pathLayer = new PathLayer({
@@ -204,6 +267,18 @@ export class DeckTileVisualization implements ITileVisualization {
                 registry.remove(this.arrowLayerKey);
                 this.arrowLayerKey = null;
             }
+            if (mergedPointFeatures) {
+                for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
+                    for (const finishedCornerTile of this.pointMergeService.insert(
+                        mergedPointVisualizations as MergedPointVisualization[],
+                        this.tile.tileId,
+                        this.tile.mapTileKey,
+                        mapLayerStyleRuleId
+                    )) {
+                        finishedCornerTile.renderScene(sceneHandle);
+                    }
+                }
+            }
             this.rendered = true;
             this.renderQueued = false;
             this.deleted = false;
@@ -222,12 +297,22 @@ export class DeckTileVisualization implements ITileVisualization {
     destroy(sceneHandle: IRenderSceneHandle): void {
         this.deleted = true;
         const registry = this.resolveRegistry(sceneHandle);
+        for (const removedCornerTile of this.pointMergeService.remove(
+            this.tile.tileId,
+            this.mapViewLayerStyleId()
+        )) {
+            removedCornerTile.removeScene(sceneHandle);
+        }
+        if (this.pointLayerKey) {
+            registry.remove(this.pointLayerKey);
+        }
         if (this.pathLayerKey) {
             registry.remove(this.pathLayerKey);
         }
         if (this.arrowLayerKey) {
             registry.remove(this.arrowLayerKey);
         }
+        this.pointLayerKey = null;
         this.pathLayerKey = null;
         this.arrowLayerKey = null;
         this.rendered = false;
@@ -317,9 +402,20 @@ export class DeckTileVisualization implements ITileVisualization {
             styleSource: this.styleSource,
             styleOptions: this.copyStyleOptions(),
             highlightModeValue: this.highlightMode.value,
-            featureIdSubset: [...this.featureIdSubset]
+            featureIdSubset: [...this.featureIdSubset],
+            mergeCountSnapshot: this.pointMergeService.makeMergeCountSnapshot(
+                this.tile.tileId,
+                this.mapViewLayerStyleId()
+            )
         });
         this.latestWorkerTimings = result.workerTimings ?? null;
+        this.latestPointLayerData = this.buildPointLayerData({
+            coordinateOrigin: result.coordinateOrigin,
+            positions: result.pointPositions,
+            colors: result.pointColors,
+            radii: result.pointRadii,
+            featureIds: result.pointFeatureIds
+        });
         this.latestArrowLayerData = this.buildPathLayerData({
             coordinateOrigin: result.coordinateOrigin,
             positions: result.arrowPositions,
@@ -328,6 +424,8 @@ export class DeckTileVisualization implements ITileVisualization {
             widths: result.arrowWidths,
             featureIds: result.arrowFeatureIds
         });
+        this.latestMergedPointFeatures =
+            (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>;
         return this.buildPathLayerData(result);
     }
 
@@ -340,6 +438,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.tile.mapTileKey,
                 this.style,
                 this.options,
+                this.pointMergeService,
                 this.highlightMode,
                 this.featureIdSubset
             );
@@ -359,6 +458,13 @@ export class DeckTileVisualization implements ITileVisualization {
                 dashArrays: this.readFloat32Array(deckVisu, "pathDashArrayRaw"),
                 dashOffsets: this.readFloat32Array(deckVisu, "pathDashOffsetsRaw")
             });
+            this.latestPointLayerData = this.buildPointLayerData({
+                coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
+                positions: this.readFloat32Array(deckVisu, "pointPositionsRaw"),
+                colors: this.readUint8Array(deckVisu, "pointColorsRaw"),
+                radii: this.readFloat32Array(deckVisu, "pointRadiiRaw"),
+                featureIds: this.readUint32Array(deckVisu, "pointFeatureIdsRaw")
+            });
             this.latestArrowLayerData = this.buildPathLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
                 positions: this.readFloat32Array(deckVisu, "arrowPositionsRaw"),
@@ -367,6 +473,8 @@ export class DeckTileVisualization implements ITileVisualization {
                 widths: this.readFloat32Array(deckVisu, "arrowWidthsRaw"),
                 featureIds: this.readUint32Array(deckVisu, "arrowFeatureIdsRaw")
             });
+            this.latestMergedPointFeatures = deckVisu.mergedPointFeatures() as
+                Record<MapViewLayerStyleRule, MergedPointVisualization[]>;
             return lineLayerData;
         } finally {
             if (deckVisu && typeof deckVisu.delete === "function") {
@@ -468,6 +576,50 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
+    private buildPointLayerData(raw: DeckPointRawBuffers): DeckPointLayerData | null {
+        if (raw.coordinateOrigin.length < 3) {
+            return null;
+        }
+        if (raw.positions.length < 3) {
+            return null;
+        }
+        if (raw.positions.length % 3 !== 0) {
+            return null;
+        }
+
+        const pointCount = raw.positions.length / 3;
+        if (!pointCount || pointCount > MAX_DECK_POINT_COUNT) {
+            return null;
+        }
+        if (raw.colors.length < pointCount * 4 || raw.radii.length < pointCount || raw.featureIds.length < pointCount) {
+            return null;
+        }
+
+        const featureIds: Array<number | null> = new Array<number | null>(pointCount).fill(null);
+        for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+            const featureId = raw.featureIds[pointIndex];
+            featureIds[pointIndex] =
+                Number.isInteger(featureId) && featureId !== DECK_UNSELECTABLE_FEATURE_INDEX
+                    ? featureId
+                    : null;
+        }
+
+        return {
+            length: pointCount,
+            coordinateOrigin: [
+                raw.coordinateOrigin[0],
+                raw.coordinateOrigin[1],
+                raw.coordinateOrigin[2]
+            ],
+            featureIds,
+            attributes: {
+                getPosition: {value: raw.positions, size: 3},
+                getFillColor: {value: raw.colors, size: 4},
+                getRadius: {value: raw.radii, size: 1}
+            }
+        };
+    }
+
     private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {
         const markers: DeckArrowMarker[] = [];
         const positions = pathData.attributes.getPath.value;
@@ -560,6 +712,16 @@ export class DeckTileVisualization implements ITileVisualization {
 
     private copyStyleOptions(): Record<string, boolean | number | string> {
         return {...this.options};
+    }
+
+    private mapViewLayerStyleId(): MapViewLayerStyleRule {
+        return this.pointMergeService.makeMapViewLayerStyleId(
+            this.viewIndex,
+            this.tile.mapName,
+            this.tile.layerName,
+            this.styleId,
+            this.highlightMode
+        );
     }
 
     private recordRenderTimeSample(durationMs: number, measuredDurationMs?: number): void {

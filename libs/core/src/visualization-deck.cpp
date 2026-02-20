@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
+#include <fmt/format.h>
 
 using namespace mapget;
 
@@ -34,6 +35,29 @@ void writeVectorToSharedBuffer(SharedUint8Array& out, std::vector<T> const& buff
     auto const* end = start + (buffer.size() * sizeof(T));
     out.writeToArray(start, end);
 }
+
+mapget::Point pointFromJsValue(JsValue const& xyzPos)
+{
+    return {
+        xyzPos["x"].as<double>(),
+        xyzPos["y"].as<double>(),
+        xyzPos["z"].as<double>(),
+    };
+}
+
+JsValue rgbaBytesFromColor(glm::fvec4 const& color)
+{
+    auto toByte = [](float value) {
+        const auto scaled = std::round(std::clamp(value, 0.0f, 1.0f) * 255.0f);
+        return static_cast<std::uint8_t>(scaled);
+    };
+    return JsValue::List({
+        JsValue(toByte(color.r)),
+        JsValue(toByte(color.g)),
+        JsValue(toByte(color.b)),
+        JsValue(toByte(color.a)),
+    });
+}
 }
 
 DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
@@ -41,6 +65,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
     std::string const& mapTileKey,
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
+    NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
     NativeJsValue const& rawFeatureIdSubset)
     : FeatureLayerVisualizationBase(
@@ -49,7 +74,8 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           style,
           rawOptionValues,
           highlightMode,
-          rawFeatureIdSubset)
+          rawFeatureIdSubset,
+          rawFeatureMergeService)
 {
     pathStartIndicesBuffer_.push_back(0);
     arrowStartIndicesBuffer_.push_back(0);
@@ -60,6 +86,26 @@ DeckFeatureLayerVisualization::~DeckFeatureLayerVisualization() = default;
 uint32_t DeckFeatureLayerVisualization::abiVersion() const
 {
     return 1u;
+}
+
+void DeckFeatureLayerVisualization::pointPositionsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pointPositionsBuffer_);
+}
+
+void DeckFeatureLayerVisualization::pointColorsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pointColorsBuffer_);
+}
+
+void DeckFeatureLayerVisualization::pointRadiiRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pointRadiiBuffer_);
+}
+
+void DeckFeatureLayerVisualization::pointFeatureStartRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pointFeatureStartBuffer_);
+}
+
+void DeckFeatureLayerVisualization::pointFeatureIdsRaw(SharedUint8Array& out) const {
+    writeVectorToSharedBuffer(out, pointFeatureIdsBuffer_);
 }
 
 void DeckFeatureLayerVisualization::pathPositionsRaw(SharedUint8Array& out) const {
@@ -133,6 +179,38 @@ void DeckFeatureLayerVisualization::arrowFeatureIdsRaw(SharedUint8Array& out) co
     writeVectorToSharedBuffer(out, arrowFeatureIdsBuffer_);
 }
 
+NativeJsValue DeckFeatureLayerVisualization::mergedPointFeatures() const
+{
+    auto result = JsValue::Dict();
+    for (auto const& [mapLayerStyleRuleId, primitives] : mergedPointsPerStyleRuleId_) {
+        auto pointList = JsValue::List();
+        for (auto const& [_, featureIdsAndPoint] : primitives) {
+            if (auto const& pt = featureIdsAndPoint.second) {
+                pointList.push(*pt);
+            }
+        }
+        result.set(mapLayerStyleRuleId, pointList);
+    }
+    return *result;
+}
+
+void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
+{
+    auto const isFirstTile = !tile_;
+    FeatureLayerVisualizationBase::addTileFeatureLayer(tile);
+    if (!isFirstTile) {
+        return;
+    }
+    for (auto&& rule : style_.rules()) {
+        if (rule.mode() != highlightMode_ || !rule.pointMergeGridCellSize()) {
+            continue;
+        }
+        mergedPointsPerStyleRuleId_.emplace(
+            makeMapLayerStyleRuleId(rule.index()),
+            std::map<std::string, std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>());
+    }
+}
+
 mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
     mapget::Point const& wgsPoint,
     glm::dvec3 const& wgsOffset) const
@@ -162,6 +240,121 @@ mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
         dLatRad * kEarthRadiusMeters,
         adjustedWgs.z - pathCoordinateOriginWgs_.z,
     };
+}
+
+std::string DeckFeatureLayerVisualization::makeMapLayerStyleRuleId(uint32_t ruleIndex) const
+{
+    return fmt::format(
+        "{}:{}:{}:{}:{}:{}",
+        viewIndex_,
+        tile_->mapId(),
+        tile_->layerInfo()->layerId_,
+        style_.name(),
+        static_cast<uint32_t>(highlightMode_),
+        ruleIndex);
+}
+
+void DeckFeatureLayerVisualization::emitPoint(
+    JsValue const& xyzPos,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    appendPointGeometry(pointFromJsValue(xyzPos), rule, tileFeatureId, evalFun);
+}
+
+void DeckFeatureLayerVisualization::emitIcon(
+    JsValue const& xyzPos,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    appendPointGeometry(pointFromJsValue(xyzPos), rule, tileFeatureId, evalFun);
+}
+
+JsValue DeckFeatureLayerVisualization::makeMergedPointPointParams(
+    JsValue const& xyzPos,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    auto const color = rule.color(evalFun);
+    return JsValue::Dict({
+        {"id", JsValue(tileFeatureId)},
+        {"position", xyzPos},
+        {"pixelSize", JsValue(rule.width())},
+        {"color", rgbaBytesFromColor(color)},
+        {"outlineColor", rgbaBytesFromColor(rule.outlineColor())},
+        {"outlineWidth", JsValue(rule.outlineWidth())},
+    });
+}
+
+JsValue DeckFeatureLayerVisualization::makeMergedPointIconParams(
+    JsValue const& xyzPos,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    auto result = makeMergedPointPointParams(xyzPos, rule, tileFeatureId, evalFun);
+    result.set("width", JsValue(rule.width()));
+    result.set("height", JsValue(rule.width()));
+    if (rule.hasIconUrl()) {
+        result.set("image", JsValue(rule.iconUrl(evalFun)));
+    }
+    return result;
+}
+
+JsValue DeckFeatureLayerVisualization::makeMergedPointLabelParams(
+    JsValue const& xyzPos,
+    std::string const& text,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    (void) evalFun;
+    auto result = JsValue::Dict({
+        {"id", JsValue(tileFeatureId)},
+        {"position", xyzPos},
+        {"text", JsValue(text)},
+        {"font", JsValue(rule.labelFont())},
+        {"fillColor", rgbaBytesFromColor(rule.labelColor())},
+        {"outlineColor", rgbaBytesFromColor(rule.labelOutlineColor())},
+        {"outlineWidth", JsValue(rule.labelOutlineWidth())},
+        {"scale", JsValue(rule.labelScale())},
+    });
+    if (auto const& pixelOffset = rule.labelPixelOffset()) {
+        result.set("pixelOffset", JsValue::List({
+            JsValue(pixelOffset->first),
+            JsValue(pixelOffset->second),
+        }));
+    }
+    return result;
+}
+
+void DeckFeatureLayerVisualization::appendPointGeometry(
+    mapget::Point const& pointCartesian,
+    FeatureStyleRule const& rule,
+    uint32_t tileFeatureId,
+    BoundEvalFun& evalFun)
+{
+    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.x));
+    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.y));
+    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.z));
+
+    auto const color = rule.color(evalFun);
+    pointColorsBuffer_.push_back(toColorByte(color.r));
+    pointColorsBuffer_.push_back(toColorByte(color.g));
+    pointColorsBuffer_.push_back(toColorByte(color.b));
+    pointColorsBuffer_.push_back(toColorByte(color.a));
+
+    pointRadiiBuffer_.push_back(std::max(0.0f, rule.width() * 0.5f));
+
+    auto const pointIndex = static_cast<uint32_t>(pointFeatureStartBuffer_.size());
+    pointFeatureStartBuffer_.push_back(pointIndex);
+    pointFeatureIdsBuffer_.push_back(
+        rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
+
+    featuresAdded_ = true;
 }
 
 void DeckFeatureLayerVisualization::addPolyLine(

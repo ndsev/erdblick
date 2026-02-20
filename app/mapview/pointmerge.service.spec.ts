@@ -1,11 +1,20 @@
 import {beforeAll, describe, expect, it} from 'vitest';
 import {initializeLibrary} from '../integrations/wasm';
+import {DeckLayerLike, DeckLayerRegistry, DeckLike} from './deck/deck-layer-registry';
 
 beforeAll(async () => {
     await initializeLibrary();
 });
 
 import {MergedPointsTile, PointMergeService} from './pointmerge.service';
+
+class DeckStub implements DeckLike {
+    readonly commits: DeckLayerLike[][] = [];
+
+    setProps(props: { layers: DeckLayerLike[] }): void {
+        this.commits.push(props.layers);
+    }
+}
 
 describe('MergedPointsTile', () => {
     it('adds new points and merges feature IDs, updating parameters only when new IDs are added', () => {
@@ -44,6 +53,57 @@ describe('MergedPointsTile', () => {
         expect(stored2.labelParameters).toBe(point2.labelParameters);
         expect(tile.count('unknown-hash')).toBe(0);
     });
+
+    it('renders and removes merged points through deck scene handles', () => {
+        const tile = new MergedPointsTile(1n, '0:map:layer:style:0:7');
+        tile.add({
+            position: {x: 8, y: 49, z: 0},
+            positionHash: 'deck-pos',
+            pointParameters: {
+                position: {x: 123, y: 456, z: 0},
+                pixelSize: 6,
+                color: [255, 0, 0, 255],
+                outlineColor: [0, 0, 0, 255],
+                outlineWidth: 1
+            },
+            labelParameters: {
+                position: {x: 8, y: 49, z: 0},
+                text: 'A',
+                fillColor: [255, 255, 255, 255],
+                outlineColor: [0, 0, 0, 255],
+                outlineWidth: 1,
+                scale: 1,
+                pixelOffset: [0, 0]
+            },
+            featureIds: [3]
+        } as any, 'tile-key');
+
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+
+        tile.renderScene({
+            renderer: 'deck',
+            scene: {layerRegistry: registry}
+        } as any);
+        registry.flush();
+
+        expect(deck.commits).toHaveLength(1);
+        expect(deck.commits[0].length).toBeGreaterThan(0);
+        const mergedPointLayer: any = deck.commits[0].find(layer =>
+            typeof layer.id === 'string' && layer.id.includes('/merged-point'));
+        expect(mergedPointLayer).toBeTruthy();
+        const firstDatum = mergedPointLayer.props.data[0];
+        expect(mergedPointLayer.props.getPosition(firstDatum)).toEqual([8, 49, 0]);
+
+        tile.removeScene({
+            renderer: 'deck',
+            scene: {layerRegistry: registry}
+        } as any);
+        registry.flush();
+
+        expect(deck.commits).toHaveLength(2);
+        expect(deck.commits[1]).toHaveLength(0);
+    });
 });
 
 describe('PointMergeService', () => {
@@ -74,6 +134,27 @@ describe('PointMergeService', () => {
         for (const tile of yielded) {
             expect(tile.referencingTiles).toContain(sourceTileId);
         }
+    });
+
+    it('captures merge-count snapshot for surrounding corner tiles', () => {
+        const service = new PointMergeService();
+        const ruleId = '0:map:layer:style:0:7';
+        const sourceTileId = 5n;
+        const cornerTile = new MergedPointsTile(sourceTileId, ruleId);
+        cornerTile.features.set('h', {
+            position: {x: 0, y: 0, z: 0},
+            positionHash: 'h',
+            pointParameters: null,
+            labelParameters: null,
+            featureIds: [11, 22]
+        } as any);
+
+        service.mergedPointsTiles.set(ruleId, new Map<bigint, MergedPointsTile>([
+            [sourceTileId, cornerTile]
+        ]));
+
+        const snapshot = service.makeMergeCountSnapshot(sourceTileId, '0:map:layer:style:0');
+        expect(snapshot[`${ruleId}|h`]).toBe(2);
     });
 
     it('remove yields and deletes tiles whose references are cleared, retaining others', () => {

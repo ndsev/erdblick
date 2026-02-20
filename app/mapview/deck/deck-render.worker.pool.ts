@@ -21,9 +21,14 @@ export interface DeckPathRenderRequest {
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     featureIdSubset: string[];
+    mergeCountSnapshot: Record<string, number>;
 }
 
 export interface DeckPathRenderBuffers {
+    pointPositions: Float32Array;
+    pointColors: Uint8Array;
+    pointRadii: Float32Array;
+    pointFeatureIds: Uint32Array;
     coordinateOrigin: Float64Array;
     positions: Float32Array;
     startIndices: Uint32Array;
@@ -37,6 +42,7 @@ export interface DeckPathRenderBuffers {
     arrowColors: Uint8Array;
     arrowWidths: Float32Array;
     arrowFeatureIds: Uint32Array;
+    mergedPointFeatures: Record<string, any[]>;
     workerTimings?: DeckWorkerTimings;
 }
 
@@ -173,6 +179,10 @@ export class DeckRenderWorkerPool {
         }
 
         pending.resolve({
+            pointPositions: this.toFloat32Array(result.pointPositions),
+            pointColors: this.toUint8Array(result.pointColors),
+            pointRadii: this.toFloat32Array(result.pointRadii),
+            pointFeatureIds: this.toUint32Array(result.pointFeatureIds),
             coordinateOrigin: this.toFloat64Array(result.coordinateOrigin),
             positions: this.toFloat32Array(result.positions),
             startIndices: this.toUint32Array(result.startIndices),
@@ -186,6 +196,7 @@ export class DeckRenderWorkerPool {
             arrowColors: this.toUint8Array(result.arrowColors),
             arrowWidths: this.toFloat32Array(result.arrowWidths),
             arrowFeatureIds: this.toUint32Array(result.arrowFeatureIds),
+            mergedPointFeatures: result.mergedPointFeatures ?? {},
             workerTimings: result.timings
         });
     }

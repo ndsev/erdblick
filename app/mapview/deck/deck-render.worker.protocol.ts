@@ -12,6 +12,7 @@ export interface DeckPathRenderTask {
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     featureIdSubset: string[];
+    mergeCountSnapshot: Record<string, number>;
 }
 
 export interface DeckWorkerInitMessage {
@@ -33,6 +34,10 @@ export interface DeckPathRenderResult {
     type: "DeckPathRenderResult";
     taskId: string;
     tileKey: string;
+    pointPositions: ArrayBuffer;
+    pointColors: ArrayBuffer;
+    pointRadii: ArrayBuffer;
+    pointFeatureIds: ArrayBuffer;
     coordinateOrigin: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
@@ -46,6 +51,7 @@ export interface DeckPathRenderResult {
     arrowColors: ArrayBuffer;
     arrowWidths: ArrayBuffer;
     arrowFeatureIds: ArrayBuffer;
+    mergedPointFeatures: Record<string, any[]>;
     timings?: DeckWorkerTimings;
     error?: string;
 }

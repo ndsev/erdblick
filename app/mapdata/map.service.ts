@@ -918,6 +918,7 @@ export class MapDataService {
             return new DeckTileVisualization(
                 viewIndex,
                 tile,
+                this.pointMergeService,
                 style,
                 styleSource,
                 highDetail,

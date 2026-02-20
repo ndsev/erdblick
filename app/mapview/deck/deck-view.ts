@@ -13,6 +13,7 @@ import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-vie
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {environment} from "../../environments/environment";
+import {MergedPointsTile} from "../pointmerge.service";
 
 interface DeckCameraState {
     longitude: number;
@@ -214,11 +215,19 @@ export abstract class DeckMapView implements IRenderView {
 
         const objectTileKey = (picked.layer?.props as {tileKey?: string} | undefined)?.tileKey;
         const pickedObject = picked.object;
+        const objectIdTileKeys = Array.isArray(pickedObject?.idTileKeys)
+            ? pickedObject.idTileKeys as unknown[]
+            : undefined;
         const objectId = pickedObject?.id ?? pickedObject?.featureId;
         if (objectId !== undefined && objectId !== null) {
             if (Array.isArray(objectId)) {
                 return objectId
-                    .map(value => resolveFeatureIndex(objectTileKey, value))
+                    .map((value, index) => {
+                        const idTileKey = typeof objectIdTileKeys?.[index] === "string"
+                            ? objectIdTileKeys[index] as string
+                            : objectTileKey;
+                        return resolveFeatureIndex(idTileKey, value);
+                    })
                     .filter((value): value is TileFeatureId => value !== null);
             }
             const resolved = resolveFeatureIndex(objectTileKey, objectId);
@@ -436,6 +445,16 @@ export abstract class DeckMapView implements IRenderView {
                     return;
                 }
                 tileVis.destroy(this.getSceneHandle());
+                this.requestRender();
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapService.mergedTileVisualizationDestructionTopic.subscribe((tileVis: MergedPointsTile) => {
+                if (tileVis.viewIndex !== this._viewIndex) {
+                    return;
+                }
+                tileVis.removeScene(this.getSceneHandle());
                 this.requestRender();
             })
         );
