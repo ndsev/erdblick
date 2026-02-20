@@ -403,4 +403,67 @@ describe("DeckTileVisualization", () => {
             1, 0, 1, 0
         ]);
     });
+
+    it("derives screen-space arrow markers from arrow path data", () => {
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => true,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            style,
+            "",
+            true,
+            {value: 0} as any
+        ) as any;
+
+        const arrowPathData = {
+            length: 1,
+            coordinateOrigin: [11, 48, 0] as [number, number, number],
+            startIndices: new Uint32Array([0, 3]),
+            featureIds: [123],
+            featureIdsByVertex: [123, 123, 123],
+            attributes: {
+                getPath: {
+                    value: new Float32Array([
+                        0, 0, 0,
+                        10, 20, 0,
+                        20, 0, 0
+                    ]),
+                    size: 3
+                },
+                instanceColors: {
+                    value: new Uint8Array([
+                        255, 0, 0, 255,
+                        255, 0, 0, 255,
+                        255, 0, 0, 255
+                    ]),
+                    size: 4
+                },
+                instanceStrokeWidths: {
+                    value: new Float32Array([3, 3, 3]),
+                    size: 1
+                },
+                instanceDashArrays: {
+                    value: new Float32Array([1, 0, 1, 0, 1, 0]),
+                    size: 2
+                }
+            }
+        };
+
+        const markers = visu.buildArrowMarkers(arrowPathData);
+        expect(markers).toHaveLength(1);
+        expect(markers[0].featureId).toBe(123);
+        expect(markers[0].sizePx).toBe(12);
+        expect(Number.isFinite(markers[0].angleDeg)).toBe(true);
+        expect(markers[0].position).toEqual([10, 20, 0]);
+    });
 });

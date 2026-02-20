@@ -1,7 +1,7 @@
 import {FeatureTile} from "../../mapdata/features.model";
 import {FeatureLayerStyle, HighlightMode} from "../../../build/libs/core/erdblick-core";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
-import {PathLayer} from "@deck.gl/layers";
+import {IconLayer, PathLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
@@ -51,6 +51,34 @@ interface DeckPathRawBuffers {
 const MAX_DECK_PATH_COUNT = 1_000_000;
 const MAX_DECK_VERTEX_COUNT = 20_000_000;
 const DECK_UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
+const DECK_ARROW_ANGLE_SIGN = -1;
+const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
+const DECK_ARROW_ICON_SIZE = 64;
+const DECK_ARROW_ICON_ATLAS =
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${DECK_ARROW_ICON_SIZE}" height="${DECK_ARROW_ICON_SIZE}" viewBox="0 0 ${DECK_ARROW_ICON_SIZE} ${DECK_ARROW_ICON_SIZE}"><polygon points="32,0 60,60 4,60" fill="white"/></svg>`
+    );
+const DECK_ARROW_ICON_MAPPING = {
+    arrowhead: {
+        x: 0,
+        y: 0,
+        width: DECK_ARROW_ICON_SIZE,
+        height: DECK_ARROW_ICON_SIZE,
+        anchorX: DECK_ARROW_ICON_SIZE / 2,
+        anchorY: 0,
+        mask: true
+    }
+};
+
+interface DeckArrowMarker {
+    id: number | null;
+    position: [number, number, number];
+    color: [number, number, number, number];
+    sizePx: number;
+    angleDeg: number;
+    featureId: number | null;
+}
 
 /**
  * Deck tile visualization used during migration.
@@ -150,19 +178,25 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.pathLayerKey = null;
             }
             if (arrowLayerData && arrowLayerData.length > 0) {
-                const arrowLayer = new PathLayer({
+                const arrowMarkers = this.buildArrowMarkers(arrowLayerData);
+                const arrowLayer = new IconLayer({
                     id: arrowLayerKey,
-                    data: arrowLayerData as any,
+                    data: arrowMarkers,
                     coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
                     coordinateOrigin: arrowLayerData.coordinateOrigin,
-                    _pathType: "open",
-                    widthUnits: "pixels",
-                    capRounded: true,
-                    jointRounded: true,
+                    iconAtlas: DECK_ARROW_ICON_ATLAS,
+                    iconMapping: DECK_ARROW_ICON_MAPPING as any,
+                    getIcon: () => "arrowhead",
+                    getPosition: (marker: DeckArrowMarker) => marker.position,
+                    getSize: (marker: DeckArrowMarker) => marker.sizePx,
+                    sizeUnits: "pixels",
+                    getAngle: (marker: DeckArrowMarker) => marker.angleDeg,
+                    getColor: (marker: DeckArrowMarker) => marker.color,
+                    billboard: false,
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
-                    featureIds: arrowLayerData.featureIds,
-                    featureIdsByVertex: arrowLayerData.featureIdsByVertex
+                    alphaCutoff: 0.05,
+                    getId: (marker: DeckArrowMarker) => marker.featureId
                 } as any);
                 registry.upsert(arrowLayerKey, arrowLayer as any, 450);
                 this.arrowLayerKey = arrowLayerKey;
@@ -434,6 +468,62 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
+    private buildArrowMarkers(pathData: DeckPathLayerData): DeckArrowMarker[] {
+        const markers: DeckArrowMarker[] = [];
+        const positions = pathData.attributes.getPath.value;
+        const colors = pathData.attributes.instanceColors.value;
+        const widths = pathData.attributes.instanceStrokeWidths.value;
+        for (let arrowIndex = 0; arrowIndex < pathData.length; arrowIndex++) {
+            const start = pathData.startIndices[arrowIndex];
+            const end = pathData.startIndices[arrowIndex + 1];
+            if (end - start < 3) continue;
+
+            const leftVertex = start;
+            const tipVertex = start + 1;
+            const rightVertex = end - 1;
+
+            const tipBase = tipVertex * 3;
+            const leftBase = leftVertex * 3;
+            const rightBase = rightVertex * 3;
+
+            const tipX = positions[tipBase];
+            const tipY = positions[tipBase + 1];
+            const tipZ = positions[tipBase + 2];
+
+            const baseCenterX = (positions[leftBase] + positions[rightBase]) * 0.5;
+            const baseCenterY = (positions[leftBase + 1] + positions[rightBase + 1]) * 0.5;
+
+            const dirX = tipX - baseCenterX;
+            const dirY = tipY - baseCenterY;
+            const dirLength = Math.hypot(dirX, dirY);
+            if (dirLength <= 1e-6) continue;
+
+            const colorBase = tipVertex * 4;
+            const widthPx = widths[tipVertex];
+            const featureId = pathData.featureIds[arrowIndex];
+            const angleDeg =
+                this.normalizeDegrees(
+                    DECK_ARROW_ANGLE_SIGN * ((Math.atan2(dirX, dirY) * 180) / Math.PI) +
+                    DECK_ARROW_ANGLE_OFFSET_DEG
+                );
+            const sizePx = Math.max(8, widthPx * 4);
+            markers.push({
+                id: featureId,
+                position: [tipX, tipY, tipZ],
+                color: [
+                    colors[colorBase],
+                    colors[colorBase + 1],
+                    colors[colorBase + 2],
+                    colors[colorBase + 3]
+                ],
+                sizePx,
+                angleDeg,
+                featureId
+            });
+        }
+        return markers;
+    }
+
     private readFloat32Array(deckVisu: any, rawAccessor: string): Float32Array {
         const raw = this.readRawBytes(deckVisu, rawAccessor);
         return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / Float32Array.BYTES_PER_ELEMENT);
@@ -519,5 +609,10 @@ export class DeckTileVisualization implements ITileVisualization {
         const timings = this.latestWorkerTimings;
         this.latestWorkerTimings = null;
         return timings;
+    }
+
+    private normalizeDegrees(value: number): number {
+        const normalized = value % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
     }
 }
