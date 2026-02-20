@@ -24,6 +24,7 @@ import {CoordinatesService} from "../coords/coordinates.service";
 import {JumpTargetService} from "../search/jump.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
+import {ContextMenu} from "primeng/contextmenu";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CesiumMapView2D} from "./cesium/cesium-map-view2d";
@@ -39,7 +40,11 @@ import {Popover} from "primeng/popover";
 @Component({
     selector: 'map-view',
     template: `
-        <div #viewer [ngClass]="{'border': outlined}" [id]="canvasId" class="mapviewer-renderlayer" style="z-index: 0"></div>
+        <div #viewer
+             [ngClass]="{'border': outlined}"
+             [id]="canvasId"
+             class="mapviewer-renderlayer"
+             style="z-index: 0"></div>
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select">
                 @for (option of syncOptions; track $index) {
@@ -54,7 +59,7 @@ import {Popover} from "primeng/popover";
             </p-buttonGroup>
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
-            <p-contextMenu [target]="viewer" [model]="menuItems" (onHide)="onContextMenuHide()" appendTo="body" />
+            <p-contextMenu #viewerContextMenu [model]="menuItems" (onHide)="onContextMenuHide()" appendTo="body" />
         }
         @if (!appModeService.isVisualizationOnly) {
             <sourcedatadialog></sourcedatadialog>
@@ -82,6 +87,8 @@ import {Popover} from "primeng/popover";
     standalone: false
 })
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
+    private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 0;
+
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
@@ -103,9 +110,17 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
+    private rightPressStart: {x: number; y: number} | null = null;
+    private rightPressMoved = false;
+    private viewerPointerDownCapture?: (event: PointerEvent) => void;
+    private viewerPointerMoveCapture?: (event: PointerEvent) => void;
+    private viewerPointerUpCapture?: (_event: PointerEvent) => void;
+    private viewerPointerCancelCapture?: (_event: PointerEvent) => void;
+    private viewerContextMenuCapture?: (event: MouseEvent) => void;
 
     @ViewChild('popover') featureIdsPopover!: Popover;
     @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
+    @ViewChild('viewerContextMenu') viewerContextMenu?: ContextMenu;
     featureIdsContent: string[] = [];
 
     /**
@@ -164,6 +179,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     ngAfterViewInit() {
+        this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
             this.stateService.mode2dState.pipe(this.viewIndex()),
@@ -227,6 +243,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        this.teardownViewerContextMenuHandling();
         if (this.mediaQueryList && this.mediaQueryChangeListener) {
             if (typeof this.mediaQueryList.removeEventListener === 'function') {
                 this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
@@ -338,6 +355,94 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.stateService.viewSync = this.syncOptions.filter(option =>
             option.value).map(option=> option.code);
         this.stateService.syncViews();
+    }
+
+    private resetRightPressTracking(): void {
+        this.rightPressStart = null;
+        this.rightPressMoved = false;
+    }
+
+    private setupViewerContextMenuHandling(): void {
+        const viewer = this.viewerElement?.nativeElement;
+        if (!viewer) {
+            return;
+        }
+
+        this.viewerPointerDownCapture = (event: PointerEvent) => {
+            if (event.button !== 2) {
+                return;
+            }
+            this.rightPressStart = {x: event.clientX, y: event.clientY};
+            this.rightPressMoved = false;
+        };
+        this.viewerPointerMoveCapture = (event: PointerEvent) => {
+            if (!this.rightPressStart || (event.buttons & 2) === 0 || this.rightPressMoved) {
+                return;
+            }
+            const dx = event.clientX - this.rightPressStart.x;
+            const dy = event.clientY - this.rightPressStart.y;
+            if (dx === 0 && dy === 0) {
+                return;
+            }
+            this.rightPressMoved = true;
+        };
+        this.viewerPointerUpCapture = (_event: PointerEvent) => {};
+        this.viewerPointerCancelCapture = (_event: PointerEvent) => {
+            this.resetRightPressTracking();
+        };
+        this.viewerContextMenuCapture = (event: MouseEvent) => {
+            const menu = this.viewerContextMenu;
+            if (!menu) {
+                return;
+            }
+            event.preventDefault();
+            const start = this.rightPressStart;
+            const threshold = MapViewComponent.RIGHT_DRAG_SUPPRESS_THRESHOLD_PX;
+            const movedSinceRightDown = !!start && (
+                Math.abs(event.clientX - start.x) > threshold ||
+                Math.abs(event.clientY - start.y) > threshold
+            );
+            if (this.rightPressMoved || movedSinceRightDown) {
+                this.resetRightPressTracking();
+                return;
+            }
+            menu.show(event);
+            this.resetRightPressTracking();
+        };
+
+        viewer.addEventListener("pointerdown", this.viewerPointerDownCapture, true);
+        viewer.addEventListener("pointermove", this.viewerPointerMoveCapture, true);
+        viewer.addEventListener("pointerup", this.viewerPointerUpCapture, true);
+        viewer.addEventListener("pointercancel", this.viewerPointerCancelCapture, true);
+        viewer.addEventListener("contextmenu", this.viewerContextMenuCapture, true);
+    }
+
+    private teardownViewerContextMenuHandling(): void {
+        const viewer = this.viewerElement?.nativeElement;
+        if (!viewer) {
+            return;
+        }
+        if (this.viewerPointerDownCapture) {
+            viewer.removeEventListener("pointerdown", this.viewerPointerDownCapture, true);
+        }
+        if (this.viewerPointerMoveCapture) {
+            viewer.removeEventListener("pointermove", this.viewerPointerMoveCapture, true);
+        }
+        if (this.viewerPointerUpCapture) {
+            viewer.removeEventListener("pointerup", this.viewerPointerUpCapture, true);
+        }
+        if (this.viewerPointerCancelCapture) {
+            viewer.removeEventListener("pointercancel", this.viewerPointerCancelCapture, true);
+        }
+        if (this.viewerContextMenuCapture) {
+            viewer.removeEventListener("contextmenu", this.viewerContextMenuCapture, true);
+        }
+        this.viewerPointerDownCapture = undefined;
+        this.viewerPointerMoveCapture = undefined;
+        this.viewerPointerUpCapture = undefined;
+        this.viewerPointerCancelCapture = undefined;
+        this.viewerContextMenuCapture = undefined;
+        this.resetRightPressTracking();
     }
 
     protected readonly environment = environment;
