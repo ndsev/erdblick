@@ -27,6 +27,19 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
     TileLayerParser tlp;
     auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     for (auto const& f : *testLayer) {
-        std::cout << InspectionConverter().convert(f).value_.dump(4) << std::endl;
+        auto inspection = InspectionConverter().convert(f);
+        std::cout << inspection.value_.dump(4) << std::endl;
+
+        REQUIRE(inspection.size() > 0);
+        REQUIRE(inspection.at(0)["key"].as<std::string>() == "Identifiers");
+
+        bool hasFeatureRoot = false;
+        for (uint32_t i = 0; i < inspection.size(); ++i) {
+            if (inspection.at(i)["key"].as<std::string>() == "Feature") {
+                hasFeatureRoot = true;
+                break;
+            }
+        }
+        REQUIRE_FALSE(hasFeatureRoot);
     }
 }

@@ -376,6 +376,20 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (currentMargin) {
             nextStyle['margin'] = currentMargin;
         }
+        if (!nextStyle['left'] || !nextStyle['top']) {
+            const stored = panel.inspectionDialogLayoutEntry?.position
+                ?? this.stateService.getInspectionDialogLayoutEntry(panel.id)?.position;
+            if (stored) {
+                if (!nextStyle['left']) {
+                    nextStyle['left'] = `${Math.round(stored.left)}px`;
+                }
+                if (!nextStyle['top']) {
+                    nextStyle['top'] = `${Math.round(stored.top)}px`;
+                }
+                nextStyle['position'] = nextStyle['position'] ?? 'fixed';
+                nextStyle['margin'] = nextStyle['margin'] ?? '0';
+            }
+        }
         return nextStyle;
     }
 
@@ -447,17 +461,22 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         }
         const index = this.dialogIndex();
         const panelId = this.panel().id;
+        const stored = this.panel().inspectionDialogLayoutEntry?.position
+            ?? this.stateService.getInspectionDialogLayoutEntry(panelId)?.position;
+        if (stored) {
+            if (!this.dialog.container.style.left || !this.dialog.container.style.top) {
+                this.setDialogPosition(stored.left, stored.top);
+            }
+            return;
+        }
         const slotIndex = this.stateService.ensureInspectionDialogSlot(panelId, index);
-        const stored = this.stateService.getInspectionDialogLayoutEntry(panelId)?.position;
         const rect = this.dialog.container.getBoundingClientRect();
         const offsetPx = this.stateService.baseFontSize;
         const offsetMultiplier = slotIndex + 1;
-        const left = stored?.left ?? rect.left + offsetPx * offsetMultiplier;
-        const top = stored?.top ?? rect.top + offsetPx * offsetMultiplier;
+        const left = rect.left + offsetPx * offsetMultiplier;
+        const top = rect.top + offsetPx * offsetMultiplier;
         this.setDialogPosition(left, top);
-        if (!stored) {
-            this.stateService.setInspectionDialogPosition(panelId, {left, top}, index);
-        }
+        this.stateService.setInspectionDialogPosition(panelId, {left, top}, index);
     }
 
     private storeDialogPosition() {

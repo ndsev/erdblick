@@ -5,8 +5,19 @@ import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
 import {TreeTableNode} from 'primeng/api';
 import {MapDataService} from '../mapdata/map.service';
+import {FeatureTile} from '../mapdata/features.model';
+import {AppStateService} from '../shared/appstate.service';
 import {PerfStat} from './diagnostics.model';
 import {buildAggregatedPerfStats} from './diagnostics.datasource';
+import {
+    COUNT_KEY_PATTERN,
+    DISPLAY_DECIMALS,
+    LOAD_CONVERT_ROOT_BADGE_PATTERN,
+    RENDER_ROOT_BADGE_PATTERN,
+    ROOT_BADGE_LOAD_DT,
+    ROOT_BADGE_RENDER_DT,
+    UNIT_SUFFIXES
+} from './diagnostics.constants';
 
 interface LayerOption {
     label: string;
@@ -31,6 +42,9 @@ interface PerfTreeRowData {
     peakClass?: string;
     averageClass?: string;
     rowClass?: string;
+    rootBadgeDt?: Record<string, any>;
+    rootBadgeValue?: number;
+    rootBadgeTooltip?: string;
 }
 
 type SupportedUnit = 'ms' | 'count';
@@ -45,27 +59,17 @@ interface ParentAggregate {
     average?: number;
 }
 
-const unitSuffixes: Array<{suffix: string; unit: string}> = [
-    {suffix: '#ms', unit: 'ms'},
-    {suffix: '-ms', unit: 'ms'},
-    {suffix: '#kb', unit: 'KB'},
-    {suffix: '-kb', unit: 'KB'},
-    {suffix: '#mb', unit: 'MB'},
-    {suffix: '-mb', unit: 'MB'},
-    {suffix: '#pct', unit: '%'},
-    {suffix: '-pct', unit: '%'},
-    {suffix: '#%', unit: '%'},
-    {suffix: '-%', unit: '%'},
-    {suffix: '#count', unit: 'count'},
-    {suffix: '-count', unit: 'count'},
-];
-const countKeyPattern = /(count|num|feature|features|tile|tiles)/i;
-const DISPLAY_DECIMALS = 3;
+interface PerfTileScopeCounts {
+    consideredTiles: number;
+    nonEmptyTiles: number;
+    totalTiles: number;
+    consideredTilesByRoot: Map<string, number>;
+}
 
 @Component({
     selector: 'diagnostics-performance-dialog',
     template: `
-        <p-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="diagnostics.performanceDialogVisible"
+        <p-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="stateService.diagnosticsPerformanceDialogVisible"
                   [modal]="false"
                   [style]="dialogStyle"
                   (onShow)="onDialogShow()">
@@ -137,6 +141,16 @@ const DISPLAY_DECIMALS = 3;
                                       [tooltipDisabled]="!rowData.key">
                                     {{ rowData.key }}
                                 </span>
+                                @if (rowData.rootBadgeDt) {
+                                    <span class="diagnostics-perf-root-badge-wrapper"
+                                          [pTooltip]="rowData.rootBadgeTooltip ?? ''"
+                                          tooltipPosition="top"
+                                          tooltipStyleClass="diagnostics-perf-root-badge-tooltip"
+                                          [tooltipDisabled]="!rowData.rootBadgeTooltip">
+                                        <p-badge [value]="rowData.rootBadgeValue ?? 0"
+                                                 [dt]="rowData.rootBadgeDt"></p-badge>
+                                    </span>
+                                }
                             </div>
                         </td>
                         <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
@@ -190,10 +204,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     treeNodes: TreeTableNode[] = [];
     private durationDisplayUnit: DurationDisplayUnit = 'ms';
     private bytesDisplayUnit: BytesDisplayUnit = 'B';
+    private perfTileScopeCounts: PerfTileScopeCounts = this.createEmptyTileScopeCounts();
     private readonly expansionStateByPath = new Map<string, boolean>();
     private readonly subscriptions: Subscription[] = [];
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
+                public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService,
                 private readonly mapService: MapDataService) {
         this.subscriptions.push(
@@ -268,7 +284,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     private parsePerfUnit(key: string): string | undefined {
         const lower = key.toLowerCase();
-        for (const entry of unitSuffixes) {
+        for (const entry of UNIT_SUFFIXES) {
             if (lower.endsWith(entry.suffix)) {
                 return entry.unit;
             }
@@ -277,12 +293,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     private inferCountUnitFromKey(key: string): string | undefined {
-        return countKeyPattern.test(this.stripPerfUnitSuffix(key)) ? 'count' : undefined;
+        return COUNT_KEY_PATTERN.test(this.stripPerfUnitSuffix(key)) ? 'count' : undefined;
     }
 
     private stripPerfUnitSuffix(key: string): string {
         const lower = key.toLowerCase();
-        for (const entry of unitSuffixes) {
+        for (const entry of UNIT_SUFFIXES) {
             if (lower.endsWith(entry.suffix)) {
                 return key.slice(0, key.length - entry.suffix.length);
             }
@@ -405,17 +421,15 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     private computeFilteredPerfStats(): PerfStat[] {
         const selectedLabels = new Set(this.selectedMapLayers.map(selection => selection.label));
         if (!selectedLabels.size) {
+            this.perfTileScopeCounts = this.createEmptyTileScopeCounts();
             return [];
         }
 
         const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
         const hasTileIdSelection = selectedTileIdSet.size > 0;
 
-        const filteredTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
+        const scopedTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
             if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
-                return false;
-            }
-            if (!tile.hasData() || tile.numFeatures <= 0) {
                 return false;
             }
             if (!hasTileIdSelection) {
@@ -423,7 +437,93 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             }
             return selectedTileIdSet.has(tile.tileId.toString());
         });
-        return buildAggregatedPerfStats(filteredTiles);
+        const nonEmptyTiles = scopedTiles.filter(tile => tile.hasData() && tile.numFeatures > 0);
+        this.perfTileScopeCounts = this.computeTileScopeCounts(scopedTiles, nonEmptyTiles);
+        return buildAggregatedPerfStats(nonEmptyTiles);
+    }
+
+    private computeTileScopeCounts(scopedTiles: FeatureTile[], nonEmptyTiles: FeatureTile[]): PerfTileScopeCounts {
+        const consideredTilesByRoot = new Map<string, number>();
+        let consideredTiles = 0;
+
+        for (const tile of nonEmptyTiles) {
+            let hasConsideredStat = false;
+            const tileRoots = new Set<string>();
+
+            for (const [rawKey, rawValues] of tile.stats.entries()) {
+                if (!rawValues || rawValues.length === 0) {
+                    continue;
+                }
+                const values = rawValues.filter(value => this.isFiniteNumber(value));
+                if (!values.length) {
+                    continue;
+                }
+                const baseKey = this.stripPerfUnitSuffix(rawKey).trim();
+                if (!baseKey) {
+                    continue;
+                }
+                hasConsideredStat = true;
+                const rootKey = this.splitPerfPath(rawKey)[0]?.toLowerCase();
+                if (rootKey) {
+                    tileRoots.add(rootKey);
+                }
+            }
+
+            if (hasConsideredStat) {
+                consideredTiles += 1;
+            }
+            for (const rootKey of tileRoots) {
+                consideredTilesByRoot.set(rootKey, (consideredTilesByRoot.get(rootKey) ?? 0) + 1);
+            }
+        }
+
+        return {
+            consideredTiles,
+            nonEmptyTiles: nonEmptyTiles.length,
+            totalTiles: scopedTiles.length,
+            consideredTilesByRoot
+        };
+    }
+
+    private createEmptyTileScopeCounts(): PerfTileScopeCounts {
+        return {
+            consideredTiles: 0,
+            nonEmptyTiles: 0,
+            totalTiles: 0,
+            consideredTilesByRoot: new Map<string, number>()
+        };
+    }
+
+    private resolveConsideredTilesForRoot(key: string | undefined): number {
+        if (!key) {
+            return this.perfTileScopeCounts.consideredTiles;
+        }
+        const rootKey = key.trim().toLowerCase();
+        if (!rootKey) {
+            return this.perfTileScopeCounts.consideredTiles;
+        }
+        return this.perfTileScopeCounts.consideredTilesByRoot.get(rootKey) ?? this.perfTileScopeCounts.consideredTiles;
+    }
+
+    private buildRootBadgeTooltip(consideredTiles: number): string {
+        return [
+            `${consideredTiles} tile(s) considered`,
+            `${this.perfTileScopeCounts.nonEmptyTiles} non-empty tile(s)`,
+            `${this.perfTileScopeCounts.totalTiles} tile(s) total`
+        ].join('\n');
+    }
+
+    private resolveRootBadgeDt(key: string | undefined): Record<string, any> | undefined {
+        if (!key) {
+            return undefined;
+        }
+        if (RENDER_ROOT_BADGE_PATTERN.test(key)) {
+            return ROOT_BADGE_RENDER_DT;
+        }
+        if (LOAD_CONVERT_ROOT_BADGE_PATTERN.test(key)) {
+            return ROOT_BADGE_LOAD_DT;
+        }
+        return undefined;
     }
 
     private computeDisplayUnits(stats: PerfStat[]) {
@@ -565,6 +665,18 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                     classes.push('diagnostics-perf-root');
                 }
                 rowData.rowClass = classes.join(' ');
+                rowData.rootBadgeDt = isRootParent
+                    ? this.resolveRootBadgeDt(rowData.key)
+                    : undefined;
+                if (rowData.rootBadgeDt) {
+                    const consideredTiles = this.resolveConsideredTilesForRoot(rowData.key);
+                    rowData.rootBadgeValue = consideredTiles;
+                    rowData.rootBadgeTooltip = this.buildRootBadgeTooltip(consideredTiles);
+                } else {
+                    rowData.rootBadgeDt = undefined;
+                    rowData.rootBadgeValue = undefined;
+                    rowData.rootBadgeTooltip = undefined;
+                }
 
                 if (hasChildren) {
                     visit(node.children!, depth + 1);

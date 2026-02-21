@@ -1,114 +1,46 @@
 import {Injectable, OnDestroy} from '@angular/core';
-import {BehaviorSubject} from 'rxjs';
 import {AppStateService} from '../shared/appstate.service';
 import {MapDataService} from '../mapdata/map.service';
 import {DiagnosticsDatasource} from './diagnostics.datasource';
-import {DiagnosticsExportBundle, DiagnosticsSnapshot, LogEntry, PerfStat} from './diagnostics.model';
-
-export interface DiagnosticsLogFilter {
-    info: boolean;
-    warn: boolean;
-    error: boolean;
-}
-
-export interface DiagnosticsExportOptions {
-    includeProgress: boolean;
-    includePerformance: boolean;
-    includeLogs: boolean;
-    logFilter: DiagnosticsLogFilter;
-}
+import {DiagnosticsExportBundle, DiagnosticsExportOptions, DiagnosticsLogFilter, LogEntry} from './diagnostics.model';
 
 @Injectable({providedIn: 'root'})
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
 
-    progressDialogVisible = false;
-    performanceDialogVisible = false;
-    logDialogVisible = false;
-    exportDialogVisible = false;
-
-    readonly logFilterState = new BehaviorSubject<DiagnosticsLogFilter>({
-        info: true,
-        warn: true,
-        error: true
-    });
-
-    private readonly exportOptionsState = new BehaviorSubject<DiagnosticsExportOptions>(this.defaultExportOptions());
-
-    private latestSnapshot?: DiagnosticsSnapshot;
-    private latestPerfStats: PerfStat[] = [];
-    private latestLogs: LogEntry[] = [];
-
     constructor(mapService: MapDataService,
                 private readonly stateService: AppStateService) {
         super(mapService);
-        this.snapshot$.subscribe(snapshot => {
-            this.latestSnapshot = snapshot;
-        });
-        this.perfStats$.subscribe(stats => {
-            this.latestPerfStats = stats;
-        });
-        this.logs$.subscribe(logs => {
-            this.latestLogs = logs;
-        });
-    }
-
-    get logFilter() {
-        return this.logFilterState.getValue();
-    }
-
-    setLogFilter(filter: DiagnosticsLogFilter) {
-        this.logFilterState.next({...filter});
-    }
-
-    get logFilter$() {
-        return this.logFilterState.asObservable();
-    }
-
-    get exportOptions() {
-        return this.exportOptionsState.getValue();
-    }
-
-    setExportOptions(options: DiagnosticsExportOptions) {
-        this.exportOptionsState.next({
-            ...options,
-            logFilter: {...options.logFilter}
-        });
-    }
-
-    get exportOptions$() {
-        return this.exportOptionsState.asObservable();
-    }
-
-    openProgressDialog() {
-        this.progressDialogVisible = true;
     }
 
     openPerformanceDialog() {
         this.refreshPerfStats();
-        this.performanceDialogVisible = true;
+        this.stateService.diagnosticsPerformanceDialogVisible = true;
     }
 
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
-        this.logDialogVisible = true;
+        this.stateService.diagnosticsLogDialogVisible = true;
         if (errorsOnly) {
-            this.setLogFilter({info: false, warn: false, error: true});
+            this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
         }
     }
 
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.defaultExportOptions();
-        this.setExportOptions({
+        const base = this.stateService.diagnosticsExportOptionsState.defaultValue;
+        this.stateService.diagnosticsExportOptions = {
             ...base,
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}
-        });
-        this.exportDialogVisible = true;
+        };
+        this.stateService.diagnosticsExportDialogVisible = true;
     }
 
     createExportBundle(options: DiagnosticsExportOptions): DiagnosticsExportBundle {
+        const snapshot = this.snapshot$.getValue();
+        const perfStats = this.perfStats$.getValue();
+        const logs = this.logs$.getValue();
         const metadata = {
             erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
             distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
@@ -121,19 +53,19 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             metadata
         };
 
-        if (options.includeProgress && this.latestSnapshot) {
-            bundle.progress = this.latestSnapshot;
+        if (options.includeProgress) {
+            bundle.progress = snapshot;
         }
 
         if (options.includePerformance) {
             bundle.performance = {
-                stats: this.latestPerfStats,
+                stats: perfStats,
                 raw: undefined
             };
         }
 
         if (options.includeLogs) {
-            bundle.logs = this.filterLogs(this.latestLogs, options.logFilter);
+            bundle.logs = this.filterLogs(logs, options.logFilter);
         }
 
         return bundle;
@@ -164,18 +96,5 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     override ngOnDestroy(): void {
         super.ngOnDestroy();
-    }
-
-    private defaultExportOptions(): DiagnosticsExportOptions {
-        return {
-            includeProgress: true,
-            includePerformance: true,
-            includeLogs: true,
-            logFilter: {
-                info: true,
-                warn: true,
-                error: true
-            }
-        };
     }
 }

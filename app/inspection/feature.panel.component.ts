@@ -58,21 +58,21 @@ export class FeaturePanelComponent {
         // this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFeature.bind(this));
         effect(() => {
             this.selectedFeatures = this.panel().features;
-            const selectedFeatureInspectionModel: InspectionModelData[] = [];
+            const selectedFeatureInspectionModels: InspectionModelData[][] = [];
             const selectedFeatureGeoJsonTexts: string[] = [];
 
             this.selectedFeatures.forEach(featureWrapper => {
                 featureWrapper.peek((feature: Feature) => {
-                    selectedFeatureInspectionModel.push(...feature.inspectionModel());
+                    selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
                     selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
                 });
             });
             this.geoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
-            this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModel);
+            this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
         });
     }
 
-    getFeatureTreeDataFromModel(inspectionModels: InspectionModelData[]) {
+    getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
         let convertToTreeTableNodes = (dataNodes: Array<InspectionModelData>, featureIndex: number): TreeTableNode[] => {
             let treeNodes: Array<TreeTableNode> = [];
             for (const data of dataNodes) {
@@ -125,19 +125,21 @@ export class FeaturePanelComponent {
         }
 
         let treeNodes: Array<TreeTableNode> = [];
-        if (inspectionModels) {
-            for (let i = 0; i < inspectionModels.length; i++) {
-                const section = inspectionModels[i];
-                const node: TreeTableNode = {};
-                node.data = {key: section.key, value: section.value, type: section.type};
-                if (section.hasOwnProperty("info")) {
-                    node.data["info"] = section.info;
+        if (inspectionModelsByFeature) {
+            for (let featureIndex = 0; featureIndex < inspectionModelsByFeature.length; featureIndex++) {
+                const inspectionModels = inspectionModelsByFeature[featureIndex];
+                for (const section of inspectionModels) {
+                    const node: TreeTableNode = {};
+                    node.data = {key: section.key, value: section.value, type: section.type};
+                    if (section.hasOwnProperty("info")) {
+                        node.data["info"] = section.info;
+                    }
+                    if (section.hasOwnProperty("sourceDataReferences")) {
+                        node.data["sourceDataReferences"] = section.sourceDataReferences;
+                    }
+                    node.children = convertToTreeTableNodes(section.children, featureIndex);
+                    treeNodes.push(node);
                 }
-                if (section.hasOwnProperty("sourceDataReferences")) {
-                    node.data["sourceDataReferences"] = section.sourceDataReferences;
-                }
-                node.children = convertToTreeTableNodes(section.children, i);
-                treeNodes.push(node);
             }
         }
         return treeNodes;

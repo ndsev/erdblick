@@ -237,9 +237,11 @@ export class InspectionContainerComponent implements OnDestroy {
     }
 
     private queueUndock(panelId: number, event: PointerEvent) {
-        const offset = this.stateService.baseFontSize;
-        const left = Math.max(0, event.clientX - offset);
-        const top = Math.max(0, event.clientY - offset);
+        const fallbackOffset = this.stateService.baseFontSize;
+        const offsetX = this.dragPreviewElement ? this.dragPreviewOffset.x : fallbackOffset;
+        const offsetY = this.dragPreviewElement ? this.dragPreviewOffset.y : fallbackOffset;
+        const left = Math.max(0, Math.round(event.clientX - offsetX));
+        const top = Math.max(0, Math.round(event.clientY - offsetY));
         this.stateService.setInspectionDialogPosition(panelId, {left, top});
         this.stateService.setInspectionPanelUndockedState(panelId, true);
     }

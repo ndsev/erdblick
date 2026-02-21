@@ -4,27 +4,15 @@ import {MapDataService} from '../mapdata/map.service';
 import {TileLoadState} from '../mapdata/tilestream';
 import {FeatureTile} from '../mapdata/features.model';
 import {DiagnosticsSnapshot, LogEntry, LogLevel, PerfStat, TilePipelineProgress, TileStateCounts} from './diagnostics.model';
-
-const SNAPSHOT_INTERVAL_MS = 400;
-const PERF_INTERVAL_MS = 2500;
-const LOG_INTERVAL_MS = 1500;
-const MAX_LOGS = 1000;
-const PEAK_TILE_LIMIT = 5;
-const UNIT_SUFFIXES: Array<{suffix: string; unit: string}> = [
-    {suffix: '#ms', unit: 'ms'},
-    {suffix: '-ms', unit: 'ms'},
-    {suffix: '#kb', unit: 'KB'},
-    {suffix: '-kb', unit: 'KB'},
-    {suffix: '#mb', unit: 'MB'},
-    {suffix: '-mb', unit: 'MB'},
-    {suffix: '#pct', unit: '%'},
-    {suffix: '-pct', unit: '%'},
-    {suffix: '#%', unit: '%'},
-    {suffix: '-%', unit: '%'},
-    {suffix: '#count', unit: 'count'},
-    {suffix: '-count', unit: 'count'}
-];
-const COUNT_KEY_PATTERN = /(count|num|feature|features|tile|tiles)/i;
+import {
+    COUNT_KEY_PATTERN,
+    LOG_INTERVAL_MS,
+    MAX_LOGS,
+    PEAK_TILE_LIMIT,
+    PERF_INTERVAL_MS,
+    SNAPSHOT_INTERVAL_MS,
+    UNIT_SUFFIXES
+} from './diagnostics.constants';
 
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
@@ -335,7 +323,9 @@ type AggregatedPerfAccumulator = {
     peakTileIds: Set<string>;
 };
 
-const isFiniteNumber = (value: number) => Number.isFinite(value);
+function isFiniteNumber(value: number): boolean {
+    return Number.isFinite(value);
+}
 
 export function buildAggregatedPerfStats(tiles: Iterable<FeatureTile>, maxPeakTileIds: number = 5): PerfStat[] {
     const statsByKey = new Map<string, AggregatedPerfAccumulator>();

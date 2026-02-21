@@ -5,6 +5,7 @@ import {MapDataService} from '../mapdata/map.service';
 interface ProgressStage {
     key: keyof TilePipelineProgress;
     label: string;
+    color: Record<string, any>;
 }
 
 @Component({
@@ -16,7 +17,7 @@ interface ProgressStage {
                     <div class="diagnostics-progress-item">
                         <span class="diagnostics-stage-label">{{ stage.label }}</span>
                         <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(progress[stage.key]) + '%'">
-                            <p-progressBar [value]="progressPercent(progress[stage.key])" [showValue]="false"></p-progressBar>
+                            <p-progressBar [value]="progressPercent(progress[stage.key])" [dt]="stage.color" [showValue]="false"></p-progressBar>
                             <span class="diagnostics-stage-bar-value">
                                 {{ progress[stage.key].done }} / {{ progress[stage.key].total }}
                             </span>
@@ -45,10 +46,10 @@ export class DiagnosticsProgressComponent {
     readonly paused$ = this.mapService.tilePipelinePaused$;
 
     readonly progressStages: ProgressStage[] = [
-        {key: 'requested', label: 'Requested'},
-        {key: 'fetched', label: 'Fetched'},
-        {key: 'converted', label: 'Converted'},
-        {key: 'rendered', label: 'Rendered'}
+        {key: 'requested', label: 'Requested', color: { value: { background: '{surface.500}' } }},
+        {key: 'fetched', label: 'Fetched', color: { value: { background: '{blue.500}' } }},
+        {key: 'converted', label: 'Converted', color: { value: { background: '{blue.500}' } }},
+        {key: 'rendered', label: 'Rendered', color: { value: { background: '{emerald.500}' } }}
     ];
 
     constructor(private readonly mapService: MapDataService) {}

@@ -2,12 +2,10 @@ import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService, Versions} from "./shared/appstate.service";
-import {AppModeService} from "./shared/app-mode.service";
 import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
 import {InfoMessageService} from "./shared/info.service";
 import {environment} from "./environments/environment";
 import {DialogStackService} from "./shared/dialog-stack.service";
-import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 import {Title} from "@angular/platform-browser";
 
 // Redeclare window with extended interface
@@ -20,16 +18,13 @@ declare let window: DebugWindow;
         @if (!environment.visualizationOnly) {
             <datasources></datasources>
             <map-panel></map-panel>
-            @if (mapService.statsDialogVisible) {
-                <stats-dialog></stats-dialog>
-            }
-            @if (diagnostics.performanceDialogVisible) {
+            @if (stateService.diagnosticsPerformanceDialogVisible) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (diagnostics.logDialogVisible) {
+            @if (stateService.diagnosticsLogDialogVisible) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (diagnostics.exportDialogVisible) {
+            @if (stateService.diagnosticsExportDialogVisible) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
@@ -71,7 +66,6 @@ export class AppComponent implements OnDestroy {
                 private viewContainerRef: ViewContainerRef,
                 private infoMessageService: InfoMessageService,
                 private dialogStack: DialogStackService,
-                public diagnostics: DiagnosticsFacadeService,
                 private titleService: Title) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);

@@ -10,6 +10,7 @@ import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
 import type {FeatureWrapper} from "../mapdata/features.model";
+import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
@@ -426,6 +427,62 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly diagnosticsPerformanceDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsPerformanceDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsLogDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsLogDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsExportDialogVisibleState = this.createState<boolean>({
+        name: 'diagnosticsExportDialogVisible',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
+        name: 'diagnosticsLogFilter',
+        defaultValue: {
+            info: true,
+            warn: true,
+            error: true
+        },
+        schema: z.object({
+            info: Boolish,
+            warn: Boolish,
+            error: Boolish
+        })
+    });
+
+    readonly diagnosticsExportOptionsState = this.createState<DiagnosticsExportOptions>({
+        name: 'diagnosticsExportOptions',
+        defaultValue: {
+            includeProgress: true,
+            includePerformance: true,
+            includeLogs: true,
+            logFilter: {
+                info: true,
+                warn: true,
+                error: true
+            }
+        },
+        schema: z.object({
+            includeProgress: Boolish,
+            includePerformance: Boolish,
+            includeLogs: Boolish,
+            logFilter: z.object({
+                info: Boolish,
+                warn: Boolish,
+                error: Boolish
+            })
+        })
+    });
+
     readonly lastSearchHistoryEntryState = this.createState<[number, string] | null>({
         name: 'lastSearchHistoryEntry',
         defaultValue: null,
@@ -737,6 +794,23 @@ export class AppStateService implements OnDestroy {
     set preferencesDialogVisible(val: boolean) {this.preferencesDialogVisibleState.next(val);};
     get controlsDialogVisible() {return this.controlsDialogVisibleState.getValue();}
     set controlsDialogVisible(val: boolean) {this.controlsDialogVisibleState.next(val);};
+    get diagnosticsPerformanceDialogVisible() {return this.diagnosticsPerformanceDialogVisibleState.getValue();}
+    set diagnosticsPerformanceDialogVisible(val: boolean) {this.diagnosticsPerformanceDialogVisibleState.next(val);};
+    get diagnosticsLogDialogVisible() {return this.diagnosticsLogDialogVisibleState.getValue();}
+    set diagnosticsLogDialogVisible(val: boolean) {this.diagnosticsLogDialogVisibleState.next(val);};
+    get diagnosticsExportDialogVisible() {return this.diagnosticsExportDialogVisibleState.getValue();}
+    set diagnosticsExportDialogVisible(val: boolean) {this.diagnosticsExportDialogVisibleState.next(val);};
+    get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
+    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
+        this.diagnosticsLogFilterState.next({...val});
+    };
+    get diagnosticsExportOptions() {return this.diagnosticsExportOptionsState.getValue();}
+    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
+        this.diagnosticsExportOptionsState.next({
+            ...val,
+            logFilter: {...val.logFilter}
+        });
+    };
     get lastSearchHistoryEntry() {return this.lastSearchHistoryEntryState.getValue();}
     set lastSearchHistoryEntry(val: [number, string] | null) {this.lastSearchHistoryEntryState.next(val);};
     get viewSync() {return this.viewSyncState.getValue();}

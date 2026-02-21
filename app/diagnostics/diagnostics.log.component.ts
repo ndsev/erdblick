@@ -1,14 +1,16 @@
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
-import {DiagnosticsFacadeService, DiagnosticsLogFilter} from './diagnostics.facade.service';
+import {DiagnosticsFacadeService} from './diagnostics.facade.service';
+import type {DiagnosticsLogFilter} from './diagnostics.model';
 import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppStateService} from '../shared/appstate.service';
 
 @Component({
     selector: 'diagnostics-log-dialog',
     template: `
         <p-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
-                  [(visible)]="diagnostics.logDialogVisible"
+                  [(visible)]="stateService.diagnosticsLogDialogVisible"
                   [modal]="false"
                   [style]="dialogStyle"
                   (onShow)="onDialogShow()">
@@ -25,7 +27,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
                     <label for="diag-log-error">Errors</label>
                 </div>
                 <div class="diagnostics-log-actions">
-                    @if (diagnostics.logFilterState | async; as filterState) {
+                    @if (stateService.diagnosticsLogFilterState | async; as filterState) {
                         @if (filterState.error && !filterState.warn && !filterState.info) {
                             <p-button size="small" label="Show all" (click)="unsetAllFilter()"/>
                         } @else {
@@ -110,7 +112,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     private readonly sortOrder$ = new BehaviorSubject<'asc' | 'desc'>(this.sortOrder);
     readonly filteredLogs$ = combineLatest([
         this.diagnostics.logs$,
-        this.diagnostics.logFilter$,
+        this.stateService.diagnosticsLogFilterState,
         this.sortOrder$
     ]).pipe(
         map(([logs, filter, sortOrder]) => {
@@ -128,9 +130,10 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     private readonly subscriptions: Subscription[] = [];
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
+                public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService) {
         this.subscriptions.push(
-            this.diagnostics.logFilter$.subscribe(filter => {
+            this.stateService.diagnosticsLogFilterState.subscribe(filter => {
                 this.logFilter = {...filter};
             })
         );
@@ -146,7 +149,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     }
 
     updateFilter() {
-        this.diagnostics.setLogFilter({...this.logFilter});
+        this.stateService.diagnosticsLogFilter = {...this.logFilter};
     }
 
     setSortOrder(order: 'asc' | 'desc') {
@@ -159,7 +162,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     };
 
     setErrorsOnly() {
-        this.diagnostics.setLogFilter({info: false, warn: false, error: true});
+        this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
     }
 
     openExport() {
@@ -172,6 +175,6 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     }
 
     unsetAllFilter() {
-        this.diagnostics.setLogFilter({info: true, warn: true, error: true});
+        this.stateService.diagnosticsLogFilter = {info: true, warn: true, error: true};
     }
 }

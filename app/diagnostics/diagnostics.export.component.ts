@@ -1,13 +1,15 @@
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
-import {DiagnosticsExportOptions, DiagnosticsFacadeService} from './diagnostics.facade.service';
+import {DiagnosticsFacadeService} from './diagnostics.facade.service';
+import type {DiagnosticsExportOptions} from './diagnostics.model';
 import {Dialog} from 'primeng/dialog';
 import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppStateService} from '../shared/appstate.service';
 
 @Component({
     selector: 'diagnostics-export-dialog',
     template: `
-        <p-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="diagnostics.exportDialogVisible"
+        <p-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="stateService.diagnosticsExportDialogVisible"
                   [modal]="false" (onShow)="onDialogShow()">
             <div class="diagnostics-export-content">
                 <div class="diagnostics-export-section">
@@ -45,14 +47,29 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 })
 export class DiagnosticsExportDialogComponent implements OnDestroy {
     @ViewChild('dialog') dialog?: Dialog;
-    exportOptions: DiagnosticsExportOptions = this.diagnostics.exportOptions;
+    exportOptions: DiagnosticsExportOptions = {
+        includeProgress: true,
+        includePerformance: true,
+        includeLogs: true,
+        logFilter: {
+            info: true,
+            warn: true,
+            error: true
+        }
+    };
 
     private readonly subscriptions: Subscription[] = [];
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
+                public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService) {
+        const options = this.stateService.diagnosticsExportOptions;
+        this.exportOptions = {
+            ...options,
+            logFilter: {...options.logFilter}
+        };
         this.subscriptions.push(
-            this.diagnostics.exportOptions$.subscribe(options => {
+            this.stateService.diagnosticsExportOptionsState.subscribe(options => {
                 this.exportOptions = {
                     ...options,
                     logFilter: {...options.logFilter}
@@ -74,10 +91,10 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     }
 
     updateOptions() {
-        this.diagnostics.setExportOptions({
+        this.stateService.diagnosticsExportOptions = {
             ...this.exportOptions,
             logFilter: {...this.exportOptions.logFilter}
-        });
+        };
     }
 
     export() {

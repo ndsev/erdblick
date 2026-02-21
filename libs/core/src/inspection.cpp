@@ -54,14 +54,10 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     featureId_ = featurePtr->id()->toString();
     tile_ = &featurePtr->model();
 
-    // Top-Level Feature Item
-    auto featureScope = push("Feature", "", ValueType::Section);
-    featureScope->value_ = JsValue(featurePtr->id()->toString());
-    convertSourceDataReferences(featurePtr->sourceDataReferences(), *featureScope);
-
     // Identifiers section.
     {
         auto scope = push(convertString("Identifiers"), "", ValueType::Section);
+        convertSourceDataReferences(featurePtr->sourceDataReferences(), *scope);
         push("type", "typeId", ValueType::String)->value_ = convertString(featurePtr->typeId());
 
         // Add map and layer names to the Identifiers section.

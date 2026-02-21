@@ -76,7 +76,7 @@ export class DockableLayoutComponent {
         if (!this.dragging || !this.dockRef) return;
         // Compute new width from left edge drag: width = rightEdge - pointerX
         const newWidth = Math.max(0, this.dockRight - ev.clientX);
-        this.dockRef.nativeElement.style.width = `${Math.round(newWidth)}px`;
+        this.dockRef.nativeElement.style.width = `${newWidth}px`;
     }
 
     private onPointerUp() {

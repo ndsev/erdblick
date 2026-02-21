@@ -172,7 +172,9 @@ main-bar {
 
 .main-layout {
   .viewer-layout {
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
     position: relative;
     height: 100vh;
   }
@@ -183,9 +185,10 @@ main-bar {
   gap: 0;
 
   .collapsible-dock {
+    flex: 0 0 auto;
+    flex-shrink: 0;
     padding: 0;
     height: 100vh;
-    max-width: 50vw;
     min-width: 0;
     overflow: hidden;
     display: flex;
@@ -438,7 +441,18 @@ diagnostics-indicator {
   width: 100%;
 }
 
+.diagnostics-perf-root-badge-wrapper {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.diagnostics-perf-root-badge-tooltip .p-tooltip-text {
+  white-space: pre-line;
+}
+
 .diagnostics-key-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1948,6 +1962,7 @@ body.dialog-dragging * {
       min-height: 15em;
       resize: vertical;
       overflow: auto;
+      border-bottom: solid 0.1em var(--p-form-field-border-color);
     }
   }
 

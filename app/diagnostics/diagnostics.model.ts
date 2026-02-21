@@ -56,6 +56,19 @@ export interface LogEntry {
     data?: unknown;
 }
 
+export interface DiagnosticsLogFilter {
+    info: boolean;
+    warn: boolean;
+    error: boolean;
+}
+
+export interface DiagnosticsExportOptions {
+    includeProgress: boolean;
+    includePerformance: boolean;
+    includeLogs: boolean;
+    logFilter: DiagnosticsLogFilter;
+}
+
 export interface DiagnosticsExportBundle {
     exportedAt: string;
     metadata: {

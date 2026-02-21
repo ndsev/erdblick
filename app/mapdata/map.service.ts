@@ -88,7 +88,6 @@ export class MapDataService {
     }
 
     selectionTileRequests: SelectionTileRequest[] = [];
-    statsDialogVisible: boolean = false;
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
 
     constructor(public styleService: StyleService,
@@ -240,11 +239,6 @@ export class MapDataService {
             this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
                 features: hoveredFeatureWrappers}]);
         });
-
-        this.keyboardService.registerShortcut("Ctrl+x", () => {
-            this.statsDialogVisible = true;
-            this.statsDialogNeedsUpdate.next();
-        }, true);
     }
 
     private processVisualizationTasks() {

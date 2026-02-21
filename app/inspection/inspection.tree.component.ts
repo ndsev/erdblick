@@ -246,7 +246,7 @@ export class InspectionTreeComponent implements OnDestroy {
                 private messageService: InfoMessageService) {
         effect(() => {
             this.data = this.treeData();
-            if (this.data[0].data.key === "Feature") {
+            if (this.isFeatureInspectionTree(this.data)) {
                 this.expandTreeNodes(this.data);
             }
 
@@ -540,6 +540,11 @@ export class InspectionTreeComponent implements OnDestroy {
     }
 
     protected readonly InspectionValueType = coreLib.ValueType;
+
+    private isFeatureInspectionTree(nodes: TreeTableNode[]): boolean {
+        const firstKey = nodes[0]?.data?.["key"];
+        return firstKey === "Feature" || firstKey === "Identifiers";
+    }
 
     private emitFilterChange(filterString: string) {
         if (this.suppressFilterEmit || this.lastEmittedFilterText === filterString) {
