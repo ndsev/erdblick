@@ -131,6 +131,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestPointLayerData: DeckPointLayerData | null = null;
     private latestArrowLayerData: DeckPathLayerData | null = null;
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
+    private tileDataVersionAtLastRender = -1;
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
@@ -285,6 +286,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.lastSignature = this.renderSignature();
             this.hadTileDataAtLastRender = this.tileHasData();
             this.tileFeatureCountAtLastRender = this.tileFeatureCount();
+            this.tileDataVersionAtLastRender = this.tileDataVersion();
             return true;
         } finally {
             const workerTimings = this.consumeLatestWorkerTimings();
@@ -318,12 +320,14 @@ export class DeckTileVisualization implements ITileVisualization {
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
+        this.tileDataVersionAtLastRender = -1;
     }
 
     isDirty(): boolean {
         return (
             !this.rendered ||
             this.lastSignature !== this.renderSignature() ||
+            this.tileDataVersionAtLastRender !== this.tileDataVersion() ||
             this.hadTileDataAtLastRender !== this.tileHasData() ||
             this.tileFeatureCountAtLastRender !== this.tileFeatureCount()
         );
@@ -377,6 +381,10 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private async renderWasmInWorker(): Promise<DeckPathLayerData | null> {
+        if (this.tile.blobCount() > 1) {
+            // Overlay composition currently happens in FeatureTile.peek() on the main thread.
+            return null;
+        }
         const tileBlob = this.tile.tileFeatureLayerBlob;
         if (!tileBlob) {
             return null;
@@ -708,6 +716,10 @@ export class DeckTileVisualization implements ITileVisualization {
 
     private tileFeatureCount(): number {
         return (this.tile as any).numFeatures as number;
+    }
+
+    private tileDataVersion(): number {
+        return this.tile.dataVersion;
     }
 
     private copyStyleOptions(): Record<string, boolean | number | string> {

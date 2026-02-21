@@ -49,6 +49,7 @@ public:
         std::string mapName;
         std::string layerName;
         uint64_t tileId;
+        uint32_t stage;
         std::string legalInfo;
         std::string error;
         int32_t numFeatures;

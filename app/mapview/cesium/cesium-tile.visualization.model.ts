@@ -74,6 +74,7 @@ export class CesiumTileVisualization implements ITileVisualization {
     private renderQueued: boolean = false;
     private styleOptionsVersion: number = 0;
     private renderedStyleOptionsVersion: number = 0;
+    private renderedTileDataVersion: number = -1;
 
     /**
      * Create a tile visualization.
@@ -284,6 +285,7 @@ export class CesiumTileVisualization implements ITileVisualization {
         this.hasTileBorder = this.showTileBorder;
 
         this.renderedStyleOptionsVersion = renderStyleOptionsVersion;
+        this.renderedTileDataVersion = this.tile.dataVersion;
         this.renderingInProgress = false;
         this.updateStatus(false);
         if (this.deleted)
@@ -342,6 +344,7 @@ export class CesiumTileVisualization implements ITileVisualization {
     isDirty() {
         return (
             this.styleOptionsVersion !== this.renderedStyleOptionsVersion ||
+            this.renderedTileDataVersion !== this.tile.dataVersion ||
             this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
             this.showTileBorder != this.hasTileBorder ||
             !this.lowDetailVisu

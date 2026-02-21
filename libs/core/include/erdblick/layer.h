@@ -30,6 +30,12 @@ struct TileFeatureLayer
     uint64_t tileId() const;
 
     /**
+     * Retrieves the staged-loading index for the tile layer.
+     * Returns 0 when no explicit stage is stored.
+     */
+    uint32_t stage() const;
+
+    /**
      * Gets the number of features in the tile.
      * @return The number of features.
      */
@@ -53,6 +59,11 @@ struct TileFeatureLayer
      * @return A pointer to the found feature, or `nullptr` if not found.
      */
     mapget::model_ptr<mapget::Feature> find(const std::string& id) const;
+
+    /**
+     * Attach an overlay tile to this tile.
+     */
+    void attachOverlay(TileFeatureLayer const& overlay);
 
     /**
      * Finds the index of a feature based on its type and ID parts.

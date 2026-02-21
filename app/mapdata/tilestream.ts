@@ -51,6 +51,7 @@ export interface MapTileStreamLoadStatePayload {
     mapId: string;
     layerId: string;
     tileId: number;
+    stage?: number;
     state: TileLoadState;
     stateText?: string;
 }

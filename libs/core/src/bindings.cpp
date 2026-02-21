@@ -243,10 +243,15 @@ std::string getSourceDataLayerKey(std::string const& mapId, std::string const& l
     return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, tileId).toString();
 }
 
-/** Get mapId, layerId and tileId of a MapTileKey. */
+/** Get mapId, layerId, tileId and stage of a MapTileKey. */
 NativeJsValue parseMapTileKey(std::string const& key) {
     auto tileKey = mapget::MapTileKey(key);
-    return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
+    return *JsValue::List({
+        JsValue(tileKey.mapId_),
+        JsValue(tileKey.layerId_),
+        JsValue(tileKey.tileId_.value_),
+        JsValue(tileKey.stage_)
+    });
 }
 
 /** Create a test tile over New York. */
@@ -357,6 +362,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("name", &FeatureLayerStyle::name)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
+        .function("minimumStage", &FeatureLayerStyle::minimumStage)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -421,10 +427,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileFeatureLayer
     em::class_<TileFeatureLayer>("TileFeatureLayer")
         .function("id", &TileFeatureLayer::id)
+        .function("stage", &TileFeatureLayer::stage)
         .function("tileId", &TileFeatureLayer::tileId)
         .function("numFeatures", &TileFeatureLayer::numFeatures)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
+        .function("attachOverlay", &TileFeatureLayer::attachOverlay)
         .function("featureIdByIndex", &TileFeatureLayer::featureIdByIndex)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
@@ -498,6 +506,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("stage", &TileLayerParser::TileLayerMetadata::stage)
         .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)

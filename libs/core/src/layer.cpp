@@ -44,6 +44,11 @@ uint64_t TileFeatureLayer::tileId() const
     return model_->tileId().value_;
 }
 
+uint32_t TileFeatureLayer::stage() const
+{
+    return model_->stage().value_or(0U);
+}
+
 /**
  * Gets the number of features in the tile.
  * @return The number of features.
@@ -81,6 +86,14 @@ std::string TileFeatureLayer::legalInfo() const
 mapget::model_ptr<mapget::Feature> TileFeatureLayer::find(const std::string& id) const
 {
     return model_->find(id);
+}
+
+void TileFeatureLayer::attachOverlay(TileFeatureLayer const& overlay)
+{
+    if (!model_ || !overlay.model_) {
+        return;
+    }
+    model_->attachOverlay(overlay.model_);
 }
 
 /**

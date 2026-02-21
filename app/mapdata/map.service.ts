@@ -405,7 +405,7 @@ export class MapDataService {
             return;
         }
 
-        this.applyTileLoadState(tile, payload.state);
+        this.applyTileLoadState(tile, payload.state, payload.stage);
     }
 
     public scheduleUpdate() {
@@ -462,12 +462,129 @@ export class MapDataService {
         }
     }
 
-    private applyTileLoadState(tile: FeatureTile, status: TileLoadState) {
-        tile.status = status;
+    private applyTileLoadState(tile: FeatureTile, status: TileLoadState, stage?: number) {
+        const tileWithStages = tile as FeatureTile & {
+            setStageLoadState?: (stage: number, state: TileLoadState) => void;
+            stageLoadState?: (stage: number) => TileLoadState | undefined;
+            isComplete?: (stageCount: number) => boolean;
+        };
+        if (Number.isInteger(stage) && typeof tileWithStages.setStageLoadState === "function") {
+            tileWithStages.setStageLoadState(stage as number, status);
+        }
+
+        const stageCount = this.getLayerStageCount(tile.mapName, tile.layerName);
+        if (tile.error) {
+            tile.status = TileLoadState.Error;
+        } else if (typeof tileWithStages.isComplete === "function" && tileWithStages.isComplete(stageCount)) {
+            tile.status = TileLoadState.Ok;
+        } else {
+            tile.status = this.nextPendingTileLoadState(tileWithStages, stageCount) ?? status;
+        }
+
         const tileKey = tile.mapTileKey;
         for (const viewState of this.viewVisualizationState) {
             for (const visu of viewState.getVisualizations(undefined, tileKey)) {
                 visu.updateStatus();
+            }
+        }
+    }
+
+    private nextPendingTileLoadState(tile: FeatureTile & {
+        nextMissingStage?: (stageCount: number) => number | undefined;
+        stageLoadState?: (stage: number) => TileLoadState | undefined;
+    }, stageCount: number): TileLoadState | undefined {
+        if (typeof tile.nextMissingStage !== "function") {
+            return tile.hasData() ? TileLoadState.BackendFetching : TileLoadState.LoadingQueued;
+        }
+        const nextMissingStage = tile.nextMissingStage(stageCount);
+        if (nextMissingStage === undefined) {
+            return TileLoadState.Ok;
+        }
+        for (let stage = nextMissingStage; stage < stageCount; stage++) {
+            const stageState = typeof tile.stageLoadState === "function"
+                ? tile.stageLoadState(stage)
+                : undefined;
+            if (stageState !== undefined) {
+                return stageState;
+            }
+        }
+        return tile.hasData() ? TileLoadState.BackendFetching : TileLoadState.LoadingQueued;
+    }
+
+    private getLayerStageCount(mapId: string, layerId: string): number {
+        const layerStages = this.maps.maps.get(mapId)?.layers.get(layerId)?.info?.stages;
+        if (typeof layerStages === "number" && Number.isFinite(layerStages) && layerStages > 0) {
+            return Math.max(1, Math.floor(layerStages));
+        }
+        return 1;
+    }
+
+    private styleMinimumStage(style: FeatureLayerStyle): number {
+        const styleWithMinimumStage = style as FeatureLayerStyle & { minimumStage?: () => number };
+        if (typeof styleWithMinimumStage.minimumStage !== "function") {
+            return 0;
+        }
+        const rawValue = styleWithMinimumStage.minimumStage();
+        if (!Number.isFinite(rawValue)) {
+            return 0;
+        }
+        return Math.max(0, Math.floor(rawValue));
+    }
+
+    private tileSatisfiesStyleStage(tile: FeatureTile, style: FeatureLayerStyle): boolean {
+        const tileWithStages = tile as FeatureTile & { highestLoadedStage?: () => number | null };
+        const highestLoadedStage = typeof tileWithStages.highestLoadedStage === "function"
+            ? tileWithStages.highestLoadedStage()
+            : (tile.hasData() ? 0 : null);
+        if (highestLoadedStage === null) {
+            return false;
+        }
+        return highestLoadedStage >= this.styleMinimumStage(style);
+    }
+
+    public isTileInspectionDataComplete(tile: FeatureTile): boolean {
+        const maybeTile = tile as FeatureTile & { isComplete?: (stageCount: number) => boolean };
+        if (typeof maybeTile.isComplete === "function") {
+            return maybeTile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
+        }
+        return tile.hasData();
+    }
+
+    private tileMinimumMissingStage(mapId: string, layerId: string, tileId: bigint): number | undefined {
+        const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+        const tile = this.loadedTileLayers.get(tileKey);
+        if (!tile) {
+            return 0;
+        }
+        const tileWithStages = tile as FeatureTile & { nextMissingStage?: (stageCount: number) => number | undefined };
+        if (typeof tileWithStages.nextMissingStage === "function") {
+            return tileWithStages.nextMissingStage(this.getLayerStageCount(mapId, layerId));
+        }
+        return tile.hasData() ? undefined : 0;
+    }
+
+    private canonicalizeMapTileKey(tileKey: string): string {
+        const parsed = this.parseMapTileKeySafe(tileKey);
+        if (!parsed) {
+            return tileKey;
+        }
+        const [mapId, layerId, tileId] = parsed;
+        return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+    }
+
+    private parseMapTileKeySafe(tileKey: string): [string, string, bigint] | null {
+        try {
+            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
+            return [mapId, layerId, BigInt(tileId as any)];
+        } catch (_error) {
+            const parts = tileKey.split('/');
+            if (parts.length < 3) {
+                return null;
+            }
+            try {
+                return [parts[0], parts[1], BigInt(parts[2])];
+            } catch (_parseError) {
+                return null;
             }
         }
     }
@@ -708,24 +825,27 @@ export class MapDataService {
             return;
         }
 
-        // Request non-present required tile layers.
-        const requestByLayer = new Map<string, {mapId: string, layerId: string, tileIds: number[], tileIdSet: Set<number>}>();
+        type LayerRequestEntry = {
+            mapId: string;
+            layerId: string;
+            tileIdToNextMissingStage: Map<number, number>;
+        };
+        const requestByLayer = new Map<string, LayerRequestEntry>();
         let placeholdersAdded = false;
-        const queueTiles = (mapId: string, layerId: string, tileIds: Array<number>) => {
-            if (!tileIds.length) {
-                return;
-            }
+        const queueTile = (mapId: string, layerId: string, tileId: number, nextMissingStage: number) => {
             const key = `${mapId}/${layerId}`;
             let entry = requestByLayer.get(key);
             if (!entry) {
-                entry = {mapId, layerId, tileIds: [], tileIdSet: new Set<number>()};
+                entry = {
+                    mapId,
+                    layerId,
+                    tileIdToNextMissingStage: new Map<number, number>(),
+                };
                 requestByLayer.set(key, entry);
             }
-            for (const tileId of tileIds) {
-                if (!entry.tileIdSet.has(tileId)) {
-                    entry.tileIds.push(tileId);
-                    entry.tileIdSet.add(tileId);
-                }
+            const previousStage = entry.tileIdToNextMissingStage.get(tileId);
+            if (previousStage === undefined || nextMissingStage < previousStage) {
+                entry.tileIdToNextMissingStage.set(tileId, nextMissingStage);
             }
         };
         for (const selectionTileRequest of this.selectionTileRequests) {
@@ -735,16 +855,23 @@ export class MapDataService {
                 .get(selectionTileRequest.remoteRequest.mapId)?.layers
                 .get(selectionTileRequest.remoteRequest.layerId);
             if (mapLayerItem) {
-                queueTiles(
-                    selectionTileRequest.remoteRequest.mapId,
-                    selectionTileRequest.remoteRequest.layerId,
-                    selectionTileRequest.remoteRequest.tileIds);
                 for (const tileId of selectionTileRequest.remoteRequest.tileIds) {
                     placeholdersAdded = this.ensureTilePlaceholder(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
                         true) || placeholdersAdded;
+                    const nextMissingStage = this.tileMinimumMissingStage(
+                        selectionTileRequest.remoteRequest.mapId,
+                        selectionTileRequest.remoteRequest.layerId,
+                        BigInt(tileId));
+                    if (nextMissingStage !== undefined) {
+                        queueTile(
+                            selectionTileRequest.remoteRequest.mapId,
+                            selectionTileRequest.remoteRequest.layerId,
+                            tileId,
+                            nextMissingStage);
+                    }
                 }
             } else {
                 selectionTileRequest.reject!("Map layer is not available.");
@@ -753,12 +880,6 @@ export class MapDataService {
 
         for (const [mapName, map] of this.maps.maps) {
             for (const layer of map.allFeatureLayers()) {
-                // Find tile IDs which are not yet loaded for this map layer combination.
-                // We keep a set in addition to the array to ensure that no tile ids are
-                // requested twice.
-                const requestTilesForMapLayer = []
-                const requestTilesForMapLayerSet = new Set<bigint>();
-
                 for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
                     if (!this.maps.getMapLayerVisibility(viewIndex, mapName, layer.id)) {
                         continue;
@@ -771,26 +892,44 @@ export class MapDataService {
                     for (let tileId of tileIds!) {
                         const tileMapLayerKey = coreLib.getTileFeatureLayerKey(mapName, layer.id, tileId);
                         const existingTile = this.loadedTileLayers.get(tileMapLayerKey);
-                        if ((!existingTile || !existingTile.hasData()) && !requestTilesForMapLayerSet.has(tileId)) {
-                            requestTilesForMapLayer.push(Number(tileId)); // TODO: Get rid of type casting after new tile ids are available
-                            requestTilesForMapLayerSet.add(tileId);
+                        if (!existingTile) {
                             placeholdersAdded = this.ensureTilePlaceholder(mapName, layer.id, tileId, false) || placeholdersAdded;
                         }
+                        const nextMissingStage = this.tileMinimumMissingStage(mapName, layer.id, tileId);
+                        if (nextMissingStage !== undefined) {
+                            queueTile(mapName, layer.id, Number(tileId), nextMissingStage);
+                        }
                     }
-                }
-
-                // Only add a request if there are tiles to be loaded.
-                if (requestTilesForMapLayer.length > 0) {
-                    queueTiles(mapName, layer.id, requestTilesForMapLayer);
                 }
             }
         }
 
-        const requests = Array.from(requestByLayer.values()).map(entry => ({
-            mapId: entry.mapId,
-            layerId: entry.layerId,
-            tileIds: entry.tileIds
-        }));
+        const requests = Array.from(requestByLayer.values()).map(entry => {
+            let maxRequestedStage = 0;
+            for (const nextMissingStage of entry.tileIdToNextMissingStage.values()) {
+                if (nextMissingStage > maxRequestedStage) {
+                    maxRequestedStage = nextMissingStage;
+                }
+            }
+            const tileIdsByNextStage = Array.from(
+                {length: Math.max(1, maxRequestedStage + 1)},
+                () => new Array<number>());
+            for (const [tileId, nextMissingStage] of entry.tileIdToNextMissingStage.entries()) {
+                tileIdsByNextStage[nextMissingStage].push(tileId);
+            }
+            if (tileIdsByNextStage.length <= 1) {
+                return {
+                    mapId: entry.mapId,
+                    layerId: entry.layerId,
+                    tileIds: tileIdsByNextStage[0],
+                };
+            }
+            return {
+                mapId: entry.mapId,
+                layerId: entry.layerId,
+                tileIdsByNextStage,
+            };
+        });
 
         if (placeholdersAdded) {
             this.statsDialogNeedsUpdate.next();
@@ -805,19 +944,31 @@ export class MapDataService {
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return this.tileLayerParser.readTileLayerMetadata(wasmBlob);
-        }, tileLayerBlob);
-        const existingTile = this.loadedTileLayers.get(mapTileMetadata.id as string);
+        }, tileLayerBlob) as {
+            id: string;
+            mapName: string;
+            layerName: string;
+            tileId: bigint;
+            stage?: number;
+        };
+        const tileStage = Number.isInteger(mapTileMetadata.stage) ? Number(mapTileMetadata.stage) : 0;
+        const canonicalMapTileKey = mapTileMetadata.id
+            ? this.canonicalizeMapTileKey(mapTileMetadata.id)
+            : coreLib.getTileFeatureLayerKey(
+                mapTileMetadata.mapName,
+                mapTileMetadata.layerName,
+                mapTileMetadata.tileId);
+        const existingTile = this.loadedTileLayers.get(canonicalMapTileKey);
         let tileLayer: FeatureTile;
         if (existingTile) {
             tileLayer = existingTile;
             tileLayer.preventCulling = tileLayer.preventCulling || preventCulling;
-            tileLayer.hydrateFromBlob(tileLayerBlob);
+            tileLayer.hydrateFromBlob(tileLayerBlob, tileStage);
         } else {
-            // tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
-            // this.loadedTileLayers.set(tileLayer.mapTileKey, tileLayer);
-            return;
+            tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
+            this.loadedTileLayers.set(canonicalMapTileKey, tileLayer);
         }
-        this.applyTileLoadState(tileLayer, tileLayer.status);
+        this.applyTileLoadState(tileLayer, tileLayer.status, tileStage);
 
         // Consider, if this tile is needed by a selection tile request.
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
@@ -898,6 +1049,7 @@ export class MapDataService {
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         if (style.visible &&
             style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName) &&
+            this.tileSatisfiesStyleStage(tileLayer, style.featureLayerStyle) &&
             style.featureLayerStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             this.renderTileLayer(viewIndex, tileLayer, style);
         }
@@ -948,6 +1100,9 @@ export class MapDataService {
             return;
         }
         if (!style.visible) {
+            return;
+        }
+        if (!this.tileSatisfiesStyleStage(tileLayer, wasmStyle)) {
             return;
         }
         if (!wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
@@ -1008,7 +1163,8 @@ export class MapDataService {
     }
 
     getFeatureTile(tileKey: string): FeatureTile | null {
-        const tile = this.loadedTileLayers.get(tileKey);
+        const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
+        const tile = this.loadedTileLayers.get(canonicalTileKey);
         if (!tile || !tile.hasData()) {
             return null;
         }
@@ -1027,7 +1183,8 @@ export class MapDataService {
         if (!Number.isInteger(featureIndex) || featureIndex < 0) {
             return null;
         }
-        const tile = this.loadedTileLayers.get(tileKey);
+        const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
+        const tile = this.loadedTileLayers.get(canonicalTileKey);
         if (!tile || !tile.hasData()) {
             return null;
         }
@@ -1039,7 +1196,7 @@ export class MapDataService {
             return null;
         }
         return {
-            mapTileKey: tileKey,
+            mapTileKey: canonicalTileKey,
             featureId
         };
     }
@@ -1055,9 +1212,17 @@ export class MapDataService {
                 continue;
             }
 
-            let tile = this.loadedTileLayers.get(tileKey);
+            const canonicalTileKey = this.canonicalizeMapTileKey(tileKey);
+            const parsedTileKey = this.parseMapTileKeySafe(canonicalTileKey);
+            if (!parsedTileKey) {
+                continue;
+            }
+            const [mapId, layerId, tileId] = parsedTileKey;
+
+            let tile = this.loadedTileLayers.get(canonicalTileKey);
             if (tile && tile.hasData()) {
                 result.set(tileKey, tile);
+                result.set(canonicalTileKey, tile);
                 continue;
             }
 
@@ -1066,14 +1231,13 @@ export class MapDataService {
                 continue;
             }
 
-            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
             const selectionTileRequest: SelectionTileRequest =  {
                 remoteRequest: {
                     mapId: mapId,
                     layerId: layerId,
                     tileIds: [Number(tileId)],
                 },
-                tileKey: tileKey,
+                tileKey: canonicalTileKey,
                 resolve: null,
                 reject: null
             };
@@ -1087,6 +1251,7 @@ export class MapDataService {
             this.scheduleUpdate();
             tile = await selectionTilePromise;
             result.set(tileKey, tile);
+            result.set(canonicalTileKey, tile);
         }
 
         return result;
@@ -1134,7 +1299,8 @@ export class MapDataService {
             }
 
             if (!tile.has(resolvedFeatureId)) {
-                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(id?.mapTileKey || "");
+                const parsedTileKey = this.parseMapTileKeySafe(id?.mapTileKey || "");
+                const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
                 this.messageService.showError(
                     `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                 continue;
@@ -1293,6 +1459,7 @@ export class MapDataService {
                     for (let [_, style] of this.styleService.styles) {
                         if (style.visible &&
                             style.featureLayerStyle.hasLayerAffinity(featureTile.layerName) &&
+                            this.tileSatisfiesStyleStage(featureTile, style.featureLayerStyle) &&
                             style.featureLayerStyle.supportsHighlightMode(mode)) {
                             const styleOptions = this.maps.getLayerStyleOptions(
                                 viewIndex, featureTile.mapName, featureTile.layerName, style.id) ?? {};

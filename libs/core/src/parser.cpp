@@ -121,15 +121,37 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     // Parse just the TileLayer part of the blob, which is the base class of
     // e.g. the TileFeatureLayer. The base class blob always precedes the
     // blob from the derived class.
+    size_t bytesRead = 0;
     TileLayer tileLayer(
         buffer.bytes(),
         [this](auto&& mapId, auto&& layerId)
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
-        }
+        },
+        &bytesRead
     );
     int32_t numFeatures = -1;
+    uint32_t stage = 0;
     auto layerInfo = tileLayer.info();
+    auto const& bytes = buffer.bytes();
+    if (tileLayer.layerInfo() &&
+        tileLayer.layerInfo()->type_ == LayerType::Features &&
+        tileLayer.layerInfo()->stages_ > 1 &&
+        bytesRead < bytes.size())
+    {
+        // TileFeatureLayer serializes stage as std::optional<uint32_t>:
+        // one byte "hasValue" marker, followed by 4-byte little-endian value.
+        // Staged layers always set stage, but keep a safe fallback to zero.
+        const auto hasSerializedStage = bytes[bytesRead];
+        if (hasSerializedStage == 1U && bytesRead + 1 + sizeof(uint32_t) <= bytes.size()) {
+            const auto stageOffset = bytesRead + 1;
+            stage =
+                static_cast<uint32_t>(bytes[stageOffset]) |
+                (static_cast<uint32_t>(bytes[stageOffset + 1]) << 8U) |
+                (static_cast<uint32_t>(bytes[stageOffset + 2]) << 16U) |
+                (static_cast<uint32_t>(bytes[stageOffset + 3]) << 24U);
+        }
+    }
     auto allScalarFields = JsValue::Dict();
     if (layerInfo.is_object()) {
         numFeatures = layerInfo.value<int32_t>("Size/Features", -1);
@@ -145,6 +167,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         tileLayer.tileId().value_,
+        stage,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,

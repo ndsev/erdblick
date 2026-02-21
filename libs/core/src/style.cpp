@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <regex>
 
@@ -32,6 +33,12 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
     if (auto enabled = styleYaml["default"]) {
         if (enabled.IsScalar())
             enabled_ = enabled.as<bool>();
+    }
+
+    if (auto stage = styleYaml["stage"]) {
+        if (stage.IsScalar()) {
+            stage_ = static_cast<uint32_t>(std::max(0, stage.as<int>()));
+        }
     }
 
     if (auto layer = styleYaml["layer"]) {
@@ -89,6 +96,11 @@ bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
 bool FeatureLayerStyle::defaultEnabled() const
 {
     return enabled_;
+}
+
+uint32_t FeatureLayerStyle::minimumStage() const
+{
+    return stage_;
 }
 
 std::string const& FeatureLayerStyle::name() const {

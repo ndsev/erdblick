@@ -173,9 +173,9 @@ describe('JumpTargetService', () => {
             target.execute('12345 m1 layerA');
         }
 
-        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 12345n)).toBe("SourceData:m1:LAYER-ID:3039");
+        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 12345n)).toBe("SourceData:m1:LAYER-ID:3039:0");
         expect(stateService.setSelection).toHaveBeenCalledWith({
-            mapTileKey: 'SourceData:m1:LAYER-ID:3039',
+            mapTileKey: 'SourceData:m1:LAYER-ID:3039:0',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
     });
