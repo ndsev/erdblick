@@ -3,9 +3,10 @@ import {ProgressCounter, TilePipelineProgress} from './diagnostics.model';
 import {MapDataService} from '../mapdata/map.service';
 
 interface ProgressStage {
-    key: keyof TilePipelineProgress;
+    key: string;
     label: string;
-    color: Record<string, any>;
+    counter: ProgressCounter;
+    color?: Record<string, any>;
 }
 
 @Component({
@@ -16,10 +17,10 @@ interface ProgressStage {
                 @for (stage of progressStages; track stage.key) {
                     <div class="diagnostics-progress-item">
                         <span class="diagnostics-stage-label">{{ stage.label }}</span>
-                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(progress[stage.key]) + '%'">
-                            <p-progressBar [value]="progressPercent(progress[stage.key])" [dt]="stage.color" [showValue]="false"></p-progressBar>
+                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(stage.counter) + '%'">
+                            <p-progressBar [value]="progressPercent(stage.counter)" [dt]="stage.color" [showValue]="false"></p-progressBar>
                             <span class="diagnostics-stage-bar-value">
-                                {{ progress[stage.key].done }} / {{ progress[stage.key].total }}
+                                {{ stage.counter.done }} / {{ stage.counter.total }}
                             </span>
                         </div>
                     </div>
@@ -45,21 +46,31 @@ export class DiagnosticsProgressComponent {
     @Input({required: true}) progress!: TilePipelineProgress;
     readonly paused$ = this.mapService.tilePipelinePaused$;
 
-    readonly progressStages: ProgressStage[] = [
-        {key: 'requested', label: 'Requested', color: { value: { background: '{surface.500}' } }},
-        {key: 'fetched', label: 'Fetched', color: { value: { background: '{blue.500}' } }},
-        {key: 'converted', label: 'Converted', color: { value: { background: '{blue.500}' } }},
-        {key: 'rendered', label: 'Rendered', color: { value: { background: '{emerald.500}' } }}
-    ];
-
     constructor(private readonly mapService: MapDataService) {}
+
+    get progressStages(): ProgressStage[] {
+        const stageCounters = this.progress?.stages ?? [];
+        const stages = stageCounters.map((counter, index) => ({
+            key: `stage-${index}`,
+            label: `Stage ${index} Received`,
+            counter,
+            color: {value: {background: '{blue.500}'}}
+        }));
+        stages.push({
+            key: 'rendered',
+            label: 'Rendered',
+            counter: this.progress?.rendered ?? {done: 0, total: 0},
+            color: {value: {background: '{emerald.500}'}}
+        });
+        return stages;
+    }
 
     togglePause() {
         this.mapService.toggleTilePipelinePause();
     }
 
     get isProgressComplete(): boolean {
-        return this.progressStages.every(stage => this.progressPercent(this.progress[stage.key]) === 100);
+        return this.progressStages.every(stage => this.progressPercent(stage.counter) === 100);
     }
 
     progressPercent(counter: ProgressCounter): number {

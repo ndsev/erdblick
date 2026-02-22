@@ -116,8 +116,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         const expected = tiles.length;
         let loaded = 0;
         let errors = 0;
-        let fetched = 0;
-
+        const stageCounters: Array<{done: number; total: number}> = [];
         for (const tile of tiles) {
             const status = tile.status;
             const hasData = tile.hasData();
@@ -127,9 +126,16 @@ export class DiagnosticsDatasource implements OnDestroy {
             if (status === TileLoadState.Error) {
                 errors += 1;
             }
-            const rank = this.tileStageRank(status);
-            if (rank >= 1 || hasData) {
-                fetched += 1;
+            const stageCount = this.mapService.getLayerStageCount(tile.mapName, tile.layerName);
+            for (let stage = 0; stage < stageCount; stage++) {
+                if (stageCounters.length <= stage) {
+                    stageCounters.push({done: 0, total: 0});
+                }
+                const counter = stageCounters[stage];
+                counter.total += 1;
+                if (tile.hasStage(stage)) {
+                    counter.done += 1;
+                }
             }
         }
 
@@ -141,9 +147,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         };
 
         const progress: TilePipelineProgress = {
-            requested: {done: expected, total: expected},
-            fetched: {done: fetched, total: expected},
-            converted: {done: loaded, total: expected},
+            stages: stageCounters,
             rendered: this.mapService.getVisualizationCounts()
         };
 
@@ -155,24 +159,6 @@ export class DiagnosticsDatasource implements OnDestroy {
                 connected: this.mapService.isTileStreamConnected()
             }
         };
-    }
-
-    private tileStageRank(status: TileLoadState): number {
-        switch (status) {
-            case TileLoadState.LoadingQueued:
-                return 0;
-            case TileLoadState.BackendFetching:
-                return 1;
-            case TileLoadState.BackendConverting:
-                return 2;
-            case TileLoadState.RenderingQueued:
-                return 3;
-            case TileLoadState.Ok:
-            case TileLoadState.Error:
-                return 4;
-            default:
-                return 0;
-        }
     }
 
     private appendLogEntry(entry: LogEntry) {

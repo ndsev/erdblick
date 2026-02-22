@@ -6,9 +6,7 @@ export interface ProgressCounter {
 }
 
 export interface TilePipelineProgress {
-    requested: ProgressCounter;
-    fetched: ProgressCounter;
-    converted: ProgressCounter;
+    stages: ProgressCounter[];
     rendered: ProgressCounter;
 }
 

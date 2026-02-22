@@ -308,11 +308,31 @@ export class MapDataService {
             done: 0
         };
 
-        for (const view of this.viewVisualizationState) {
-            for (const visu of view.getVisualizations()) {
-                ++result.total;
-                if (visu.tile.hasData() && !visu.isDirty()) {
-                    ++result.done;
+        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+            const view = this.viewVisualizationState[viewIndex];
+            for (const [_, style] of this.styleService.styles) {
+                if (!style.visible) {
+                    continue;
+                }
+                const wasmStyle = style.featureLayerStyle;
+                if (!wasmStyle || !wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
+                    continue;
+                }
+                for (const tile of this.loadedTileLayers.values()) {
+                    if (!this.viewShowsFeatureTile(viewIndex, tile)) {
+                        continue;
+                    }
+                    if (!wasmStyle.hasLayerAffinity(tile.layerName)) {
+                        continue;
+                    }
+                    ++result.total;
+                    if (!this.tileSatisfiesStyleStage(tile, wasmStyle)) {
+                        continue;
+                    }
+                    const visu = view.getVisualization(style.id, tile.mapTileKey);
+                    if (visu && !visu.isDirty()) {
+                        ++result.done;
+                    }
                 }
             }
         }
@@ -511,7 +531,7 @@ export class MapDataService {
         return tile.hasData() ? TileLoadState.BackendFetching : TileLoadState.LoadingQueued;
     }
 
-    private getLayerStageCount(mapId: string, layerId: string): number {
+    getLayerStageCount(mapId: string, layerId: string): number {
         const layerStages = this.maps.maps.get(mapId)?.layers.get(layerId)?.info?.stages;
         if (typeof layerStages === "number" && Number.isFinite(layerStages) && layerStages > 0) {
             return Math.max(1, Math.floor(layerStages));
@@ -994,20 +1014,20 @@ export class MapDataService {
             }
         }
 
-        // Fast path: only wake visualizations already waiting on this tile.
-        // Fall back to full recomputation when no matching waiting visualization exists.
+        // Fast path: only wake visualizations already tracked for this tile.
+        // If none exist yet, create only the tile-local visualizations.
         const waitingUpdate = this.updateWaitingVisualizationsForTile(tileLayer);
-        if (waitingUpdate.visibleInAnyView && !waitingUpdate.foundWaitingVisualization) {
-            this.updateVisualizations();
+        if (waitingUpdate.visibleInAnyView && !waitingUpdate.foundExistingVisualization) {
+            this.createVisualizationsForTile(tileLayer);
         }
     }
 
     private updateWaitingVisualizationsForTile(tileLayer: FeatureTile): {
-        foundWaitingVisualization: boolean;
+        foundExistingVisualization: boolean;
         visibleInAnyView: boolean;
     } {
         const tileKey = tileLayer.mapTileKey;
-        let foundWaitingVisualization = false;
+        let foundExistingVisualization = false;
         let visibleInAnyView = false;
 
         for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
@@ -1019,15 +1039,18 @@ export class MapDataService {
             const viewState = this.viewVisualizationState[viewIndex];
             const queuedVisualizations = new Set(viewState.visualizationQueue);
             for (const visu of viewState.getVisualizations(undefined, tileKey)) {
+                foundExistingVisualization = true;
+                const style = this.styleService.styles.get(visu.styleId);
+                if (style && !this.tileSatisfiesStyleStage(tileLayer, style.featureLayerStyle)) {
+                    visu.updateStatus(false);
+                    continue;
+                }
                 const isQueued = queuedVisualizations.has(visu);
                 const isDirty = visu.isDirty();
 
                 visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                 visu.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
 
-                if (isQueued || isDirty) {
-                    foundWaitingVisualization = true;
-                }
                 if (!isDirty) {
                     continue;
                 }
@@ -1041,15 +1064,25 @@ export class MapDataService {
         }
 
         return {
-            foundWaitingVisualization,
+            foundExistingVisualization,
             visibleInAnyView
         };
+    }
+
+    private createVisualizationsForTile(tileLayer: FeatureTile): void {
+        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
+            if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
+                continue;
+            }
+            for (const [_, style] of this.styleService.styles) {
+                this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
+            }
+        }
     }
 
     private renderTileLayerOnDemand(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
         if (style.visible &&
             style.featureLayerStyle.hasLayerAffinity(tileLayer.layerName) &&
-            this.tileSatisfiesStyleStage(tileLayer, style.featureLayerStyle) &&
             style.featureLayerStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             this.renderTileLayer(viewIndex, tileLayer, style);
         }
@@ -1102,12 +1135,10 @@ export class MapDataService {
         if (!style.visible) {
             return;
         }
-        if (!this.tileSatisfiesStyleStage(tileLayer, wasmStyle)) {
-            return;
-        }
         if (!wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
             return;
         }
+        const stageReady = this.tileSatisfiesStyleStage(tileLayer, wasmStyle);
 
         const styleId = style.id;
         const mapName = tileLayer.mapName;
@@ -1118,6 +1149,10 @@ export class MapDataService {
         if (existing) {
             existing.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
             existing.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
+            if (!stageReady) {
+                existing.updateStatus(false);
+                return;
+            }
             if (existing.isDirty()) {
                 existing.updateStatus(true);
                 viewState.visualizationQueue.push(existing);
@@ -1135,9 +1170,13 @@ export class MapDataService {
             this.maps.getViewTileBorderState(viewIndex),
             this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
         );
+        viewState.putVisualization(styleId, tileKey, visu);
+        if (!stageReady) {
+            visu.updateStatus(false);
+            return;
+        }
         visu.updateStatus(true);
         viewState.visualizationQueue.push(visu);
-        viewState.putVisualization(styleId, tileKey, visu);
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
