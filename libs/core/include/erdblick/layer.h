@@ -42,6 +42,12 @@ struct TileFeatureLayer
     uint32_t numFeatures() const;
 
     /**
+     * Gets the total number of geometry vertices in the tile.
+     * Includes all points across all geometries of all features.
+     */
+    uint64_t numVertices() const;
+
+    /**
      * Retrieves the center point of the tile, including the zoom level as the Z coordinate.
      * @return The center point of the tile.
      */

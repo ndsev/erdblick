@@ -186,6 +186,10 @@ export class MapTileStreamClient {
         return this.downstreamBytesPerSecondEwma;
     }
 
+    getPendingFrameQueueSize(): number {
+        return this.frameQueue.length;
+    }
+
     sendRequest(body: object | string) {
         this.awaitingCompletion = true;
         this.lastStatusPayload = null;

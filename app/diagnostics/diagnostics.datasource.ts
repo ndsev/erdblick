@@ -156,6 +156,8 @@ export class DiagnosticsDatasource implements OnDestroy {
                 downstreamBytesPerSecond: hudStats.downstreamBytesPerSecond,
                 features: hudStats.features,
                 vertices: hudStats.vertices,
+                parseQueueSize: hudStats.parseQueueSize,
+                renderQueueSize: hudStats.renderQueueSize,
                 renderSeconds: hudStats.viewportRenderSeconds,
             }
         };

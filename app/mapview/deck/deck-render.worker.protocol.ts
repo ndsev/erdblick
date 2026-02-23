@@ -34,6 +34,7 @@ export interface DeckPathRenderResult {
     type: "DeckPathRenderResult";
     taskId: string;
     tileKey: string;
+    vertexCount: number;
     pointPositions: ArrayBuffer;
     pointColors: ArrayBuffer;
     pointRadii: ArrayBuffer;

@@ -22,23 +22,23 @@ endif()
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
-
-FetchContent_Declare(yaml-cpp
-  GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "yaml-cpp-0.9.0"
-  GIT_SHALLOW    OFF)
-FetchContent_MakeAvailable(yaml-cpp)
-
-if (NOT TARGET mapget)
-  if (NOT DEFINED NOSERDE_DEFAULT_VECTOR_STORAGE)
-    set(NOSERDE_DEFAULT_VECTOR_STORAGE ON CACHE BOOL "Default noserde::Buffer storage policy to vector_byte_storage")
+set(CPM_DOWNLOAD_ALL ON)
+set(CPM_USE_LOCAL_PACKAGES OFF)
+if (NOT COMMAND CPMAddPackage)
+  if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Missing CPM submodule at cmake/CPM.cmake. "
+      "Run: git submodule update --init --recursive cmake/CPM.cmake")
   endif()
-  FetchContent_Declare(mapget
-    GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
-    GIT_TAG        "noserde"
-    GIT_SHALLOW    OFF)
-  FetchContent_MakeAvailable(mapget)
+  # If this build tree previously used a different CPM checkout, stale cache
+  # variables can make CPM.cmake return early before defining CPMAddPackage.
+  foreach(_erdblick_cpm_var CPM_INITIALIZED CPM_DIRECTORY CPM_FILE CPM_VERSION CPM_PACKAGES)
+    unset(${_erdblick_cpm_var} CACHE)
+    unset(${_erdblick_cpm_var})
+  endforeach()
+  add_subdirectory(cmake/CPM.cmake)
 endif()
+include(cmake/deps.cmake)
 
 include(cmake/cesium.cmake)
 

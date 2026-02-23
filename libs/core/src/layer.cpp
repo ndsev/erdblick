@@ -58,6 +58,11 @@ uint32_t TileFeatureLayer::numFeatures() const
     return model_->numRoots();
 }
 
+uint64_t TileFeatureLayer::numVertices() const
+{
+    return model_->numVertices();
+}
+
 /**
  * Retrieves the center point of the tile, including the zoom level as the Z coordinate.
  * @return The center point of the tile.

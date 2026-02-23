@@ -29,6 +29,8 @@ interface ProgressBar {
                     <span class="diagnostics-loading-bubble">{{ formatThroughput(bubbles.downstreamBytesPerSecond) }}</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.features) }} Feats.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.vertices) }} Verts.</span>
+                    <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.parseQueueSize) }} ParseQ</span>
+                    <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.renderQueueSize) }} RenderQ</span>
                     <span class="diagnostics-loading-bubble">{{ formatSeconds(bubbles.renderSeconds) }}</span>
                 </div>
             </div>
@@ -63,13 +65,13 @@ export class DiagnosticsProgressComponent {
             color: {value: {background: '{cyan.500}'}}
         }));
         return [
-            ...stageBars,
             {
             key: 'backend',
             label: 'Backend',
             counter: this.progress?.backend ?? {done: 0, total: 0},
             color: {value: {background: '{blue.500}'}}
         },
+        ...stageBars,
         {
             key: 'rendered',
             label: 'Rendered',
@@ -84,6 +86,8 @@ export class DiagnosticsProgressComponent {
             downstreamBytesPerSecond: 0,
             features: 0,
             vertices: 0,
+            parseQueueSize: 0,
+            renderQueueSize: 0,
             renderSeconds: 0,
         };
     }

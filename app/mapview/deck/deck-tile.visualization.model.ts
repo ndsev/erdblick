@@ -131,7 +131,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestPointLayerData: DeckPointLayerData | null = null;
     private latestArrowLayerData: DeckPathLayerData | null = null;
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
-    private tileDataVersionAtLastRender = -1;
+    private relevantTileDataVersionAtLastRender = -1;
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
@@ -286,7 +286,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.lastSignature = this.renderSignature();
             this.hadTileDataAtLastRender = this.tileHasData();
             this.tileFeatureCountAtLastRender = this.tileFeatureCount();
-            this.tileDataVersionAtLastRender = this.tileDataVersion();
+            this.relevantTileDataVersionAtLastRender = this.relevantTileDataVersion();
             return true;
         } finally {
             const workerTimings = this.consumeLatestWorkerTimings();
@@ -320,14 +320,14 @@ export class DeckTileVisualization implements ITileVisualization {
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
-        this.tileDataVersionAtLastRender = -1;
+        this.relevantTileDataVersionAtLastRender = -1;
     }
 
     isDirty(): boolean {
         return (
             !this.rendered ||
             this.lastSignature !== this.renderSignature() ||
-            this.tileDataVersionAtLastRender !== this.tileDataVersion() ||
+            this.relevantTileDataVersionAtLastRender !== this.relevantTileDataVersion() ||
             this.hadTileDataAtLastRender !== this.tileHasData() ||
             this.tileFeatureCountAtLastRender !== this.tileFeatureCount()
         );
@@ -416,6 +416,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.mapViewLayerStyleId()
             )
         });
+        this.setTileVertexCount(result.vertexCount);
         this.latestWorkerTimings = result.workerTimings ?? null;
         this.latestPointLayerData = this.buildPointLayerData({
             coordinateOrigin: result.coordinateOrigin,
@@ -452,6 +453,7 @@ export class DeckTileVisualization implements ITileVisualization {
             );
 
             await this.tile.peekAsync(async (tileFeatureLayer) => {
+                this.setTileVertexCount(Number(tileFeatureLayer.numVertices()));
                 deckVisu.addTileFeatureLayer(tileFeatureLayer);
                 deckVisu.run();
             });
@@ -718,8 +720,28 @@ export class DeckTileVisualization implements ITileVisualization {
         return (this.tile as any).numFeatures as number;
     }
 
-    private tileDataVersion(): number {
-        return this.tile.dataVersion;
+    private minimumStage(): number {
+        const styleWithMinimumStage = this.style as FeatureLayerStyle & { minimumStage?: () => number };
+        if (typeof styleWithMinimumStage.minimumStage !== "function") {
+            return 0;
+        }
+        const rawValue = styleWithMinimumStage.minimumStage();
+        if (!Number.isFinite(rawValue)) {
+            return 0;
+        }
+        return Math.max(0, Math.floor(rawValue));
+    }
+
+    private relevantTileDataVersion(): number {
+        const tileWithStageVersion = this.tile as FeatureTile & { dataVersionUpToStage?: (maxStage: number) => number };
+        if (typeof tileWithStageVersion.dataVersionUpToStage !== "function") {
+            return this.tile.dataVersion;
+        }
+        return tileWithStageVersion.dataVersionUpToStage(this.minimumStage());
+    }
+
+    private setTileVertexCount(count: number): void {
+        this.tile.setVertexCount(Math.max(0, Math.floor(Number(count))));
     }
 
     private copyStyleOptions(): Record<string, boolean | number | string> {

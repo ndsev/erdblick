@@ -89,6 +89,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const deserializeStart = performance.now();
         tile = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), task.tileBlob) as any;
         deserializeMs = performance.now() - deserializeStart;
+        const vertexCount = Math.max(0, Math.floor(Number(tile.numVertices())));
 
         deckVisu = new coreLib.DeckFeatureLayerVisualization(
             task.viewIndex,
@@ -127,6 +128,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             type: "DeckPathRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
+            vertexCount,
             pointPositions: pointPositions.buffer,
             pointColors: pointColors.buffer,
             pointRadii: pointRadii.buffer,
@@ -232,6 +234,7 @@ addEventListener("message", async ({data}) => {
             type: "DeckPathRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
+            vertexCount: 0,
             ...buffers,
             error: toErrorMessage(error)
         };

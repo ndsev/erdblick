@@ -23,6 +23,9 @@ export class FeatureTile {
     private dataSourceInfoBlobCache: Uint8Array | null = null;
     private featureIdByIndexCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
+    private stageDataVersionByStage: Map<number, number> = new Map<number, number>();
+    private vertexCountCache: number | null = null;
+    private vertexCountCacheDataVersion: number = -1;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
@@ -90,11 +93,14 @@ export class FeatureTile {
         const canonicalMapTileKey = this.canonicalMapTileKeyForMetadata(mapTileMetadata);
 
         this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
+        this.stageDataVersionByStage.set(stage, (this.stageDataVersionByStage.get(stage) || 0) + 1);
         this.tileFeatureLayerBlob = this.highestStageBlob();
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
         this.featureIdByIndexCache.clear();
         this.dataVersion += 1;
+        this.vertexCountCache = null;
+        this.vertexCountCacheDataVersion = -1;
 
         if (this.mapTileKey === "undefined") {
             this.mapTileKey = canonicalMapTileKey;
@@ -157,6 +163,17 @@ export class FeatureTile {
         return this.tileFeatureLayerBlobsByStage.has(stage);
     }
 
+    dataVersionUpToStage(maxStage: number): number {
+        const normalizedMaxStage = Math.max(0, Math.floor(maxStage));
+        let version = 0;
+        for (const [stage, stageVersion] of this.stageDataVersionByStage.entries()) {
+            if (stage <= normalizedMaxStage) {
+                version += stageVersion;
+            }
+        }
+        return version;
+    }
+
     nextMissingStage(stageCount: number): number | undefined {
         const normalizedStageCount = Math.max(1, Math.floor(stageCount));
         for (let stage = 0; stage < normalizedStageCount; stage++) {
@@ -177,6 +194,49 @@ export class FeatureTile {
 
     stageLoadState(stage: number): TileLoadState | undefined {
         return this.stageLoadStates.get(Math.max(0, Math.floor(stage)));
+    }
+
+    setVertexCount(count: number): void {
+        this.storeVertexCount(count);
+    }
+
+    vertexCount(): number {
+        if (this.vertexCountCacheDataVersion === this.dataVersion && this.vertexCountCache !== null) {
+            return this.vertexCountCache;
+        }
+
+        const fromStats = this.vertexCountFromStats();
+        if (fromStats > 0) {
+            return this.storeVertexCount(fromStats);
+        }
+        return 0;
+    }
+
+    private storeVertexCount(count: number): number {
+        this.vertexCountCache = Math.max(0, Math.floor(count));
+        this.vertexCountCacheDataVersion = this.dataVersion;
+        return this.vertexCountCache;
+    }
+
+    private vertexCountFromStats(): number {
+        let vertices = 0;
+        for (const [key, values] of this.stats.entries()) {
+            if (!values?.length) {
+                continue;
+            }
+            if (!/(^|\/)(vert|vertex|vertices)(\/|$|#)/i.test(key)) {
+                continue;
+            }
+            if (/#ms$/i.test(key) || /#kb$/i.test(key)) {
+                continue;
+            }
+            const value = values[values.length - 1];
+            if (!Number.isFinite(value)) {
+                continue;
+            }
+            vertices += Math.max(0, Math.round(value));
+        }
+        return vertices;
     }
 
     private existingParseTimeStats(): Map<string, number[]> {
@@ -378,8 +438,11 @@ export class FeatureTile {
      */
     dispose() {
         this.tileFeatureLayerBlobsByStage.clear();
+        this.stageDataVersionByStage.clear();
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
+        this.vertexCountCache = null;
+        this.vertexCountCacheDataVersion = -1;
         this.disposed = true;
     }
 
