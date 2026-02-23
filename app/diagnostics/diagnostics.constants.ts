@@ -22,9 +22,11 @@ export const UNIT_SUFFIXES: DiagnosticsUnitSuffix[] = [
     {suffix: '-%', unit: '%'},
     {suffix: '#count', unit: 'count'},
     {suffix: '-count', unit: 'count'},
+    {suffix: '#features', unit: 'features'},
+    {suffix: '-features', unit: 'features'}
 ];
 
-export const COUNT_KEY_PATTERN = /(count|num|feature|features|tile|tiles)/i;
+export const COUNT_KEY_PATTERN = /(count|num|tile|tiles)/i;
 export const LOAD_CONVERT_ROOT_BADGE_PATTERN = /(load|convert)/i;
 export const RENDER_ROOT_BADGE_PATTERN = /render/i;
 export const ROOT_BADGE_LOAD_DT = {primary: {background: '{blue.500}'}};

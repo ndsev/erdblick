@@ -138,7 +138,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     auto layerInfo = tileLayer.info();
     auto allScalarFields = JsValue::Dict();
     if (layerInfo.is_object()) {
-        numFeatures = layerInfo.value<int32_t>("Size/Features", -1);
+        numFeatures = layerInfo.value<int32_t>("Size/Features#features", -1);
         for (auto const& [k, v] : layerInfo.items()) {
             if (v.is_number()) {
                 allScalarFields.set(k, JsValue(v.get<double>()));

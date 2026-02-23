@@ -47,7 +47,7 @@ interface PerfTreeRowData {
     rootBadgeTooltip?: string;
 }
 
-type SupportedUnit = 'ms' | 'count';
+type SupportedUnit = 'ms' | 'count' | 'features';
 type DurationDisplayUnit = 'ms' | 's' | 'm' | 'h';
 type BytesDisplayUnit = 'B' | 'KB' | 'MB' | 'GB';
 
@@ -428,25 +428,36 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
         const hasTileIdSelection = selectedTileIdSet.size > 0;
 
-        const scopedTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
+        const layerScopedTiles = Array.from(this.mapService.loadedTileLayers.values()).filter(tile => {
             if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
                 return false;
             }
+            return true;
+        });
+        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.hasData() && tile.numFeatures > 0);
+
+        const tileScopedNonEmptyTiles = layerScopedNonEmptyTiles.filter(tile => {
             if (!hasTileIdSelection) {
                 return true;
             }
             return selectedTileIdSet.has(tile.tileId.toString());
         });
-        const nonEmptyTiles = scopedTiles.filter(tile => tile.hasData() && tile.numFeatures > 0);
-        this.perfTileScopeCounts = this.computeTileScopeCounts(scopedTiles, nonEmptyTiles);
-        return buildAggregatedPerfStats(nonEmptyTiles);
+
+        this.perfTileScopeCounts = this.computeTileScopeCounts(
+            layerScopedTiles,
+            layerScopedNonEmptyTiles,
+            tileScopedNonEmptyTiles
+        );
+        return buildAggregatedPerfStats(tileScopedNonEmptyTiles);
     }
 
-    private computeTileScopeCounts(scopedTiles: FeatureTile[], nonEmptyTiles: FeatureTile[]): PerfTileScopeCounts {
+    private computeTileScopeCounts(scopedTiles: FeatureTile[],
+                                   nonEmptyTiles: FeatureTile[],
+                                   consideredSourceTiles: FeatureTile[]): PerfTileScopeCounts {
         const consideredTilesByRoot = new Map<string, number>();
         let consideredTiles = 0;
 
-        for (const tile of nonEmptyTiles) {
+        for (const tile of consideredSourceTiles) {
             let hasConsideredStat = false;
             const tileRoots = new Set<string>();
 
@@ -797,7 +808,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     private toSupportedUnit(unit?: string): SupportedUnit | undefined {
-        return unit === 'ms' || unit === 'count' ? unit : undefined;
+        return unit === 'ms' || unit === 'count' || unit === 'features' ? unit : undefined;
     }
 
     private isFiniteNumber(value: number | undefined): value is number {
@@ -952,6 +963,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (unit === 'count') {
             return Math.round(value).toLocaleString();
         }
+        if (unit === 'features') {
+            return `${Math.round(value)} features`;
+        }
         if (unit === 'KB' || unit === 'MB') {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
@@ -971,6 +985,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
         if (unit === 'count') {
             return `${Math.round(value).toLocaleString()} count`;
+        }
+        if (unit === 'features') {
+            return `${Math.round(value)} features`;
         }
         if (unit === 'KB' || unit === 'MB') {
             const bytes = this.toBytes(value, unit);
