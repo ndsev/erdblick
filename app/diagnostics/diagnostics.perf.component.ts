@@ -349,7 +349,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             if (!selectedLabels.has(`${tile.mapName} - ${tile.layerName}`)) {
                 continue;
             }
-            if (!tile.hasData() || tile.numFeatures <= 0) {
+            if (!tile.hasData()) {
                 continue;
             }
             tileIdSet.add(tile.tileId.toString());
@@ -434,7 +434,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             }
             return true;
         });
-        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.hasData() && tile.numFeatures > 0);
+        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.hasData());
 
         const tileScopedNonEmptyTiles = layerScopedNonEmptyTiles.filter(tile => {
             if (!hasTileIdSelection) {

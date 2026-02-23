@@ -25,7 +25,6 @@ export class FeatureTile {
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
     private stageDataVersionByStage: Map<number, number> = new Map<number, number>();
     private vertexCountCache: number | null = null;
-    private vertexCountCacheDataVersion: number = -1;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
@@ -99,8 +98,6 @@ export class FeatureTile {
         this.dataSourceInfoBlobCache = null;
         this.featureIdByIndexCache.clear();
         this.dataVersion += 1;
-        this.vertexCountCache = null;
-        this.vertexCountCacheDataVersion = -1;
 
         if (this.mapTileKey === "undefined") {
             this.mapTileKey = canonicalMapTileKey;
@@ -113,7 +110,10 @@ export class FeatureTile {
         this.tileId = BigInt(mapTileMetadata.tileId as any);
         this.legalInfo = mapTileMetadata.legalInfo as string;
         this.error = mapTileMetadata.error ? mapTileMetadata.error as string : undefined;
-        this.numFeatures = Math.max(this.numFeatures, mapTileMetadata.numFeatures);
+        const parsedNumFeatures = Number(mapTileMetadata.numFeatures);
+        if (Number.isFinite(parsedNumFeatures) && parsedNumFeatures >= 0) {
+            this.numFeatures = Math.max(this.numFeatures, Math.floor(parsedNumFeatures));
+        }
         this.status = this.error ? TileLoadState.Error : TileLoadState.Ok;
 
         const parseTimesByKey = this.existingParseTimeStats();
@@ -129,6 +129,11 @@ export class FeatureTile {
         }
         for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
             this.stats.set(k, [v as number]);
+        }
+
+        const verticesFromStats = this.vertexCountFromStats();
+        if (verticesFromStats > 0) {
+            this.storeVertexCount(verticesFromStats);
         }
     }
 
@@ -201,7 +206,7 @@ export class FeatureTile {
     }
 
     vertexCount(): number {
-        if (this.vertexCountCacheDataVersion === this.dataVersion && this.vertexCountCache !== null) {
+        if (this.vertexCountCache !== null) {
             return this.vertexCountCache;
         }
 
@@ -214,7 +219,6 @@ export class FeatureTile {
 
     private storeVertexCount(count: number): number {
         this.vertexCountCache = Math.max(0, Math.floor(count));
-        this.vertexCountCacheDataVersion = this.dataVersion;
         return this.vertexCountCache;
     }
 
@@ -442,7 +446,6 @@ export class FeatureTile {
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
         this.vertexCountCache = null;
-        this.vertexCountCacheDataVersion = -1;
         this.disposed = true;
     }
 

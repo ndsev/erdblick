@@ -367,7 +367,10 @@ export class MapDataService {
             if (!tile.hasData()) {
                 continue;
             }
-            features += tile.numFeatures || 0;
+            const tileFeatures = Number(tile.numFeatures);
+            if (Number.isFinite(tileFeatures) && tileFeatures > 0) {
+                features += Math.floor(tileFeatures);
+            }
             vertices += this.vertexCountFromTileStats(tile);
         }
 
