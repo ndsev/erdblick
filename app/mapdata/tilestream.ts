@@ -17,7 +17,6 @@ export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_LOAD_STATE = 5;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
-export const MAP_TILE_STREAM_FLOW_GRANT_TYPE = "mapget.tiles.flow-grant";
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 
 export interface MapTileStreamStatusRequest {
@@ -59,6 +58,7 @@ export interface MapTileStreamLoadStatePayload {
 export interface MapTileStreamRequestContextPayload {
     type: string;
     requestId: number;
+    clientId?: number;
 }
 
 export class MapTileStreamClient {
@@ -82,7 +82,11 @@ export class MapTileStreamClient {
     private processingFrameQueue: boolean = false;
     private frameProcessingPaused: boolean = false;
     private readonly frameTimeBudgetMs: number = 10;
-    private readonly flowControlEnabled: boolean = true;
+    private pullClientId: number | null = null;
+    private pullControllers: AbortController[] = [];
+    private readonly pullParallelism: number = 2;
+    private readonly pullWaitMs: number = 25000;
+    private readonly pullRetryDelayMs: number = 50;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -167,6 +171,8 @@ export class MapTileStreamClient {
         this.latestRequestedRequestId = null;
         this.incomingRequestId = null;
         this.supportsRequestContextFrames = false;
+        this.pullClientId = null;
+        this.stopPullLoops();
         this.clearPendingFrames();
         this.resetCompletionPromise();
         if (this.parser) {
@@ -211,7 +217,6 @@ export class MapTileStreamClient {
 
     async updateRequest(tileLayerRequests: any) {
         const requestBodyBase = {
-            flowControl: this.flowControlEnabled,
             requests: tileLayerRequests,
             stringPoolOffsets: this.parser!.getFieldDictOffsets(),
         };
@@ -311,6 +316,8 @@ export class MapTileStreamClient {
                 const isCurrent = this.socket === socket;
                 if (isCurrent) {
                     this.socket = null;
+                    this.pullClientId = null;
+                    this.stopPullLoops();
                 }
                 if (isCurrent) {
                     if (this.onClose) {
@@ -409,14 +416,10 @@ export class MapTileStreamClient {
         try {
             const startTime = Date.now();
             let handledMessages = 0;
-            let grantFrames = 0;
             while (this.frameQueue.length) {
                 const data = this.frameQueue.shift()!;
                 try {
-                    const flowAccounting = await this.handleMessage(data);
-                    if (flowAccounting.isFlowControlledDataFrame) {
-                        grantFrames += 1;
-                    }
+                    await this.handleMessage(data);
                     ++handledMessages;
                 } catch (err) {
                     console.error("Tile stream message handler failed.", err);
@@ -425,7 +428,6 @@ export class MapTileStreamClient {
                     break;
                 }
             }
-            this.sendFlowGrant(grantFrames);
         } finally {
             this.processingFrameQueue = false;
         }
@@ -435,7 +437,7 @@ export class MapTileStreamClient {
         }
     }
 
-    private async handleMessage(data: ArrayBuffer | Blob): Promise<{ isFlowControlledDataFrame: boolean; }> {
+    private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
@@ -444,18 +446,17 @@ export class MapTileStreamClient {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
             console.warn("Unexpected WebSocket message payload.");
-            return {isFlowControlledDataFrame: false};
+            return;
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
             console.warn("Tile stream frame too small.");
-            return {isFlowControlledDataFrame: false};
+            return;
         }
 
         const type = bytes[6];
-        const isFlowControlledDataFrame = this.isFlowControlledDataFrameType(type);
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
-            return {isFlowControlledDataFrame};
+            return;
         }
 
         try {
@@ -470,7 +471,7 @@ export class MapTileStreamClient {
                 try {
                     const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
                     if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame};
+                        return;
                     }
                     if (this.onStatus) {
                         this.onStatus(payload);
@@ -483,7 +484,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles status payload:", err);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_LOAD_STATE) {
@@ -492,7 +493,7 @@ export class MapTileStreamClient {
                 try {
                     const payload = JSON.parse(payloadText) as MapTileStreamLoadStatePayload;
                     if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame};
+                        return;
                     }
                     if (this.onLoadState) {
                         this.onLoadState(payload);
@@ -500,7 +501,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles load-state payload:", err);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
@@ -511,11 +512,20 @@ export class MapTileStreamClient {
                     if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
                         this.supportsRequestContextFrames = true;
                         this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
+                        if (Number.isFinite(payload.clientId)) {
+                            const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
+                            if (this.pullClientId !== nextClientId) {
+                                this.pullClientId = nextClientId;
+                                this.startPullLoops();
+                            } else if (!this.pullControllers.length) {
+                                this.startPullLoops();
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error("Failed to parse /tiles request-context payload:", err);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
@@ -525,21 +535,21 @@ export class MapTileStreamClient {
                 if (this.onFields) {
                     this.onFields(bytes);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
                 if (this.onFeatures) {
                     this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (this.onFrame) {
@@ -548,13 +558,7 @@ export class MapTileStreamClient {
         } catch (err) {
             console.error("Tile stream message handler failed.", err);
         }
-        return {isFlowControlledDataFrame};
-    }
-
-    private isFlowControlledDataFrameType(type: number): boolean {
-        return type === MAP_TILE_STREAM_TYPE_FIELDS
-            || type === MAP_TILE_STREAM_TYPE_FEATURES
-            || type === MAP_TILE_STREAM_TYPE_SOURCEDATA;
+        return;
     }
 
     private matchesCurrentRequest(requestId: number | undefined): boolean {
@@ -567,24 +571,103 @@ export class MapTileStreamClient {
         return requestId === this.latestRequestedRequestId;
     }
 
-    private sendFlowGrant(frames: number) {
-        if (!this.flowControlEnabled) {
+    private startPullLoops() {
+        this.stopPullLoops();
+        if (this.pullClientId === null) {
             return;
         }
-        if (frames <= 0) {
+        for (let i = 0; i < this.pullParallelism; ++i) {
+            const controller = new AbortController();
+            this.pullControllers.push(controller);
+            this.runPullLoop(controller).catch(err => {
+                if (!controller.signal.aborted) {
+                    console.error("Tile pull loop failed.", err);
+                }
+            });
+        }
+    }
+
+    private stopPullLoops() {
+        for (const controller of this.pullControllers) {
+            controller.abort();
+        }
+        this.pullControllers = [];
+    }
+
+    private async runPullLoop(controller: AbortController) {
+        while (!controller.signal.aborted) {
+            const clientId = this.pullClientId;
+            if (clientId === null) {
+                return;
+            }
+
+            try {
+                const response = await fetch(this.resolvePullUrl(clientId), {
+                    method: "GET",
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+
+                if (controller.signal.aborted) {
+                    return;
+                }
+
+                if (response.status === 200) {
+                    const body = await response.arrayBuffer();
+                    if (controller.signal.aborted) {
+                        return;
+                    }
+                    this.enqueueFrame(body);
+                    continue;
+                }
+
+                if (response.status === 204) {
+                    continue;
+                }
+
+                if (response.status === 410) {
+                    if (this.pullClientId === clientId) {
+                        this.pullClientId = null;
+                        this.stopPullLoops();
+                    }
+                    return;
+                }
+            } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+            }
+
+            await this.delay(this.pullRetryDelayMs, controller.signal);
+        }
+    }
+
+    private resolvePullUrl(clientId: number): string {
+        const base = (typeof document !== "undefined" && document.baseURI)
+            ? document.baseURI
+            : window.location.href;
+        const normalizedPath = this.path.replace(/\/+$/, "");
+        const pullUrl = new URL(`${normalizedPath}/next`, base);
+        pullUrl.searchParams.set("clientId", String(clientId));
+        pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
+        return pullUrl.toString();
+    }
+
+    private async delay(ms: number, signal: AbortSignal): Promise<void> {
+        if (signal.aborted || ms <= 0) {
             return;
         }
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            return;
-        }
-        const payload = {
-            type: MAP_TILE_STREAM_FLOW_GRANT_TYPE,
-            frames: Math.max(0, Math.floor(frames)),
-        };
-        try {
-            this.socket.send(JSON.stringify(payload));
-        } catch (err) {
-            console.warn("Failed to send /tiles flow grant.", err);
-        }
+        await new Promise<void>(resolve => {
+            const timeout = setTimeout(() => {
+                signal.removeEventListener("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timeout);
+                signal.removeEventListener("abort", onAbort);
+                resolve();
+            };
+            signal.addEventListener("abort", onAbort, {once: true});
+        });
     }
 }
