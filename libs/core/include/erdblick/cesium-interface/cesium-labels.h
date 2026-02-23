@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "cesium.h"
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
@@ -18,7 +20,7 @@ struct CesiumLabelCollection
         JsValue const &position,
         const std::string& labelText,
         FeatureStyleRule const &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -28,7 +30,7 @@ struct CesiumLabelCollection
         JsValue const &position,
         const std::string& labelText,
         FeatureStyleRule const &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**

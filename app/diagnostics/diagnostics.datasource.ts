@@ -1,7 +1,6 @@
 import {Injectable, OnDestroy} from '@angular/core';
-import {BehaviorSubject, interval, Subscription} from 'rxjs';
+import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
-import {TileLoadState} from '../mapdata/tilestream';
 import {FeatureTile} from '../mapdata/features.model';
 import {DiagnosticsSnapshot, LogEntry, LogLevel, PerfStat, TilePipelineProgress, TileStateCounts} from './diagnostics.model';
 import {
@@ -13,6 +12,7 @@ import {
     SNAPSHOT_INTERVAL_MS,
     UNIT_SUFFIXES
 } from './diagnostics.constants';
+const UPDATE_EVENT_DEBOUNCE_MS = 1000;
 
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
@@ -41,16 +41,17 @@ export class DiagnosticsDatasource implements OnDestroy {
                 this.snapshot$.next(this.buildSnapshot());
             }),
             interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStats()),
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshPerfStats()),
             interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
-            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.refreshLogs()),
             this.mapService.tilePipelinePaused$.subscribe(paused => {
                 if (wasPaused && !paused) {
                     this.snapshot$.next(this.buildSnapshot());
                     this.refreshPerfStats();
                 }
                 wasPaused = paused;
-            })
+            }),
+            this.mapService.statsDialogNeedsUpdate
+                .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
+                .subscribe(() => this.refreshOnDemand())
         );
     }
 
@@ -81,16 +82,15 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
 
         for (const tile of this.mapService.loadedTileLayers.values()) {
-            const status = tile.status ?? TileLoadState.LoadingQueued;
             const tileKey = tile.mapTileKey ?? tile.tileId?.toString() ?? '';
             if (!tileKey) {
                 continue;
             }
-            if ((status === TileLoadState.Error || tile.error) && !this.errorTileKeys.has(tileKey)) {
+            if (tile.error && !this.errorTileKeys.has(tileKey)) {
                 newEntries.push({
                     at: now,
                     level: 'error',
-                    message: tile.error ? `Tile error: ${tile.error}` : 'Tile error',
+                    message: `Tile error: ${tile.error}`,
                     data: {
                         tileId: tileKey,
                         mapName: tile.mapName,
@@ -104,25 +104,35 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntries(newEntries);
     }
 
+    private refreshOnDemand() {
+        this.refreshPerfStats();
+        this.refreshLogs();
+    }
+
     private buildSnapshot(): DiagnosticsSnapshot {
         const tiles = Array.from(this.mapService.loadedTileLayers.values());
         const expected = tiles.length;
         let loaded = 0;
         let errors = 0;
-        let fetched = 0;
-
+        const stageCounters: Array<{done: number; total: number}> = [];
         for (const tile of tiles) {
-            const status = tile.status;
             const hasData = tile.hasData();
             if (hasData) {
                 loaded += 1;
             }
-            if (status === TileLoadState.Error) {
+            if (tile.error) {
                 errors += 1;
             }
-            const rank = this.tileStageRank(status);
-            if (rank >= 1 || hasData) {
-                fetched += 1;
+            const stageCount = this.mapService.getLayerStageCount(tile.mapName, tile.layerName);
+            for (let stage = 0; stage < stageCount; stage++) {
+                if (stageCounters.length <= stage) {
+                    stageCounters.push({done: 0, total: 0});
+                }
+                const counter = stageCounters[stage];
+                counter.total += 1;
+                if (tile.hasStage(stage)) {
+                    counter.done += 1;
+                }
             }
         }
 
@@ -133,11 +143,21 @@ export class DiagnosticsDatasource implements OnDestroy {
             errors
         };
 
+        const backendProgress = this.mapService.getBackendRequestProgress();
+        const hudStats = this.mapService.getTileLoadingHudStats();
         const progress: TilePipelineProgress = {
-            requested: {done: expected, total: expected},
-            fetched: {done: fetched, total: expected},
-            converted: {done: loaded, total: expected},
-            rendered: this.mapService.getVisualizationCounts()
+            stages: stageCounters,
+            backend: {
+                done: backendProgress.done,
+                total: backendProgress.total,
+            },
+            rendered: this.mapService.getVisualizationCounts(),
+            bubbles: {
+                downstreamBytesPerSecond: hudStats.downstreamBytesPerSecond,
+                features: hudStats.features,
+                vertices: hudStats.vertices,
+                renderSeconds: hudStats.viewportRenderSeconds,
+            }
         };
 
         return {
@@ -148,24 +168,6 @@ export class DiagnosticsDatasource implements OnDestroy {
                 connected: this.mapService.isTileStreamConnected()
             }
         };
-    }
-
-    private tileStageRank(status: TileLoadState): number {
-        switch (status) {
-            case TileLoadState.LoadingQueued:
-                return 0;
-            case TileLoadState.BackendFetching:
-                return 1;
-            case TileLoadState.BackendConverting:
-                return 2;
-            case TileLoadState.RenderingQueued:
-                return 3;
-            case TileLoadState.Ok:
-            case TileLoadState.Error:
-                return 4;
-            default:
-                return 0;
-        }
     }
 
     private appendLogEntry(entry: LogEntry) {

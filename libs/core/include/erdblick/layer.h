@@ -2,7 +2,7 @@
 
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/sourcedata.h"
 
 namespace erdblick
@@ -30,6 +30,12 @@ struct TileFeatureLayer
     uint64_t tileId() const;
 
     /**
+     * Retrieves the staged-loading index for the tile layer.
+     * Returns 0 when no explicit stage is stored.
+     */
+    uint32_t stage() const;
+
+    /**
      * Gets the number of features in the tile.
      * @return The number of features.
      */
@@ -55,12 +61,24 @@ struct TileFeatureLayer
     mapget::model_ptr<mapget::Feature> find(const std::string& id) const;
 
     /**
+     * Attach an overlay tile to this tile.
+     */
+    void attachOverlay(TileFeatureLayer const& overlay);
+
+    /**
      * Finds the index of a feature based on its type and ID parts.
      * @param type The type of the feature.
      * @param idParts The parts of the feature's ID.
      * @return The index of the feature, or `-1` if not found.
      */
     int32_t findFeatureIndex(std::string type, NativeJsValue idParts) const;
+
+    /**
+     * Retrieves the feature ID string for a feature index.
+     * @param index Index of the feature in the tile.
+     * @return Feature ID string, or empty string if not found.
+     */
+    std::string featureIdByIndex(uint32_t index) const;
 
     ~TileFeatureLayer();
 

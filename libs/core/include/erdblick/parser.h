@@ -3,7 +3,7 @@
 #include "mapget/model/stream.h"
 #include "mapget/model/featurelayer.h"
 #include "buffer.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "layer.h"
@@ -49,6 +49,7 @@ public:
         std::string mapName;
         std::string layerName;
         uint64_t tileId;
+        uint32_t stage;
         std::string legalInfo;
         std::string error;
         int32_t numFeatures;

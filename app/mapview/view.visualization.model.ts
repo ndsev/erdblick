@@ -1,6 +1,6 @@
 import {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
-import type {TileVisualization} from "./tile.visualization.model";
+import type {ITileVisualization} from "./render-view.model";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: .0,
@@ -17,17 +17,17 @@ export class ViewVisualizationState {
     visibleTileIds: Set<bigint> = new Set();
     visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
     highDetailTileIds: Set<bigint> = new Set();
-    visualizationQueue: TileVisualization[] = [];
-    private visualizedTileLayers: Map<string, Map<string, TileVisualization>> = new Map();
+    visualizationQueue: ITileVisualization[] = [];
+    private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
-    getVisualization(styleId: string, tileKey: string): TileVisualization | undefined {
+    getVisualization(styleId: string, tileKey: string): ITileVisualization | undefined {
         return this.visualizedTileLayers.get(styleId)?.get(tileKey);
     }
 
-    putVisualization(styleId: string, tileKey: string, visu: TileVisualization) {
+    putVisualization(styleId: string, tileKey: string, visu: ITileVisualization) {
         let tileVisus = this.visualizedTileLayers.get(styleId);
         if (!tileVisus) {
-            tileVisus = new Map<string, TileVisualization>();
+            tileVisus = new Map<string, ITileVisualization>();
             this.visualizedTileLayers.set(styleId, tileVisus);
         }
         tileVisus.set(tileKey, visu);
@@ -37,7 +37,7 @@ export class ViewVisualizationState {
         return this.visualizedTileLayers.has(styleId);
     }
 
-    *removeVisualizations(styleId?: string, tileKey?: string): Generator<TileVisualization> {
+    *removeVisualizations(styleId?: string, tileKey?: string): Generator<ITileVisualization> {
         if (styleId !== undefined) {
             if (tileKey !== undefined) {
                 const tileVisus = this.visualizedTileLayers.get(styleId);
@@ -96,7 +96,7 @@ export class ViewVisualizationState {
         }
     }
 
-    *getVisualizations(styleId?: string, tileKey?: string): Generator<TileVisualization> {
+    *getVisualizations(styleId?: string, tileKey?: string): Generator<ITileVisualization> {
         if (styleId !== undefined) {
             const tileVisus = this.visualizedTileLayers.get(styleId);
             if (!tileVisus) {

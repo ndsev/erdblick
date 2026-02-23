@@ -3,7 +3,15 @@ import {Subscription} from "rxjs";
 import {InfoMessageService} from "../shared/info.service";
 import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
-import {MAX_NUM_TILES_TO_LOAD, MAX_NUM_TILES_TO_VISUALIZE, MAX_SIMULTANEOUS_INSPECTIONS, AppStateService} from "../shared/appstate.service";
+import {
+    MAX_NUM_TILES_TO_LOAD,
+    MAX_NUM_TILES_TO_VISUALIZE,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    MAX_DECK_STYLE_WORKERS,
+    AppStateService,
+    RendererMode,
+    DEFAULT_DECK_STYLE_WORKER_COUNT
+} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
@@ -41,6 +49,47 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             </div>
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
+            <div class="button-container">
+                <label>Renderer:</label>
+                <p-selectButton [options]="rendererModeOptions"
+                                [(ngModel)]="rendererModeSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setRendererMode($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Deck style workers:</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="deckStyleWorkersEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckStyleWorkersEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
+                <label>Deck worker count override:</label>
+                <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
+                                (ngModelChange)="setDeckStyleWorkersOverride($event)" />
+            </div>
+            <div class="slider-container">
+                <label [for]="deckStyleWorkersCountInput">Deck worker count:</label>
+                <div style="display: inline-block">
+                    <input class="tiles-input w-full"
+                           type="text"
+                           pInputText
+                           [(ngModel)]="deckStyleWorkersCountInput"
+                           [disabled]="!deckStyleWorkersOverrideSetting"
+                           (keydown.enter)="applyDeckStyleWorkersCount()"/>
+                    <p-slider [(ngModel)]="deckStyleWorkersCountInput"
+                              class="w-full"
+                              [disabled]="!deckStyleWorkersOverrideSetting"
+                              [min]="1"
+                              [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
+                </div>
+            </div>
+            <p-button (click)="applyDeckStyleWorkersCount()"
+                      label="Apply Worker Count"
+                      icon="pi pi-check"
+                      [disabled]="!deckStyleWorkersOverrideSetting"></p-button>
             <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
@@ -100,6 +149,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToLoadInput: number = 0;
     tilesToVisualizeInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
+    rendererModeSetting: RendererMode = 'cesium';
+    rendererModeOptions = [
+        {label: 'Cesium', value: 'cesium'},
+        {label: 'Deck', value: 'deck'}
+    ];
+    deckStyleWorkersEnabledSetting: boolean = false;
+    deckStyleWorkersOverrideSetting: boolean = false;
+    deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
+    toggleOptions = [
+        {label: 'Off', value: false},
+        {label: 'On', value: true}
+    ];
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
         { label: 'Off', value: 'off' },
@@ -130,6 +191,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
+        }));
+        this.subscriptions.push(this.stateService.rendererModeState.subscribe(mode => {
+            this.rendererModeSetting = mode;
+        }));
+        this.subscriptions.push(this.stateService.deckStyleWorkersEnabledState.subscribe(enabled => {
+            this.deckStyleWorkersEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
+            this.deckStyleWorkersOverrideSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckStyleWorkersCountState.subscribe(count => {
+            this.deckStyleWorkersCountInput = count;
         }));
     }
 
@@ -180,6 +253,34 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
+    }
+
+    setRendererMode(mode: RendererMode) {
+        this.rendererModeSetting = mode;
+        this.stateService.rendererMode = mode;
+    }
+
+    setDeckStyleWorkersEnabled(enabled: boolean) {
+        this.deckStyleWorkersEnabledSetting = enabled;
+        this.stateService.deckStyleWorkersEnabled = enabled;
+    }
+
+    setDeckStyleWorkersOverride(enabled: boolean) {
+        this.deckStyleWorkersOverrideSetting = enabled;
+        this.stateService.deckStyleWorkersOverride = enabled;
+    }
+
+    applyDeckStyleWorkersCount() {
+        if (!this.deckStyleWorkersOverrideSetting) {
+            return;
+        }
+        const count = Number(this.deckStyleWorkersCountInput);
+        if (!Number.isInteger(count) || count < 1 || count > MAX_DECK_STYLE_WORKERS) {
+            this.messageService.showError(`Please enter a worker count between 1 and ${MAX_DECK_STYLE_WORKERS}.`);
+            return;
+        }
+        this.deckStyleWorkersCountInput = count;
+        this.stateService.deckStyleWorkersCount = count;
     }
 
     setDarkMode(setting: 'off' | 'on' | 'auto') {
@@ -237,4 +338,5 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
     protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
+    protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
 }

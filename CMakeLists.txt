@@ -22,19 +22,23 @@ endif()
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 
-if (NOT TARGET mapget)
-  FetchContent_Declare(mapget
-    GIT_REPOSITORY "https://github.com/Klebert-Engineering/mapget"
-    GIT_TAG        "release/2026.1.0"
-    GIT_SHALLOW    ON)
-  FetchContent_MakeAvailable(mapget)
-endif()
 
 FetchContent_Declare(yaml-cpp
   GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
-  GIT_TAG        "0.8.0"
-  GIT_SHALLOW    ON)
+  GIT_TAG        "yaml-cpp-0.9.0"
+  GIT_SHALLOW    OFF)
 FetchContent_MakeAvailable(yaml-cpp)
+
+if (NOT TARGET mapget)
+  if (NOT DEFINED NOSERDE_DEFAULT_VECTOR_STORAGE)
+    set(NOSERDE_DEFAULT_VECTOR_STORAGE ON CACHE BOOL "Default noserde::Buffer storage policy to vector_byte_storage")
+  endif()
+  FetchContent_Declare(mapget
+    GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
+    GIT_TAG        "noserde"
+    GIT_SHALLOW    OFF)
+  FetchContent_MakeAvailable(mapget)
+endif()
 
 include(cmake/cesium.cmake)
 

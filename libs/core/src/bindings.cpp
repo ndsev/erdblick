@@ -23,7 +23,7 @@ const char *__asan_default_options() {
 
 #include "aabb.h"
 #include "buffer.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/info.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/simfilutil.h"
@@ -38,7 +38,7 @@ const char *__asan_default_options() {
 #include "layer.h"
 
 #include "cesium-interface/point-conversion.h"
-#include "cesium-interface/primitive.h"
+#include "cesium-interface/cesium-primitive.h"
 #include "simfil/exception-handler.h"
 
 #include "mapget/log.h"
@@ -243,10 +243,15 @@ std::string getSourceDataLayerKey(std::string const& mapId, std::string const& l
     return mapget::MapTileKey(mapget::LayerType::SourceData, mapId, layerId, tileId).toString();
 }
 
-/** Get mapId, layerId and tileId of a MapTileKey. */
+/** Get mapId, layerId, tileId and stage of a MapTileKey. */
 NativeJsValue parseMapTileKey(std::string const& key) {
     auto tileKey = mapget::MapTileKey(key);
-    return *JsValue::List({JsValue(tileKey.mapId_), JsValue(tileKey.layerId_), JsValue(tileKey.tileId_.value_)});
+    return *JsValue::List({
+        JsValue(tileKey.mapId_),
+        JsValue(tileKey.layerId_),
+        JsValue(tileKey.tileId_.value_),
+        JsValue(tileKey.stage_)
+    });
 }
 
 /** Create a test tile over New York. */
@@ -357,6 +362,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("name", &FeatureLayerStyle::name)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
+        .function("minimumStage", &FeatureLayerStyle::minimumStage)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -421,10 +427,13 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileFeatureLayer
     em::class_<TileFeatureLayer>("TileFeatureLayer")
         .function("id", &TileFeatureLayer::id)
+        .function("stage", &TileFeatureLayer::stage)
         .function("tileId", &TileFeatureLayer::tileId)
         .function("numFeatures", &TileFeatureLayer::numFeatures)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
+        .function("attachOverlay", &TileFeatureLayer::attachOverlay)
+        .function("featureIdByIndex", &TileFeatureLayer::featureIdByIndex)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
     ////////// Highlight Modes
@@ -433,15 +442,55 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
         .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
 
-    ////////// FeatureLayerVisualization
-    em::class_<FeatureLayerVisualization>("FeatureLayerVisualization")
+    ////////// CesiumFeatureLayerVisualization
+    em::class_<CesiumFeatureLayerVisualization>("CesiumFeatureLayerVisualization")
         .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
-        .function("addTileFeatureLayer", &FeatureLayerVisualization::addTileFeatureLayer)
-        .function("run", &FeatureLayerVisualization::run)
-        .function("primitiveCollection", &FeatureLayerVisualization::primitiveCollection)
-        .function("mergedPointFeatures", &FeatureLayerVisualization::mergedPointFeatures)
-        .function("externalReferences", &FeatureLayerVisualization::externalReferences)
-        .function("processResolvedExternalReferences", &FeatureLayerVisualization::processResolvedExternalReferences);
+        .function("addTileFeatureLayer", &CesiumFeatureLayerVisualization::addTileFeatureLayer)
+        .function("run", &CesiumFeatureLayerVisualization::run)
+        .function("primitiveCollection", &CesiumFeatureLayerVisualization::primitiveCollection)
+        .function("mergedPointFeatures", &CesiumFeatureLayerVisualization::mergedPointFeatures)
+        .function("externalReferences", &CesiumFeatureLayerVisualization::externalReferences)
+        .function("processResolvedExternalReferences", &CesiumFeatureLayerVisualization::processResolvedExternalReferences);
+
+    ////////// DeckFeatureLayerVisualization
+    em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .function(
+            "addTileFeatureLayer",
+            std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(
+                [](DeckFeatureLayerVisualization& self, TileFeatureLayer const& tile)
+                {
+                    self.addTileFeatureLayer(tile);
+                }))
+        .function(
+            "run",
+            std::function<void(DeckFeatureLayerVisualization&)>(
+                [](DeckFeatureLayerVisualization& self)
+                {
+                    self.FeatureLayerVisualizationBase::run();
+                }))
+        .function("abiVersion", &DeckFeatureLayerVisualization::abiVersion)
+        .function("pointPositionsRaw", &DeckFeatureLayerVisualization::pointPositionsRaw)
+        .function("pointColorsRaw", &DeckFeatureLayerVisualization::pointColorsRaw)
+        .function("pointRadiiRaw", &DeckFeatureLayerVisualization::pointRadiiRaw)
+        .function("pointFeatureStartRaw", &DeckFeatureLayerVisualization::pointFeatureStartRaw)
+        .function("pointFeatureIdsRaw", &DeckFeatureLayerVisualization::pointFeatureIdsRaw)
+        .function("pathPositionsRaw", &DeckFeatureLayerVisualization::pathPositionsRaw)
+        .function("pathStartIndicesRaw", &DeckFeatureLayerVisualization::pathStartIndicesRaw)
+        .function("pathColorsRaw", &DeckFeatureLayerVisualization::pathColorsRaw)
+        .function("pathWidthsRaw", &DeckFeatureLayerVisualization::pathWidthsRaw)
+        .function("pathFeatureStartRaw", &DeckFeatureLayerVisualization::pathFeatureStartRaw)
+        .function("pathFeatureIdsRaw", &DeckFeatureLayerVisualization::pathFeatureIdsRaw)
+        .function("pathDashArrayRaw", &DeckFeatureLayerVisualization::pathDashArrayRaw)
+        .function("pathDashOffsetsRaw", &DeckFeatureLayerVisualization::pathDashOffsetsRaw)
+        .function("pathCoordinateOriginRaw", &DeckFeatureLayerVisualization::pathCoordinateOriginRaw)
+        .function("arrowPositionsRaw", &DeckFeatureLayerVisualization::arrowPositionsRaw)
+        .function("arrowStartIndicesRaw", &DeckFeatureLayerVisualization::arrowStartIndicesRaw)
+        .function("arrowColorsRaw", &DeckFeatureLayerVisualization::arrowColorsRaw)
+        .function("arrowWidthsRaw", &DeckFeatureLayerVisualization::arrowWidthsRaw)
+        .function("arrowFeatureStartRaw", &DeckFeatureLayerVisualization::arrowFeatureStartRaw)
+        .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw)
+        .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
@@ -457,6 +506,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
+        .field("stage", &TileLayerParser::TileLayerMetadata::stage)
         .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)

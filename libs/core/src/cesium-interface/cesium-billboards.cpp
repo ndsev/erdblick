@@ -1,4 +1,4 @@
-#include "cesium-interface/billboards.h"
+#include "cesium-interface/cesium-billboards.h"
 #include "cesium-interface/cesium.h"
 #include "simfil/model/model.h"
 
@@ -14,7 +14,7 @@ CesiumBillboardCollection::CesiumBillboardCollection() :
 JsValue CesiumBillboardCollection::billboardParams(
     const JsValue& position,
     const FeatureStyleRule& style,
-    const JsValue& id,
+    uint32_t id,
     const BoundEvalFun& evalFun)
 {
     auto result = CesiumPointPrimitiveCollection::pointParams(position, style, id, evalFun);
@@ -30,7 +30,7 @@ JsValue CesiumBillboardCollection::billboardParams(
 void CesiumBillboardCollection::addBillboard(
     const JsValue& position,
     FeatureStyleRule const& style,
-    JsValue const& id,
+    uint32_t id,
     BoundEvalFun const& evalFun)
 {
     auto params = billboardParams(position, style, id, evalFun);

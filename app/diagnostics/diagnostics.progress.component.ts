@@ -1,11 +1,12 @@
 import {Component, Input} from '@angular/core';
-import {ProgressCounter, TilePipelineProgress} from './diagnostics.model';
+import {LoadingStatBubbles, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
 import {MapDataService} from '../mapdata/map.service';
 
-interface ProgressStage {
-    key: keyof TilePipelineProgress;
+interface ProgressBar {
+    key: string;
     label: string;
-    color: Record<string, any>;
+    counter: ProgressCounter;
+    color?: Record<string, any>;
 }
 
 @Component({
@@ -13,17 +14,23 @@ interface ProgressStage {
     template: `
         <div class="diagnostics-progress">
             <div class="diagnostics-progress-list">
-                @for (stage of progressStages; track stage.key) {
+                @for (bar of progressBars; track bar.key) {
                     <div class="diagnostics-progress-item">
-                        <span class="diagnostics-stage-label">{{ stage.label }}</span>
-                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(progress[stage.key]) + '%'">
-                            <p-progressBar [value]="progressPercent(progress[stage.key])" [dt]="stage.color" [showValue]="false"></p-progressBar>
+                        <span class="diagnostics-stage-label">{{ bar.label }}</span>
+                        <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(bar.counter) + '%'">
+                            <p-progressBar [value]="progressPercent(bar.counter)" [dt]="bar.color" [showValue]="false"></p-progressBar>
                             <span class="diagnostics-stage-bar-value">
-                                {{ progress[stage.key].done }} / {{ progress[stage.key].total }}
+                                {{ bar.counter.done }} / {{ bar.counter.total }}
                             </span>
                         </div>
                     </div>
                 }
+                <div class="diagnostics-loading-bubbles">
+                    <span class="diagnostics-loading-bubble">{{ formatThroughput(bubbles.downstreamBytesPerSecond) }}</span>
+                    <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.features) }} Feats.</span>
+                    <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.vertices) }} Verts.</span>
+                    <span class="diagnostics-loading-bubble">{{ formatSeconds(bubbles.renderSeconds) }}</span>
+                </div>
             </div>
             <div class="diagnostics-progress-actions">
                 @if (paused$ | async) {
@@ -45,21 +52,48 @@ export class DiagnosticsProgressComponent {
     @Input({required: true}) progress!: TilePipelineProgress;
     readonly paused$ = this.mapService.tilePipelinePaused$;
 
-    readonly progressStages: ProgressStage[] = [
-        {key: 'requested', label: 'Requested', color: { value: { background: '{surface.500}' } }},
-        {key: 'fetched', label: 'Fetched', color: { value: { background: '{blue.500}' } }},
-        {key: 'converted', label: 'Converted', color: { value: { background: '{blue.500}' } }},
-        {key: 'rendered', label: 'Rendered', color: { value: { background: '{emerald.500}' } }}
-    ];
-
     constructor(private readonly mapService: MapDataService) {}
+
+    get progressBars(): ProgressBar[] {
+        const stageCounters = this.progress?.stages ?? [];
+        const stageBars = stageCounters.map((counter, stage) => ({
+            key: `stage-${stage}`,
+            label: `Stage ${stage} Received`,
+            counter,
+            color: {value: {background: '{cyan.500}'}}
+        }));
+        return [
+            ...stageBars,
+            {
+            key: 'backend',
+            label: 'Backend',
+            counter: this.progress?.backend ?? {done: 0, total: 0},
+            color: {value: {background: '{blue.500}'}}
+        },
+        {
+            key: 'rendered',
+            label: 'Rendered',
+            counter: this.progress?.rendered ?? {done: 0, total: 0},
+            color: {value: {background: '{emerald.500}'}}
+        }
+        ];
+    }
+
+    get bubbles(): LoadingStatBubbles {
+        return this.progress?.bubbles ?? {
+            downstreamBytesPerSecond: 0,
+            features: 0,
+            vertices: 0,
+            renderSeconds: 0,
+        };
+    }
 
     togglePause() {
         this.mapService.toggleTilePipelinePause();
     }
 
     get isProgressComplete(): boolean {
-        return this.progressStages.every(stage => this.progressPercent(this.progress[stage.key]) === 100);
+        return this.progressBars.every(bar => this.progressPercent(bar.counter) === 100);
     }
 
     progressPercent(counter: ProgressCounter): number {
@@ -71,5 +105,19 @@ export class DiagnosticsProgressComponent {
         }
         const percent = Math.floor((counter.done / counter.total) * 100);
         return Math.max(0, Math.min(99, percent));
+    }
+
+    formatInt(value: number): string {
+        return Math.max(0, Math.floor(value || 0)).toLocaleString();
+    }
+
+    formatThroughput(bytesPerSecond: number): string {
+        const mbPerSecond = Math.max(0, bytesPerSecond || 0) / (1024 * 1024);
+        return `${mbPerSecond.toFixed(2)} MB/s`;
+    }
+
+    formatSeconds(seconds: number): string {
+        const safe = Math.max(0, seconds || 0);
+        return `${safe.toFixed(1)} s`;
     }
 }

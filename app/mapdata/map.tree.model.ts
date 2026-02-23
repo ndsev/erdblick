@@ -25,6 +25,7 @@ export interface LayerInfoItem extends Record<string, any> {
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
+    stages?: number;
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;

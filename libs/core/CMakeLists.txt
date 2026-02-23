@@ -3,6 +3,9 @@ project(erdblick-core)
 # For WASM modules, add_executable is used instead of add_library.
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
+  include/erdblick/visualization-base.h
+  include/erdblick/visualization-cesium.h
+  include/erdblick/visualization-deck.h
   include/erdblick/style.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
@@ -15,15 +18,17 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/search.h
   include/erdblick/layer.h
 
-  include/erdblick/cesium-interface/object.h
-  include/erdblick/cesium-interface/primitive.h
+  include/erdblick/cesium-interface/cesium-object.h
+  include/erdblick/cesium-interface/cesium-primitive.h
   include/erdblick/cesium-interface/cesium.h
   include/erdblick/cesium-interface/point-conversion.h
-  include/erdblick/cesium-interface/points.h
-  include/erdblick/cesium-interface/labels.h
-  include/erdblick/cesium-interface/billboards.h
+  include/erdblick/cesium-interface/cesium-points.h
+  include/erdblick/cesium-interface/cesium-labels.h
+  include/erdblick/cesium-interface/cesium-billboards.h
 
-  src/visualization.cpp
+  src/visualization-base.cpp
+  src/visualization-cesium.cpp
+  src/visualization-deck.cpp
   src/style.cpp
   src/rule.cpp
   src/color.cpp
@@ -36,12 +41,12 @@ set(ERDBLICK_SOURCE_FILES
   src/layer.cpp
 
   src/cesium-interface/base64.h
-  src/cesium-interface/object.cpp
-  src/cesium-interface/primitive.cpp
+  src/cesium-interface/cesium-object.cpp
+  src/cesium-interface/cesium-primitive.cpp
   src/cesium-interface/cesium.cpp
-  src/cesium-interface/points.cpp
-  src/cesium-interface/labels.cpp
-  src/cesium-interface/billboards.cpp
+  src/cesium-interface/cesium-points.cpp
+  src/cesium-interface/cesium-labels.cpp
+  src/cesium-interface/cesium-billboards.cpp
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
@@ -60,30 +65,34 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   #  add sanitize-address to the LINK_FLAGS.
   # target_compile_options(erdblick-core PRIVATE -fsanitize=address)
   # -fsanitize=address \
-  set(erdblick_link_flags "\
-    --bind \
-    --emit-tsd erdblick-core.d.ts \
-    -O3 \
-    -msimd128 \
-    -s SINGLE_FILE=1 \
-    -s ENVIRONMENT=web \
-    -s MODULARIZE=1 \
-    -s EXPORT_ES6=1 \
-    -s EXPORT_NAME='\"libErdblickCore\"' \
-    -s WASM_BIGINT=1 \
-    -s LEGALIZE_JS_FFI=0 \
-    -s JS_MATH=0 \
-    -s ALLOW_MEMORY_GROWTH=1 \
-    -s FILESYSTEM=0 \
-    -s EXPORTED_RUNTIME_METHODS=HEAPU8 \
-    -s ASSERTIONS=0 \
-    -s SAFE_HEAP=0 \
-    -s STACK_OVERFLOW_CHECK=0 \
-  ")
+  set(erdblick_link_flags
+    "--bind"
+    "--profiling"
+    "--emit-tsd erdblick-core.d.ts"
+    "-s SINGLE_FILE=1"
+    "-s ENVIRONMENT=web"
+    "-s MODULARIZE=1"
+    "-s EXPORT_ES6=1"
+    "-s EXPORT_NAME='\"libErdblickCore\"'"
+    "-s WASM_BIGINT=1"
+    "-s LEGALIZE_JS_FFI=0"
+    "-s JS_MATH=0"
+    "-s ALLOW_MEMORY_GROWTH=1"
+    "-s FILESYSTEM=0"
+    "-s EXPORTED_RUNTIME_METHODS=HEAPU8"
+    "-s ASSERTIONS=0"
+    "-s SAFE_HEAP=0"
+    "-s NO_DISABLE_EXCEPTION_CATCHING=0"
+    "-s STACK_OVERFLOW_CHECK=0"
+  )
+  message(STATUS "Building ${CMAKE_BUILD_TYPE}")
   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    string(APPEND erdblick_link_flags " --profiling")
+    list(APPEND erdblick_link_flags "--profiling")
+  else ()
+    list(APPEND erdblick_link_flags "-O3" "-msimd128")
   endif()
-  set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "${erdblick_link_flags}")
+  string(JOIN " " erdblick_link_flags_joined ${erdblick_link_flags})
+  set_target_properties(erdblick-core PROPERTIES LINK_FLAGS "${erdblick_link_flags_joined}")
 else()
   add_library(erdblick-core ${ERDBLICK_SOURCE_FILES})
 endif()

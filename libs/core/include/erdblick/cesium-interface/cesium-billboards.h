@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
+
 #include "cesium.h"
 #include "simfil/model/model.h"
 #include "mapget/model/featurelayer.h"
 #include "../rule.h"
-#include "points.h"
+#include "cesium-points.h"
 
 namespace erdblick
 {
@@ -19,7 +21,7 @@ struct CesiumBillboardCollection
     void addBillboard(
         const JsValue& position,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**
@@ -28,7 +30,7 @@ struct CesiumBillboardCollection
     static JsValue billboardParams(
         const JsValue& position,
         FeatureStyleRule const& style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const& evalFun);
 
     /**

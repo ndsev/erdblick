@@ -22,6 +22,7 @@ public:
     void writeToArray(std::vector<std::byte> const& content);
 
     std::string toString() const;
+    std::vector<uint8_t> const& bytes() const;
 
 private:
     std::vector<uint8_t> array_;

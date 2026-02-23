@@ -22,25 +22,25 @@ import {
     ColorMaterialProperty,
     CallbackProperty,
     JulianDate
-} from "../integrations/cesium";
-import {AppStateService, CameraViewState, TileFeatureId} from "../shared/appstate.service";
-import {MapDataService} from "../mapdata/map.service";
-import {TileVisualization} from "./tile.visualization.model";
+} from "../../integrations/cesium";
+import {AppStateService, CameraViewState, TileFeatureId} from "../../shared/appstate.service";
+import {MapDataService} from "../../mapdata/map.service";
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
 import {
     FeatureSearchService, MAX_VISIBLE_TILES_PER_LEVEL,
     MAX_ZOOM_LEVEL,
     SAFE_ZOOM_LEVEL,
     SearchResultPrimitiveId
-} from "../search/feature.search.service";
-import {coreLib} from "../integrations/wasm";
-import {environment} from "../environments/environment";
-import {JumpTargetService} from "../search/jump.service";
-import {RightClickMenuService} from "./rightclickmenu.service";
-import {CoordinatesService} from "../coords/coordinates.service";
-import {SearchResultPosition} from "../search/search.worker";
-import {MergedPointsTile} from "./pointmerge.service";
-import {Viewport} from '../../build/libs/core/erdblick-core';
+} from "../../search/feature.search.service";
+import {coreLib} from "../../integrations/wasm";
+import {environment} from "../../environments/environment";
+import {JumpTargetService} from "../../search/jump.service";
+import {RightClickMenuService} from "../rightclickmenu.service";
+import {CoordinatesService} from "../../coords/coordinates.service";
+import {SearchResultPosition} from "../../search/search.worker";
+import {MergedPointsTile} from "../pointmerge.service";
+import {Viewport} from '../../../build/libs/core/erdblick-core';
+import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 
 /**
  * Camera constants object to centralize all numerical values for easier maintenance
@@ -117,7 +117,7 @@ interface MarkerParams {
     heightReference?: HeightReference;
 }
 
-export class MapView {
+export class CesiumMapView implements IRenderView {
     private mouseHandler: ScreenSpaceEventHandler | null = null;
     private openStreetMapLayer: ImageryLayer | null = null;
     isDestroyingViewer = false;
@@ -133,10 +133,10 @@ export class MapView {
     private ignoreNextCamAppStateUpdate: boolean = false;
     zoomLevel: BehaviorSubject<number> = new BehaviorSubject<number>(0);
     hoveredFeatureIds: BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[],
+        featureIds: (TileFeatureId | null)[],
         position: {x: number, y: number}
     } | undefined> = new BehaviorSubject<{
-        featureIds: (TileFeatureId | null | string)[],
+        featureIds: (TileFeatureId | null)[],
         position: {x: number, y: number}
     } | undefined>(undefined);
     private hoverUpdateSequence = 0;
@@ -145,6 +145,7 @@ export class MapView {
     // animation clock explicitly. Afterward we reset it to the saved state.
     private ongoingAnimationRequests = 0;
     private savedClockAnimationState: { shouldAnimate: boolean; canAnimate: boolean } | null = null;
+    private readonly tickListenerRemovers = new Map<() => void, () => void>();
 
     get viewIndex() {
         return this._viewIndex;
@@ -265,6 +266,221 @@ export class MapView {
         this.setupMouseEventHandlers();
     }
 
+    requestRender(): void {
+        if (this.isAvailable()) {
+            this.viewer.scene.requestRender();
+        }
+    }
+
+    getCanvasClientRect(): DOMRect {
+        if (!this.isAvailable()) {
+            return new DOMRect();
+        }
+        return this.viewer.canvas.getBoundingClientRect();
+    }
+
+    getCameraHeadingDegrees(): number {
+        if (!this.isAvailable()) {
+            return 0;
+        }
+        return CesiumMath.toDegrees(this.viewer.camera.heading);
+    }
+
+    onTick(cb: () => void): void {
+        if (!this.isAvailable()) {
+            return;
+        }
+        const remove = this.viewer.clock.onTick.addEventListener(cb);
+        this.tickListenerRemovers.set(cb, remove);
+    }
+
+    offTick(cb: () => void): void {
+        const remove = this.tickListenerRemovers.get(cb);
+        if (!remove) {
+            return;
+        }
+        remove();
+        this.tickListenerRemovers.delete(cb);
+    }
+
+    getSceneHandle(): IRenderSceneHandle {
+        return {
+            renderer: "cesium",
+            scene: this.viewer
+        };
+    }
+
+    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[] {
+        if (!this.isAvailable()) {
+            return [];
+        }
+        const picked = this.viewer.scene.pick(new Cartesian2(screenPos.x, screenPos.y));
+        if (!defined(picked)) {
+            return [];
+        }
+        return this.resolvePickedFeatureIds(picked);
+    }
+
+    private resolvePickedFeatureIds(picked: any): TileFeatureId[] {
+        const primitive = picked?.primitive as any;
+        const tileKeyFromPrimitive = primitive?.tileKey;
+        const tileKey = typeof tileKeyFromPrimitive === "string" ? tileKeyFromPrimitive : undefined;
+        const idTileKeysRaw = picked?.idTileKeys ?? primitive?.idTileKeys;
+        const idTileKeys = Array.isArray(idTileKeysRaw) ? idTileKeysRaw : undefined;
+        const pickedId = picked?.id ?? primitive?.id;
+
+        const resolve = (rawId: unknown, fallbackTileKey: string | undefined): TileFeatureId | null => {
+            if (rawId && typeof rawId === "object") {
+                const candidate = rawId as Partial<TileFeatureId>;
+                if (typeof candidate.featureId === "string" && typeof candidate.mapTileKey === "string") {
+                    const featureIndex = Number(candidate.featureIndex);
+                    return {
+                        featureId: candidate.featureId,
+                        mapTileKey: candidate.mapTileKey,
+                        featureIndex: Number.isInteger(featureIndex) && featureIndex >= 0 ? featureIndex : undefined
+                    };
+                }
+            }
+
+            if (!fallbackTileKey) {
+                return null;
+            }
+            const index = Number(rawId);
+            if (!Number.isInteger(index) || index < 0) {
+                return null;
+            }
+            return this.mapService.resolveTileFeatureIdByIndex(fallbackTileKey, index);
+        };
+
+        if (Array.isArray(pickedId)) {
+            const result: TileFeatureId[] = [];
+            for (let i = 0; i < pickedId.length; i++) {
+                const idTileKey = typeof idTileKeys?.[i] === "string"
+                    ? idTileKeys[i] as string
+                    : tileKey;
+                const resolved = resolve(pickedId[i], idTileKey);
+                if (resolved) {
+                    result.push(resolved);
+                }
+            }
+            return result;
+        }
+
+        const resolved = resolve(pickedId, tileKey);
+        return resolved ? [resolved] : [];
+    }
+
+    private selectFeatureIds(featureIds: TileFeatureId[], lockSelection: boolean): void {
+        if (!featureIds.length) {
+            return;
+        }
+
+        if (featureIds.length === 1) {
+            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
+            if (lockSelection && panelId !== undefined) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+            return;
+        }
+
+        // Open one panel per merged feature.
+        this.stateService.unsetUnlockedSelections();
+        let remainingSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
+        if (remainingSlots <= 0) {
+            return;
+        }
+
+        for (const featureId of featureIds) {
+            if (remainingSlots <= 0) {
+                break;
+            }
+            const panelId = this.stateService.setSelection([featureId], undefined, true);
+            if (panelId === undefined) {
+                continue;
+            }
+            remainingSlots -= 1;
+            if (lockSelection) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+        }
+    }
+
+    pickCartographic(screenPos: {x: number; y: number}): { lon: number; lat: number; alt: number } | undefined {
+        if (!this.isAvailable()) {
+            return undefined;
+        }
+        const coordinates = this.viewer.camera.pickEllipsoid(
+            new Cartesian2(screenPos.x, screenPos.y),
+            this.viewer.scene.globe.ellipsoid
+        );
+        if (!coordinates) {
+            return undefined;
+        }
+        const cartographic = Cartographic.fromCartesian(coordinates);
+        return {
+            lon: CesiumMath.toDegrees(cartographic.longitude),
+            lat: CesiumMath.toDegrees(cartographic.latitude),
+            alt: cartographic.height
+        };
+    }
+
+    setViewFromState(cameraData: CameraViewState): void {
+        this.updateOnAppStateChange(cameraData);
+        this.updateViewport();
+    }
+
+    getViewState(): CameraViewState {
+        return this.stateService.cameraViewDataState.getValue(this._viewIndex);
+    }
+
+    computeViewport(): Viewport | undefined {
+        if (!this.isAvailable()) {
+            return undefined;
+        }
+        const rectangle = this.computeViewRectangle();
+        if (!rectangle) {
+            return undefined;
+        }
+
+        const canvas = this.viewer.scene.canvas;
+        if (!canvas) {
+            return undefined;
+        }
+
+        const center = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+        const centerCartesian = this.viewer.camera.pickEllipsoid(center);
+        let centerLon: number;
+        let centerLat: number;
+        if (centerCartesian !== undefined) {
+            const centerCartographic = Cartographic.fromCartesian(centerCartesian);
+            centerLon = CesiumMath.toDegrees(centerCartographic.longitude);
+            centerLat = CesiumMath.toDegrees(centerCartographic.latitude);
+        } else {
+            const cameraCartographic = Cartographic.fromCartesian(this.viewer.camera.positionWC);
+            centerLon = CesiumMath.toDegrees(cameraCartographic.longitude);
+            centerLat = CesiumMath.toDegrees(cameraCartographic.latitude);
+        }
+
+        const west = CesiumMath.toDegrees(rectangle.west);
+        const south = CesiumMath.toDegrees(rectangle.south);
+        const east = CesiumMath.toDegrees(rectangle.east);
+        const north = CesiumMath.toDegrees(rectangle.north);
+        const sizeLon = Math.abs(east - west);
+        const sizeLat = Math.abs(north - south);
+        const expandLon = sizeLon * 0.25;
+        const expandLat = sizeLat * 0.25;
+
+        return {
+            south: south - expandLat,
+            west: west - expandLon,
+            width: sizeLon + expandLon * 2,
+            height: sizeLat + expandLat * 2,
+            camPosLon: centerLon,
+            camPosLat: centerLat,
+            orientation: -this.viewer.camera.heading + Math.PI * .5,
+        };
+    }
+
     /**
      * Setup parameter subscriptions
      */
@@ -380,7 +596,10 @@ export class MapView {
                     }
                 } else {
                     // Just select the feature.
-                    this.selectFeatureFromPick(feature, false);
+                    const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
+                    if (selectedFeatureIds.length) {
+                        this.selectFeatureIds(selectedFeatureIds, false);
+                    }
                 }
             } else {
                 // No new feature to select. Unset existing locked selections.
@@ -406,7 +625,10 @@ export class MapView {
             const feature = this.viewer.scene.pick(position);
             if (defined(feature) && !(feature.primitive instanceof Billboard)) {
                 // Select the feature and pin the panel immediately.
-                this.selectFeatureFromPick(feature, true);
+                const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
+                if (selectedFeatureIds.length) {
+                    this.selectFeatureIds(selectedFeatureIds, true);
+                }
             }
 
             // Handle position update after highlighting.
@@ -453,29 +675,11 @@ export class MapView {
 
                 const feature = this.viewer.scene.pick(position);
                 if (defined(feature)) {
-                    let hasDisplayableFeatureId = false;
-                    const featureIdsArray = (Array.isArray(feature.id) ? feature.id : [feature.id]).flatMap((id: any) => {
-                        if (typeof id === 'string') {
-                            const trimmedId = id.trim();
-                            if (!trimmedId) {
-                                return [];
-                            }
-                            if (trimmedId !== 'hover-highlight') {
-                                hasDisplayableFeatureId = true;
-                            }
-                            return [trimmedId];
-                        } else if (id && typeof id === 'object' && typeof id.featureId === 'string') {
-                            const trimmedId = id.featureId.trim();
-                            if (!trimmedId) {
-                                return [];
-                            }
-                            hasDisplayableFeatureId = true;
-                            return [{...id, featureId: trimmedId}];
+                    const featureIdsArray = this.resolvePickedFeatureIds(feature);
+                    if (!featureIdsArray.length) {
+                        if (this.hoveredFeatureIds.getValue() !== undefined) {
+                            this.hoveredFeatureIds.next(undefined);
                         }
-                        return [id];
-                    });
-                    if (!hasDisplayableFeatureId && this.hoveredFeatureIds.getValue() !== undefined) {
-                        this.hoveredFeatureIds.next(undefined);
                         return;
                     }
                     const hoverPosition = {x: position.x, y: position.y};
@@ -510,62 +714,12 @@ export class MapView {
 
     }
 
-    private isTileFeatureId(value: any): value is TileFeatureId {
-        return value !== null &&
-            typeof value === 'object' &&
-            typeof value.featureId === 'string' &&
-            typeof value.mapTileKey === 'string';
-    }
-
-    private selectedFeatureIdsFromPick(feature: any): TileFeatureId[] {
-        const rawFeatureIds = Array.isArray(feature?.id) ? feature.id : [feature?.id];
-        return rawFeatureIds.filter((value: any) => this.isTileFeatureId(value));
-    }
-
-    private selectFeatureFromPick(feature: any, lockSelection: boolean) {
-        const featureIds = this.selectedFeatureIdsFromPick(feature);
-        if (!featureIds.length) {
-            return;
-        }
-
-        if (featureIds.length === 1) {
-            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
-            if (lockSelection && panelId !== undefined) {
-                this.stateService.setInspectionPanelLockedState(panelId, true);
-            }
-            return;
-        }
-
-        // Merged picks should replace unlocked feature inspections and open one panel per feature.
-        this.stateService.unsetUnlockedSelections();
-        const availableSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
-        if (availableSlots <= 0) {
-            this.stateService.setSelection([featureIds[0]], undefined, true);
-            return;
-        }
-
-        let remainingSlots = availableSlots;
-        for (const featureId of featureIds) {
-            if (remainingSlots <= 0) {
-                break;
-            }
-            const panelId = this.stateService.setSelection([featureId], undefined, true);
-            if (panelId === undefined) {
-                continue;
-            }
-            remainingSlots -= 1;
-            if (lockSelection) {
-                this.stateService.setInspectionPanelLockedState(panelId, true);
-            }
-        }
-    }
-
     /**
      * Setup additional subscriptions for services
      */
     private setupServiceSubscriptions() {
         this.subscriptions.push(
-            this.mapService.tileVisualizationTopic.subscribe((tileVis: TileVisualization) => {
+            this.mapService.tileVisualizationTopic.subscribe((tileVis: ITileVisualization) => {
                 // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot render tile visualization: viewer not available');
@@ -577,7 +731,7 @@ export class MapView {
                     return;
                 }
 
-                tileVis.render(this.viewer).then(wasRendered => {
+                tileVis.render(this.getSceneHandle()).then(wasRendered => {
                     if (wasRendered && this.isAvailable()) {
                         this.viewer.scene.requestRender();
                     }
@@ -586,7 +740,7 @@ export class MapView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: TileVisualization) => {
+            this.mapService.tileVisualizationDestructionTopic.subscribe((tileVis: ITileVisualization) => {
                 // Safety check: ensure viewer exists and is not destroyed
                 if (!this.isAvailable()) {
                     console.debug('Cannot destroy tile visualization: viewer not available');
@@ -598,7 +752,7 @@ export class MapView {
                     return;
                 }
 
-                tileVis.destroy(this.viewer);
+                tileVis.destroy(this.getSceneHandle());
                 if (this.isAvailable()) {
                     this.viewer.scene.requestRender();
                 }
@@ -655,10 +809,16 @@ export class MapView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                const rectangle = Rectangle.fromDegrees(
+                    value.rectangle.west,
+                    value.rectangle.south,
+                    value.rectangle.east,
+                    value.rectangle.north
+                );
                 const fauxCamera = new Camera(this.viewer.scene);
                 // Use top-down normalised orientation otherwise need to compensate for different parts of the globe.
                 fauxCamera.setView({
-                    destination: value.rectangle,
+                    destination: rectangle,
                     orientation: {
                         heading: 0.0, // East, in radians.
                         pitch: CesiumMath.toRadians(CAMERA_CONSTANTS.DEFAULT_PITCH_DEGREES), // Directly looking down.
@@ -671,7 +831,7 @@ export class MapView {
                 const duration = 3.0; // seconds
                 const entity = this.viewer.entities.add({
                     rectangle: {
-                        coordinates: value.rectangle,
+                        coordinates: rectangle,
                         heightReference: HeightReference.CLAMP_TO_GROUND,
                         height: 0,
                         material: new ColorMaterialProperty(
@@ -737,8 +897,10 @@ export class MapView {
                     return;
                 }
 
-                const direction = Cartesian3.subtract(value.normal, new Cartesian3(), new Cartesian3());
-                const endPoint = Cartesian3.add(value.origin, direction, new Cartesian3());
+                const origin = new Cartesian3(value.origin.x, value.origin.y, value.origin.z);
+                const normal = new Cartesian3(value.normal.x, value.normal.y, value.normal.z);
+                const direction = Cartesian3.subtract(normal, new Cartesian3(), new Cartesian3());
+                const endPoint = Cartesian3.add(origin, direction, new Cartesian3());
                 Cartesian3.normalize(direction, direction);
                 Cartesian3.negate(direction, direction);
                 const up = this.viewer.scene.globe.ellipsoid.geodeticSurfaceNormal(
@@ -794,6 +956,10 @@ export class MapView {
         // Clean up subscriptions first to prevent race conditions
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions = [];
+        for (const remove of this.tickListenerRemovers.values()) {
+            remove();
+        }
+        this.tickListenerRemovers.clear();
 
         // Clean up mouse handler
         if (this.mouseHandler) {
@@ -812,7 +978,7 @@ export class MapView {
 
         // Clean up all visualizations bound to the old viewer.
         if (this.isAvailable()) {
-            this.mapService.clearAllTileVisualizations(this._viewIndex, this.viewer);
+            this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
         }
 
         // Check if still not destroyed before calling destroy

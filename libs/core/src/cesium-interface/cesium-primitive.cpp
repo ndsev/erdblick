@@ -1,6 +1,6 @@
 #include <map>
 #include <iostream>
-#include "cesium-interface/primitive.h"
+#include "cesium-interface/cesium-primitive.h"
 #include "cesium-interface/cesium.h"
 #include "cesium-interface/point-conversion.h"
 
@@ -66,7 +66,7 @@ CesiumPrimitive CesiumPrimitive::withPerInstanceColorAppearance(bool flatAndSync
 void CesiumPrimitive::addPolyLine(
         JsValue const &vertices,
         FeatureStyleRule const &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const &evalFun) {
     JsValue polylineArgs;
     CesiumClass* polylineClass = nullptr;
@@ -96,7 +96,7 @@ void CesiumPrimitive::addPolyLine(
 void CesiumPrimitive::addPolygon(
         const JsValue &vertices,
         const FeatureStyleRule &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const &evalFun) {
     auto polygon = Cesium().PolygonGeometry.New({
         {"polygonHierarchy",  Cesium().PolygonHierarchy.New(*vertices)},
@@ -109,7 +109,7 @@ void CesiumPrimitive::addPolygon(
 void CesiumPrimitive::addTriangles(
         const JsValue &float64Array,
         const FeatureStyleRule &style,
-        JsValue const& id,
+        uint32_t id,
         BoundEvalFun const &evalFun) {
     auto geometry = Cesium().Geometry.New({
         {"attributes", JsValue::Dict({
@@ -126,7 +126,7 @@ void CesiumPrimitive::addTriangles(
 
 void CesiumPrimitive::addGeometryInstance(
         const FeatureStyleRule &style,
-        JsValue const& id,
+        uint32_t id,
         const JsValue &geom,
         BoundEvalFun const &evalFun) {
     auto attributes = JsValue::Dict();
@@ -136,7 +136,7 @@ void CesiumPrimitive::addGeometryInstance(
     }
     auto geometryInstance = Cesium().GeometryInstance.New({
         {"geometry",   geom},
-        {"id",         id},
+        {"id",         JsValue(id)},
         {"attributes", attributes}
     });
     ++numGeometryInstances_;

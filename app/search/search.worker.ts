@@ -4,7 +4,7 @@ import {TileFeatureLayer} from "../../build/libs/core/erdblick-core";
 export interface SearchWorkerTask {
     type: 'SearchWorkerTask';
     tileId: bigint;
-    tileBlob: Uint8Array;
+    tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     query: string;
     dataSourceInfo: Uint8Array;
@@ -15,7 +15,7 @@ export interface SearchWorkerTask {
 
 export interface CompletionWorkerTask {
     type: 'CompletionWorkerTask';
-    blob: Uint8Array;
+    tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     dataSourceInfo: Uint8Array;
     query: string; // Query prefix to complete
@@ -28,7 +28,7 @@ export interface CompletionWorkerTask {
 
 export interface DiagnosticsWorkerTask {
     type: 'DiagnosticsWorkerTask';
-    blob: Uint8Array;
+    tileBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     dataSourceInfo: Uint8Array;
     nodeId: string;
@@ -112,6 +112,37 @@ export type WorkerResult = SearchResultForTile | CompletionCandidatesForTile | D
 export type WorkerInboundMessage = WorkerTask | WorkerInitMessage;
 export type WorkerOutboundMessage = WorkerResult | WorkerReadyMessage;
 
+function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatureLayer | null {
+    if (!tileBlobs.length) {
+        return null;
+    }
+    const baseTile: TileFeatureLayer | null = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), tileBlobs[0]);
+    if (!baseTile) {
+        return null;
+    }
+    const attachOverlay = (baseTile as any).attachOverlay;
+    if (typeof attachOverlay !== "function") {
+        return baseTile;
+    }
+    try {
+        for (let i = 1; i < tileBlobs.length; i++) {
+            const overlay = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), tileBlobs[i]) as TileFeatureLayer | null;
+            if (!overlay) {
+                continue;
+            }
+            try {
+                attachOverlay.call(baseTile, overlay);
+            } finally {
+                overlay.delete();
+            }
+        }
+    } catch (error) {
+        baseTile.delete();
+        throw error;
+    }
+    return baseTile;
+}
+
 function processSearch(task: SearchWorkerTask) {
     let postError = (name: string, message: string) => {
         let result: SearchResultForTile = {
@@ -134,7 +165,10 @@ function processSearch(task: SearchWorkerTask) {
         let parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.tileBlob);
+        let tile = parseTileWithOverlays(parser, task.tileBlobs);
+        if (!tile) {
+            throw new Error("No tile blobs provided for search task.");
+        }
         const numFeatures = tile.numFeatures();
         const tileId = tile.tileId();
 
@@ -175,7 +209,10 @@ function processCompletion(task: CompletionWorkerTask) {
         let parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        let tile = parseTileWithOverlays(parser, task.tileBlobs);
+        if (!tile) {
+            throw new Error("No tile blobs provided for completion task.");
+        }
 
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);
@@ -223,7 +260,10 @@ function processDiagnostics(task: DiagnosticsWorkerTask) {
         let parser = new coreLib.TileLayerParser();
         uint8ArrayToWasm(data => parser.setDataSourceInfo(data), task.dataSourceInfo);
         uint8ArrayToWasm(data => parser.addFieldDict(data), task.fieldDictBlob);
-        let tile: TileFeatureLayer = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), task.blob);
+        let tile = parseTileWithOverlays(parser, task.tileBlobs);
+        if (!tile) {
+            throw new Error("No tile blobs provided for diagnostics task.");
+        }
 
         // Get the query results from the tile.
         let search = new coreLib.FeatureLayerSearch(tile);

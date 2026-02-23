@@ -1,4 +1,4 @@
-import {uint8ArrayToWasm, uint8ArrayToWasmAsync} from "../integrations/wasm";
+import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
 import {TileLayerParser, TileFeatureLayer} from '../../build/libs/core/erdblick-core';
 import {TileFeatureId} from "../shared/appstate.service";
 import {TileLoadState} from "./tilestream";
@@ -19,12 +19,20 @@ export class FeatureTile {
     numFeatures: number = 0;
     error?: string;
     private parser: TileLayerParser;
+    private fieldDictBlobCache: Uint8Array | null = null;
+    private dataSourceInfoBlobCache: Uint8Array | null = null;
+    private featureIdByIndexCache: Map<number, string> = new Map<number, string>();
+    private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
+    private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
     public tileFeatureLayerBlob: Uint8Array | null = null;
+    dataVersion: number = 0;
     disposed: boolean = false;
     status: TileLoadState = TileLoadState.LoadingQueued;
     stats: Map<string, number[]> = new Map<string, number[]>();
 
+    static statTileSizePrefix = "Size/Feature-Model";
+    static statParseTimePrefix = "Rendering/Feature-Model-Parsing";
     static statTileSize = "Size/Feature-Model#kb";
     static statParseTime = "Rendering/Feature-Model-Parsing#ms";
 
@@ -57,100 +65,321 @@ export class FeatureTile {
         }
     }
 
-    hydrateFromBlob(tileFeatureLayerBlob: Uint8Array) {
+    hydrateFromBlob(tileFeatureLayerBlob: Uint8Array, stageOverride?: number) {
         const mapTileMetadata = uint8ArrayToWasm((wasmBlob: any) => {
             return this.parser.readTileLayerMetadata(wasmBlob);
-        }, tileFeatureLayerBlob);
+        }, tileFeatureLayerBlob) as {
+            id: string;
+            nodeId: string;
+            mapName: string;
+            layerName: string;
+            tileId: bigint;
+            stage?: number;
+            legalInfo?: string;
+            error?: string;
+            numFeatures: number;
+            scalarFields: Record<string, number>;
+        };
 
-        this.tileFeatureLayerBlob = tileFeatureLayerBlob;
+        const parsedStage = Number.isInteger(mapTileMetadata.stage)
+            ? Number(mapTileMetadata.stage)
+            : 0;
+        const stage = Number.isInteger(stageOverride)
+            ? Math.max(0, Number(stageOverride))
+            : Math.max(0, parsedStage);
+        const canonicalMapTileKey = this.canonicalMapTileKeyForMetadata(mapTileMetadata);
+
+        this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
+        this.tileFeatureLayerBlob = this.highestStageBlob();
+        this.fieldDictBlobCache = null;
+        this.dataSourceInfoBlobCache = null;
+        this.featureIdByIndexCache.clear();
+        this.dataVersion += 1;
+
         if (this.mapTileKey === "undefined") {
-            this.mapTileKey = mapTileMetadata.id as string;
-        } else if (this.mapTileKey !== mapTileMetadata.id) {
-            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${mapTileMetadata.id}`);
+            this.mapTileKey = canonicalMapTileKey;
+        } else if (this.mapTileKey !== canonicalMapTileKey) {
+            console.warn(`Hydrating tile with mismatched key. Existing=${this.mapTileKey}, Parsed=${canonicalMapTileKey}`);
         }
         this.nodeId = mapTileMetadata.nodeId as string;
         this.mapName = mapTileMetadata.mapName as string;
         this.layerName = mapTileMetadata.layerName as string;
-        this.tileId = mapTileMetadata.tileId;
+        this.tileId = BigInt(mapTileMetadata.tileId as any);
         this.legalInfo = mapTileMetadata.legalInfo as string;
         this.error = mapTileMetadata.error ? mapTileMetadata.error as string : undefined;
-        this.numFeatures = mapTileMetadata.numFeatures;
+        this.numFeatures = Math.max(this.numFeatures, mapTileMetadata.numFeatures);
         this.status = this.error ? TileLoadState.Error : TileLoadState.Ok;
 
-        const parseTimes = this.stats.get(FeatureTile.statParseTime) ?? [];
+        const parseTimesByKey = this.existingParseTimeStats();
         this.stats = new Map<string, number[]>();
-        this.stats.set(FeatureTile.statParseTime, parseTimes);
-        this.stats.set(FeatureTile.statTileSize, [tileFeatureLayerBlob.length/1024]);
+        for (const [key, values] of parseTimesByKey.entries()) {
+            this.stats.set(key, values);
+        }
+        const stageBlobs = this.stageBlobs();
+        const totalSizeKb = stageBlobs.reduce((sum, item) => sum + item.blob.length, 0) / 1024;
+        this.stats.set(FeatureTile.statTileSize, [totalSizeKb]);
+        for (const stageBlob of stageBlobs) {
+            this.stats.set(FeatureTile.stageTileSizeKey(stageBlob.stage), [stageBlob.blob.length / 1024]);
+        }
         for (let [k, v] of Object.entries(mapTileMetadata.scalarFields)) {
             this.stats.set(k, [v as number]);
         }
     }
 
     hasData(): boolean {
-        return !!this.tileFeatureLayerBlob;
+        return this.tileFeatureLayerBlobsByStage.size > 0;
+    }
+
+    blobCount(): number {
+        return this.tileFeatureLayerBlobsByStage.size;
+    }
+
+    stageBlobs(): Array<{stage: number, blob: Uint8Array}> {
+        const result: Array<{stage: number, blob: Uint8Array}> = [];
+        for (const [stage, blob] of this.tileFeatureLayerBlobsByStage.entries()) {
+            result.push({stage, blob});
+        }
+        result.sort((lhs, rhs) => lhs.stage - rhs.stage);
+        return result;
+    }
+
+    highestLoadedStage(): number | null {
+        let highest: number | null = null;
+        for (const stage of this.tileFeatureLayerBlobsByStage.keys()) {
+            if (highest === null || stage > highest) {
+                highest = stage;
+            }
+        }
+        return highest;
+    }
+
+    hasStage(stage: number): boolean {
+        return this.tileFeatureLayerBlobsByStage.has(stage);
+    }
+
+    nextMissingStage(stageCount: number): number | undefined {
+        const normalizedStageCount = Math.max(1, Math.floor(stageCount));
+        for (let stage = 0; stage < normalizedStageCount; stage++) {
+            if (!this.tileFeatureLayerBlobsByStage.has(stage)) {
+                return stage;
+            }
+        }
+        return undefined;
+    }
+
+    isComplete(stageCount: number): boolean {
+        return this.nextMissingStage(stageCount) === undefined;
+    }
+
+    setStageLoadState(stage: number, state: TileLoadState): void {
+        this.stageLoadStates.set(Math.max(0, Math.floor(stage)), state);
+    }
+
+    stageLoadState(stage: number): TileLoadState | undefined {
+        return this.stageLoadStates.get(Math.max(0, Math.floor(stage)));
+    }
+
+    private existingParseTimeStats(): Map<string, number[]> {
+        const result = new Map<string, number[]>();
+        for (const [key, values] of this.stats.entries()) {
+            if (key === FeatureTile.statParseTime || key.startsWith(`${FeatureTile.statParseTimePrefix}/Stage-`)) {
+                result.set(key, [...values]);
+            }
+        }
+        return result;
+    }
+
+    getFieldDictBlob(): Uint8Array | null {
+        if (this.fieldDictBlobCache) {
+            return this.fieldDictBlobCache;
+        }
+        if (!this.nodeId.length) {
+            return null;
+        }
+        const parserWithFieldDict = this.parser as any;
+        if (typeof parserWithFieldDict.getFieldDict !== "function") {
+            return null;
+        }
+        const encoded = uint8ArrayFromWasm((buf) => {
+            parserWithFieldDict.getFieldDict(buf, this.nodeId);
+            return true;
+        });
+        if (!encoded) {
+            return null;
+        }
+        this.fieldDictBlobCache = encoded;
+        return encoded;
+    }
+
+    getDataSourceInfoBlob(): Uint8Array | null {
+        if (this.dataSourceInfoBlobCache) {
+            return this.dataSourceInfoBlobCache;
+        }
+        if (!this.mapName.length) {
+            return null;
+        }
+        const parserWithDataSourceInfo = this.parser as any;
+        if (typeof parserWithDataSourceInfo.getDataSourceInfo !== "function") {
+            return null;
+        }
+        const encoded = uint8ArrayFromWasm((buf) => {
+            parserWithDataSourceInfo.getDataSourceInfo(buf, this.mapName);
+            return true;
+        });
+        if (!encoded) {
+            return null;
+        }
+        this.dataSourceInfoBlobCache = encoded;
+        return encoded;
+    }
+
+    private canonicalMapTileKeyForMetadata(metadata: {
+        id?: string;
+        mapName?: string;
+        layerName?: string;
+        tileId?: bigint;
+    }): string {
+        if (metadata.id) {
+            try {
+                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(metadata.id);
+                return coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+            } catch (_error) {
+                return metadata.id;
+            }
+        }
+        if (metadata.mapName && metadata.layerName && metadata.tileId !== undefined) {
+            return coreLib.getTileFeatureLayerKey(metadata.mapName, metadata.layerName, metadata.tileId);
+        }
+        return this.mapTileKey;
+    }
+
+    private highestStageBlob(): Uint8Array | null {
+        const highest = this.highestLoadedStage();
+        if (highest === null) {
+            return null;
+        }
+        return this.tileFeatureLayerBlobsByStage.get(highest) || null;
+    }
+
+    static stageTileSizeKey(stage: number): string {
+        return `${FeatureTile.statTileSizePrefix}/Stage-${stage}#kb`;
+    }
+
+    static stageParseTimeKey(stage: number): string {
+        return `${FeatureTile.statParseTimePrefix}/Stage-${stage}#ms`;
+    }
+
+    private recordParseTime(durationMs: number, stage: number): void {
+        const parseTimes = this.stats.get(FeatureTile.statParseTime);
+        if (parseTimes) {
+            parseTimes.push(durationMs);
+        } else {
+            this.stats.set(FeatureTile.statParseTime, [durationMs]);
+        }
+        const stageKey = FeatureTile.stageParseTimeKey(stage);
+        const stageParseTimes = this.stats.get(stageKey);
+        if (stageParseTimes) {
+            stageParseTimes.push(durationMs);
+        } else {
+            this.stats.set(stageKey, [durationMs]);
+        }
+    }
+
+    private deserializeTileFeatureLayer(tileBlob: Uint8Array, stage: number): TileFeatureLayer | null {
+        return uint8ArrayToWasm((bufferToRead: any) => {
+            const startTime = performance.now();
+            const deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
+            const endTime = performance.now();
+            if (!deserializedLayer) {
+                return null;
+            }
+            this.recordParseTime(endTime - startTime, stage);
+            return deserializedLayer;
+        }, tileBlob);
+    }
+
+    private attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLayer[]): void {
+        const maybeAttach = (baseLayer as any).attachOverlay;
+        if (typeof maybeAttach !== "function") {
+            return;
+        }
+        for (const overlay of overlays) {
+            maybeAttach.call(baseLayer, overlay);
+        }
     }
 
     /**
-     * Deserialize the wrapped TileFeatureLayer, run a callback, then
-     * delete the deserialized WASM representation.
+     * Provide temporary access to a deserialized TileFeatureLayer.
      * @returns The value returned by the callback.
      */
     peek(callback: (layer: TileFeatureLayer) => any) {
-        if (!this.tileFeatureLayerBlob) {
+        const stageBlobs = this.stageBlobs();
+        if (!stageBlobs.length) {
             return null;
         }
-        // Deserialize the WASM tileFeatureLayer from the blob.
-        let result = uint8ArrayToWasm((bufferToRead: any) => {
-            let startTime = performance.now();
-            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            let endTime = performance.now();
-            if (!deserializedLayer)
-                return null;
-            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
 
-            // Run the callback with the deserialized layer, and
-            // provide the result as the return value.
-            let result = null;
-            if (callback) {
-                result = callback(deserializedLayer);
+        const baseLayer = this.deserializeTileFeatureLayer(stageBlobs[0].blob, stageBlobs[0].stage);
+        if (!baseLayer) {
+            return null;
+        }
+        const overlays: TileFeatureLayer[] = [];
+        try {
+            for (let i = 1; i < stageBlobs.length; i++) {
+                const overlay = this.deserializeTileFeatureLayer(stageBlobs[i].blob, stageBlobs[i].stage);
+                if (!overlay) {
+                    continue;
+                }
+                overlays.push(overlay);
             }
-            deserializedLayer.delete();
-            return result;
-        }, this.tileFeatureLayerBlob);
-        return result;
+            this.attachOverlayChain(baseLayer, overlays);
+            return callback(baseLayer);
+        } finally {
+            for (const overlay of overlays) {
+                overlay.delete();
+            }
+            baseLayer.delete();
+        }
     }
 
     /**
      * Async version of the above function.
      */
     async peekAsync(callback: (layer: TileFeatureLayer) => Promise<any>) {
-        if (!this.tileFeatureLayerBlob) {
+        const stageBlobs = this.stageBlobs();
+        if (!stageBlobs.length) {
             return null;
         }
-        // Deserialize the WASM tileFeatureLayer from the blob.
-        return await uint8ArrayToWasmAsync(async (bufferToRead: any) => {
-            let startTime = performance.now();
-            let deserializedLayer = this.parser.readTileFeatureLayer(bufferToRead);
-            let endTime = performance.now();
-            if (!deserializedLayer)
-                return null;
-            this.stats.get(FeatureTile.statParseTime)!.push(endTime - startTime);
 
-            // Run the callback with the deserialized layer, and
-            // provide the result as the return value.
-            let result = null;
-            if (callback) {
-                result = await callback(deserializedLayer);
+        const baseLayer = this.deserializeTileFeatureLayer(stageBlobs[0].blob, stageBlobs[0].stage);
+        if (!baseLayer) {
+            return null;
+        }
+        const overlays: TileFeatureLayer[] = [];
+        try {
+            for (let i = 1; i < stageBlobs.length; i++) {
+                const overlay = this.deserializeTileFeatureLayer(stageBlobs[i].blob, stageBlobs[i].stage);
+                if (!overlay) {
+                    continue;
+                }
+                overlays.push(overlay);
             }
-            deserializedLayer.delete();
-            return result;
-        }, this.tileFeatureLayerBlob);
+            this.attachOverlayChain(baseLayer, overlays);
+            return await callback(baseLayer);
+        } finally {
+            for (const overlay of overlays) {
+                overlay.delete();
+            }
+            baseLayer.delete();
+        }
     }
 
     /**
      * Mark this tile as "not available anymore".
      */
     dispose() {
+        this.tileFeatureLayerBlobsByStage.clear();
+        this.stageLoadStates.clear();
+        this.tileFeatureLayerBlob = null;
         this.disposed = true;
     }
 
@@ -210,6 +439,32 @@ export class FeatureTile {
             feature.delete();
             return result;
         });
+    }
+
+    featureIdByIndex(featureIndex: number): string | null {
+        if (!Number.isInteger(featureIndex) || featureIndex < 0) {
+            return null;
+        }
+        if (featureIndex >= this.numFeatures) {
+            return null;
+        }
+        const cached = this.featureIdByIndexCache.get(featureIndex);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const featureId = this.peek((tileFeatureLayer: TileFeatureLayer) => {
+            const layerAny = tileFeatureLayer as any;
+            if (typeof layerAny.featureIdByIndex !== "function") {
+                return null;
+            }
+            const result = layerAny.featureIdByIndex(featureIndex);
+            return (typeof result === "string" && result.length > 0) ? result : null;
+        });
+        if (typeof featureId === "string" && featureId.length > 0) {
+            this.featureIdByIndexCache.set(featureIndex, featureId);
+            return featureId;
+        }
+        return null;
     }
 }
 

@@ -1,13 +1,13 @@
-import {Cartesian3, Cartographic, CesiumMath, Rectangle, SceneMode} from "../integrations/cesium";
-import {CAMERA_CONSTANTS, MapView} from "./view";
-import {MapDataService} from "../mapdata/map.service";
-import {AppStateService, CameraViewState} from "../shared/appstate.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {JumpTargetService} from "../search/jump.service";
-import {RightClickMenuService} from "./rightclickmenu.service";
-import {CoordinatesService} from "../coords/coordinates.service";
+import {Cartesian3, Cartographic, CesiumMath, Rectangle, SceneMode} from "../../integrations/cesium";
+import {CAMERA_CONSTANTS, CesiumMapView} from "./cesium-map-view";
+import {MapDataService} from "../../mapdata/map.service";
+import {AppStateService, CameraViewState} from "../../shared/appstate.service";
+import {FeatureSearchService} from "../../search/feature.search.service";
+import {JumpTargetService} from "../../search/jump.service";
+import {RightClickMenuService} from "../rightclickmenu.service";
+import {CoordinatesService} from "../../coords/coordinates.service";
 
-export class MapView3D extends MapView {
+export class CesiumMapView3D extends CesiumMapView {
 
     constructor(id: number,
                 canvasId: string,
@@ -104,3 +104,4 @@ export class MapView3D extends MapView {
         }
     }
 }
+

@@ -250,14 +250,7 @@ export class InspectionTreeComponent implements OnDestroy {
                 this.expandTreeNodes(this.data);
             }
 
-            // FIXME We have to force recalculate the tables number of visible items?
-            setTimeout(() => {
-                let scroller = (<any>this.table.scrollableViewChild)?.scroller;
-                if (scroller) {
-                    scroller.init();
-                    scroller.calculateAutoSize();
-                }
-            }, 0);
+            this.refreshLayout();
 
             this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
                 setTimeout(() => this.table.scrollToVirtualIndex(index ?? 0), 5);
@@ -301,6 +294,18 @@ export class InspectionTreeComponent implements OnDestroy {
         if (!this.destroyed) {
             this.cdr.detectChanges();
         }
+    }
+
+    refreshLayout(): void {
+        // Recalculate virtual scroller geometry after data or container-size changes.
+        setTimeout(() => {
+            const scroller = (this.table as any)?.scrollableViewChild?.scroller;
+            if (scroller) {
+                scroller.init();
+                scroller.calculateAutoSize();
+            }
+            this.cdr.markForCheck();
+        }, 0);
     }
 
     clearFilter() {
@@ -384,10 +389,10 @@ export class InspectionTreeComponent implements OnDestroy {
 
     onNodeHoverExit(event: any, rowData: any) {
         event.stopPropagation();
-        if (!rowData.hasOwnProperty("type")) {
+        if (!rowData.hasOwnProperty("type") && !rowData.hasOwnProperty("hoverId")) {
             return;
         }
-        if (rowData["type"] === this.InspectionValueType.FEATUREID.value) {
+        if (rowData["type"] === this.InspectionValueType.FEATUREID.value || rowData["hoverId"]) {
             this.mapService.setHoveredFeatures([]).then();
         }
     }
@@ -402,11 +407,56 @@ export class InspectionTreeComponent implements OnDestroy {
                 rowData["value"],
                 coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
         } else if (rowData["hoverId"] && this.selectedFeatures()) {
+            const hoverId = String(rowData["hoverId"]);
+            const mapTileKey = this.resolveHoverMapTileKey(
+                hoverId,
+                rowData["featureIndex"],
+                this.selectedFeatures() ?? []
+            );
+            if (!mapTileKey) {
+                return;
+            }
             this.mapService.setHoveredFeatures([{
-                mapTileKey: this.selectedFeatures()![rowData["featureIndex"]].mapTileKey,
-                featureId: rowData["hoverId"]
+                mapTileKey,
+                featureId: hoverId
             }]).then();
         }
+    }
+
+    private resolveHoverMapTileKey(
+        hoverId: string,
+        rawFeatureIndex: unknown,
+        selectedFeatures: FeatureWrapper[]
+    ): string | undefined {
+        const featureIndex = Number(rawFeatureIndex);
+        if (Number.isInteger(featureIndex) &&
+            featureIndex >= 0 &&
+            featureIndex < selectedFeatures.length) {
+            return selectedFeatures[featureIndex].mapTileKey;
+        }
+
+        const baseFeatureId = this.stripHoverSuffix(hoverId);
+        const matched = selectedFeatures.find(feature => feature.featureId === baseFeatureId);
+        if (matched) {
+            return matched.mapTileKey;
+        }
+
+        if (selectedFeatures.length === 1) {
+            return selectedFeatures[0].mapTileKey;
+        }
+        return undefined;
+    }
+
+    private stripHoverSuffix(featureId: string): string {
+        const attributeIndex = featureId.indexOf(":attribute#");
+        if (attributeIndex >= 0) {
+            return featureId.slice(0, attributeIndex);
+        }
+        const relationIndex = featureId.indexOf(":relation#");
+        if (relationIndex >= 0) {
+            return featureId.slice(0, relationIndex);
+        }
+        return featureId;
     }
 
     showSourceData(event: Event, sourceDataRef: any) {

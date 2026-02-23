@@ -429,12 +429,16 @@ export class FeatureSearchService {
         });
 
         const tileParser = this.mapService.tileLayerParser;
-        const makeTask = (tile: FeatureTile): SearchWorkerTask => {
+        const makeTask = (tile: FeatureTile): SearchWorkerTask | null => {
+            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+            if (!tileBlobs.length) {
+                return null;
+            }
             const taskId = this.generateTaskId();
             const task: SearchWorkerTask = {
                 type: TASK_SEARCH,
                 tileId: tile.tileId,
-                tileBlob: tile.tileFeatureLayerBlob as Uint8Array,
+                tileBlobs,
                 fieldDictBlob: uint8ArrayFromWasm((buf) => {
                     tileParser?.getFieldDict(buf, tile.nodeId)
                 })!,
@@ -547,11 +551,15 @@ export class FeatureSearchService {
         const diagnosticsGroup = this.jobGroupManager.createGroup('diagnostics', query, this.generateTaskGroupId());
 
         const tileParser = this.mapService.tileLayerParser;
-        const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask => {
+        const makeDiagnosticsTask = (tile: FeatureTile): DiagnosticsWorkerTask | null => {
+            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+            if (!tileBlobs.length) {
+                return null;
+            }
             const taskId = this.generateTaskId();
             const task: DiagnosticsWorkerTask = {
                 type: TASK_DIAGNOSTICS,
-                blob: tile.tileFeatureLayerBlob as Uint8Array,
+                tileBlobs,
                 fieldDictBlob: uint8ArrayFromWasm((buf) => {
                     tileParser?.getFieldDict(buf, tile.nodeId)
                 })!,
@@ -573,7 +581,10 @@ export class FeatureSearchService {
         for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
             // TODO: Simplify this, see simfil issue #131
             this.mapService.getPrioritisedTiles(viewIndex).some((tile: FeatureTile) => {
-                diagTasks.push(makeDiagnosticsTask(tile));
+                const task = makeDiagnosticsTask(tile);
+                if (task) {
+                    diagTasks.push(task);
+                }
                 return true;
             });
         }
@@ -602,11 +613,15 @@ export class FeatureSearchService {
         // Build one task per tile
         const tileParser = this.mapService.tileLayerParser;
         const limit = this.completionCandidateLimit;
-        const makeTask = (tile: FeatureTile): CompletionWorkerTask => {
+        const makeTask = (tile: FeatureTile): CompletionWorkerTask | null => {
+            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+            if (!tileBlobs.length) {
+                return null;
+            }
             const taskId = this.generateTaskId();
             const task: CompletionWorkerTask = {
                 type: TASK_COMPLETION,
-                blob: tile.tileFeatureLayerBlob as Uint8Array,
+                tileBlobs,
                 fieldDictBlob: uint8ArrayFromWasm((buf) => {
                     tileParser?.getFieldDict(buf, tile.nodeId)
                 })!,
@@ -690,13 +705,33 @@ export class FeatureSearchService {
             this.currentSearch.addDiagnostics(tileResult.diagnostics);
         }
 
+        const seenFeatureKeys = new Set<string>();
+        const dedupedMatches = tileResult.matches.filter(([mapTileKey, featureId]) => {
+            let canonicalTileKey = mapTileKey;
+            try {
+                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+                canonicalTileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
+            } catch (_error) {
+                canonicalTileKey = mapTileKey;
+            }
+            const dedupeKey = `${canonicalTileKey}|${featureId}`;
+            if (seenFeatureKeys.has(dedupeKey)) {
+                return false;
+            }
+            seenFeatureKeys.add(dedupeKey);
+            return true;
+        });
+
         // Add visualizations and register the search result.
-        if (tileResult.matches.length && tileResult.tileId) {
-            const mapTileKey = tileResult.matches[0][0];
+        if (dedupedMatches.length && tileResult.tileId) {
+            const mapTileKey = dedupedMatches[0][0];
             const [mapId, layerId, _] = coreLib.parseMapTileKey(mapTileKey);
             const mapLayerId = `${mapId}/${layerId}`;
-            this.resultsPerTile.set(mapTileKey, tileResult);
-            this.resultTree.insert(tileResult.tileId, mapLayerId, tileResult.matches.map(result => {
+            this.resultsPerTile.set(mapTileKey, {
+                ...tileResult,
+                matches: dedupedMatches
+            });
+            this.resultTree.insert(tileResult.tileId, mapLayerId, dedupedMatches.map(result => {
                 if (result[2].cartographic) {
                     result[2].cartographicRad = Cartographic.fromDegrees(
                         result[2].cartographic.x,

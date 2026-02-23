@@ -1,6 +1,5 @@
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
-import {TileVisualization} from "../mapview/tile.visualization.model";
 
 export enum MapTileRequestStatus {
     Open = 0,
@@ -15,10 +14,8 @@ export const MAP_TILE_STREAM_TYPE_FIELDS = 1;
 export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
-export const MAP_TILE_STREAM_TYPE_LOAD_STATE = 5;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
-export const MAP_TILE_STREAM_FLOW_GRANT_TYPE = "mapget.tiles.flow-grant";
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 
 export interface MapTileStreamStatusRequest {
@@ -46,19 +43,10 @@ export enum TileLoadState {
     Ok = 130,               // Only used by erdblick
 }
 
-export interface MapTileStreamLoadStatePayload {
-    type: string;
-    requestId?: number;
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    state: TileLoadState;
-    stateText?: string;
-}
-
 export interface MapTileStreamRequestContextPayload {
     type: string;
     requestId: number;
+    clientId?: number;
 }
 
 export class MapTileStreamClient {
@@ -82,14 +70,21 @@ export class MapTileStreamClient {
     private processingFrameQueue: boolean = false;
     private frameProcessingPaused: boolean = false;
     private readonly frameTimeBudgetMs: number = 10;
-    private readonly flowControlEnabled: boolean = true;
+    private pullClientId: number | null = null;
+    private pullControllers: AbortController[] = [];
+    private readonly pullParallelism: number = 2;
+    private readonly pullWaitMs: number = 25000;
+    private readonly pullRetryDelayMs: number = 50;
+    private readonly pullBatchMaxBytesCap: number = 5 * 1024 * 1024;
+    private readonly pullBatchMinBytes: number = 64 * 1024;
+    private readonly pullDownstreamEwmaAlpha: number = 0.2;
+    private downstreamBytesPerSecondEwma: number = 512 * 1024;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
     onSourceData: ((payload: Uint8Array) => void) | null = null;
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
-    onLoadState: ((payload: MapTileStreamLoadStatePayload) => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
@@ -114,11 +109,6 @@ export class MapTileStreamClient {
 
     withStatusCallback(callback: (status: MapTileStreamStatusPayload) => void) {
         this.onStatus = callback;
-        return this;
-    }
-
-    withLoadStateCallback(callback: (payload: MapTileStreamLoadStatePayload) => void) {
-        this.onLoadState = callback;
         return this;
     }
 
@@ -167,6 +157,8 @@ export class MapTileStreamClient {
         this.latestRequestedRequestId = null;
         this.incomingRequestId = null;
         this.supportsRequestContextFrames = false;
+        this.pullClientId = null;
+        this.stopPullLoops();
         this.clearPendingFrames();
         this.resetCompletionPromise();
         if (this.parser) {
@@ -190,6 +182,10 @@ export class MapTileStreamClient {
         return this.frameProcessingPaused;
     }
 
+    getDownstreamBytesPerSecond(): number {
+        return this.downstreamBytesPerSecondEwma;
+    }
+
     sendRequest(body: object | string) {
         this.awaitingCompletion = true;
         this.lastStatusPayload = null;
@@ -211,7 +207,6 @@ export class MapTileStreamClient {
 
     async updateRequest(tileLayerRequests: any) {
         const requestBodyBase = {
-            flowControl: this.flowControlEnabled,
             requests: tileLayerRequests,
             stringPoolOffsets: this.parser!.getFieldDictOffsets(),
         };
@@ -311,6 +306,8 @@ export class MapTileStreamClient {
                 const isCurrent = this.socket === socket;
                 if (isCurrent) {
                     this.socket = null;
+                    this.pullClientId = null;
+                    this.stopPullLoops();
                 }
                 if (isCurrent) {
                     if (this.onClose) {
@@ -409,14 +406,10 @@ export class MapTileStreamClient {
         try {
             const startTime = Date.now();
             let handledMessages = 0;
-            let grantFrames = 0;
             while (this.frameQueue.length) {
                 const data = this.frameQueue.shift()!;
                 try {
-                    const flowAccounting = await this.handleMessage(data);
-                    if (flowAccounting.isFlowControlledDataFrame) {
-                        grantFrames += 1;
-                    }
+                    await this.handleMessage(data);
                     ++handledMessages;
                 } catch (err) {
                     console.error("Tile stream message handler failed.", err);
@@ -425,7 +418,6 @@ export class MapTileStreamClient {
                     break;
                 }
             }
-            this.sendFlowGrant(grantFrames);
         } finally {
             this.processingFrameQueue = false;
         }
@@ -435,7 +427,7 @@ export class MapTileStreamClient {
         }
     }
 
-    private async handleMessage(data: ArrayBuffer | Blob): Promise<{ isFlowControlledDataFrame: boolean; }> {
+    private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
@@ -444,33 +436,49 @@ export class MapTileStreamClient {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
             console.warn("Unexpected WebSocket message payload.");
-            return {isFlowControlledDataFrame: false};
+            return;
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
             console.warn("Tile stream frame too small.");
-            return {isFlowControlledDataFrame: false};
+            return;
         }
 
-        const type = bytes[6];
-        const isFlowControlledDataFrame = this.isFlowControlledDataFrameType(type);
-        if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
-            return {isFlowControlledDataFrame};
-        }
-
-        try {
-            const length = new DataView(bytes.buffer, bytes.byteOffset + 7, 4).getUint32(0, true);
-            if (bytes.length !== MAP_TILE_STREAM_HEADER_SIZE + length) {
+        let offset = 0;
+        while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
+            const type = bytes[offset + 6];
+            const payloadLength = new DataView(
+                bytes.buffer,
+                bytes.byteOffset + offset + 7,
+                4).getUint32(0, true);
+            const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
+            if (frameEnd > bytes.length) {
                 console.warn("Tile stream frame size mismatch.");
+                return;
             }
 
+            const frameBytes = bytes.subarray(offset, frameEnd);
+            await this.handleFrame(frameBytes, type);
+            offset = frameEnd;
+        }
+
+        if (offset !== bytes.length) {
+            console.warn("Tile stream frame alignment mismatch.");
+        }
+    }
+
+    private async handleFrame(bytes: Uint8Array, type: number): Promise<void> {
+        if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
+            return;
+        }
+        try {
             if (type === MAP_TILE_STREAM_TYPE_STATUS) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
                 try {
                     const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
                     if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame};
+                        return;
                     }
                     if (this.onStatus) {
                         this.onStatus(payload);
@@ -483,24 +491,7 @@ export class MapTileStreamClient {
                 } catch (err) {
                     console.error("Failed to parse /tiles status payload:", err);
                 }
-                return {isFlowControlledDataFrame};
-            }
-
-            if (type === MAP_TILE_STREAM_TYPE_LOAD_STATE) {
-                const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
-                const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamLoadStatePayload;
-                    if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return {isFlowControlledDataFrame};
-                    }
-                    if (this.onLoadState) {
-                        this.onLoadState(payload);
-                    }
-                } catch (err) {
-                    console.error("Failed to parse /tiles load-state payload:", err);
-                }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
@@ -511,11 +502,20 @@ export class MapTileStreamClient {
                     if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
                         this.supportsRequestContextFrames = true;
                         this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
+                        if (Number.isFinite(payload.clientId)) {
+                            const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
+                            if (this.pullClientId !== nextClientId) {
+                                this.pullClientId = nextClientId;
+                                this.startPullLoops();
+                            } else if (!this.pullControllers.length) {
+                                this.startPullLoops();
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error("Failed to parse /tiles request-context payload:", err);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
@@ -525,21 +525,21 @@ export class MapTileStreamClient {
                 if (this.onFields) {
                     this.onFields(bytes);
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
                 if (this.onFeatures) {
                     this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
                 if (this.onSourceData) {
                     this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
-                return {isFlowControlledDataFrame};
+                return;
             }
 
             if (this.onFrame) {
@@ -548,13 +548,6 @@ export class MapTileStreamClient {
         } catch (err) {
             console.error("Tile stream message handler failed.", err);
         }
-        return {isFlowControlledDataFrame};
-    }
-
-    private isFlowControlledDataFrameType(type: number): boolean {
-        return type === MAP_TILE_STREAM_TYPE_FIELDS
-            || type === MAP_TILE_STREAM_TYPE_FEATURES
-            || type === MAP_TILE_STREAM_TYPE_SOURCEDATA;
     }
 
     private matchesCurrentRequest(requestId: number | undefined): boolean {
@@ -567,24 +560,124 @@ export class MapTileStreamClient {
         return requestId === this.latestRequestedRequestId;
     }
 
-    private sendFlowGrant(frames: number) {
-        if (!this.flowControlEnabled) {
+    private startPullLoops() {
+        this.stopPullLoops();
+        if (this.pullClientId === null) {
             return;
         }
-        if (frames <= 0) {
+        for (let i = 0; i < this.pullParallelism; ++i) {
+            const controller = new AbortController();
+            this.pullControllers.push(controller);
+            this.runPullLoop(controller).catch(err => {
+                if (!controller.signal.aborted) {
+                    console.error("Tile pull loop failed.", err);
+                }
+            });
+        }
+    }
+
+    private stopPullLoops() {
+        for (const controller of this.pullControllers) {
+            controller.abort();
+        }
+        this.pullControllers = [];
+    }
+
+    private async runPullLoop(controller: AbortController) {
+        while (!controller.signal.aborted) {
+            const clientId = this.pullClientId;
+            if (clientId === null) {
+                return;
+            }
+
+            try {
+                const startedAt = performance.now();
+                const response = await fetch(this.resolvePullUrl(clientId), {
+                    method: "GET",
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+
+                if (controller.signal.aborted) {
+                    return;
+                }
+
+                if (response.status === 200) {
+                    const body = await response.arrayBuffer();
+                    if (controller.signal.aborted) {
+                        return;
+                    }
+                    const elapsedMs = Math.max(1, performance.now() - startedAt);
+                    this.recordDownstreamSample(body.byteLength, elapsedMs);
+                    this.enqueueFrame(body);
+                    continue;
+                }
+
+                if (response.status === 204) {
+                    continue;
+                }
+
+                if (response.status === 410) {
+                    if (this.pullClientId === clientId) {
+                        this.pullClientId = null;
+                        this.stopPullLoops();
+                    }
+                    return;
+                }
+            } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+            }
+
+            await this.delay(this.pullRetryDelayMs, controller.signal);
+        }
+    }
+
+    private resolvePullUrl(clientId: number): string {
+        const base = (typeof document !== "undefined" && document.baseURI)
+            ? document.baseURI
+            : window.location.href;
+        const normalizedPath = this.path.replace(/\/+$/, "");
+        const pullUrl = new URL(`${normalizedPath}/next`, base);
+        pullUrl.searchParams.set("clientId", String(clientId));
+        pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
+        pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
+        return pullUrl.toString();
+    }
+
+    private currentPullMaxBytes(): number {
+        const estimated = Math.max(this.pullBatchMinBytes, Math.floor(this.downstreamBytesPerSecondEwma));
+        return Math.min(this.pullBatchMaxBytesCap, estimated);
+    }
+
+    private recordDownstreamSample(bytes: number, elapsedMs: number) {
+        if (bytes <= 0 || elapsedMs <= 0) {
             return;
         }
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        const bytesPerSecond = bytes * 1000 / elapsedMs;
+        if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
             return;
         }
-        const payload = {
-            type: MAP_TILE_STREAM_FLOW_GRANT_TYPE,
-            frames: Math.max(0, Math.floor(frames)),
-        };
-        try {
-            this.socket.send(JSON.stringify(payload));
-        } catch (err) {
-            console.warn("Failed to send /tiles flow grant.", err);
+        this.downstreamBytesPerSecondEwma = this.pullDownstreamEwmaAlpha * bytesPerSecond
+            + (1 - this.pullDownstreamEwmaAlpha) * this.downstreamBytesPerSecondEwma;
+    }
+
+    private async delay(ms: number, signal: AbortSignal): Promise<void> {
+        if (signal.aborted || ms <= 0) {
+            return;
         }
+        await new Promise<void>(resolve => {
+            const timeout = setTimeout(() => {
+                signal.removeEventListener("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timeout);
+                signal.removeEventListener("abort", onAbort);
+                resolve();
+            };
+            signal.addEventListener("abort", onAbort, {once: true});
+        });
     }
 }

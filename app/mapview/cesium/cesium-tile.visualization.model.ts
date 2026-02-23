@@ -1,10 +1,10 @@
-import {FeatureTile} from "../mapdata/features.model";
-import {TileLoadState} from "../mapdata/tilestream";
-import {coreLib} from "../integrations/wasm";
-import {PrimitiveCollection, Viewer} from "../integrations/cesium";
-import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../build/libs/core/erdblick-core";
-import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "./pointmerge.service";
-import {TileBoxVisualization} from "./tilebox.visualization.model";
+import {FeatureTile} from "../../mapdata/features.model";
+import {coreLib} from "../../integrations/wasm";
+import {PrimitiveCollection, Viewer} from "../../integrations/cesium";
+import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../../build/libs/core/erdblick-core";
+import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
+import {CesiumTileBoxVisualization} from "./cesium-tilebox.visualization.model";
+import {IRenderSceneHandle, ITileVisualization} from "../render-view.model";
 
 export interface LocateResolution {
     tileId: string,
@@ -20,14 +20,44 @@ interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
 }
 
+function asCesiumViewer(sceneHandle: IRenderSceneHandle): Viewer | undefined {
+    if (sceneHandle.renderer !== "cesium") {
+        console.warn(`CesiumTileVisualization expects a Cesium scene handle, got "${sceneHandle.renderer}".`);
+        return undefined;
+    }
+    const viewer = sceneHandle.scene as Viewer;
+    if (!viewer || !(viewer as any).scene) {
+        console.warn("CesiumTileVisualization received an invalid Cesium scene handle.");
+        return undefined;
+    }
+    return viewer;
+}
+
+function annotatePrimitiveTileKey(primitive: any, tileKey: string): void {
+    if (!primitive || typeof primitive !== "object") {
+        return;
+    }
+    try {
+        primitive.tileKey = tileKey;
+    } catch (_) {
+        return;
+    }
+    if (typeof primitive.length !== "number" || typeof primitive.get !== "function") {
+        return;
+    }
+    for (let i = 0; i < primitive.length; i++) {
+        annotatePrimitiveTileKey(primitive.get(i), tileKey);
+    }
+}
+
 /** Bundle of a FeatureTile, a style, and a rendered Cesium visualization. */
-export class TileVisualization {
+export class CesiumTileVisualization implements ITileVisualization {
     tile: FeatureTile;
     isHighDetail: boolean;
     showTileBorder: boolean = false;
     readonly viewIndex: number;
 
-    private lowDetailVisu: TileBoxVisualization|null = null;
+    private lowDetailVisu: CesiumTileBoxVisualization|null = null;
     private primitiveCollection: PrimitiveCollection|null = null;
     private hasHighDetailVisualization: boolean = false;
     private hasTileBorder: boolean = false;
@@ -43,10 +73,11 @@ export class TileVisualization {
     private renderQueued: boolean = false;
     private styleOptionsVersion: number = 0;
     private renderedStyleOptionsVersion: number = 0;
+    private renderedTileDataVersion: number = -1;
 
     /**
      * Create a tile visualization.
-     * @param viewIndex Index of the MapView to which is TileVisualization is dedicated.
+     * @param viewIndex Index of the MapView to which is CesiumTileVisualization is dedicated.
      * @param tile The tile to visualize.
      * @param pointMergeService Instance of the central PointMergeService, used to visualize merged point features.
      * @param auxTileFun Callback which may be called to resolve external references
@@ -88,40 +119,29 @@ export class TileVisualization {
         this.viewIndex = viewIndex;
     }
 
-    private effectiveStatus(): TileLoadState | undefined {
-        const tileStatus = this.tile.status;
-        const renderStatus = this.renderQueued ? TileLoadState.RenderingQueued : undefined;
-        if (tileStatus === undefined) {
-            return renderStatus;
-        }
-        if (renderStatus === undefined) {
-            return tileStatus;
-        }
-        return tileStatus < renderStatus ? tileStatus : renderStatus;
-    }
-
     updateStatus(renderQueued?: boolean) {
         if (renderQueued !== undefined) {
             this.renderQueued = renderQueued;
-        }
-        if (this.lowDetailVisu) {
-            this.lowDetailVisu.setStatus(this, this.effectiveStatus());
         }
     }
 
     /**
      * Actually create the visualization.
-     * @param viewer {Viewer} The viewer to add the rendered entity to.
+     * @param sceneHandle Renderer scene handle.
      * @return True if anything was rendered, false otherwise.
      */
-    async render(viewer: Viewer) {
+    async render(sceneHandle: IRenderSceneHandle) {
+        const viewer = asCesiumViewer(sceneHandle);
+        if (!viewer) {
+            return false;
+        }
         if (this.renderingInProgress || this.deleted)
             return false;
 
         const renderStyleOptionsVersion = this.styleOptionsVersion;
 
         // Remove any previous render-result, as a new one is generated.
-        this.destroy(viewer);
+        this.destroy(sceneHandle);
         this.deleted = false;
 
         // Do not continue if the style was deleted while we were waiting.
@@ -135,7 +155,8 @@ export class TileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
-                let wasmVisualization = new coreLib.FeatureLayerVisualization(
+                const VisualizationCtor = (coreLib as any).CesiumFeatureLayerVisualization;
+                let wasmVisualization = new VisualizationCtor(
                     this.viewIndex,
                     this.tile.mapTileKey,
                     this.style,
@@ -206,8 +227,13 @@ export class TileVisualization {
 
                 if (!this.deleted) {
                     this.primitiveCollection = wasmVisualization.primitiveCollection();
+                    annotatePrimitiveTileKey(this.primitiveCollection, this.tile.mapTileKey);
                     for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(wasmVisualization.mergedPointFeatures())) {
-                        for (let finishedCornerTile of this.pointMergeService.insert(mergedPointVisualizations as MergedPointVisualization[], this.tile.tileId, mapLayerStyleRuleId)) {
+                        for (let finishedCornerTile of this.pointMergeService.insert(
+                            mergedPointVisualizations as MergedPointVisualization[],
+                            this.tile.tileId,
+                            this.tile.mapTileKey,
+                            mapLayerStyleRuleId)) {
                             finishedCornerTile.render(viewer);
                         }
                     }
@@ -232,31 +258,35 @@ export class TileVisualization {
         }
 
         // Low-detail bounding box and load-state overlays.
-        this.lowDetailVisu = TileBoxVisualization.get(
+        this.lowDetailVisu = CesiumTileBoxVisualization.get(
             this.viewIndex,
             this.tile,
             this.tile.numFeatures,
             viewer,
             this,
-            this.effectiveStatus(),
             this.showTileBorder);
         this.hasTileBorder = this.showTileBorder;
 
         this.renderedStyleOptionsVersion = renderStyleOptionsVersion;
+        this.renderedTileDataVersion = this.tile.dataVersion;
         this.renderingInProgress = false;
         this.updateStatus(false);
         if (this.deleted)
-            this.destroy(viewer);
+            this.destroy(sceneHandle);
         return returnValue;
     }
 
     /**
      * Destroy any current visualization.
-     * @param viewer {Viewer} The viewer to remove the rendered entity from.
+     * @param sceneHandle Renderer scene handle.
      */
-    destroy(viewer: Viewer) {
+    destroy(sceneHandle: IRenderSceneHandle) {
         this.deleted = true;
         if (this.renderingInProgress) {
+            return;
+        }
+        const viewer = asCesiumViewer(sceneHandle);
+        if (!viewer) {
             return;
         }
 
@@ -297,6 +327,7 @@ export class TileVisualization {
     isDirty() {
         return (
             this.styleOptionsVersion !== this.renderedStyleOptionsVersion ||
+            this.renderedTileDataVersion !== this.tile.dataVersion ||
             this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
             this.showTileBorder != this.hasTileBorder ||
             !this.lowDetailVisu
@@ -306,7 +337,7 @@ export class TileVisualization {
     /**
      * Combination of map name, layer name, style name and highlight mode which
      * (in combination with the tile id) uniquely identifies the rendered contents
-     * of this TileVisualization as expected by the surrounding MergedPointsTiles.
+     * of this CesiumTileVisualization as expected by the surrounding MergedPointsTiles.
      */
     private mapViewLayerStyleId(): MapViewLayerStyleRule {
         return this.pointMergeService.makeMapViewLayerStyleId(this.viewIndex, this.tile.mapName, this.tile.layerName, this.styleId, this.highlightMode);

@@ -1,7 +1,7 @@
 import {beforeAll, describe, expect, it, vi} from 'vitest';
-import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../integrations/wasm';
-import {FeatureTile} from '../mapdata/features.model';
-import {TileVisualization} from './tile.visualization.model';
+import {coreLib, initializeLibrary, uint8ArrayFromWasm} from '../../integrations/wasm';
+import {FeatureTile} from '../../mapdata/features.model';
+import {CesiumTileVisualization} from './cesium-tile.visualization.model';
 
 beforeAll(async () => {
     // Minimal polyfills for the jsdom test environment so Cesium's texture and image handling paths
@@ -41,7 +41,7 @@ beforeAll(async () => {
     await initializeLibrary();
 });
 
-describe('TileVisualization', () => {
+describe('CesiumTileVisualization', () => {
 
     const createViewer = () => {
         const primitives = {
@@ -97,8 +97,9 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -113,7 +114,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(true);
         expect(addSpy).toHaveBeenCalledTimes(2);
@@ -122,15 +123,16 @@ describe('TileVisualization', () => {
         visu.isHighDetail = false;
         expect(visu.isDirty()).toBe(true);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('renders only a low-detail tile border when high-detail is disabled', async () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             1,
             createTile({tileId: 2n}) as any,
             pointMergeService as any,
@@ -145,7 +147,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(true);
         expect(addSpy).toHaveBeenCalledTimes(1);
@@ -154,7 +156,7 @@ describe('TileVisualization', () => {
         visu.showTileBorder = false;
         expect(visu.isDirty()).toBe(true);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('marks visualization dirty when style options change', async () => {
@@ -162,8 +164,9 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -176,19 +179,19 @@ describe('TileVisualization', () => {
             {roadColor: '#f00'},
         );
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(visu.isDirty()).toBe(false);
 
         visu.setStyleOption('roadColor', '#0f0');
         expect(visu.isDirty()).toBe(true);
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(visu.isDirty()).toBe(false);
 
         visu.setStyleOption('roadColor', '#0f0');
         expect(visu.isDirty()).toBe(false);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
     });
 
     it('destroys visualizations and removes point-merge contributions', async () => {
@@ -201,8 +204,9 @@ describe('TileVisualization', () => {
         };
         const style = createStyle();
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -218,10 +222,10 @@ describe('TileVisualization', () => {
         const addSpy = vi.spyOn(primitives, 'add');
         const removeSpy = vi.spyOn(primitives, 'remove');
 
-        await visu.render(viewer as any);
+        await visu.render(sceneHandle as any);
         expect(addSpy).toHaveBeenCalledTimes(2);
 
-        visu.destroy(viewer as any);
+        visu.destroy(sceneHandle as any);
 
         expect(pointMergeService.remove).toHaveBeenCalledWith(tile.tileId, 'rule');
         expect(removedTiles[0].remove).toHaveBeenCalledWith(viewer);
@@ -234,8 +238,9 @@ describe('TileVisualization', () => {
         const pointMergeService = createPointMergeService();
         const style = createStyle({isDeleted: () => true});
         const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
 
-        const visu = new TileVisualization(
+        const visu = new CesiumTileVisualization(
             0,
             tile as any,
             pointMergeService as any,
@@ -247,7 +252,7 @@ describe('TileVisualization', () => {
         const primitives = (viewer.scene.primitives as any);
         const addSpy = vi.spyOn(primitives, 'add');
 
-        const result = await visu.render(viewer as any);
+        const result = await visu.render(sceneHandle as any);
 
         expect(result).toBe(false);
         expect(addSpy).not.toHaveBeenCalled();

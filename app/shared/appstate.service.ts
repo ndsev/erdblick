@@ -23,6 +23,9 @@ export const VIEW_SYNC_LAYERS = "lay";
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
+export const MAX_DECK_STYLE_WORKERS = 32;
+export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
+export type RendererMode = "cesium" | "deck";
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -45,6 +48,7 @@ export interface Versions {
 export interface TileFeatureId {
     featureId: string;
     mapTileKey: string;
+    featureIndex?: number;
 }
 
 export interface SelectedSourceData {
@@ -324,6 +328,32 @@ export class AppStateService implements OnDestroy {
         schema: Boolish,
         urlParamName: 'm2d',
         urlIncludeInVisualizationOnly: false
+    });
+
+    readonly rendererModeState = this.createState<RendererMode>({
+        name: 'rendererMode',
+        defaultValue: 'cesium',
+        schema: z.union([z.literal('cesium'), z.literal('deck')]),
+        urlParamName: 'rdr',
+        urlIncludeInVisualizationOnly: false
+    });
+
+    readonly deckStyleWorkersEnabledState = this.createState<boolean>({
+        name: 'deckStyleWorkersEnabled',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly deckStyleWorkersOverrideState = this.createState<boolean>({
+        name: 'deckStyleWorkersOverride',
+        defaultValue: false,
+        schema: Boolish
+    });
+
+    readonly deckStyleWorkersCountState = this.createState<number>({
+        name: 'deckStyleWorkersCount',
+        defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
+        schema: z.coerce.number().int().min(1).max(MAX_DECK_STYLE_WORKERS)
     });
 
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
@@ -748,6 +778,14 @@ export class AppStateService implements OnDestroy {
 
     get numViews() {return this.numViewsState.getValue();}
     set numViews(val: number) {this.numViewsState.next(val);};
+    get rendererMode() {return this.rendererModeState.getValue();}
+    set rendererMode(val: RendererMode) {this.rendererModeState.next(val);};
+    get deckStyleWorkersEnabled() {return this.deckStyleWorkersEnabledState.getValue();}
+    set deckStyleWorkersEnabled(val: boolean) {this.deckStyleWorkersEnabledState.next(val);};
+    get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
+    set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
+    get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
+    set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}

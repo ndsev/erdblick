@@ -16,3 +16,8 @@ dist
 coverage
 test-results
 playwright/.cache/*
+*-todo.md
+venv/
+dev-screenshots/
+dev/
+.venv*/

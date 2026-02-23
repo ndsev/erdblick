@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_map>
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 #include "mapget/model/feature.h"
 #include "sfl/small_vector.hpp"
 #include "simfil/model/string-pool.h"
@@ -89,7 +89,6 @@ public:
 
     std::string featureId_;
     uint32_t nextRelationIndex_ = 0;
-    uint32_t nextAttributeIndex_ = 0;
     InspectionNode root_;
     std::vector<InspectionNode*> stack_ = {&root_};
     InspectionNode* current_ = &root_;

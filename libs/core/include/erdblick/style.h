@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "buffer.h"
 #include "rule.h"
-#include "cesium-interface/object.h"
+#include "cesium-interface/cesium-object.h"
 
 #include <array>
 #include <string_view>
@@ -60,6 +60,7 @@ public:
     [[nodiscard]] std::string const& name() const;
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
     [[nodiscard]] bool defaultEnabled() const;
+    [[nodiscard]] uint32_t minimumStage() const;
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
     [[nodiscard]] std::vector<uint32_t> const& candidateRuleIndices(
@@ -101,6 +102,7 @@ private:
     std::vector<FeatureStyleOption> options_;
     bool valid_ = false;
     bool enabled_ = true;
+    uint32_t stage_ = 0;
     std::string name_;
     std::optional<std::regex> layerAffinity_;
     std::array<RuleIndexList, kHighlightModeCount> ruleIndicesByMode_{};

@@ -1,5 +1,5 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Renderer2, ViewChild} from "@angular/core";
-import {Camera, Cartesian3, Rectangle, Scene} from "../integrations/cesium";
+import {Camera, Cartesian3, CesiumMath, Rectangle, Scene} from "../integrations/cesium";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
 import {MapDataService} from "../mapdata/map.service";
@@ -528,7 +528,15 @@ export class SearchPanelComponent implements AfterViewInit {
             });
             this.jumpService.markedPosition.next(coordinates);
         } else {
-            this.mapService.moveToRectangleTopic.next({targetView: targetViewIndex, rectangle: coordinates});
+            this.mapService.moveToRectangleTopic.next({
+                targetView: targetViewIndex,
+                rectangle: {
+                    west: CesiumMath.toDegrees(coordinates.west),
+                    south: CesiumMath.toDegrees(coordinates.south),
+                    east: CesiumMath.toDegrees(coordinates.east),
+                    north: CesiumMath.toDegrees(coordinates.north),
+                }
+            });
         }
     }
 

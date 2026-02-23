@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mapget/model/feature.h"
+#include "mapget/model/featurelayer.h"
 #include "simfil/model/nodes.h"
 #include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"

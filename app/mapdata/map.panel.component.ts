@@ -9,7 +9,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
-import {Rectangle} from "../integrations/cesium";
+import {CesiumMath, Rectangle} from "../integrations/cesium";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
 
@@ -501,7 +501,15 @@ export class MapPanelComponent {
         }
         this.stateService.focusedView = viewIndex;
         this.mapService.moveToRectangleTopic.next(
-            {targetView: viewIndex, rectangle: targetRect!}
+            {
+                targetView: viewIndex,
+                rectangle: {
+                    west: CesiumMath.toDegrees(targetRect!.west),
+                    south: CesiumMath.toDegrees(targetRect!.south),
+                    east: CesiumMath.toDegrees(targetRect!.east),
+                    north: CesiumMath.toDegrees(targetRect!.north),
+                }
+            }
         );
     }
 

@@ -44,6 +44,11 @@ uint64_t TileFeatureLayer::tileId() const
     return model_->tileId().value_;
 }
 
+uint32_t TileFeatureLayer::stage() const
+{
+    return model_->stage().value_or(0U);
+}
+
 /**
  * Gets the number of features in the tile.
  * @return The number of features.
@@ -83,6 +88,14 @@ mapget::model_ptr<mapget::Feature> TileFeatureLayer::find(const std::string& id)
     return model_->find(id);
 }
 
+void TileFeatureLayer::attachOverlay(TileFeatureLayer const& overlay)
+{
+    if (!model_ || !overlay.model_) {
+        return;
+    }
+    model_->attachOverlay(overlay.model_);
+}
+
 /**
  * Finds the index of a feature based on its type and ID parts.
  * @param type The type of the feature.
@@ -95,6 +108,24 @@ int32_t TileFeatureLayer::findFeatureIndex(std::string type, NativeJsValue idPar
     if (auto result = model_->find(type, idPartsKvp))
         return result->addr().index();
     return -1;
+}
+
+std::string TileFeatureLayer::featureIdByIndex(uint32_t index) const
+{
+    if (index >= model_->numRoots()) {
+        return {};
+    }
+    uint32_t currentIndex = 0;
+    for (auto&& feature : *model_) {
+        if (currentIndex++ != index) {
+            continue;
+        }
+        if (auto featureId = feature->id()) {
+            return featureId->toString();
+        }
+        return {};
+    }
+    return {};
 }
 
 TileFeatureLayer::~TileFeatureLayer() = default;
