@@ -70,7 +70,12 @@ export class FeaturePanelComponent implements OnDestroy {
         effect(() => {
             this.rebuildInspectionTree();
         });
-        this.tileUpdateSubscription = this.mapService.statsDialogNeedsUpdate.subscribe(() => {
+        this.tileUpdateSubscription = this.mapService.selectionTileUpdated.subscribe(tileKey => {
+            const selectedFeatures = this.panel().features ?? [];
+            const hasUpdatedSelectionTile = selectedFeatures.some(feature => feature.mapTileKey === tileKey);
+            if (!hasUpdatedSelectionTile) {
+                return;
+            }
             this.rebuildInspectionTree();
         });
     }

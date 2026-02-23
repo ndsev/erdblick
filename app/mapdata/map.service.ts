@@ -74,7 +74,6 @@ export class MapDataService {
     public legalInformationPerMap = new Map<string, Set<string>>();
     public legalInformationUpdated = new Subject<boolean>();
     private tileStream: MapTileStreamClient|null = null;
-    private featureLayerParsingQueue: Uint8Array[] = [];
     private selectionVisualizations: ITileVisualization[];
     private hoverVisualizations: ITileVisualization[];
     private viewVisualizationState: ViewVisualizationState[] = [];
@@ -117,6 +116,8 @@ export class MapDataService {
 
     selectionTileRequests: SelectionTileRequest[] = [];
     statsDialogNeedsUpdate: Subject<void> = new Subject<void>();
+    selectionTileUpdated: Subject<string> = new Subject<string>();
+    private selectedTileKeys: Set<string> = new Set<string>();
 
     constructor(public styleService: StyleService,
                 public stateService: AppStateService,
@@ -265,6 +266,18 @@ export class MapDataService {
             this.selectionTopic.next(convertedSelections);
         });
         this.selectionTopic.subscribe(selectedPanels => {
+            const nextSelectedTileKeys = new Set<string>();
+            for (const panel of selectedPanels) {
+                for (const feature of panel.features) {
+                    nextSelectedTileKeys.add(feature.mapTileKey);
+                }
+                const sourceDataTileKey = panel.sourceData?.mapTileKey;
+                if (sourceDataTileKey) {
+                    nextSelectedTileKeys.add(sourceDataTileKey);
+                }
+            }
+            this.selectedTileKeys = nextSelectedTileKeys;
+
             // TODO: Consider only visualizing updated selections/features and not the whole set of the panels
             this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedPanels);
             // If a hovered feature is selected, eliminate it from the hover highlights.
@@ -375,8 +388,7 @@ export class MapDataService {
         }
 
         const downstreamBytesPerSecond = this.tileStream?.getDownstreamBytesPerSecond() ?? 0;
-        const parseQueueSize = (this.tileStream?.getPendingFrameQueueSize() ?? 0)
-            + this.featureLayerParsingQueue.length;
+        const parseQueueSize = this.tileStream?.getPendingFrameQueueSize() ?? 0;
         const renderQueueSize = this.visualizationQueueLength();
         const viewportRenderSeconds = this.currentViewportRenderSeconds();
         return {
@@ -1061,6 +1073,9 @@ export class MapDataService {
         });
 
         this.statsDialogNeedsUpdate.next();
+        if (this.selectedTileKeys.has(tileLayer.mapTileKey)) {
+            this.selectionTileUpdated.next(tileLayer.mapTileKey);
+        }
 
         // Update legal information if any.
         if (tileLayer.legalInfo) {
