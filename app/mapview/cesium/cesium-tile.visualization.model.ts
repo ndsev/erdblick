@@ -73,7 +73,7 @@ export class CesiumTileVisualization implements ITileVisualization {
     private renderQueued: boolean = false;
     private styleOptionsVersion: number = 0;
     private renderedStyleOptionsVersion: number = 0;
-    private renderedTileDataVersion: number = -1;
+    private renderedRelevantTileDataVersion: number = -1;
 
     /**
      * Create a tile visualization.
@@ -155,6 +155,7 @@ export class CesiumTileVisualization implements ITileVisualization {
         let returnValue = true;
         if (this.isHighDetailAndNotEmpty()) {
             returnValue = await this.tile.peekAsync(async (tileFeatureLayer: TileFeatureLayer) => {
+                this.setTileVertexCount(Number(tileFeatureLayer.numVertices()));
                 const VisualizationCtor = (coreLib as any).CesiumFeatureLayerVisualization;
                 let wasmVisualization = new VisualizationCtor(
                     this.viewIndex,
@@ -268,7 +269,7 @@ export class CesiumTileVisualization implements ITileVisualization {
         this.hasTileBorder = this.showTileBorder;
 
         this.renderedStyleOptionsVersion = renderStyleOptionsVersion;
-        this.renderedTileDataVersion = this.tile.dataVersion;
+        this.renderedRelevantTileDataVersion = this.relevantTileDataVersion();
         this.renderingInProgress = false;
         this.updateStatus(false);
         if (this.deleted)
@@ -327,7 +328,7 @@ export class CesiumTileVisualization implements ITileVisualization {
     isDirty() {
         return (
             this.styleOptionsVersion !== this.renderedStyleOptionsVersion ||
-            this.renderedTileDataVersion !== this.tile.dataVersion ||
+            this.renderedRelevantTileDataVersion !== this.relevantTileDataVersion() ||
             this.isHighDetailAndNotEmpty() != this.hasHighDetailVisualization ||
             this.showTileBorder != this.hasTileBorder ||
             !this.lowDetailVisu
@@ -350,5 +351,29 @@ export class CesiumTileVisualization implements ITileVisualization {
         this.options[optionId] = value;
         this.styleOptionsVersion++;
         return true;
+    }
+
+    private minimumStage(): number {
+        const styleWithMinimumStage = this.style as FeatureLayerStyle & { minimumStage?: () => number };
+        if (typeof styleWithMinimumStage.minimumStage !== "function") {
+            return 0;
+        }
+        const rawValue = styleWithMinimumStage.minimumStage();
+        if (!Number.isFinite(rawValue)) {
+            return 0;
+        }
+        return Math.max(0, Math.floor(rawValue));
+    }
+
+    private relevantTileDataVersion(): number {
+        const tileWithStageVersion = this.tile as FeatureTile & { dataVersionUpToStage?: (maxStage: number) => number };
+        if (typeof tileWithStageVersion.dataVersionUpToStage !== "function") {
+            return this.tile.dataVersion;
+        }
+        return tileWithStageVersion.dataVersionUpToStage(this.minimumStage());
+    }
+
+    private setTileVertexCount(count: number): void {
+        this.tile.setVertexCount(Math.max(0, Math.floor(Number(count))));
     }
 }

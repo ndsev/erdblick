@@ -229,6 +229,73 @@ describe("DeckTileVisualization", () => {
         expect(visu.isDirty()).toBe(false);
     });
 
+    it("ignores tile data version bumps above the style minimum stage", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        let relevantVersion = 1;
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 2,
+            dataVersion: 10,
+            hasData: () => true,
+            dataVersionUpToStage: () => relevantVersion,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            minimumStage: () => 0
+        } as any;
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            true,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async () => ({
+            length: 1,
+            coordinateOrigin: [11, 48, 0] as [number, number, number],
+            startIndices: new Uint32Array([0, 2]),
+            featureIds: [null],
+            featureIdsByVertex: [null, null],
+            attributes: {
+                getPath: {
+                    value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
+                    size: 3
+                },
+                instanceColors: {
+                    value: new Uint8Array([32, 196, 255, 220]),
+                    size: 4
+                },
+                instanceStrokeWidths: {
+                    value: new Float32Array([2]),
+                    size: 1
+                },
+                instanceDashArrays: {
+                    value: new Float32Array([1, 0]),
+                    size: 2
+                }
+            }
+        });
+
+        await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
+        expect(visu.isDirty()).toBe(false);
+
+        tile.dataVersion += 1;
+        expect(visu.isDirty()).toBe(false);
+
+        relevantVersion += 1;
+        expect(visu.isDirty()).toBe(true);
+    });
+
     it("does not emit placeholder label layers when no path geometry is available", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);

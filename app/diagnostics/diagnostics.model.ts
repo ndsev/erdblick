@@ -9,6 +9,8 @@ export interface LoadingStatBubbles {
     downstreamBytesPerSecond: number;
     features: number;
     vertices: number;
+    parseQueueSize: number;
+    renderQueueSize: number;
     renderSeconds: number;
 }
 

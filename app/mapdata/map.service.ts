@@ -51,6 +51,8 @@ export interface TileLoadingHudStats {
     downstreamBytesPerSecond: number;
     features: number;
     vertices: number;
+    parseQueueSize: number;
+    renderQueueSize: number;
     viewportRenderSeconds: number;
 }
 
@@ -370,12 +372,17 @@ export class MapDataService {
         }
 
         const downstreamBytesPerSecond = this.tileStream?.getDownstreamBytesPerSecond() ?? 0;
+        const parseQueueSize = (this.tileStream?.getPendingFrameQueueSize() ?? 0)
+            + this.featureLayerParsingQueue.length;
+        const renderQueueSize = this.visualizationQueueLength();
         const viewportRenderSeconds = this.currentViewportRenderSeconds();
         return {
             backend: this.getBackendRequestProgress(),
             downstreamBytesPerSecond,
             features,
             vertices,
+            parseQueueSize,
+            renderQueueSize,
             viewportRenderSeconds
         };
     }
@@ -413,20 +420,7 @@ export class MapDataService {
     }
 
     private vertexCountFromTileStats(tile: FeatureTile): number {
-        let vertices = 0;
-        for (const [key, values] of tile.stats) {
-            if (!values?.length) {
-                continue;
-            }
-            if (!/vert/i.test(key) || /#ms$/i.test(key) || /#kb$/i.test(key)) {
-                continue;
-            }
-            const value = values[values.length - 1];
-            if (Number.isFinite(value)) {
-                vertices += Math.max(0, Math.round(value));
-            }
-        }
-        return vertices;
+        return tile.vertexCount();
     }
 
     public isTileStreamConnected(): boolean {
@@ -486,6 +480,18 @@ export class MapDataService {
         }
         if (statusMessage) {
             console.info("/tiles status:", statusMessage);
+        }
+        if (!requests.length) {
+            if (status.allDone && this.backendRequestProgress.total > 0 && !this.backendRequestProgress.allDone) {
+                this.backendRequestProgress = {
+                    ...this.backendRequestProgress,
+                    done: this.backendRequestProgress.total,
+                    allDone: true,
+                    requestId: status.requestId ?? this.backendRequestProgress.requestId
+                };
+                this.tryFinalizeViewportRenderDuration();
+            }
+            return;
         }
         const doneRequests = requests.filter(req => req.status !== MapTileRequestStatus.Open).length;
         this.backendRequestProgress = {
@@ -995,13 +1001,20 @@ export class MapDataService {
         }
         const requestSent = await this.tileStream!.updateRequest(requests);
         if (requestSent) {
+            const previousProgress = this.backendRequestProgress;
+            const hasPreviousProgress = previousProgress.total > 0;
+            const newTotal = requests.length;
             this.backendRequestProgress = {
-                done: 0,
-                total: requests.length,
-                allDone: requests.length === 0
+                done: newTotal === 0 && hasPreviousProgress
+                    ? previousProgress.total
+                    : 0,
+                total: newTotal === 0 && hasPreviousProgress
+                    ? previousProgress.total
+                    : newTotal,
+                allDone: newTotal === 0
             };
             this.viewportLoadStartedAtMs = performance.now();
-            this.viewportRenderCompletedAtMs = requests.length === 0
+            this.viewportRenderCompletedAtMs = newTotal === 0
                 ? this.viewportLoadStartedAtMs
                 : null;
         }

@@ -257,4 +257,40 @@ describe('CesiumTileVisualization', () => {
         expect(result).toBe(false);
         expect(addSpy).not.toHaveBeenCalled();
     });
+
+    it('ignores tile data version bumps above the style minimum stage', async () => {
+        const tile = createTile({tileId: 3n});
+        let relevantVersion = 1;
+        (tile as any).dataVersion = 10;
+        (tile as any).dataVersionUpToStage = () => relevantVersion;
+
+        const pointMergeService = createPointMergeService();
+        const style = createStyle();
+        (style as any).minimumStage = () => 0;
+        const viewer = createViewer();
+        const sceneHandle = {renderer: 'cesium' as const, scene: viewer};
+
+        const visu = new CesiumTileVisualization(
+            0,
+            tile as any,
+            pointMergeService as any,
+            () => null,
+            style as any,
+            false,
+            coreLib.HighlightMode.NO_HIGHLIGHT,
+            undefined,
+            true,
+        );
+
+        await visu.render(sceneHandle as any);
+        expect(visu.isDirty()).toBe(false);
+
+        // Simulate arrival of higher-stage data that does not affect the style's minimum stage.
+        (tile as any).dataVersion += 1;
+        expect(visu.isDirty()).toBe(false);
+
+        // A relevant-stage update still marks the visualization dirty.
+        relevantVersion += 1;
+        expect(visu.isDirty()).toBe(true);
+    });
 });

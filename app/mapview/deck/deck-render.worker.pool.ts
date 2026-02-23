@@ -25,6 +25,7 @@ export interface DeckPathRenderRequest {
 }
 
 export interface DeckPathRenderBuffers {
+    vertexCount: number;
     pointPositions: Float32Array;
     pointColors: Uint8Array;
     pointRadii: Float32Array;
@@ -179,6 +180,7 @@ export class DeckRenderWorkerPool {
         }
 
         pending.resolve({
+            vertexCount: Math.max(0, Math.floor(result.vertexCount)),
             pointPositions: this.toFloat32Array(result.pointPositions),
             pointColors: this.toUint8Array(result.pointColors),
             pointRadii: this.toFloat32Array(result.pointRadii),
