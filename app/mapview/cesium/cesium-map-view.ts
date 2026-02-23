@@ -322,17 +322,34 @@ export class CesiumMapView implements IRenderView {
     }
 
     private resolvePickedFeatureIds(picked: any): TileFeatureId[] {
-        const tileKeyFromPrimitive = (picked?.primitive as any)?.tileKey;
+        const primitive = picked?.primitive as any;
+        const tileKeyFromPrimitive = primitive?.tileKey;
         const tileKey = typeof tileKeyFromPrimitive === "string" ? tileKeyFromPrimitive : undefined;
-        const idTileKeysRaw = (picked?.primitive as any)?.idTileKeys;
+        const idTileKeysRaw = picked?.idTileKeys ?? primitive?.idTileKeys;
         const idTileKeys = Array.isArray(idTileKeysRaw) ? idTileKeysRaw : undefined;
-        const pickedId = picked?.id;
+        const pickedId = picked?.id ?? primitive?.id;
 
         const resolve = (rawId: unknown, fallbackTileKey: string | undefined): TileFeatureId | null => {
-            if (!Number.isInteger(rawId) || !fallbackTileKey) {
+            if (rawId && typeof rawId === "object") {
+                const candidate = rawId as Partial<TileFeatureId>;
+                if (typeof candidate.featureId === "string" && typeof candidate.mapTileKey === "string") {
+                    const featureIndex = Number(candidate.featureIndex);
+                    return {
+                        featureId: candidate.featureId,
+                        mapTileKey: candidate.mapTileKey,
+                        featureIndex: Number.isInteger(featureIndex) && featureIndex >= 0 ? featureIndex : undefined
+                    };
+                }
+            }
+
+            if (!fallbackTileKey) {
                 return null;
             }
-            return this.mapService.resolveTileFeatureIdByIndex(fallbackTileKey, rawId as number);
+            const index = Number(rawId);
+            if (!Number.isInteger(index) || index < 0) {
+                return null;
+            }
+            return this.mapService.resolveTileFeatureIdByIndex(fallbackTileKey, index);
         };
 
         if (Array.isArray(pickedId)) {
@@ -351,6 +368,41 @@ export class CesiumMapView implements IRenderView {
 
         const resolved = resolve(pickedId, tileKey);
         return resolved ? [resolved] : [];
+    }
+
+    private selectFeatureIds(featureIds: TileFeatureId[], lockSelection: boolean): void {
+        if (!featureIds.length) {
+            return;
+        }
+
+        if (featureIds.length === 1) {
+            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
+            if (lockSelection && panelId !== undefined) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+            return;
+        }
+
+        // Open one panel per merged feature.
+        this.stateService.unsetUnlockedSelections();
+        let remainingSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
+        if (remainingSlots <= 0) {
+            return;
+        }
+
+        for (const featureId of featureIds) {
+            if (remainingSlots <= 0) {
+                break;
+            }
+            const panelId = this.stateService.setSelection([featureId], undefined, true);
+            if (panelId === undefined) {
+                continue;
+            }
+            remainingSlots -= 1;
+            if (lockSelection) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+        }
     }
 
     pickCartographic(screenPos: {x: number; y: number}): { lon: number; lat: number; alt: number } | undefined {
@@ -546,7 +598,7 @@ export class CesiumMapView implements IRenderView {
                     // Just select the feature.
                     const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
                     if (selectedFeatureIds.length) {
-                        this.stateService.setSelection(selectedFeatureIds);
+                        this.selectFeatureIds(selectedFeatureIds, false);
                     }
                 }
             } else {
@@ -575,10 +627,7 @@ export class CesiumMapView implements IRenderView {
                 // Select the feature and pin the panel immediately.
                 const selectedFeatureIds = this.resolvePickedFeatureIds(feature);
                 if (selectedFeatureIds.length) {
-                    const id = this.stateService.setSelection(selectedFeatureIds, undefined, true);
-                    if (id !== undefined) {
-                        this.stateService.setInspectionPanelLockedState(id, true);
-                    }
+                    this.selectFeatureIds(selectedFeatureIds, true);
                 }
             }
 
@@ -663,56 +712,6 @@ export class CesiumMapView implements IRenderView {
             this.stateService.focusedView = this._viewIndex;
         }, ScreenSpaceEventType.LEFT_DOWN);
 
-    }
-
-    private isTileFeatureId(value: any): value is TileFeatureId {
-        return value !== null &&
-            typeof value === 'object' &&
-            typeof value.featureId === 'string' &&
-            typeof value.mapTileKey === 'string';
-    }
-
-    private selectedFeatureIdsFromPick(feature: any): TileFeatureId[] {
-        const rawFeatureIds = Array.isArray(feature?.id) ? feature.id : [feature?.id];
-        return rawFeatureIds.filter((value: any) => this.isTileFeatureId(value));
-    }
-
-    private selectFeatureFromPick(feature: any, lockSelection: boolean) {
-        const featureIds = this.selectedFeatureIdsFromPick(feature);
-        if (!featureIds.length) {
-            return;
-        }
-
-        if (featureIds.length === 1) {
-            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
-            if (lockSelection && panelId !== undefined) {
-                this.stateService.setInspectionPanelLockedState(panelId, true);
-            }
-            return;
-        }
-
-        // Merged picks should replace unlocked feature inspections and open one panel per feature.
-        this.stateService.unsetUnlockedSelections();
-        const availableSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
-        if (availableSlots <= 0) {
-            this.stateService.setSelection([featureIds[0]], undefined, true);
-            return;
-        }
-
-        let remainingSlots = availableSlots;
-        for (const featureId of featureIds) {
-            if (remainingSlots <= 0) {
-                break;
-            }
-            const panelId = this.stateService.setSelection([featureId], undefined, true);
-            if (panelId === undefined) {
-                continue;
-            }
-            remainingSlots -= 1;
-            if (lockSelection) {
-                this.stateService.setInspectionPanelLockedState(panelId, true);
-            }
-        }
     }
 
     /**

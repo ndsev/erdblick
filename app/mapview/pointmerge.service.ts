@@ -152,8 +152,9 @@ export class MergedPointsTile {
         this.labelPrimitives = new LabelCollection();
 
         for (let [_, feature] of this.features) {
+            const pointIds = this.makeCesiumTileFeatureIds(feature);
             if (feature.pointParameters) {
-                feature.pointParameters["id"] = feature.featureIds;
+                feature.pointParameters["id"] = pointIds;
                 feature.pointParameters["idTileKeys"] = feature.idTileKeys ?? [];
                 if (feature.pointParameters.hasOwnProperty("image")) {
                     this.billboardPrimitives.add(feature.pointParameters);
@@ -163,7 +164,7 @@ export class MergedPointsTile {
                 }
             }
             if (feature.labelParameters) {
-                feature.labelParameters["id"] = feature.featureIds;
+                feature.labelParameters["id"] = pointIds;
                 feature.labelParameters["idTileKeys"] = feature.idTileKeys ?? [];
                 this.labelPrimitives.add(feature.labelParameters);
             }
@@ -412,6 +413,20 @@ export class MergedPointsTile {
 
     private makeDeckLayerKey(kind: string): string {
         return `merged/${this.mapViewLayerStyleRuleId}/${this.tileId.toString()}/${kind}`;
+    }
+
+    private makeCesiumTileFeatureIds(feature: MergedPointVisualization): Array<{
+        featureId: string;
+        featureIndex: number;
+        mapTileKey: string;
+    }> {
+        const idTileKeys = feature.idTileKeys ?? [];
+        const fallbackTileKey = idTileKeys[0] ?? "";
+        return feature.featureIds.map((featureIndex, index) => ({
+            featureId: String(featureIndex),
+            featureIndex,
+            mapTileKey: idTileKeys[index] ?? fallbackTileKey
+        }));
     }
 
     private toDeckColor(input: any, fallback: DeckColor): DeckColor {

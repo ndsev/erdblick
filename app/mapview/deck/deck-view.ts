@@ -525,9 +525,41 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const shouldPinPanel = !!event?.srcEvent?.ctrlKey;
-        const panelId = this.stateService.setSelection(featureIds, undefined, shouldPinPanel);
-        if (shouldPinPanel && panelId !== undefined) {
-            this.stateService.setInspectionPanelLockedState(panelId, true);
+        this.selectFeatureIds(featureIds, shouldPinPanel);
+    }
+
+    private selectFeatureIds(featureIds: TileFeatureId[], lockSelection: boolean): void {
+        if (!featureIds.length) {
+            return;
+        }
+
+        if (featureIds.length === 1) {
+            const panelId = this.stateService.setSelection([featureIds[0]], undefined, lockSelection);
+            if (lockSelection && panelId !== undefined) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
+            return;
+        }
+
+        // Open one panel per merged feature.
+        this.stateService.unsetUnlockedSelections();
+        let remainingSlots = Math.max(0, this.stateService.inspectionsLimit - this.stateService.selection.length);
+        if (remainingSlots <= 0) {
+            return;
+        }
+
+        for (const featureId of featureIds) {
+            if (remainingSlots <= 0) {
+                break;
+            }
+            const panelId = this.stateService.setSelection([featureId], undefined, true);
+            if (panelId === undefined) {
+                continue;
+            }
+            remainingSlots -= 1;
+            if (lockSelection) {
+                this.stateService.setInspectionPanelLockedState(panelId, true);
+            }
         }
     }
 

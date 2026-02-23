@@ -324,6 +324,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.bindDialogFocus();
         this.bindDockDragCue();
         this.applyInitialPosition();
+        setTimeout(() => this.featurePanel?.refresh(), 0);
     }
 
     protected onDialogDragEnd() {

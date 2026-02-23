@@ -24,9 +24,9 @@ interface InspectionModelData {
 @Component({
     selector: 'feature-panel',
     template: `
-        <div style="position: relative; width: 100%; height: 100%">
+        <div style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
             @if (loading) {
-                <div class="spinner">
+                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.55);">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
             }
@@ -34,7 +34,8 @@ interface InspectionModelData {
                              [geoJson]="geoJson" [selectedFeatures]="selectedFeatures"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
-                             [enableSourceDataNavigation]="enableSourceDataNavigation()">
+                             [enableSourceDataNavigation]="enableSourceDataNavigation()"
+                             style="flex: 1 1 auto; min-height: 0;">
             </inspection-tree>
         </div>
     `,
@@ -78,8 +79,20 @@ export class FeaturePanelComponent implements OnDestroy {
         this.tileUpdateSubscription.unsubscribe();
     }
 
+    refresh() {
+        this.rebuildInspectionTree();
+        this.inspectionTree?.refreshLayout();
+    }
+
     private rebuildInspectionTree() {
-        this.selectedFeatures = this.panel().features;
+        this.selectedFeatures = this.panel().features ?? [];
+        if (!this.selectedFeatures.length) {
+            this.loading = false;
+            this.geoJson = `{"type":"FeatureCollection","features":[]}`;
+            this.treeData = [];
+            return;
+        }
+
         this.loading = this.selectedFeatures.some(feature =>
             !this.mapService.isTileInspectionDataComplete(feature.featureTile));
 
@@ -91,8 +104,17 @@ export class FeaturePanelComponent implements OnDestroy {
                 selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
             });
         });
-        this.geoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
-        this.treeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
+        const nextGeoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
+        const nextTreeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
+
+        // During staged loading, keep the existing tree until inspection data is available.
+        if (!nextTreeData.length && this.loading && this.treeData.length) {
+            return;
+        }
+
+        this.geoJson = nextGeoJson;
+        this.treeData = nextTreeData;
+        this.inspectionTree?.refreshLayout();
     }
 
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
