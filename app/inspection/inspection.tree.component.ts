@@ -1,4 +1,14 @@
-import {ChangeDetectionStrategy, ChangeDetectorRef, Component, ViewChild, input, OnDestroy, effect, output} from "@angular/core";
+import {
+    AfterViewInit,
+    ChangeDetectionStrategy,
+    ChangeDetectorRef,
+    Component,
+    ViewChild,
+    input,
+    OnDestroy,
+    effect,
+    output
+} from "@angular/core";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {TreeTable} from "primeng/treetable";
 import {toObservable} from "@angular/core/rxjs-interop";
@@ -193,7 +203,7 @@ export class FeatureFilterOptions {
     `],
     standalone: false
 })
-export class InspectionTreeComponent implements OnDestroy {
+export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -226,6 +236,9 @@ export class InspectionTreeComponent implements OnDestroy {
     private lastEmittedFilterText = "";
     private frozen = false;
     private destroyed = false;
+    private resizeObserver?: ResizeObserver;
+    private scrollerRecalcFrame?: number;
+    private readonly onWindowResize = () => this.scheduleScrollerRecalc();
 
     @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
@@ -244,6 +257,7 @@ export class InspectionTreeComponent implements OnDestroy {
                 this.expandTreeNodes(this.data);
             }
 
+            this.scheduleScrollerRecalc();
             this.refreshLayout();
 
             this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
@@ -263,11 +277,39 @@ export class InspectionTreeComponent implements OnDestroy {
             this.suppressFilterEmit = false;
             this.cdr.markForCheck();
         });
+        this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
+            setTimeout(() => this.table?.scrollToVirtualIndex(index ?? 0), 5);
+        }));
+    }
+
+    ngAfterViewInit() {
+        this.scheduleScrollerRecalc();
+        const hostElement = (this.table as any)?.el?.nativeElement as HTMLElement | undefined;
+        if (hostElement && typeof ResizeObserver !== "undefined") {
+            this.resizeObserver = new ResizeObserver(() => this.scheduleScrollerRecalc());
+            this.resizeObserver.observe(hostElement);
+            const container = hostElement.closest(".resizable-container");
+            if (container instanceof HTMLElement) {
+                this.resizeObserver.observe(container);
+            }
+        }
+        if (typeof window !== "undefined") {
+            window.addEventListener("resize", this.onWindowResize);
+        }
     }
 
     ngOnDestroy() {
         this.destroyed = true;
         this.unfreeze();
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = undefined;
+        if (typeof window !== "undefined") {
+            window.removeEventListener("resize", this.onWindowResize);
+        }
+        if (this.scrollerRecalcFrame !== undefined) {
+            window.cancelAnimationFrame(this.scrollerRecalcFrame);
+            this.scrollerRecalcFrame = undefined;
+        }
         this.subscriptions.forEach(s => s.unsubscribe());
     }
 
@@ -287,7 +329,26 @@ export class InspectionTreeComponent implements OnDestroy {
         this.cdr.reattach();
         if (!this.destroyed) {
             this.cdr.detectChanges();
+            this.scheduleScrollerRecalc();
         }
+    }
+
+    private scheduleScrollerRecalc() {
+        if (this.destroyed || typeof window === "undefined") {
+            return;
+        }
+        if (this.scrollerRecalcFrame !== undefined) {
+            window.cancelAnimationFrame(this.scrollerRecalcFrame);
+        }
+        this.scrollerRecalcFrame = window.requestAnimationFrame(() => {
+            this.scrollerRecalcFrame = undefined;
+            const scroller = (<any>this.table?.scrollableViewChild)?.scroller;
+            if (!scroller) {
+                return;
+            }
+            scroller.init();
+            scroller.calculateAutoSize();
+        });
     }
 
     refreshLayout(): void {

@@ -1,13 +1,10 @@
 import {Injectable, NgZone} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
-import {
-    MapTileRequestStatus,
-    MapTileStreamClient,
-} from "./tilestream";
+import {MapTileRequestStatus, MapTileStreamClient} from "./tilestream";
+import {featureSetContains, featureSetsEqual, FeatureTile, FeatureWrapper} from "./features.model";
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
-import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
-import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
+import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {
     configureDeckRenderWorkerSettings,
@@ -16,7 +13,7 @@ import {
 } from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
-import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
+import {Feature, FeatureLayerStyle, HighlightMode, TileLayerParser, Viewport} from '../../build/libs/core/erdblick-core';
 import {
     AppStateService,
     InspectionPanelModel,
@@ -120,6 +117,7 @@ export class MapDataService {
     private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
     private observedLayerStageCountByKey: Map<string, number> = new Map();
     private dataSourceInfoJson: string | null = null;
+    private selectionConversionRevision = 0;
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
@@ -287,33 +285,31 @@ export class MapDataService {
             this.stateService.prune(this.maps.maps, this.styleService.styles);
         });
         this.stateService.selectionState.subscribe(async selected => {
-            // Selection -> panel projection is async because loadFeatures() may await tile loading.
-            // Capture a revision token so only the newest projection run can publish results.
-            const syncRevision = ++this.selectionSyncRevision;
+            const revision = ++this.selectionConversionRevision;
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
+            const pendingPanelUpdates: Array<{
+                panel: InspectionPanelModel<FeatureWrapper>,
+                selection: InspectionPanelModel<TileFeatureId>
+            }> = [];
+            const existingPanels = new Map(this.selectionTopic.getValue().map(panel => [panel.id, panel]));
             for (const selection of selected) {
-                // A newer selection update arrived while we were iterating.
-                // Abort this stale run to avoid reintroducing outdated panel state.
-                if (syncRevision !== this.selectionSyncRevision) {
-                    return;
-                }
                 // Only push a new panel if the selection changed. Otherwise,
                 // just reuse the old panel so that the inspection trees in existing
                 // opened panels are not recalculated.
-                const existing = this.selectionTopic.getValue().find(p => p.id === selection.id);
+                const existing = existingPanels.get(selection.id);
                 if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
-                    existing.locked = selection.locked;
-                    existing.color = selection.color;
-                    existing.size = selection.size;
-                    existing.undocked = selection.undocked ?? false;
-                    existing.inspectionDialogLayoutEntry = selection.inspectionDialogLayoutEntry;
                     convertedSelections.push(existing);
+                    pendingPanelUpdates.push({panel: existing, selection});
                     continue;
                 }
-                const features = await this.loadFeatures(selection.features);
-                // Feature loading completed after a newer selection revision started.
-                // Do not publish stale panel data.
-                if (syncRevision !== this.selectionSyncRevision) {
+                let features: FeatureWrapper[] = [];
+                try {
+                    features = await this.loadFeatures(selection.features);
+                } catch (error) {
+                    console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
+                    continue;
+                }
+                if (revision !== this.selectionConversionRevision) {
                     return;
                 }
                 convertedSelections.push({
@@ -327,10 +323,16 @@ export class MapDataService {
                     inspectionDialogLayoutEntry: selection.inspectionDialogLayoutEntry
                 });
             }
-            // Final stale-run guard right before publishing.
-            if (syncRevision !== this.selectionSyncRevision) {
+            if (revision !== this.selectionConversionRevision) {
                 return;
             }
+            pendingPanelUpdates.forEach(update => {
+                update.panel.locked = update.selection.locked;
+                update.panel.color = update.selection.color;
+                update.panel.size = update.selection.size;
+                update.panel.undocked = update.selection.undocked ?? false;
+                update.panel.inspectionDialogLayoutEntry = update.selection.inspectionDialogLayoutEntry;
+            });
             this.selectionTopic.next(convertedSelections);
         });
         this.selectionTopic.subscribe(selectedPanels => {

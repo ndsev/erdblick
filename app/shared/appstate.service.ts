@@ -1524,10 +1524,15 @@ export class AppStateService implements OnDestroy {
     prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
         // 1) Build sets of present maps, layers and styles
         const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+        const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
         for (const [mapId, mapNode] of presentMaps.entries()) {
             // Use feature layers (exclude SourceData) via children
             for (const layer of mapNode.children) {
                 presentLayerIds.add(`${mapId}/${layer.id}`);
+            }
+            // Selection pruning must keep SourceData inspections too.
+            for (const layerId of mapNode.layers.keys()) {
+                presentSelectionLayerIds.add(`${mapId}/${layerId}`);
             }
         }
 
@@ -1673,7 +1678,7 @@ export class AppStateService implements OnDestroy {
             // Validate sourceData if present
             if (updated.sourceData) {
                 const mapLayerId = parseKey(updated.sourceData.mapTileKey);
-                if (!mapLayerId || !presentLayerIds.has(mapLayerId)) {
+                if (!mapLayerId || !presentSelectionLayerIds.has(mapLayerId)) {
                     delete updated.sourceData;
                 }
             }

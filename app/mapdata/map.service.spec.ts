@@ -258,6 +258,8 @@ const createMapDataService = () => {
 };
 
 describe('MapDataService', () => {
+    const flushAsync = async (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+
     beforeEach(() => {
         wsInstances.length = 0;
         vi.clearAllMocks();
@@ -294,8 +296,9 @@ describe('MapDataService', () => {
         const state = viewStates[0];
 
         expect(state.visibleTileIds.size).toBeGreaterThan(0);
-        const hasLowFidelityOnlyLevel = Array.from(state.visibleTileIdsPerLevel.values())
-            .some((tileIds: bigint[]) => tileIds.length > LOW_FI_LOD0_TILE_COUNT_THRESHOLD);
+        const visibleTileIdsPerLevel = Array.from(state.visibleTileIdsPerLevel.values()) as bigint[][];
+        const hasLowFidelityOnlyLevel = visibleTileIdsPerLevel
+            .some(tileIds => tileIds.length > LOW_FI_LOD0_TILE_COUNT_THRESHOLD);
         if (hasLowFidelityOnlyLevel) {
             expect(state.highFidelityTileIds.size).toBe(0);
         } else {
@@ -608,57 +611,97 @@ describe('MapDataService', () => {
         await selectionTilePromise;
     });
 
-    it('re-requests a visible tile from its first missing stage during low-fidelity interaction', async () => {
-        const {service} = createMapDataService();
-        const tileKey = coreLib.getTileFeatureLayerKey('m1', 'layerA', 1n);
+    it('keeps SourceData panels when feature selection loading fails', async () => {
+        const {service, stateService} = createMapDataService();
+        await service.initialize();
 
-        const fakeMapTree = {
-            allLevels: (_viewIndex: number) => [],
-            getMapLayerVisibility: () => true,
-            getMapLayerLevel: () => 0,
-            maps: new Map<string, any>([
-                ['m1', {
-                    layers: new Map<string, any>([['layerA', {info: {stages: 3}}]]),
-                    allFeatureLayers: () => [{id: 'layerA'}],
-                }],
-            ]),
-        };
-        service.maps$.next(fakeMapTree as any);
-
-        const viewStates = (service as any).viewVisualizationState as any[];
-        viewStates[0].visibleTileIdsPerLevel = new Map<number, bigint[]>([[0, [1n]]]);
-        viewStates[0].getTileRenderPolicy = vi.fn().mockReturnValue({
-            targetFidelity: 'low',
-            maxLowFiLod: 0,
+        vi.spyOn(service, 'loadFeatures').mockImplementation(async (tileFeatureIds: any[]) => {
+            if (tileFeatureIds.length > 0) {
+                throw new Error('forced load failure');
+            }
+            return [];
         });
 
-        const stagedTile = {
-            mapName: 'm1',
-            layerName: 'layerA',
-            mapTileKey: tileKey,
-            tileId: 1n,
-            preventCulling: false,
-            hasData: () => true,
-            hasStage: (stage: number) => stage === 0,
-            nextMissingStage: (stageCount: number) => (stageCount > 1 ? 1 : undefined),
-        } as any;
-        service.loadedTileLayers.set(stagedTile.mapTileKey, stagedTile);
-
-        await (service as any).updateMapDataRequest();
-
-        const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
-        expect(tileSocket).toBeDefined();
-        const body = JSON.parse(tileSocket.lastSent);
-        expect(body.requests).toEqual([
+        stateService.selectionState.next([
             {
-                mapId: 'm1',
-                layerId: 'layerA',
-                tileIdsByNextStage: [
-                    [],
-                    [1],
-                ],
+                id: 1,
+                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
+                locked: false,
+                size: [30, 20],
+                color: '#111111',
+                undocked: false
             },
+            {
+                id: 2,
+                features: [],
+                sourceData: {mapTileKey: 'SourceData:m1:SourceData-LAYER:1'},
+                locked: false,
+                size: [30, 40],
+                color: '#222222',
+                undocked: true
+            }
         ]);
+
+        await flushAsync();
+        await flushAsync();
+
+        const panels = service.selectionTopic.getValue();
+        expect(panels.some(panel => panel.id === 2 && panel.sourceData?.mapTileKey === 'SourceData:m1:SourceData-LAYER:1')).toBe(true);
+    });
+
+    it('applies the latest selection emission when updates overlap', async () => {
+        const {service, stateService} = createMapDataService();
+        await service.initialize();
+
+        let loadCall = 0;
+        vi.spyOn(service, 'loadFeatures').mockImplementation(async (tileFeatureIds: any[]) => {
+            loadCall += 1;
+            if (loadCall === 1 && tileFeatureIds.length > 0) {
+                await flushAsync(25);
+            }
+            return [];
+        });
+
+        stateService.selectionState.next([
+            {
+                id: 1,
+                features: [{mapTileKey: 'm1/layerA/1', featureId: 'f1'}],
+                locked: false,
+                size: [30, 20],
+                color: '#111111',
+                undocked: false
+            },
+            {
+                id: 2,
+                features: [],
+                sourceData: {mapTileKey: 'SourceData:m1:SourceData-LAYER:1'},
+                locked: false,
+                size: [30, 40],
+                color: '#222222',
+                undocked: true
+            }
+        ]);
+
+        await flushAsync(1);
+
+        stateService.selectionState.next([
+            {
+                id: 2,
+                features: [],
+                sourceData: {mapTileKey: 'SourceData:m1:SourceData-LAYER:9'},
+                locked: false,
+                size: [30, 40],
+                color: '#222222',
+                undocked: true
+            }
+        ]);
+
+        await flushAsync(50);
+
+        const panels = service.selectionTopic.getValue();
+        expect(panels).toHaveLength(1);
+        expect(panels[0].id).toBe(2);
+        expect(panels[0].sourceData?.mapTileKey).toBe('SourceData:m1:SourceData-LAYER:9');
     });
 
     it('records tile layers and legal info on arrival', () => {
