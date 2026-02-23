@@ -1,11 +1,9 @@
 import {FeatureTile} from "../../mapdata/features.model";
-import {TileLoadState} from "../../mapdata/tilestream";
 import {coreLib} from "../../integrations/wasm";
 import {
     Color,
     ColorGeometryInstanceAttribute,
     GeometryInstance,
-    Material,
     MaterialAppearance,
     PerInstanceColorAppearance,
     Primitive,
@@ -18,64 +16,36 @@ import type {CesiumTileVisualization} from "./cesium-tile.visualization.model";
 
 enum TileOverlayKind {
     None = 0,
-    LoadingQueued = 1,
-    BackendFetching = 2,
-    BackendConverting = 3,
-    RenderingQueued = 4,
-    Empty = 5,
-    Error = 6,
+    Empty = 1,
+    Error = 2,
 }
 
 const BASE_OUTLINE_COLOR = Color.DIMGRAY.withAlpha(0.5);
 const TRANSPARENT_COLOR = Color.WHITE.withAlpha(0.0);
-const LOADING_OUTLINE_COLOR = Color.ORANGE.withAlpha(0.9);
-const STRIPE_EVEN_COLOR = Color.ORANGE.withAlpha(0.35);
-const STRIPE_ODD_COLOR = Color.ORANGE.withAlpha(0.1);
-const RENDERING_FILL_COLOR = Color.ORANGE.withAlpha(0.2);
 const EMPTY_FILL_COLOR = Color.GRAY.withAlpha(0.2);
 const ERROR_FILL_COLOR = Color.RED.withAlpha(0.25);
-const INSET_FRACTION = 0.06;
-const STRIPE_REPEAT_FETCHING = 8.0;
-const STRIPE_REPEAT_CONVERTING = 14.0;
-const STRIPE_ST_ROTATION = Math.PI / 4;
 
 /**
- * Ensure that low-detail representations are only rendered once
- * per map tile layer. Otherwise, they are rendered once per
- * (style sheet, tile layer) combination.
+ * Low-detail tile box renderer.
+ *
+ * This intentionally no longer visualizes per-tile backend load states.
+ * It only keeps optional tile borders and static empty/error overlays.
  */
 export class CesiumTileBoxVisualization {
     static tileBoxStatePerView: {
         visualizations: Map<bigint, CesiumTileBoxVisualization>,
         outlinePrimitive: Primitive | null,
-        loadingOutlinePrimitive: Primitive | null,
-        stripeFetchingPrimitive: Primitive | null,
-        stripeConvertingPrimitive: Primitive | null,
         solidFillPrimitive: Primitive | null,
-        loadingOutlineInstances: Map<bigint, GeometryInstance>,
-        stripeFetchingInstances: Map<bigint, GeometryInstance>,
-        stripeConvertingInstances: Map<bigint, GeometryInstance>,
         solidFillInstances: Map<bigint, GeometryInstance>,
         viewer: Viewer | null
     }[] = [];
-
-    private static stripeMaterials: {fetching: Material | null, converting: Material | null} = {
-        fetching: null,
-        converting: null,
-    };
 
     static getTileBoxState(viewIndex: number) {
         while (viewIndex >= this.tileBoxStatePerView.length) {
             this.tileBoxStatePerView.push({
                 visualizations: new Map<bigint, CesiumTileBoxVisualization>(),
                 outlinePrimitive: null,
-                loadingOutlinePrimitive: null,
-                stripeFetchingPrimitive: null,
-                stripeConvertingPrimitive: null,
                 solidFillPrimitive: null,
-                loadingOutlineInstances: new Map<bigint, GeometryInstance>(),
-                stripeFetchingInstances: new Map<bigint, GeometryInstance>(),
-                stripeConvertingInstances: new Map<bigint, GeometryInstance>(),
                 solidFillInstances: new Map<bigint, GeometryInstance>(),
                 viewer: null,
             });
@@ -89,21 +59,19 @@ export class CesiumTileBoxVisualization {
         featureCount: number,
         viewer: Viewer,
         owner: CesiumTileVisualization,
-        status?: TileLoadState,
         showBorder: boolean = false
     ): CesiumTileBoxVisualization {
         const state = this.getTileBoxState(viewIndex);
         state.viewer = viewer;
         if (!state.visualizations.has(tile.tileId)) {
-            state.visualizations.set(
-                tile.tileId, new CesiumTileBoxVisualization(viewIndex, tile));
+            state.visualizations.set(tile.tileId, new CesiumTileBoxVisualization(viewIndex, tile));
             CesiumTileBoxVisualization.updatePrimitive(viewIndex, viewer);
         }
         const result = state.visualizations.get(tile.tileId)!;
         ++result.refCount;
         result.featureCount += featureCount;
         result.setBorder(owner, showBorder);
-        result.setStatus(owner, status);
+        result.updateOverlay();
         return result;
     }
 
@@ -127,88 +95,12 @@ export class CesiumTileBoxVisualization {
                 flat: true,
                 translucent: true,
                 renderState: {
-                    depthTest: {
-                        enabled: true
-                    },
+                    depthTest: {enabled: true},
                     depthMask: false
                 }
             }),
             asynchronous: false
         }));
-    }
-
-    static updateLoadingOutlinePrimitive(viewIndex: number) {
-        const state = this.getTileBoxState(viewIndex);
-        if (!state.viewer) {
-            return;
-        }
-        if (state.loadingOutlinePrimitive) {
-            state.viewer.scene.primitives.remove(state.loadingOutlinePrimitive);
-        }
-        const instances = [...state.loadingOutlineInstances.values()];
-        if (!instances.length) {
-            state.loadingOutlinePrimitive = null;
-            return;
-        }
-        state.loadingOutlinePrimitive = state.viewer.scene.primitives.add(new Primitive({
-            geometryInstances: instances,
-            appearance: new PerInstanceColorAppearance({
-                flat: true,
-                translucent: true,
-                renderState: {
-                    depthTest: {
-                        enabled: true
-                    },
-                    depthMask: false
-                }
-            }),
-            asynchronous: false
-        }));
-    }
-
-    static updateStripePrimitive(viewIndex: number, kind: "fetching" | "converting") {
-        const state = this.getTileBoxState(viewIndex);
-        if (!state.viewer) {
-            return;
-        }
-        const instances = kind === "fetching"
-            ? [...state.stripeFetchingInstances.values()]
-            : [...state.stripeConvertingInstances.values()];
-        const existing = kind === "fetching"
-            ? state.stripeFetchingPrimitive
-            : state.stripeConvertingPrimitive;
-        if (existing) {
-            state.viewer.scene.primitives.remove(existing);
-        }
-        if (!instances.length) {
-            if (kind === "fetching") {
-                state.stripeFetchingPrimitive = null;
-            } else {
-                state.stripeConvertingPrimitive = null;
-            }
-            return;
-        }
-        const appearance = new MaterialAppearance({
-            material: CesiumTileBoxVisualization.getStripeMaterial(kind),
-            flat: true,
-            translucent: true,
-            renderState: {
-                depthTest: {
-                    enabled: true
-                },
-                depthMask: false
-            }
-        });
-        const primitive = state.viewer.scene.primitives.add(new Primitive({
-            geometryInstances: instances,
-            appearance: appearance,
-            asynchronous: false
-        }));
-        if (kind === "fetching") {
-            state.stripeFetchingPrimitive = primitive;
-        } else {
-            state.stripeConvertingPrimitive = primitive;
-        }
     }
 
     static updateSolidFillPrimitive(viewIndex: number) {
@@ -230,39 +122,12 @@ export class CesiumTileBoxVisualization {
                 flat: true,
                 translucent: true,
                 renderState: {
-                    depthTest: {
-                        enabled: true
-                    },
+                    depthTest: {enabled: true},
                     depthMask: false
                 }
             }),
             asynchronous: false
         }));
-    }
-
-    private static getStripeMaterial(kind: "fetching" | "converting") {
-        const existing = kind === "fetching"
-            ? this.stripeMaterials.fetching
-            : this.stripeMaterials.converting;
-        if (existing) {
-            return existing;
-        }
-        const repeat = kind === "fetching"
-            ? STRIPE_REPEAT_FETCHING
-            : STRIPE_REPEAT_CONVERTING;
-        const material = Material.fromType(Material.StripeType, {
-            evenColor: STRIPE_EVEN_COLOR,
-            oddColor: STRIPE_ODD_COLOR,
-            repeat: repeat,
-            offset: 0.0,
-            horizontal: true
-        });
-        if (kind === "fetching") {
-            this.stripeMaterials.fetching = material;
-        } else {
-            this.stripeMaterials.converting = material;
-        }
-        return material;
     }
 
     refCount: number = 0;
@@ -271,15 +136,9 @@ export class CesiumTileBoxVisualization {
     private readonly tile: FeatureTile;
     private readonly viewIndex: number;
     private outlineColorAttribute: ColorGeometryInstanceAttribute;
-    private loadingOutlineColorAttribute: ColorGeometryInstanceAttribute;
-    private solidInsetFillColorAttribute: ColorGeometryInstanceAttribute;
     private solidFullFillColorAttribute: ColorGeometryInstanceAttribute;
     private outlineInstance: GeometryInstance;
-    private loadingOutlineInstance: GeometryInstance;
-    private stripeFillInstance: GeometryInstance;
-    private solidInsetFillInstance: GeometryInstance;
     private solidFullFillInstance: GeometryInstance;
-    private statusByVisualization = new Map<CesiumTileVisualization, TileLoadState | undefined>();
     private borderByVisualization = new Map<CesiumTileVisualization, boolean>();
     private overlayKind: TileOverlayKind = TileOverlayKind.None;
     private borderVisible: boolean = false;
@@ -291,23 +150,16 @@ export class CesiumTileBoxVisualization {
 
         const tileBox = coreLib.getTileBox(BigInt(tile.tileId));
         const rectangle = Rectangle.fromDegrees(...tileBox);
-        const insetRectangle = CesiumTileBoxVisualization.insetRectangle(rectangle, INSET_FRACTION);
 
         const outlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
             rectangle: rectangle,
             height: 0.0
         }));
-        const insetOutlineGeometry = RectangleOutlineGeometry.createGeometry(new RectangleOutlineGeometry({
-            rectangle: insetRectangle,
-            height: 0.0
-        }));
-        if (!outlineGeometry || !insetOutlineGeometry) {
+        if (!outlineGeometry) {
             console.error("Failed to create RectangleOutlineGeometry!");
         }
 
         this.outlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
-        this.loadingOutlineColorAttribute = ColorGeometryInstanceAttribute.fromColor(LOADING_OUTLINE_COLOR);
-        this.solidInsetFillColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
         this.solidFullFillColorAttribute = ColorGeometryInstanceAttribute.fromColor(TRANSPARENT_COLOR);
 
         this.outlineInstance = new GeometryInstance({
@@ -318,39 +170,11 @@ export class CesiumTileBoxVisualization {
             }
         });
 
-        this.loadingOutlineInstance = new GeometryInstance({
-            id: this.id,
-            geometry: insetOutlineGeometry!,
-            attributes: {
-                color: this.loadingOutlineColorAttribute
-            }
-        });
-
-        const insetFillGeometry = new RectangleGeometry({
-            rectangle: insetRectangle,
-            height: 0.0,
-            vertexFormat: MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat,
-            stRotation: STRIPE_ST_ROTATION
-        });
         const fullFillGeometry = new RectangleGeometry({
             rectangle: rectangle,
             height: 0.0,
             vertexFormat: MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat
         });
-
-        this.stripeFillInstance = new GeometryInstance({
-            id: this.id,
-            geometry: insetFillGeometry
-        });
-
-        this.solidInsetFillInstance = new GeometryInstance({
-            id: this.id,
-            geometry: insetFillGeometry,
-            attributes: {
-                color: this.solidInsetFillColorAttribute
-            }
-        });
-
         this.solidFullFillInstance = new GeometryInstance({
             id: this.id,
             geometry: fullFillGeometry,
@@ -360,13 +184,8 @@ export class CesiumTileBoxVisualization {
         });
     }
 
-    setStatus(owner: CesiumTileVisualization, status?: TileLoadState) {
-        if (status === undefined) {
-            this.statusByVisualization.delete(owner);
-        } else {
-            this.statusByVisualization.set(owner, status);
-        }
-        this.updateOverlay();
+    setStatus(_owner: CesiumTileVisualization, _status?: unknown) {
+        // Load-state overlays are disabled; kept for API compatibility.
     }
 
     setBorder(owner: CesiumTileVisualization, enabled: boolean) {
@@ -379,7 +198,7 @@ export class CesiumTileBoxVisualization {
     }
 
     private updateBaseOutlineVisibility() {
-        const shouldShow = [...this.borderByVisualization.values()].some(value => value);
+        const shouldShow = [...this.borderByVisualization.values()].some(Boolean);
         if (shouldShow === this.borderVisible) {
             return;
         }
@@ -390,35 +209,9 @@ export class CesiumTileBoxVisualization {
         CesiumTileBoxVisualization.updateInstanceColor(state.outlinePrimitive, this.id, nextColor);
     }
 
-    private aggregateStatus(): TileLoadState | undefined {
-        let leastStatus: TileLoadState | undefined = undefined;
-        for (const status of this.statusByVisualization.values()) {
-            if (status === undefined) {
-                continue;
-            }
-            if (leastStatus === undefined || status < leastStatus) {
-                leastStatus = status;
-            }
-        }
-        return leastStatus;
-    }
-
-    private resolveOverlayKind(status: TileLoadState | undefined): TileOverlayKind {
-        if (status !== undefined) {
-            switch (status) {
-                case TileLoadState.LoadingQueued:
-                    return TileOverlayKind.LoadingQueued;
-                case TileLoadState.BackendFetching:
-                    return TileOverlayKind.BackendFetching;
-                case TileLoadState.BackendConverting:
-                    return TileOverlayKind.BackendConverting;
-                case TileLoadState.RenderingQueued:
-                    return TileOverlayKind.RenderingQueued;
-                case TileLoadState.Error:
-                    return TileOverlayKind.Error;
-                default:
-                    return TileOverlayKind.None;
-            }
+    private resolveOverlayKind(): TileOverlayKind {
+        if (this.tile.error) {
+            return TileOverlayKind.Error;
         }
         if (this.tile.hasData() && this.tile.numFeatures === 0) {
             return TileOverlayKind.Empty;
@@ -427,102 +220,39 @@ export class CesiumTileBoxVisualization {
     }
 
     private updateOverlay() {
-        const nextKind = this.resolveOverlayKind(this.aggregateStatus());
+        const nextKind = this.resolveOverlayKind();
         if (nextKind === this.overlayKind) {
             return;
         }
+
         const state = CesiumTileBoxVisualization.getTileBoxState(this.viewIndex);
-        let rebuildLoading = false;
-        let rebuildFetching = false;
-        let rebuildConverting = false;
         let rebuildSolid = false;
 
-        const removeSolid = () => {
+        if (this.overlayKind !== TileOverlayKind.None) {
             if (state.solidFillInstances.delete(this.id)) {
                 rebuildSolid = true;
             }
-        };
-
-        switch (this.overlayKind) {
-            case TileOverlayKind.LoadingQueued:
-                if (state.loadingOutlineInstances.delete(this.id)) {
-                    rebuildLoading = true;
-                }
-                break;
-            case TileOverlayKind.BackendFetching:
-                if (state.stripeFetchingInstances.delete(this.id)) {
-                    rebuildFetching = true;
-                }
-                break;
-            case TileOverlayKind.BackendConverting:
-                if (state.stripeConvertingInstances.delete(this.id)) {
-                    rebuildConverting = true;
-                }
-                break;
-            case TileOverlayKind.RenderingQueued:
-            case TileOverlayKind.Empty:
-            case TileOverlayKind.Error:
-                removeSolid();
-                break;
-            default:
-                break;
         }
 
-        switch (nextKind) {
-            case TileOverlayKind.LoadingQueued:
-                state.loadingOutlineInstances.set(this.id, this.loadingOutlineInstance);
-                rebuildLoading = true;
-                break;
-            case TileOverlayKind.BackendFetching:
-                state.stripeFetchingInstances.set(this.id, this.stripeFillInstance);
-                rebuildFetching = true;
-                break;
-            case TileOverlayKind.BackendConverting:
-                state.stripeConvertingInstances.set(this.id, this.stripeFillInstance);
-                rebuildConverting = true;
-                break;
-            case TileOverlayKind.RenderingQueued:
-                state.solidFillInstances.set(this.id, this.solidInsetFillInstance);
-                ColorGeometryInstanceAttribute.toValue(RENDERING_FILL_COLOR, this.solidInsetFillColorAttribute.value);
-                rebuildSolid = true;
-                break;
-            case TileOverlayKind.Empty:
-                state.solidFillInstances.set(this.id, this.solidFullFillInstance);
-                ColorGeometryInstanceAttribute.toValue(EMPTY_FILL_COLOR, this.solidFullFillColorAttribute.value);
-                rebuildSolid = true;
-                break;
-            case TileOverlayKind.Error:
-                state.solidFillInstances.set(this.id, this.solidFullFillInstance);
-                ColorGeometryInstanceAttribute.toValue(ERROR_FILL_COLOR, this.solidFullFillColorAttribute.value);
-                rebuildSolid = true;
-                break;
-            default:
-                break;
+        if (nextKind === TileOverlayKind.Empty || nextKind === TileOverlayKind.Error) {
+            state.solidFillInstances.set(this.id, this.solidFullFillInstance);
+            ColorGeometryInstanceAttribute.toValue(
+                nextKind === TileOverlayKind.Error ? ERROR_FILL_COLOR : EMPTY_FILL_COLOR,
+                this.solidFullFillColorAttribute.value);
+            rebuildSolid = true;
         }
 
         this.overlayKind = nextKind;
-        if (rebuildLoading) {
-            CesiumTileBoxVisualization.updateLoadingOutlinePrimitive(this.viewIndex);
-        }
-        if (rebuildFetching) {
-            CesiumTileBoxVisualization.updateStripePrimitive(this.viewIndex, "fetching");
-        }
-        if (rebuildConverting) {
-            CesiumTileBoxVisualization.updateStripePrimitive(this.viewIndex, "converting");
-        }
         if (rebuildSolid) {
             CesiumTileBoxVisualization.updateSolidFillPrimitive(this.viewIndex);
         }
-        if ((rebuildLoading || rebuildFetching || rebuildConverting || rebuildSolid) && state.viewer) {
+        if (rebuildSolid && state.viewer) {
             state.viewer.scene.requestRender();
         }
     }
 
     private static updateInstanceColor(primitive: Primitive | null, id: bigint, color: Color) {
-        if (!primitive) {
-            return;
-        }
-        if (!primitive.ready) {
+        if (!primitive || !primitive.ready) {
             return;
         }
         const attributes: any = primitive.getGeometryInstanceAttributes(id);
@@ -531,41 +261,20 @@ export class CesiumTileBoxVisualization {
         }
     }
 
-    private static insetRectangle(rectangle: Rectangle, insetFraction: number) {
-        const insetLon = (rectangle.east - rectangle.west) * insetFraction;
-        const insetLat = (rectangle.north - rectangle.south) * insetFraction;
-        return new Rectangle(
-            rectangle.west + insetLon,
-            rectangle.south + insetLat,
-            rectangle.east - insetLon,
-            rectangle.north - insetLat
-        );
-    }
-
     delete(viewIndex: number, viewer: Viewer, featureCount: number, owner: CesiumTileVisualization) {
         --this.refCount;
         this.featureCount -= featureCount;
-        this.statusByVisualization.delete(owner);
         this.borderByVisualization.delete(owner);
         const state = CesiumTileBoxVisualization.getTileBoxState(viewIndex);
         if (this.refCount <= 0) {
             state.visualizations.delete(this.id);
-            if (state.loadingOutlineInstances.delete(this.id)) {
-                CesiumTileBoxVisualization.updateLoadingOutlinePrimitive(this.viewIndex);
-            }
-            if (state.stripeFetchingInstances.delete(this.id)) {
-                CesiumTileBoxVisualization.updateStripePrimitive(this.viewIndex, "fetching");
-            }
-            if (state.stripeConvertingInstances.delete(this.id)) {
-                CesiumTileBoxVisualization.updateStripePrimitive(this.viewIndex, "converting");
-            }
             if (state.solidFillInstances.delete(this.id)) {
                 CesiumTileBoxVisualization.updateSolidFillPrimitive(this.viewIndex);
             }
             CesiumTileBoxVisualization.updatePrimitive(viewIndex, viewer);
-        } else {
-            this.updateOverlay();
-            this.updateBaseOutlineVisibility();
+            return;
         }
+        this.updateOverlay();
+        this.updateBaseOutlineVisibility();
     }
 }

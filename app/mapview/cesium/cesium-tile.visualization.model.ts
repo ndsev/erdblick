@@ -1,5 +1,4 @@
 import {FeatureTile} from "../../mapdata/features.model";
-import {TileLoadState} from "../../mapdata/tilestream";
 import {coreLib} from "../../integrations/wasm";
 import {PrimitiveCollection, Viewer} from "../../integrations/cesium";
 import {FeatureLayerStyle, HighlightMode, TileFeatureLayer} from "../../../build/libs/core/erdblick-core";
@@ -120,24 +119,9 @@ export class CesiumTileVisualization implements ITileVisualization {
         this.viewIndex = viewIndex;
     }
 
-    private effectiveStatus(): TileLoadState | undefined {
-        const tileStatus = this.tile.status;
-        const renderStatus = this.renderQueued ? TileLoadState.RenderingQueued : undefined;
-        if (tileStatus === undefined) {
-            return renderStatus;
-        }
-        if (renderStatus === undefined) {
-            return tileStatus;
-        }
-        return tileStatus < renderStatus ? tileStatus : renderStatus;
-    }
-
     updateStatus(renderQueued?: boolean) {
         if (renderQueued !== undefined) {
             this.renderQueued = renderQueued;
-        }
-        if (this.lowDetailVisu) {
-            this.lowDetailVisu.setStatus(this, this.effectiveStatus());
         }
     }
 
@@ -280,7 +264,6 @@ export class CesiumTileVisualization implements ITileVisualization {
             this.tile.numFeatures,
             viewer,
             this,
-            this.effectiveStatus(),
             this.showTileBorder);
         this.hasTileBorder = this.showTileBorder;
 

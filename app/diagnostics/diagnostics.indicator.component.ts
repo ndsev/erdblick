@@ -104,7 +104,8 @@ export class DiagnosticsIndicatorComponent {
     }
 
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
-        return !this.isCounterComplete(snapshot.progress.rendered);
+        return !this.isCounterComplete(snapshot.progress.backend)
+            || !this.isCounterComplete(snapshot.progress.rendered);
     }
 
     private isCounterComplete(counter: ProgressCounter): boolean {

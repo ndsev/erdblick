@@ -310,9 +310,11 @@ sequenceDiagram
   Note right of MapSvc: MapDataService compares visible tiles<br>with loaded tiles per view and style<br>and decides which tiles to keep or drop
 
   MapSvc->>TilesWS: open WebSocket /tiles (if needed)
-  MapSvc->>TilesWS: send request JSON<br>requestId + flowControl + requests + stringPoolOffsets
-  TilesWS->>Backend: WebSocket /tiles
-  Backend-->>TilesWS: VTLV tile stream frames
+  MapSvc->>TilesWS: send request JSON<br>requestId + requests + stringPoolOffsets
+  TilesWS->>Backend: WebSocket /tiles (control plane)
+  TilesWS->>Backend: GET /tiles/next?clientId=...&maxBytes=... (2 long-poll requests)
+  Backend-->>TilesWS: VTLV control frames over WS
+  Backend-->>TilesWS: VTLV tile data frames over /tiles/next
 
   loop for each received frame
     alt request-context chunk
@@ -327,15 +329,12 @@ sequenceDiagram
     else source-data chunk
       TilesWS-->>MapSvc: source-data payload bytes
       MapSvc->>Core: readTileSourceDataLayer<br>for inspection/source view
-    else load-state chunk
-      TilesWS-->>MapSvc: load-state payload
-      MapSvc->>MapSvc: applyTileLoadState<br>update TileBoxVisualization
     else status chunk
       TilesWS-->>MapSvc: status payload<br>allDone + per-request info
     end
   end
 
-  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). After each slice,<br>client grants more frame credits to backend.
+  Note over TilesWS: Frames are enqueued and handled in short<br>time slices (~10ms budget). Tile payload ingress is pull-based<br>with two parallel long-poll requests.
   Note over MapSvc: processVisualizationTasks slices rendering work<br>into small time budgets to keep the UI responsive.
 
   MapSvc-->>View: tileVisualizationTopic<br>TileVisualization instances per view
@@ -344,23 +343,22 @@ sequenceDiagram
 In `MapDataService` this flow is implemented roughly as follows:
 
 - `scheduleUpdate()` drives `runUpdate()`, which recalculates visible/high-detail tile IDs per view and then calls `updateMapDataRequest()`, `updateEvictLoadedLayers()`, and `updateVisualizations()`.
-- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs (so load-state updates have a target), and sends the request through `MapTileStreamClient.updateRequest()`.
-- `MapTileStreamClient.updateRequest()` sends `{ flowControl, requestId, requests, stringPoolOffsets }`, where:
-  - `flowControl` is currently always `true`.
+- `updateMapDataRequest()` builds per-layer request batches, inserts placeholder `FeatureTile` instances for requested IDs, and sends the request through `MapTileStreamClient.updateRequest()`.
+- `MapTileStreamClient.updateRequest()` sends `{ requestId, requests, stringPoolOffsets }`, where:
   - `requestId` is a monotonically increasing client-side id.
   - `stringPoolOffsets` comes from the shared `TileLayerParser` field dictionary so the backend can skip already-known strings.
   - Request deduplication compares the request body without `requestId`, so identical logical requests are not resent.
-- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. WebSocket `onmessage` only enqueues; parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
-- At the end of each parsing slice, the client sends a flow-grant control message (`{ type: "mapget.tiles.flow-grant", frames }`) for all processed flow-controlled frames (Fields/Features/SourceData). This is the backpressure signal to mapget.
-- In current mapget builds, flow-controlled output is connection-scoped and gated by frame credits (`creditFrames > 0`). The default frame credit cap is 2 per connection.
-- On each request update, mapget keeps the same WebSocket session, drops queued tile frames that are no longer requested, and avoids re-requesting tiles that are already queued or already sent but not yet granted.
+- `MapTileStreamClient` (defined in `app/mapdata/tilestream.ts`) owns the shared `TileLayerParser` instance and decodes VTLV frames from a local frame queue. Parsing runs in `processFrameQueue()` with a ~10ms time budget per slice.
+- `mapget.tiles.request-context` includes a stable integer `clientId` for the lifetime of the current WS connection.
+- After receiving `clientId`, erdblick runs two parallel long-poll pulls (`GET /tiles/next?clientId=...&maxBytes=...`) and feeds each returned binary VTLV frame batch into the same frame queue used by WS control frames.
+- `maxBytes` is an adaptive micro-batch limit derived from the measured `/tiles/next` downstream throughput using an EWMA estimate, capped at 5 MiB.
+- On each request update, mapget keeps the same WebSocket session/client id, drops queued tile frames that are no longer requested, and avoids re-requesting tiles that are already queued.
 - `Features` frames are forwarded to `MapDataService.addTileFeatureLayer()`, which hydrates `FeatureTile` instances, updates `loadedTileLayers`, and marks affected `TileVisualization` instances for rendering.
 - `Fields` frames are applied immediately through `TileLayerParser.readFieldDictUpdate(...)` so subsequent Feature/SourceData payloads can resolve string references.
 - `Status` frames (`mapget.tiles.status`) contain per-request results, `allDone`, and optional `requestId`. Erdblick ignores stale status messages whose `requestId` does not match the most recent request.
-- `Load-state` frames (`mapget.tiles.load-state`) carry per-tile backend progress and optional `requestId`. Erdblick ignores stale load-state messages the same way.
-- `Request-context` frames (`mapget.tiles.request-context`) announce the server-side request id currently being streamed. Erdblick currently tracks this for protocol compatibility and diagnostics; data frames are not yet dropped by request context on the client side.
+- `Request-context` frames (`mapget.tiles.request-context`) announce the active server request id and the pull `clientId` used for `/tiles/next` long-poll requests.
 - For each view, `viewVisualizationState[viewIndex].visualizationQueue` is rebuilt so that tiles which changed detail level, border flags, or styles are processed first. `processVisualizationTasks()` then schedules work in small time slices to keep the UI responsive.
-- `MapDataService` no longer flushes the tile-stream frame queue on each request update. Already queued data frames still parse, while stale status/load-state updates are filtered by `requestId`.
+- `MapDataService` no longer flushes the tile-stream frame queue on each request update. Already queued data frames still parse, while stale status updates are filtered by `requestId`.
 
 Current `/tiles` frame type ids used by erdblick:
 
@@ -370,7 +368,6 @@ Current `/tiles` frame type ids used by erdblick:
 | `2` | `Features` | Binary tile-feature-layer payload |
 | `3` | `SourceData` | Binary tile-source-data payload |
 | `4` | `Status` | JSON (`mapget.tiles.status`) |
-| `5` | `Load-state` | JSON (`mapget.tiles.load-state`) |
 | `6` | `Request-context` | JSON (`mapget.tiles.request-context`) |
 | `128` | `End-of-stream` | Marker frame (currently treated as no-op) |
 
@@ -419,8 +416,8 @@ sequenceDiagram
 
 In `tile.visualization.model.ts` and the bindings in `libs/core`, the key pieces are:
 
-- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed. It also forwards `TileLoadState` updates so load-state overlays stay in sync with backend progress and local rendering queues.
-- `TileBoxVisualization` renders one low-detail rectangle per tile *per view* (shared across styles) and aggregates load state across all `TileVisualization` instances that reference that tile. It renders inset outlines, stripe fills, or solid fills to represent queued, backend-fetching, backend-converting, rendering-queued, empty, and error states; the overlays remain visible even when tile borders are disabled.
+- `TileVisualization` wraps one `FeatureTile` and one style (`ErdblickStyle`) for a given view. It decides whether a tile should render in low detail (bounding box via `TileBoxVisualization`) or full detail (calling into the WASM core) and tracks whether borders or highlight modes changed.
+- `TileBoxVisualization` renders one low-detail rectangle per tile *per view* (shared across styles). Per-tile load-state overlays are disabled; only border and static empty/error fill overlays remain.
 - `coreLib.FeatureLayerVisualization` turns tile feature layers into Cesium primitives by evaluating style rules (`FeatureLayerStyle`) for each feature, relation, or attribute. The style sheets and their options are configured via the YAML files in `config/styles` and managed at runtime by `StyleService`.
 - For recursive relation visualization and merged point features, the WASM core builds intermediate structures that it returns via `mergedPointFeatures()`. `PointMergeService` takes these results, clusters repeated points, and turns them into Cesium primitives held by `MergedPointsTile`.
 - When styles or view sync options change, `MapDataService.addTileFeatureLayer` clears and rebuilds `visualizationQueue` so that tiles are re-rendered with the new configuration.

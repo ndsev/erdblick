@@ -14,7 +14,6 @@ export const MAP_TILE_STREAM_TYPE_FIELDS = 1;
 export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
-export const MAP_TILE_STREAM_TYPE_LOAD_STATE = 5;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
@@ -42,17 +41,6 @@ export enum TileLoadState {
     Error = 128,            // Only used by erdblick
     RenderingQueued = 129,  // Only used by erdblick
     Ok = 130,               // Only used by erdblick
-}
-
-export interface MapTileStreamLoadStatePayload {
-    type: string;
-    requestId?: number;
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    stage?: number;
-    state: TileLoadState;
-    stateText?: string;
 }
 
 export interface MapTileStreamRequestContextPayload {
@@ -87,13 +75,16 @@ export class MapTileStreamClient {
     private readonly pullParallelism: number = 2;
     private readonly pullWaitMs: number = 25000;
     private readonly pullRetryDelayMs: number = 50;
+    private readonly pullBatchMaxBytesCap: number = 5 * 1024 * 1024;
+    private readonly pullBatchMinBytes: number = 64 * 1024;
+    private readonly pullDownstreamEwmaAlpha: number = 0.2;
+    private downstreamBytesPerSecondEwma: number = 512 * 1024;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
     onSourceData: ((payload: Uint8Array) => void) | null = null;
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
-    onLoadState: ((payload: MapTileStreamLoadStatePayload) => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
 
@@ -118,11 +109,6 @@ export class MapTileStreamClient {
 
     withStatusCallback(callback: (status: MapTileStreamStatusPayload) => void) {
         this.onStatus = callback;
-        return this;
-    }
-
-    withLoadStateCallback(callback: (payload: MapTileStreamLoadStatePayload) => void) {
-        this.onLoadState = callback;
         return this;
     }
 
@@ -194,6 +180,10 @@ export class MapTileStreamClient {
 
     get isFrameProcessingPaused(): boolean {
         return this.frameProcessingPaused;
+    }
+
+    getDownstreamBytesPerSecond(): number {
+        return this.downstreamBytesPerSecondEwma;
     }
 
     sendRequest(body: object | string) {
@@ -454,17 +444,34 @@ export class MapTileStreamClient {
             return;
         }
 
-        const type = bytes[6];
+        let offset = 0;
+        while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
+            const type = bytes[offset + 6];
+            const payloadLength = new DataView(
+                bytes.buffer,
+                bytes.byteOffset + offset + 7,
+                4).getUint32(0, true);
+            const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
+            if (frameEnd > bytes.length) {
+                console.warn("Tile stream frame size mismatch.");
+                return;
+            }
+
+            const frameBytes = bytes.subarray(offset, frameEnd);
+            await this.handleFrame(frameBytes, type);
+            offset = frameEnd;
+        }
+
+        if (offset !== bytes.length) {
+            console.warn("Tile stream frame alignment mismatch.");
+        }
+    }
+
+    private async handleFrame(bytes: Uint8Array, type: number): Promise<void> {
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
             return;
         }
-
         try {
-            const length = new DataView(bytes.buffer, bytes.byteOffset + 7, 4).getUint32(0, true);
-            if (bytes.length !== MAP_TILE_STREAM_HEADER_SIZE + length) {
-                console.warn("Tile stream frame size mismatch.");
-            }
-
             if (type === MAP_TILE_STREAM_TYPE_STATUS) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
@@ -483,23 +490,6 @@ export class MapTileStreamClient {
                     }
                 } catch (err) {
                     console.error("Failed to parse /tiles status payload:", err);
-                }
-                return;
-            }
-
-            if (type === MAP_TILE_STREAM_TYPE_LOAD_STATE) {
-                const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
-                const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamLoadStatePayload;
-                    if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return;
-                    }
-                    if (this.onLoadState) {
-                        this.onLoadState(payload);
-                    }
-                } catch (err) {
-                    console.error("Failed to parse /tiles load-state payload:", err);
                 }
                 return;
             }
@@ -558,7 +548,6 @@ export class MapTileStreamClient {
         } catch (err) {
             console.error("Tile stream message handler failed.", err);
         }
-        return;
     }
 
     private matchesCurrentRequest(requestId: number | undefined): boolean {
@@ -602,6 +591,7 @@ export class MapTileStreamClient {
             }
 
             try {
+                const startedAt = performance.now();
                 const response = await fetch(this.resolvePullUrl(clientId), {
                     method: "GET",
                     cache: "no-store",
@@ -617,6 +607,8 @@ export class MapTileStreamClient {
                     if (controller.signal.aborted) {
                         return;
                     }
+                    const elapsedMs = Math.max(1, performance.now() - startedAt);
+                    this.recordDownstreamSample(body.byteLength, elapsedMs);
                     this.enqueueFrame(body);
                     continue;
                 }
@@ -650,7 +642,25 @@ export class MapTileStreamClient {
         const pullUrl = new URL(`${normalizedPath}/next`, base);
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
+        pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
         return pullUrl.toString();
+    }
+
+    private currentPullMaxBytes(): number {
+        const estimated = Math.max(this.pullBatchMinBytes, Math.floor(this.downstreamBytesPerSecondEwma));
+        return Math.min(this.pullBatchMaxBytesCap, estimated);
+    }
+
+    private recordDownstreamSample(bytes: number, elapsedMs: number) {
+        if (bytes <= 0 || elapsedMs <= 0) {
+            return;
+        }
+        const bytesPerSecond = bytes * 1000 / elapsedMs;
+        if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+            return;
+        }
+        this.downstreamBytesPerSecondEwma = this.pullDownstreamEwmaAlpha * bytesPerSecond
+            + (1 - this.pullDownstreamEwmaAlpha) * this.downstreamBytesPerSecondEwma;
     }
 
     private async delay(ms: number, signal: AbortSignal): Promise<void> {

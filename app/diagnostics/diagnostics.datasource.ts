@@ -1,7 +1,6 @@
 import {Injectable, OnDestroy} from '@angular/core';
 import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
-import {TileLoadState} from '../mapdata/tilestream';
 import {FeatureTile} from '../mapdata/features.model';
 import {DiagnosticsSnapshot, LogEntry, LogLevel, PerfStat, TilePipelineProgress, TileStateCounts} from './diagnostics.model';
 import {
@@ -83,16 +82,15 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
 
         for (const tile of this.mapService.loadedTileLayers.values()) {
-            const status = tile.status ?? TileLoadState.LoadingQueued;
             const tileKey = tile.mapTileKey ?? tile.tileId?.toString() ?? '';
             if (!tileKey) {
                 continue;
             }
-            if ((status === TileLoadState.Error || tile.error) && !this.errorTileKeys.has(tileKey)) {
+            if (tile.error && !this.errorTileKeys.has(tileKey)) {
                 newEntries.push({
                     at: now,
                     level: 'error',
-                    message: tile.error ? `Tile error: ${tile.error}` : 'Tile error',
+                    message: `Tile error: ${tile.error}`,
                     data: {
                         tileId: tileKey,
                         mapName: tile.mapName,
@@ -118,12 +116,11 @@ export class DiagnosticsDatasource implements OnDestroy {
         let errors = 0;
         const stageCounters: Array<{done: number; total: number}> = [];
         for (const tile of tiles) {
-            const status = tile.status;
             const hasData = tile.hasData();
             if (hasData) {
                 loaded += 1;
             }
-            if (status === TileLoadState.Error) {
+            if (tile.error) {
                 errors += 1;
             }
             const stageCount = this.mapService.getLayerStageCount(tile.mapName, tile.layerName);
@@ -146,9 +143,21 @@ export class DiagnosticsDatasource implements OnDestroy {
             errors
         };
 
+        const backendProgress = this.mapService.getBackendRequestProgress();
+        const hudStats = this.mapService.getTileLoadingHudStats();
         const progress: TilePipelineProgress = {
             stages: stageCounters,
-            rendered: this.mapService.getVisualizationCounts()
+            backend: {
+                done: backendProgress.done,
+                total: backendProgress.total,
+            },
+            rendered: this.mapService.getVisualizationCounts(),
+            bubbles: {
+                downstreamBytesPerSecond: hudStats.downstreamBytesPerSecond,
+                features: hudStats.features,
+                vertices: hudStats.vertices,
+                renderSeconds: hudStats.viewportRenderSeconds,
+            }
         };
 
         return {

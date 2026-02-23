@@ -3,9 +3,8 @@ import {HttpClient} from "@angular/common/http";
 import {
     MapTileRequestStatus,
     MapTileStreamClient,
-    TileLoadState,
 } from "./tilestream";
-import type {MapTileStreamLoadStatePayload, MapTileStreamStatusPayload} from "./tilestream";
+import type {MapTileStreamStatusPayload} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {CesiumTileVisualization} from "../mapview/cesium/cesium-tile.visualization.model";
@@ -40,6 +39,21 @@ interface SelectionTileRequest {
     reject: null | ((why: any) => void);
 }
 
+export interface BackendRequestProgress {
+    done: number;
+    total: number;
+    allDone: boolean;
+    requestId?: number;
+}
+
+export interface TileLoadingHudStats {
+    backend: BackendRequestProgress;
+    downstreamBytesPerSecond: number;
+    features: number;
+    vertices: number;
+    viewportRenderSeconds: number;
+}
+
 /**
  * Erdblick map service class. This class is responsible for keeping track
  * of the following objects:
@@ -71,6 +85,9 @@ export class MapDataService {
     private readonly updateDebounceMs: number = 50;
     private lastUpdateAt: number = 0;
     private dataSourceInfoJson: string | null = null;
+    private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
+    private viewportLoadStartedAtMs: number | null = null;
+    private viewportRenderCompletedAtMs: number | null = null;
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
     tileVisualizationTopic: Subject<ITileVisualization>;
@@ -156,7 +173,6 @@ export class MapDataService {
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
         this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);
-        this.tileStream.onLoadState = (payload) => this.handleTilesLoadState(payload);
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
         };
@@ -271,10 +287,7 @@ export class MapDataService {
 
         const startTime = Date.now();
         const timeBudget = 20; // milliseconds
-        let currentQueueLength = this.viewVisualizationState.reduce(
-            (sum, state) => sum + state.visualizationQueue.length,
-            0
-        );
+        let currentQueueLength = this.visualizationQueueLength();
 
         let nextViewIndexToProcess = 0;
         while (currentQueueLength > 0) {
@@ -295,6 +308,7 @@ export class MapDataService {
 
         // Continue visualizing tiles with a delay.
         const delay = currentQueueLength ? 0 : 10;
+        this.tryFinalizeViewportRenderDuration();
         setTimeout((_: any) => this.processVisualizationTasks(), delay);
     }
 
@@ -338,6 +352,81 @@ export class MapDataService {
         }
 
         return result;
+    }
+
+    public getBackendRequestProgress(): BackendRequestProgress {
+        return {...this.backendRequestProgress};
+    }
+
+    public getTileLoadingHudStats(): TileLoadingHudStats {
+        let features = 0;
+        let vertices = 0;
+        for (const tile of this.loadedTileLayers.values()) {
+            if (!tile.hasData()) {
+                continue;
+            }
+            features += tile.numFeatures || 0;
+            vertices += this.vertexCountFromTileStats(tile);
+        }
+
+        const downstreamBytesPerSecond = this.tileStream?.getDownstreamBytesPerSecond() ?? 0;
+        const viewportRenderSeconds = this.currentViewportRenderSeconds();
+        return {
+            backend: this.getBackendRequestProgress(),
+            downstreamBytesPerSecond,
+            features,
+            vertices,
+            viewportRenderSeconds
+        };
+    }
+
+    private currentViewportRenderSeconds(): number {
+        if (this.viewportLoadStartedAtMs === null) {
+            return 0;
+        }
+        const endTime = this.viewportRenderCompletedAtMs ?? performance.now();
+        return Math.max(0, (endTime - this.viewportLoadStartedAtMs) / 1000);
+    }
+
+    private visualizationQueueLength(): number {
+        return this.viewVisualizationState.reduce(
+            (sum, state) => sum + state.visualizationQueue.length,
+            0
+        );
+    }
+
+    private tryFinalizeViewportRenderDuration() {
+        if (!this.backendRequestProgress.allDone) {
+            return;
+        }
+        if (this.viewportLoadStartedAtMs === null || this.viewportRenderCompletedAtMs !== null) {
+            return;
+        }
+        if (this.visualizationQueueLength() > 0) {
+            return;
+        }
+        const rendered = this.getVisualizationCounts();
+        if (rendered.total > 0 && rendered.done < rendered.total) {
+            return;
+        }
+        this.viewportRenderCompletedAtMs = performance.now();
+    }
+
+    private vertexCountFromTileStats(tile: FeatureTile): number {
+        let vertices = 0;
+        for (const [key, values] of tile.stats) {
+            if (!values?.length) {
+                continue;
+            }
+            if (!/vert/i.test(key) || /#ms$/i.test(key) || /#kb$/i.test(key)) {
+                continue;
+            }
+            const value = values[values.length - 1];
+            if (Number.isFinite(value)) {
+                vertices += Math.max(0, Math.round(value));
+            }
+        }
+        return vertices;
     }
 
     public isTileStreamConnected(): boolean {
@@ -398,6 +487,15 @@ export class MapDataService {
         if (statusMessage) {
             console.info("/tiles status:", statusMessage);
         }
+        const doneRequests = requests.filter(req => req.status !== MapTileRequestStatus.Open).length;
+        this.backendRequestProgress = {
+            done: doneRequests,
+            total: requests.length,
+            allDone: !!status.allDone,
+            requestId: status.requestId
+        };
+        this.tryFinalizeViewportRenderDuration();
+
         if (!status.allDone) {
             return;
         }
@@ -411,21 +509,6 @@ export class MapDataService {
             .join(", ");
         const detail = statusMessage ? ` (${statusMessage})` : "";
         this.messageService.showError(`Tile request failed: ${summary}${detail}`);
-    }
-
-    private handleTilesLoadState(payload: MapTileStreamLoadStatePayload) {
-        if (!payload || payload.type !== "mapget.tiles.load-state") {
-            return;
-        }
-
-        const tileId = BigInt(payload.tileId);
-        const tileKey = coreLib.getTileFeatureLayerKey(payload.mapId, payload.layerId, tileId);
-        const tile = this.loadedTileLayers.get(tileKey);
-        if (!tile) {
-            return;
-        }
-
-        this.applyTileLoadState(tile, payload.state, payload.stage);
     }
 
     public scheduleUpdate() {
@@ -482,54 +565,6 @@ export class MapDataService {
         }
     }
 
-    private applyTileLoadState(tile: FeatureTile, status: TileLoadState, stage?: number) {
-        const tileWithStages = tile as FeatureTile & {
-            setStageLoadState?: (stage: number, state: TileLoadState) => void;
-            stageLoadState?: (stage: number) => TileLoadState | undefined;
-            isComplete?: (stageCount: number) => boolean;
-        };
-        if (Number.isInteger(stage) && typeof tileWithStages.setStageLoadState === "function") {
-            tileWithStages.setStageLoadState(stage as number, status);
-        }
-
-        const stageCount = this.getLayerStageCount(tile.mapName, tile.layerName);
-        if (tile.error) {
-            tile.status = TileLoadState.Error;
-        } else if (typeof tileWithStages.isComplete === "function" && tileWithStages.isComplete(stageCount)) {
-            tile.status = TileLoadState.Ok;
-        } else {
-            tile.status = this.nextPendingTileLoadState(tileWithStages, stageCount) ?? status;
-        }
-
-        const tileKey = tile.mapTileKey;
-        for (const viewState of this.viewVisualizationState) {
-            for (const visu of viewState.getVisualizations(undefined, tileKey)) {
-                visu.updateStatus();
-            }
-        }
-    }
-
-    private nextPendingTileLoadState(tile: FeatureTile & {
-        nextMissingStage?: (stageCount: number) => number | undefined;
-        stageLoadState?: (stage: number) => TileLoadState | undefined;
-    }, stageCount: number): TileLoadState | undefined {
-        if (typeof tile.nextMissingStage !== "function") {
-            return tile.hasData() ? TileLoadState.BackendFetching : TileLoadState.LoadingQueued;
-        }
-        const nextMissingStage = tile.nextMissingStage(stageCount);
-        if (nextMissingStage === undefined) {
-            return TileLoadState.Ok;
-        }
-        for (let stage = nextMissingStage; stage < stageCount; stage++) {
-            const stageState = typeof tile.stageLoadState === "function"
-                ? tile.stageLoadState(stage)
-                : undefined;
-            if (stageState !== undefined) {
-                return stageState;
-            }
-        }
-        return tile.hasData() ? TileLoadState.BackendFetching : TileLoadState.LoadingQueued;
-    }
 
     getLayerStageCount(mapId: string, layerId: string): number {
         const layerStages = this.maps.maps.get(mapId)?.layers.get(layerId)?.info?.stages;
@@ -958,7 +993,18 @@ export class MapDataService {
         if (this.tilePipelinePaused) {
             return;
         }
-        await this.tileStream!.updateRequest(requests);
+        const requestSent = await this.tileStream!.updateRequest(requests);
+        if (requestSent) {
+            this.backendRequestProgress = {
+                done: 0,
+                total: requests.length,
+                allDone: requests.length === 0
+            };
+            this.viewportLoadStartedAtMs = performance.now();
+            this.viewportRenderCompletedAtMs = requests.length === 0
+                ? this.viewportLoadStartedAtMs
+                : null;
+        }
     }
 
     addTileFeatureLayer(tileLayerBlob: any, style: ErdblickStyle | null = null, preventCulling: boolean = false) {
@@ -988,7 +1034,6 @@ export class MapDataService {
             tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
             this.loadedTileLayers.set(canonicalMapTileKey, tileLayer);
         }
-        this.applyTileLoadState(tileLayer, tileLayer.status, tileStage);
 
         // Consider, if this tile is needed by a selection tile request.
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
