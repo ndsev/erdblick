@@ -27,6 +27,14 @@ interface ProgressBar {
                 }
                 <div class="diagnostics-loading-bubbles">
                     <span class="diagnostics-loading-bubble">{{ formatThroughput(bubbles.downstreamBytesPerSecond) }}</span>
+                    <span class="diagnostics-loading-bubble">
+                        {{ formatCompressionBubble(
+                            bubbles.pullCompressionRatioPct,
+                            bubbles.pullCompressionCoveragePct,
+                            bubbles.pullCompressedBytesKnown,
+                            bubbles.pullUncompressedBytes
+                        ) }}
+                    </span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.features) }} Feats.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.vertices) }} Verts.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.parseQueueSize) }} ParseQ</span>
@@ -84,6 +92,12 @@ export class DiagnosticsProgressComponent {
     get bubbles(): LoadingStatBubbles {
         return this.progress?.bubbles ?? {
             downstreamBytesPerSecond: 0,
+            pullResponses: 0,
+            pullGzipResponses: 0,
+            pullUncompressedBytes: 0,
+            pullCompressedBytesKnown: 0,
+            pullCompressionRatioPct: null,
+            pullCompressionCoveragePct: 0,
             features: 0,
             vertices: 0,
             parseQueueSize: 0,
@@ -118,6 +132,21 @@ export class DiagnosticsProgressComponent {
     formatThroughput(bytesPerSecond: number): string {
         const mbPerSecond = Math.max(0, bytesPerSecond || 0) / (1024 * 1024);
         return `${mbPerSecond.toFixed(2)} MB/s`;
+    }
+
+    formatCompressionBubble(
+        ratioPct: number | null,
+        coveragePct: number,
+        compressedKnownBytes: number,
+        uncompressedBytes: number): string {
+        const hasData = (compressedKnownBytes || 0) > 0 && (uncompressedBytes || 0) > 0;
+        if (!hasData || ratioPct === null || !Number.isFinite(ratioPct)) {
+            return 'Cmp n/a';
+        }
+        const clampedRatio = Math.max(0, Math.min(100, ratioPct));
+        const clampedCoverage = Math.max(0, Math.min(100, coveragePct || 0));
+        const compressedMb = Math.max(0, compressedKnownBytes) / (1024 * 1024);
+        return `Cmp ${clampedRatio.toFixed(1)}% @ ${clampedCoverage.toFixed(0)}% (${compressedMb.toFixed(1)} MB)`;
     }
 
     formatSeconds(seconds: number): string {

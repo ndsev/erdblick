@@ -154,6 +154,12 @@ export class DiagnosticsDatasource implements OnDestroy {
             rendered: this.mapService.getVisualizationCounts(),
             bubbles: {
                 downstreamBytesPerSecond: hudStats.downstreamBytesPerSecond,
+                pullResponses: hudStats.pullResponses,
+                pullGzipResponses: hudStats.pullGzipResponses,
+                pullUncompressedBytes: hudStats.pullUncompressedBytes,
+                pullCompressedBytesKnown: hudStats.pullCompressedBytesKnown,
+                pullCompressionRatioPct: hudStats.pullCompressionRatioPct,
+                pullCompressionCoveragePct: hudStats.pullCompressionCoveragePct,
                 features: hudStats.features,
                 vertices: hudStats.vertices,
                 parseQueueSize: hudStats.parseQueueSize,

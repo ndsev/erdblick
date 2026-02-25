@@ -4,7 +4,7 @@ import {
     MapTileRequestStatus,
     MapTileStreamClient,
 } from "./tilestream";
-import type {MapTileStreamStatusPayload} from "./tilestream";
+import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {CesiumTileVisualization} from "../mapview/cesium/cesium-tile.visualization.model";
@@ -49,6 +49,12 @@ export interface BackendRequestProgress {
 export interface TileLoadingHudStats {
     backend: BackendRequestProgress;
     downstreamBytesPerSecond: number;
+    pullResponses: number;
+    pullGzipResponses: number;
+    pullUncompressedBytes: number;
+    pullCompressedBytesKnown: number;
+    pullCompressionRatioPct: number | null;
+    pullCompressionCoveragePct: number;
     features: number;
     vertices: number;
     parseQueueSize: number;
@@ -388,17 +394,38 @@ export class MapDataService {
         }
 
         const downstreamBytesPerSecond = this.tileStream?.getDownstreamBytesPerSecond() ?? 0;
+        const compressionStats = this.getTileStreamTransportCompressionStats();
         const parseQueueSize = this.tileStream?.getPendingFrameQueueSize() ?? 0;
         const renderQueueSize = this.visualizationQueueLength();
         const viewportRenderSeconds = this.currentViewportRenderSeconds();
         return {
             backend: this.getBackendRequestProgress(),
             downstreamBytesPerSecond,
+            pullResponses: compressionStats.totalPullResponses,
+            pullGzipResponses: compressionStats.totalPullGzipResponses,
+            pullUncompressedBytes: compressionStats.totalUncompressedBytes,
+            pullCompressedBytesKnown: compressionStats.knownCompressedBytes,
+            pullCompressionRatioPct: compressionStats.compressionRatioPct,
+            pullCompressionCoveragePct: compressionStats.knownCompressedCoveragePct,
             features,
             vertices,
             parseQueueSize,
             renderQueueSize,
             viewportRenderSeconds
+        };
+    }
+
+    public getTileStreamTransportCompressionStats(): MapTileStreamTransportCompressionStats {
+        return this.tileStream?.getTransportCompressionStats() ?? {
+            totalPullResponses: 0,
+            totalPullGzipResponses: 0,
+            totalUncompressedBytes: 0,
+            knownCompressedBytes: 0,
+            knownCompressedUncompressedBytes: 0,
+            responsesWithKnownCompressedBytes: 0,
+            compressionRatioPct: null,
+            compressionSavingsPct: null,
+            knownCompressedCoveragePct: 0,
         };
     }
 

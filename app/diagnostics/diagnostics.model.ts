@@ -7,6 +7,12 @@ export interface ProgressCounter {
 
 export interface LoadingStatBubbles {
     downstreamBytesPerSecond: number;
+    pullResponses: number;
+    pullGzipResponses: number;
+    pullUncompressedBytes: number;
+    pullCompressedBytesKnown: number;
+    pullCompressionRatioPct: number | null;
+    pullCompressionCoveragePct: number;
     features: number;
     vertices: number;
     parseQueueSize: number;

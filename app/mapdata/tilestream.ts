@@ -49,6 +49,18 @@ export interface MapTileStreamRequestContextPayload {
     clientId?: number;
 }
 
+export interface MapTileStreamTransportCompressionStats {
+    totalPullResponses: number;
+    totalPullGzipResponses: number;
+    totalUncompressedBytes: number;
+    knownCompressedBytes: number;
+    knownCompressedUncompressedBytes: number;
+    responsesWithKnownCompressedBytes: number;
+    compressionRatioPct: number | null;
+    compressionSavingsPct: number | null;
+    knownCompressedCoveragePct: number;
+}
+
 export class MapTileStreamClient {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
@@ -79,6 +91,12 @@ export class MapTileStreamClient {
     private readonly pullBatchMinBytes: number = 64 * 1024;
     private readonly pullDownstreamEwmaAlpha: number = 0.2;
     private downstreamBytesPerSecondEwma: number = 512 * 1024;
+    private totalPullResponses: number = 0;
+    private totalPullGzipResponses: number = 0;
+    private totalUncompressedBytes: number = 0;
+    private knownCompressedBytes: number = 0;
+    private knownCompressedUncompressedBytes: number = 0;
+    private responsesWithKnownCompressedBytes: number = 0;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
@@ -188,6 +206,27 @@ export class MapTileStreamClient {
 
     getPendingFrameQueueSize(): number {
         return this.frameQueue.length;
+    }
+
+    getTransportCompressionStats(): MapTileStreamTransportCompressionStats {
+        const ratioPct = this.knownCompressedUncompressedBytes > 0
+            ? (this.knownCompressedBytes / this.knownCompressedUncompressedBytes) * 100
+            : null;
+        const savingsPct = ratioPct === null ? null : 100 - ratioPct;
+        const coveragePct = this.totalUncompressedBytes > 0
+            ? (this.knownCompressedUncompressedBytes / this.totalUncompressedBytes) * 100
+            : 0;
+        return {
+            totalPullResponses: this.totalPullResponses,
+            totalPullGzipResponses: this.totalPullGzipResponses,
+            totalUncompressedBytes: this.totalUncompressedBytes,
+            knownCompressedBytes: this.knownCompressedBytes,
+            knownCompressedUncompressedBytes: this.knownCompressedUncompressedBytes,
+            responsesWithKnownCompressedBytes: this.responsesWithKnownCompressedBytes,
+            compressionRatioPct: ratioPct,
+            compressionSavingsPct: savingsPct,
+            knownCompressedCoveragePct: coveragePct,
+        };
     }
 
     sendRequest(body: object | string) {
@@ -611,6 +650,7 @@ export class MapTileStreamClient {
                     if (controller.signal.aborted) {
                         return;
                     }
+                    this.recordPullTransportSample(response, body.byteLength);
                     const elapsedMs = Math.max(1, performance.now() - startedAt);
                     this.recordDownstreamSample(body.byteLength, elapsedMs);
                     this.enqueueFrame(body);
@@ -665,6 +705,49 @@ export class MapTileStreamClient {
         }
         this.downstreamBytesPerSecondEwma = this.pullDownstreamEwmaAlpha * bytesPerSecond
             + (1 - this.pullDownstreamEwmaAlpha) * this.downstreamBytesPerSecondEwma;
+    }
+
+    private recordPullTransportSample(response: Response, uncompressedBytes: number) {
+        this.totalPullResponses += 1;
+        this.totalUncompressedBytes += Math.max(0, uncompressedBytes);
+        if (this.hasGzipContentEncoding(response)) {
+            this.totalPullGzipResponses += 1;
+        }
+
+        const compressedBytes = this.extractCompressedBodyBytes(response);
+        if (compressedBytes === null) {
+            return;
+        }
+        this.responsesWithKnownCompressedBytes += 1;
+        this.knownCompressedBytes += compressedBytes;
+        this.knownCompressedUncompressedBytes += Math.max(0, uncompressedBytes);
+    }
+
+    private hasGzipContentEncoding(response: Response): boolean {
+        const header = response.headers.get("content-encoding");
+        if (!header) {
+            return false;
+        }
+        return header.toLowerCase().includes("gzip");
+    }
+
+    private extractCompressedBodyBytes(response: Response): number | null {
+        const preferredHeader = this.parseNonNegativeIntegerHeader(response.headers.get("x-mapget-compressed-bytes"));
+        if (preferredHeader !== null) {
+            return preferredHeader;
+        }
+        return this.parseNonNegativeIntegerHeader(response.headers.get("content-length"));
+    }
+
+    private parseNonNegativeIntegerHeader(rawValue: string | null): number | null {
+        if (!rawValue) {
+            return null;
+        }
+        const parsed = Number.parseInt(rawValue, 10);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+            return null;
+        }
+        return parsed;
     }
 
     private async delay(ms: number, signal: AbortSignal): Promise<void> {
