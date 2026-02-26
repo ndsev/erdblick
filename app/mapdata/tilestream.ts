@@ -90,6 +90,7 @@ export class MapTileStreamClient {
     private readonly pullBatchMaxBytesCap: number = 5 * 1024 * 1024;
     private readonly pullBatchMinBytes: number = 64 * 1024;
     private readonly pullDownstreamEwmaAlpha: number = 0.2;
+    private pullCompressionEnabled: boolean = false;
     private downstreamBytesPerSecondEwma: number = 512 * 1024;
     private totalPullResponses: number = 0;
     private totalPullGzipResponses: number = 0;
@@ -194,6 +195,10 @@ export class MapTileStreamClient {
         if (!paused && this.frameQueue.length) {
             this.scheduleFrameProcessing(0);
         }
+    }
+
+    setPullCompressionEnabled(enabled: boolean) {
+        this.pullCompressionEnabled = !!enabled;
     }
 
     get isFrameProcessingPaused(): boolean {
@@ -687,6 +692,7 @@ export class MapTileStreamClient {
         pullUrl.searchParams.set("clientId", String(clientId));
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
+        pullUrl.searchParams.set("compress", this.pullCompressionEnabled ? "1" : "0");
         return pullUrl.toString();
     }
 

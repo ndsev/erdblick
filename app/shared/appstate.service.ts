@@ -356,6 +356,12 @@ export class AppStateService implements OnDestroy {
         schema: z.coerce.number().int().min(1).max(MAX_DECK_STYLE_WORKERS)
     });
 
+    readonly tilePullCompressionEnabledState = this.createState<boolean>({
+        name: 'tilePullCompressionEnabled',
+        defaultValue: false,
+        schema: Boolish
+    });
+
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
         name: 'layerSyncOptions',
         defaultValue: false,
@@ -786,6 +792,8 @@ export class AppStateService implements OnDestroy {
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
     set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
+    get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
+    set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get search() {return this.searchState.getValue();}
     set search(val: [number, string] | []) {this.searchState.next(val);};
     get marker() {return this.markerState.getValue();}

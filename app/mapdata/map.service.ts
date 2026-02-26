@@ -159,6 +159,9 @@ export class MapDataService {
         this.stateService.deckStyleWorkersEnabledState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
+        this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
+            this.tileStream?.setPullCompressionEnabled(enabled);
+        });
 
         this.stateService.numViewsState.subscribe(numViews => {
             const diff = numViews - this.viewVisualizationState.length;
@@ -179,6 +182,7 @@ export class MapDataService {
 
         // Setup TileLayerStream
         this.tileStream = new MapTileStreamClient("/tiles");
+        this.tileStream.setPullCompressionEnabled(this.stateService.tilePullCompressionEnabled);
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
         this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);

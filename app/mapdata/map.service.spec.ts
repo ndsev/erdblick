@@ -136,6 +136,7 @@ class AppStateServiceStub {
 
     tilesLoadLimitState = new BehaviorSubject<number>(8);
     tilesVisualizeLimitState = new BehaviorSubject<number>(4);
+    tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
 
     get numViews() {
         return this.numViewsState.getValue();
@@ -147,6 +148,10 @@ class AppStateServiceStub {
 
     get tilesVisualizeLimit() {
         return this.tilesVisualizeLimitState.getValue();
+    }
+
+    get tilePullCompressionEnabled() {
+        return this.tilePullCompressionEnabledState.getValue();
     }
 
     get viewSync() {

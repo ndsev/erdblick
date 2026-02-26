@@ -66,6 +66,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setDeckStyleWorkersEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label>Tile pull compression:</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="tilePullCompressionEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
                 <label>Deck worker count override:</label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
                                 (ngModelChange)="setDeckStyleWorkersOverride($event)" />
@@ -155,6 +163,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         {label: 'Deck', value: 'deck'}
     ];
     deckStyleWorkersEnabledSetting: boolean = false;
+    tilePullCompressionEnabledSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
     toggleOptions = [
@@ -197,6 +206,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersEnabledState.subscribe(enabled => {
             this.deckStyleWorkersEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
+            this.tilePullCompressionEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -263,6 +275,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckStyleWorkersEnabled(enabled: boolean) {
         this.deckStyleWorkersEnabledSetting = enabled;
         this.stateService.deckStyleWorkersEnabled = enabled;
+    }
+
+    setTilePullCompressionEnabled(enabled: boolean) {
+        this.tilePullCompressionEnabledSetting = enabled;
+        this.stateService.tilePullCompressionEnabled = enabled;
     }
 
     setDeckStyleWorkersOverride(enabled: boolean) {
