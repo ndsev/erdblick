@@ -1,7 +1,7 @@
 import {Injectable} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
 import {BehaviorSubject, skip} from "rxjs";
-import {Cartographic} from "../integrations/cesium";
+import {Cartographic} from "../integrations/geo";
 import {HttpClient} from "@angular/common/http";
 
 @Injectable({providedIn: 'root'})

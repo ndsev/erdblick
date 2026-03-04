@@ -39,6 +39,9 @@ options:
 
 - `name` – Mandatory. Free to set. May contain slash-separated grouping.
 - `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
+- `stage` – Optional minimum tile stage required before any rule in the style can render.
+- `high-fidelity-stage` – Optional stage threshold for switching a tile from `fidelity: low` to `fidelity: high` when that tile's view policy targets high fidelity.
+- Low-fidelity requests currently fetch stage `0` only; the frontend may apply an additional per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
 
@@ -50,9 +53,12 @@ options:
 | --- | --- |
 | `type` | Regex that matches the feature type ID (e.g., `LaneGroup`). |
 | `filter` | Simfil expression that runs against the current feature/relation/attribute. |
-| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. Optional `geometry-name` narrows it to specific geometry identifiers. |
+| `geometry` | Array or string that limits the rule to `point`, `line`, `polygon`, or `mesh` primitives. |
 | `aspect` | `feature` (default), `relation`, or `attribute`. Controls how the rule interprets the current entity. |
 | `mode` | `none`, `hover`, or `selection`. Use separate rules for hover/selection-specific rendering. |
+| `fidelity` | `low`, `high`, or `any` (default). Lets one style sheet define separate rules for zoomed-out low-fi rendering and high-fi rendering. In low-fi mode, erdblick may additionally cull features by backend-provided `lod`. |
+| `stage` | Optional exact tile stage match for geometry rules (for example `stage: 0` for low-fi geometry, `stage: 1` for full geometry). |
+| `lod` | Optional exact feature LOD match (`0..7`). Useful inside `first-of` chains to style coarse and fine features differently. |
 | `selectable` | `true`/`false` flag that decides whether the feature can be selected or will be skipped when the user clicks it. |
 | `first-of` | Array of child rules; erdblick evaluates them top-to-bottom and applies only the first match. Remaining child rules are skipped. |
 
@@ -78,9 +84,9 @@ options:
 | --- | --- |
 | `label-text` | Static string used as the label. |
 | `label-text-expression` | Simfil expression returning the label text (e.g., `**.name`). |
-| `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard Cesium label attributes. |
+| `label-color`, `label-outline-color`, `label-background-color`, `label-font`, `label-style`, `label-scale` | Standard deck.gl label attributes. |
 | `label-outline-width`, `label-background-padding` | Outline/padding controls. |
-| `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced Cesium label positioning knobs. |
+| `label-horizontal-origin`, `label-vertical-origin`, `label-height-reference`, `label-eye-offset`, `label-pixel-offset` | Advanced deck.gl label positioning knobs. |
 
 ### Distance-Based Properties
 

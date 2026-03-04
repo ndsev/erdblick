@@ -21,7 +21,7 @@ export interface RenderVector3 {
     z: number;
 }
 
-export type RenderBackend = "cesium" | "deck";
+export type RenderBackend = "deck";
 
 export interface IRenderSceneHandle {
     readonly renderer: RenderBackend;
@@ -32,12 +32,14 @@ export interface ITileVisualization {
     readonly viewIndex: number;
     readonly styleId: string;
     readonly tile: FeatureTile;
-    isHighDetail: boolean;
+    prefersHighFidelity: boolean;
+    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     showTileBorder: boolean;
 
     render(sceneHandle: IRenderSceneHandle): Promise<boolean>;
     destroy(sceneHandle: IRenderSceneHandle): void;
     isDirty(): boolean;
+    renderRank(): readonly number[];
     updateStatus(renderQueued?: boolean): void;
     setStyleOption(optionId: string, value: string | number | boolean): boolean;
 }

@@ -6,12 +6,12 @@ Erdblick encodes the full UI state inside the browser URL. That makes it easy to
 
 - Camera state: latitude, longitude, altitude, and orientation (heading, pitch, roll) for each view.
 - Number of map views, which view is focused, view sync flags (position/movement/projection/layers), and 2D/3D projection mode per view.
-- Active maps and the complete layer matrix: which layers are visible in which view, their zoom levels, and whether tile borders are drawn.
+- Active maps and the complete layer matrix: which layers are visible in which view and their zoom levels, plus per-view tile-border visibility.
 - Base-map settings: OpenStreetMap overlay toggles and opacity per view.
 - Enabled styles plus the values of all style options per map layer and view.
 - Inspection state: open panels, pinned vs. unpinned selections, panel sizes and highlight colours, and any active SourceData selection.
 - Search palette state and the last executed query.
-- Tile budget limits from the Preferences dialog (tiles to load vs. tiles to visualise).
+- Tile budget limit from the Preferences dialog (max tiles to load).
 - Coordinate marker enablement and position.
 
 The URL is pruned automatically so it never grows beyond a few kilobytes, even after extended sessions.
@@ -32,10 +32,9 @@ The table below lists all query parameters used by erdblick when encoding or res
 | `osmOp` | Per view | Base map opacity (0–100), per view. |
 | `l` | Global | Ordered list of map layer identifiers. Other layer-related parameters index into this list. |
 | `v` | Per view | Layer visibility flags per view, aligned with the `l` list. |
-| `tb` | Per view | Tile-border visibility flags per view, aligned with the `l` list. |
+| `tb` | Per view | Tile-border visibility flag per view. |
 | `z` | Per view | Per-layer zoom level configuration per view, aligned with the `l` list. |
 | `tll` | Global | Maximum number of tiles to load (Tiles to load). |
-| `tvl` | Global | Maximum number of tiles to visualise (Tiles to visualize). |
 | `s` | Global | Current search query, encoded as a view index plus query string. |
 | `m` | Global | Coordinate marker enablement flag. |
 | `mp` | Global | Coordinate marker position when enabled (longitude and latitude). |
@@ -56,12 +55,11 @@ When running the visualization-only build or embedding erdblick without UI panel
 | `osm` | Toggle the base map overlay (`true`/`false`), per view. |
 | `osmOp` | Base map opacity in percent (0–100), per view. |
 | `tll` | Maximum number of tiles to load, per view. |
-| `tvl` | Maximum number of tiles to visualize, per view. |
 
 Example:
 
 ```
-http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&osm=true&osmOp=30&tll=1024&tvl=256
+http://localhost:8089/?lon=11.0454671&lat=48.0179306&alt=1000&h=0.5&p=-0.7&osm=true&osmOp=30&tll=1024
 ```
 
 ## Multi-View State in Query Parameters

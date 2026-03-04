@@ -27,11 +27,6 @@
                         "assets": [
                             {
                                 "glob": "**/*",
-                                "input": "node_modules/cesium/Build/CesiumUnminified",
-                                "output": "/bundle/cesium"
-                            },
-                            {
-                                "glob": "**/*",
                                 "input": "config/styles",
                                 "output": "/bundle/styles"
                             },
@@ -78,7 +73,6 @@
                         ],
                         "styles": [
                             "node_modules/primeicons/primeicons.css",
-                            "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
                             "node_modules/material-symbols/index.css",
                             "app/styles.scss"
                         ],
@@ -101,11 +95,6 @@
                             ],
                             "outputHashing": "all",
                             "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "node_modules/cesium/Build/Cesium",
-                                    "output": "/bundle/cesium"
-                                },
                                 {
                                     "glob": "**/*",
                                     "input": "config/styles",
@@ -194,12 +183,7 @@
                             "namedChunks": true,
                             "tsConfig": "tsconfig.spec.json",
                             "browser": "app/main.ts",
-                            "fileReplacements": [
-                              {
-                                "replace": "app/integrations/cesium.prod.ts",
-                                "with": "app/integrations/cesium.test.ts"
-                              }
-                            ]
+                            "fileReplacements": []
                         },
                         "visualization-only": {
                             "outputPath": "static-visualization-only",
@@ -217,11 +201,6 @@
                             ],
                             "outputHashing": "all",
                             "assets": [
-                                {
-                                    "glob": "**/*",
-                                    "input": "node_modules/cesium/Build/Cesium",
-                                    "output": "/bundle/cesium"
-                                },
                                 {
                                     "glob": "**/*",
                                     "input": "config/styles",
@@ -341,8 +320,6 @@
                             "json-summary"
                         ],
                         "codeCoverageExclude": [
-                            "**/bundle/cesium/**",
-                            "**/dist/**/bundle/cesium/**"
                         ],
                         "exclude": [
                             "app/app.component.spec.ts"

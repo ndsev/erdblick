@@ -20,10 +20,7 @@ export default defineConfig({
             provider: 'v8',
             reporter: ['text-summary', 'html', 'lcov', 'json-summary'],
             reportsDirectory: 'coverage',
-            exclude: [
-                '**/bundle/cesium/**',
-                '**/dist/**/bundle/cesium/**'
-            ],
+            exclude: [],
         },
     },
 });

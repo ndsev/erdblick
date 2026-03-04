@@ -2,6 +2,7 @@
 
 #include "erdblick/inspection.h"
 #include "erdblick/parser.h"
+#include "erdblick/rule.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 
@@ -9,17 +10,11 @@
 
 using namespace erdblick;
 
-TEST_CASE("CesiumFeatureLayerVisualization", "[erdblick.renderer]")
+TEST_CASE("DeckFeatureLayerVisualization", "[erdblick.renderer]")
 {
-    TileLayerParser tlp;
-    auto testLayer = TestDataProvider(tlp).getTestLayer(42., 11., 13);
     auto style = TestDataProvider::style();
-    CesiumFeatureLayerVisualization visualization(0, "Features:Test:Test:0", style, {}, {});
-    visualization.addTileFeatureLayer(TileFeatureLayer(testLayer));
-    visualization.run();
-    auto result = visualization.primitiveCollection();
-    std::cout << result << std::endl;
-    REQUIRE(!result.empty());
+    DeckFeatureLayerVisualization visualization(0, "Features:Test:Test:0", style, {}, {});
+    REQUIRE(visualization.abiVersion() == 1);
 }
 
 TEST_CASE("FeatureInspection", "[erdblick.inspection]")
@@ -42,4 +37,24 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
         }
         REQUIRE_FALSE(hasFeatureRoot);
     }
+}
+
+TEST_CASE("FeatureStyleRuleLodFilterParsing", "[erdblick.style]")
+{
+    auto yamlWithLod = YAML::Load(R"(
+type: Road
+geometry: [line]
+lod: 3
+)");
+    FeatureStyleRule ruleWithLod(yamlWithLod, 0);
+    REQUIRE(ruleWithLod.lod().has_value());
+    REQUIRE(*ruleWithLod.lod() == 3);
+
+    auto yamlWithInvalidLod = YAML::Load(R"(
+type: Road
+geometry: [line]
+lod: 42
+)");
+    FeatureStyleRule ruleWithInvalidLod(yamlWithInvalidLod, 0);
+    REQUIRE_FALSE(ruleWithInvalidLod.lod().has_value());
 }

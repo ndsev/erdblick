@@ -2,8 +2,8 @@ import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from
 import {Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
 import {BitmapLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
-import {Cartographic, CesiumMath, SceneMode} from "../../integrations/cesium";
-import {MapDataService} from "../../mapdata/map.service";
+import {Cartographic, GeoMath, SceneMode} from "../../integrations/geo";
+import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
 import {JumpTargetService} from "../../search/jump.service";
 import {RightClickMenuService} from "../rightclickmenu.service";
@@ -30,7 +30,7 @@ interface DeckCameraState {
 export abstract class DeckMapView implements IRenderView {
     private static readonly EARTH_RADIUS_METERS = 6378137;
     private static readonly WEB_MERCATOR_TILE_SIZE = 512;
-    private static readonly ASSUMED_VERTICAL_FOV_RADIANS = CesiumMath.toRadians(60);
+    private static readonly ASSUMED_VERTICAL_FOV_RADIANS = GeoMath.toRadians(60);
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
     private static readonly OSM_LAYER_KEY = "osm/tile-layer";
     private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -272,10 +272,10 @@ export abstract class DeckMapView implements IRenderView {
             latitude: cameraData.destination.lat,
             zoom: this.altitudeToZoom(cameraData.destination.alt, cameraData.destination.lat),
             pitch: this.allowPitchAndBearing
-                ? Math.max(0, Math.min(60, CesiumMath.toDegrees(cameraData.orientation.pitch) + 90))
+                ? Math.max(0, Math.min(60, GeoMath.toDegrees(cameraData.orientation.pitch) + 90))
                 : 0,
             bearing: this.allowPitchAndBearing
-                ? this.normalizeDegrees(CesiumMath.toDegrees(cameraData.orientation.heading))
+                ? this.normalizeDegrees(GeoMath.toDegrees(cameraData.orientation.heading))
                 : 0
         };
         this.updateViewState(next, true, true);
@@ -302,8 +302,8 @@ export abstract class DeckMapView implements IRenderView {
         const north = Math.max(southRaw, northRaw);
         const sizeLon = Math.abs(east - west);
         const sizeLat = Math.abs(north - south);
-        const expandLon = sizeLon * 0.25;
-        const expandLat = sizeLat * 0.25;
+        const expandLon = sizeLon * 0.05;
+        const expandLat = sizeLat * 0.05;
 
         return {
             south: south - expandLat,
@@ -312,8 +312,8 @@ export abstract class DeckMapView implements IRenderView {
             height: sizeLat + expandLat * 2,
             camPosLon: this.viewState.longitude,
             camPosLat: this.viewState.latitude,
-            // Keep tile-priority orientation consistent with Cesium's viewport contract.
-            orientation: -CesiumMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
+            // Keep tile-priority orientation consistent with the legacy viewport contract.
+            orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
     }
 
@@ -427,15 +427,24 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapService.tileVisualizationTopic.subscribe((tileVis: ITileVisualization) => {
+            this.mapService.tileVisualizationTopic.subscribe((task: TileVisualizationRenderTask) => {
+                const tileVis = task.visualization;
                 if (tileVis.viewIndex !== this._viewIndex) {
+                    task.onDone?.();
                     return;
                 }
-                tileVis.render(this.getSceneHandle()).then(wasRendered => {
-                    if (wasRendered) {
-                        this.requestRender();
-                    }
-                });
+                tileVis.render(this.getSceneHandle())
+                    .then(wasRendered => {
+                        if (wasRendered) {
+                            this.requestRender();
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Tile visualization render failed.", error);
+                    })
+                    .finally(() => {
+                        task.onDone?.();
+                    });
             })
         );
 
@@ -464,7 +473,9 @@ export abstract class DeckMapView implements IRenderView {
         if (this.suppressDeckViewStateEvent) {
             return;
         }
-        this.stateService.focusedView = this._viewIndex;
+        if (this.stateService.focusedView !== this._viewIndex) {
+            this.stateService.focusedView = this._viewIndex;
+        }
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
         // take effect if we feed the updated camera state back via `setProps`.
         this.updateViewState(rawViewState as DeckCameraState, true, true);
@@ -570,7 +581,6 @@ export abstract class DeckMapView implements IRenderView {
             this.suppressDeckViewStateEvent = true;
             this.deck.setProps({viewState: sanitized});
             this.suppressDeckViewStateEvent = false;
-            this.requestRender();
         }
         if (updateViewport) {
             this.updateViewport();
@@ -591,8 +601,8 @@ export abstract class DeckMapView implements IRenderView {
                 this.zoomToAltitude(this.viewState.zoom, this.viewState.latitude)
             ),
             {
-                heading: CesiumMath.toRadians(this.viewState.bearing),
-                pitch: CesiumMath.toRadians(this.viewState.pitch - 90),
+                heading: GeoMath.toRadians(this.viewState.bearing),
+                pitch: GeoMath.toRadians(this.viewState.pitch - 90),
                 roll: 0
             }
         );
@@ -700,7 +710,7 @@ export abstract class DeckMapView implements IRenderView {
     private altitudeToZoom(altitude: number, latitude: number): number {
         const safeAltitude = Math.max(1, altitude);
         const viewportHeight = this.getViewportHeightPixels();
-        const latitudeCos = Math.max(0.01, Math.cos(CesiumMath.toRadians(latitude)));
+        const latitudeCos = Math.max(0.01, Math.cos(GeoMath.toRadians(latitude)));
         const visibleHeightMeters = 2 * safeAltitude * Math.tan(DeckMapView.ASSUMED_VERTICAL_FOV_RADIANS / 2);
         const metersPerPixel = Math.max(1e-6, visibleHeightMeters / viewportHeight);
         const worldMetersAtLatitude = latitudeCos * 2 * Math.PI * DeckMapView.EARTH_RADIUS_METERS;
@@ -715,7 +725,7 @@ export abstract class DeckMapView implements IRenderView {
 
     private zoomToAltitude(zoom: number, latitude: number = this.viewState.latitude): number {
         const viewportHeight = this.getViewportHeightPixels();
-        const latitudeCos = Math.max(0.01, Math.cos(CesiumMath.toRadians(latitude)));
+        const latitudeCos = Math.max(0.01, Math.cos(GeoMath.toRadians(latitude)));
         const worldMetersAtLatitude = latitudeCos * 2 * Math.PI * DeckMapView.EARTH_RADIUS_METERS;
         const metersPerPixel =
             worldMetersAtLatitude / (DeckMapView.WEB_MERCATOR_TILE_SIZE * Math.pow(2, zoom));

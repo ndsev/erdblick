@@ -1,10 +1,9 @@
 import {coreLib, uint8ArrayFromWasm, ErdblickCore_} from "./integrations/wasm";
 import {MapDataService} from "./mapdata/map.service";
 import {AppStateService} from "./shared/appstate.service";
-import {SceneMode, CesiumMath} from "./integrations/cesium";
 
 type DebugHighlightMode = "none" | "hover" | "selection";
-type DebugRenderer = "deck" | "cesium";
+type DebugRenderer = "deck";
 
 /**
  * Extend Window interface to allow custom ErdblickDebugApi property
@@ -203,7 +202,7 @@ export class ErdblickDebugApi {
         mapTileKey: string,
         styleId: string,
         featureIdSubset: string[],
-        renderer: DebugRenderer = "deck",
+        _renderer: DebugRenderer = "deck",
         mode: DebugHighlightMode = "hover") {
         const tile = this.mapService.loadedTileLayers.get(mapTileKey);
         if (!tile?.hasData()) {
@@ -237,72 +236,48 @@ export class ErdblickDebugApi {
         };
 
         return tile.peek((parsedTile) => {
-            if (renderer === "deck") {
-                const deckVis = new coreLib.DeckFeatureLayerVisualization(
-                    0,
-                    mapTileKey,
-                    style.featureLayerStyle,
-                    styleOptions,
-                    {count: () => 0},
-                    modeValue,
-                    featureIdSubset);
-                deckVis.addTileFeatureLayer(parsedTile);
-                deckVis.run();
-
-                const startsShared = new coreLib.SharedUint8Array();
-                deckVis.pathStartIndicesRaw(startsShared);
-                const startsBytes = readSharedBytes(startsShared);
-                const startIndices = new Uint32Array(
-                    startsBytes.buffer,
-                    startsBytes.byteOffset,
-                    Math.floor(startsBytes.byteLength / 4));
-
-                const featureIdsShared = new coreLib.SharedUint8Array();
-                deckVis.pathFeatureIdsRaw(featureIdsShared);
-                const featureIdsBytes = readSharedBytes(featureIdsShared);
-                const featureIds = new Uint32Array(
-                    featureIdsBytes.buffer,
-                    featureIdsBytes.byteOffset,
-                    Math.floor(featureIdsBytes.byteLength / 4));
-
-                deckVis.delete();
-                return {
-                    renderer: "deck",
-                    mode,
-                    styleId,
-                    subset: [...featureIdSubset],
-                    pathCount: Math.max(0, startIndices.length - 1),
-                    startIndices: Array.from(startIndices.slice(0, 20)),
-                    featureIds: Array.from(featureIds.slice(0, 20))
-                };
-            }
-
-            const cesiumVis = new coreLib.CesiumFeatureLayerVisualization(
+            const deckCtor = coreLib.DeckFeatureLayerVisualization as any;
+            const deckVis = new deckCtor(
                 0,
                 mapTileKey,
                 style.featureLayerStyle,
                 styleOptions,
                 {count: () => 0},
                 modeValue,
+                coreLib.RuleFidelity.ANY,
+                -1,
+                typeof deckCtor.GEOMETRY_OUTPUT_ALL === "function"
+                    ? deckCtor.GEOMETRY_OUTPUT_ALL()
+                    : 0,
                 featureIdSubset);
-            cesiumVis.addTileFeatureLayer(parsedTile);
-            cesiumVis.run();
-            const primitiveCollection = cesiumVis.primitiveCollection();
-            const primitiveKinds = Array.isArray(primitiveCollection?._primitives)
-                ? primitiveCollection._primitives.map((primitive: any) => primitive?.constructor?.name ?? typeof primitive)
-                : [];
-            const primitivePropertyHints = Array.isArray(primitiveCollection?._primitives)
-                ? primitiveCollection._primitives.map((primitive: any) => Object.keys(primitive ?? {}).slice(0, 12))
-                : [];
-            cesiumVis.delete();
+            deckVis.addTileFeatureLayer(parsedTile);
+            deckVis.run();
+
+            const startsShared = new coreLib.SharedUint8Array();
+            deckVis.pathStartIndicesRaw(startsShared);
+            const startsBytes = readSharedBytes(startsShared);
+            const startIndices = new Uint32Array(
+                startsBytes.buffer,
+                startsBytes.byteOffset,
+                Math.floor(startsBytes.byteLength / 4));
+
+            const featureIdsShared = new coreLib.SharedUint8Array();
+            deckVis.pathFeatureIdsRaw(featureIdsShared);
+            const featureIdsBytes = readSharedBytes(featureIdsShared);
+            const featureIds = new Uint32Array(
+                featureIdsBytes.buffer,
+                featureIdsBytes.byteOffset,
+                Math.floor(featureIdsBytes.byteLength / 4));
+
+            deckVis.delete();
             return {
-                renderer: "cesium",
+                renderer: "deck",
                 mode,
                 styleId,
                 subset: [...featureIdSubset],
-                primitiveCount: primitiveKinds.length,
-                primitiveKinds,
-                primitivePropertyHints
+                pathCount: Math.max(0, startIndices.length - 1),
+                startIndices: Array.from(startIndices.slice(0, 20)),
+                featureIds: Array.from(featureIds.slice(0, 20))
             };
         });
     }

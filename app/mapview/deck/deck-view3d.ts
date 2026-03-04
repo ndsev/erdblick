@@ -1,4 +1,4 @@
-import {SceneMode} from "../../integrations/cesium";
+import {SceneMode} from "../../integrations/geo";
 import {DeckMapView} from "./deck-view";
 
 export class DeckMapView3D extends DeckMapView {

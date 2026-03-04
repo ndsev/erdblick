@@ -1,3 +1,11 @@
+export const DECK_GEOMETRY_OUTPUT_ALL = 0;
+export const DECK_GEOMETRY_OUTPUT_POINTS_ONLY = 1;
+export const DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY = 2;
+export type DeckGeometryOutputMode =
+    typeof DECK_GEOMETRY_OUTPUT_ALL |
+    typeof DECK_GEOMETRY_OUTPUT_POINTS_ONLY |
+    typeof DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY;
+
 export interface DeckPathRenderTask {
     type: "DeckPathRenderTask";
     taskId: string;
@@ -11,6 +19,9 @@ export interface DeckPathRenderTask {
     styleSource: string;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
+    fidelityValue: number;
+    maxLowFiLod: number;
+    outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
     mergeCountSnapshot: Record<string, number>;
 }

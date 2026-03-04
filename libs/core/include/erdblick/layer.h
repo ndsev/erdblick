@@ -2,7 +2,7 @@
 
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatalayer.h"
-#include "cesium-interface/cesium-object.h"
+#include "interop/js-object.h"
 #include "mapget/model/sourcedata.h"
 
 namespace erdblick
@@ -85,6 +85,13 @@ struct TileFeatureLayer
      * @return Feature ID string, or empty string if not found.
      */
     std::string featureIdByIndex(uint32_t index) const;
+
+    /**
+     * Retrieves a feature by index.
+     * @param index Index of the feature in the tile.
+     * @return Feature pointer, or null if index is out of range.
+     */
+    mapget::model_ptr<mapget::Feature> featureByIndex(uint32_t index) const;
 
     ~TileFeatureLayer();
 

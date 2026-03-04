@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_map>
-#include "cesium-interface/cesium-object.h"
+#include "interop/js-object.h"
 #include "mapget/model/feature.h"
 #include "sfl/small_vector.hpp"
 #include "simfil/model/string-pool.h"

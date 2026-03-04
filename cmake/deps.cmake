@@ -3,9 +3,9 @@
 set(ERDBLICK_MAPGET_SOURCE_DIR "" CACHE PATH
   "Local mapget source directory to use instead of fetching from Git.")
 
-if (NOT DEFINED NOSERDE_DEFAULT_VECTOR_STORAGE)
-  set(NOSERDE_DEFAULT_VECTOR_STORAGE ON CACHE BOOL
-    "Default noserde::Buffer storage policy to vector_byte_storage")
+if (NOT DEFINED SIMFIL_DEFAULT_VECTOR_COLUMN_STORAGE)
+  set(SIMFIL_DEFAULT_VECTOR_COLUMN_STORAGE ON CACHE BOOL
+    "Default simfil::Buffer storage policy to vector_byte_storage")
 endif()
 
 if (NOT TARGET yaml-cpp)
@@ -35,7 +35,8 @@ if (NOT TARGET mapget-model)
         "MAPGET_WITH_SERVICE OFF"
         "MAPGET_WITH_HTTPLIB OFF"
         "MAPGET_ENABLE_TESTING OFF"
-        "MAPGET_BUILD_EXAMPLES OFF")
+        "MAPGET_BUILD_EXAMPLES OFF"
+        "MAPGET_VALIDATE_MODEL_COLUMNS OFF")
   else()
     CPMAddPackage(
       NAME mapget
@@ -47,7 +48,8 @@ if (NOT TARGET mapget-model)
         "MAPGET_WITH_SERVICE OFF"
         "MAPGET_WITH_HTTPLIB OFF"
         "MAPGET_ENABLE_TESTING OFF"
-        "MAPGET_BUILD_EXAMPLES OFF")
+        "MAPGET_BUILD_EXAMPLES OFF"
+        "MAPGET_VALIDATE_MODEL_COLUMNS OFF")
   endif()
 endif()
 

@@ -4,7 +4,6 @@ project(erdblick-core)
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
   include/erdblick/visualization-base.h
-  include/erdblick/visualization-cesium.h
   include/erdblick/visualization-deck.h
   include/erdblick/style.h
   include/erdblick/rule.h
@@ -18,16 +17,10 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/search.h
   include/erdblick/layer.h
 
-  include/erdblick/cesium-interface/cesium-object.h
-  include/erdblick/cesium-interface/cesium-primitive.h
-  include/erdblick/cesium-interface/cesium.h
-  include/erdblick/cesium-interface/point-conversion.h
-  include/erdblick/cesium-interface/cesium-points.h
-  include/erdblick/cesium-interface/cesium-labels.h
-  include/erdblick/cesium-interface/cesium-billboards.h
+  include/erdblick/interop/js-object.h
+  include/erdblick/geo/point-conversion.h
 
   src/visualization-base.cpp
-  src/visualization-cesium.cpp
   src/visualization-deck.cpp
   src/style.cpp
   src/rule.cpp
@@ -40,13 +33,8 @@ set(ERDBLICK_SOURCE_FILES
   src/search.cpp
   src/layer.cpp
 
-  src/cesium-interface/base64.h
-  src/cesium-interface/cesium-object.cpp
-  src/cesium-interface/cesium-primitive.cpp
-  src/cesium-interface/cesium.cpp
-  src/cesium-interface/cesium-points.cpp
-  src/cesium-interface/cesium-labels.cpp
-  src/cesium-interface/cesium-billboards.cpp
+  src/interop/base64.h
+  src/interop/js-object.cpp
 )
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
@@ -105,11 +93,6 @@ target_include_directories(erdblick-core
 
 target_link_libraries(erdblick-core
   PUBLIC
-    CesiumUtility
-    Cesium3DTilesWriter
-    CesiumGeospatial
-    CesiumGltf
-    CesiumGltfWriter
     glm
     mapget-model
     yaml-cpp)

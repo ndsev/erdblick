@@ -2,7 +2,15 @@ import {Injectable, OnDestroy} from '@angular/core';
 import {auditTime, BehaviorSubject, interval, Subscription} from 'rxjs';
 import {MapDataService} from '../mapdata/map.service';
 import {FeatureTile} from '../mapdata/features.model';
-import {DiagnosticsSnapshot, LogEntry, LogLevel, PerfStat, TilePipelineProgress, TileStateCounts} from './diagnostics.model';
+import {
+    DiagnosticsSnapshot,
+    LogEntry,
+    LogLevel,
+    PerfStat,
+    StageProgressCounter,
+    TilePipelineProgress,
+    TileStateCounts
+} from './diagnostics.model';
 import {
     COUNT_KEY_PATTERN,
     LOG_INTERVAL_MS,
@@ -114,7 +122,6 @@ export class DiagnosticsDatasource implements OnDestroy {
         const expected = tiles.length;
         let loaded = 0;
         let errors = 0;
-        const stageCounters: Array<{done: number; total: number}> = [];
         for (const tile of tiles) {
             const hasData = tile.hasData();
             if (hasData) {
@@ -123,18 +130,14 @@ export class DiagnosticsDatasource implements OnDestroy {
             if (tile.error) {
                 errors += 1;
             }
-            const stageCount = this.mapService.getLayerStageCount(tile.mapName, tile.layerName);
-            for (let stage = 0; stage < stageCount; stage++) {
-                if (stageCounters.length <= stage) {
-                    stageCounters.push({done: 0, total: 0});
-                }
-                const counter = stageCounters[stage];
-                counter.total += 1;
-                if (tile.hasStage(stage)) {
-                    counter.done += 1;
-                }
-            }
         }
+        const stageCounters = this.mapService.getRequestedStageProgress();
+        const stageLabels = this.mapService.getRequestedStageLabels();
+        const stageProgress: StageProgressCounter[] = stageCounters.map((counter, stage) => ({
+            done: counter.done,
+            total: counter.total,
+            label: stageLabels[stage] ?? `Stage ${stage}`
+        }));
 
         const tilesSummary: TileStateCounts = {
             expected,
@@ -146,7 +149,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         const backendProgress = this.mapService.getBackendRequestProgress();
         const hudStats = this.mapService.getTileLoadingHudStats();
         const progress: TilePipelineProgress = {
-            stages: stageCounters,
+            stages: stageProgress,
             backend: {
                 done: backendProgress.done,
                 total: backendProgress.total,
@@ -164,6 +167,7 @@ export class DiagnosticsDatasource implements OnDestroy {
                 vertices: hudStats.vertices,
                 parseQueueSize: hudStats.parseQueueSize,
                 renderQueueSize: hudStats.renderQueueSize,
+                frameTimeMs: hudStats.frameTimeMs,
                 renderSeconds: hudStats.viewportRenderSeconds,
             }
         };

@@ -1,7 +1,7 @@
 #include "search.h"
 
-#include "cesium-interface/cesium-object.h"
-#include "cesium-interface/point-conversion.h"
+#include "interop/js-object.h"
+#include "geo/point-conversion.h"
 #include "geometry.h"
 #include "simfil/diagnostics.h"
 #include "simfil/environment.h"

@@ -58,7 +58,7 @@ Purpose: freeze the renderer-agnostic contract from current call sites before in
 ### `app/mapview/view.container.component.ts`
 - binds keyboard shortcuts to navigation methods
 
-### `app/mapview/cesium/cesium-map-view.ts`
+### `app/mapview/deck/deck-view.ts`
 - subscribes to map service topics for render/destroy/pick/move updates
 
 ## Not in first delivery parity scope

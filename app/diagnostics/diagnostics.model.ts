@@ -5,6 +5,10 @@ export interface ProgressCounter {
     total: number;
 }
 
+export interface StageProgressCounter extends ProgressCounter {
+    label: string;
+}
+
 export interface LoadingStatBubbles {
     downstreamBytesPerSecond: number;
     pullResponses: number;
@@ -17,11 +21,12 @@ export interface LoadingStatBubbles {
     vertices: number;
     parseQueueSize: number;
     renderQueueSize: number;
+    frameTimeMs: number;
     renderSeconds: number;
 }
 
 export interface TilePipelineProgress {
-    stages: ProgressCounter[];
+    stages: StageProgressCounter[];
     backend: ProgressCounter;
     rendered: ProgressCounter;
     bubbles: LoadingStatBubbles;

@@ -57,7 +57,7 @@ struct JsValue
 
     /**
      * Construct an Object as a new JS or JSON list with provided initializers.
-     * @param initializers An initializer list of CesiumObject items.
+     * @param initializers An initializer list of JsValue items.
      */
     static JsValue List(std::initializer_list<JsValue> initializers = {});
 
@@ -221,38 +221,6 @@ ReturnType JsValue::call(std::string const& methodName, Args... args)
         {"arguments", {UnpackNativeValue(args)...}} // This assumes Args are convertible to nlohmann::json
     });
     return ReturnType(); // default-constructed value
-#endif
-}
-
-struct CesiumClass : public JsValue
-{
-public:
-    explicit CesiumClass(std::string const& className);
-
-    /**
-     * Create a new instance of the represented class using the provided arguments.
-     * For EMSCRIPTEN, it utilizes value_.new_(Args...).
-     * For the mock version, it will return an empty nlohmann JSON object.
-     */
-    [[nodiscard]] JsValue New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs = {}) const;
-    template<typename... Args>
-    JsValue New(Args... args) const;
-
-private:
-    std::string className_;
-};
-
-template<typename... Args>
-JsValue CesiumClass::New(Args... args) const
-{
-#ifdef EMSCRIPTEN
-    auto result = value_.new_(UnpackNativeValue(args)...);
-    return JsValue(result);
-#else
-    return JsValue(nlohmann::json::object({
-        {"className", className_},
-        {"constructedWith", nlohmann::json::array({UnpackNativeValue(args)...})}
-    }));
 #endif
 }
 

@@ -133,6 +133,20 @@ std::string TileFeatureLayer::featureIdByIndex(uint32_t index) const
     return {};
 }
 
+mapget::model_ptr<mapget::Feature> TileFeatureLayer::featureByIndex(uint32_t index) const
+{
+    if (index >= model_->numRoots()) {
+        return {};
+    }
+    uint32_t currentIndex = 0;
+    for (auto&& feature : *model_) {
+        if (currentIndex++ == index) {
+            return feature;
+        }
+    }
+    return {};
+}
+
 TileFeatureLayer::~TileFeatureLayer() = default;
 
 /**

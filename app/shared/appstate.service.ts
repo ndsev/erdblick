@@ -2,7 +2,7 @@ import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
 import {BehaviorSubject, skip, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
-import {Cartographic, CesiumMath} from "../integrations/cesium";
+import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {MapTreeNode} from "../mapdata/map.tree.model";
@@ -15,7 +15,6 @@ import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostic
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 2048;
-export const MAX_NUM_TILES_TO_VISUALIZE = 512;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -25,7 +24,6 @@ export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 export const MAX_DECK_STYLE_WORKERS = 32;
 export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
-export type RendererMode = "cesium" | "deck";
 export const DEFAULT_HIGHLIGHT_COLORS = [
     "#fff314",
     "#4ad6d6",
@@ -103,7 +101,6 @@ export interface CameraViewState {
 export interface LayerViewConfig {
     level: number;
     visible: boolean;
-    tileBorders: boolean;
 }
 
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
@@ -330,14 +327,6 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly rendererModeState = this.createState<RendererMode>({
-        name: 'rendererMode',
-        defaultValue: 'cesium',
-        schema: z.union([z.literal('cesium'), z.literal('deck')]),
-        urlParamName: 'rdr',
-        urlIncludeInVisualizationOnly: false
-    });
-
     readonly deckStyleWorkersEnabledState = this.createState<boolean>({
         name: 'deckStyleWorkersEnabled',
         defaultValue: false,
@@ -397,10 +386,10 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'v'
     });
 
-    readonly layerTileBordersState = this.createMapViewState<Array<boolean>>({
+    readonly viewTileBordersState = this.createMapViewState<boolean>({
         name: "tileBorders",
-        defaultValue: [],
-        schema: z.array(Boolish),
+        defaultValue: true,
+        schema: Boolish,
         urlParamName: 'tb'
     });
 
@@ -424,13 +413,6 @@ export class AppStateService implements OnDestroy {
         defaultValue: MAX_NUM_TILES_TO_LOAD,
         schema: z.coerce.number().nonnegative(),
         urlParamName: 'tll'
-    });
-
-    readonly tilesVisualizeLimitState = this.createState<number>({
-        name: 'tilesVisualizeLimit',
-        defaultValue: MAX_NUM_TILES_TO_VISUALIZE,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tvl'
     });
 
     readonly enabledCoordsTileIdsState = this.createState<string[]>({
@@ -784,8 +766,6 @@ export class AppStateService implements OnDestroy {
 
     get numViews() {return this.numViewsState.getValue();}
     set numViews(val: number) {this.numViewsState.next(val);};
-    get rendererMode() {return this.rendererModeState.getValue();}
-    set rendererMode(val: RendererMode) {this.rendererModeState.next(val);};
     get deckStyleWorkersEnabled() {return this.deckStyleWorkersEnabledState.getValue();}
     set deckStyleWorkersEnabled(val: boolean) {this.deckStyleWorkersEnabledState.next(val);};
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
@@ -811,8 +791,6 @@ export class AppStateService implements OnDestroy {
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
-    get tilesVisualizeLimit() {return this.tilesVisualizeLimitState.getValue();}
-    set tilesVisualizeLimit(val: number) {this.tilesVisualizeLimitState.next(val);};
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {
         const numeric = Number(val);
@@ -902,8 +880,8 @@ export class AppStateService implements OnDestroy {
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
             destination: {
-                lon: CesiumMath.toDegrees(destination.longitude),
-                lat: CesiumMath.toDegrees(destination.latitude),
+                lon: GeoMath.toDegrees(destination.longitude),
+                lat: GeoMath.toDegrees(destination.latitude),
                 alt: destination.height,
             },
             orientation: {
@@ -934,8 +912,8 @@ export class AppStateService implements OnDestroy {
 
             if (syncMovement) {
                 const previous = this.cameraViewDataState.getValue(viewIndex).destination;
-                const destLon = CesiumMath.toDegrees(destination.longitude);
-                const destLat = CesiumMath.toDegrees(destination.latitude);
+                const destLon = GeoMath.toDegrees(destination.longitude);
+                const destLat = GeoMath.toDegrees(destination.latitude);
                 const deltaLon = destLon - previous.lon;
                 const deltaLat = destLat - previous.lat;
 
@@ -1284,8 +1262,8 @@ export class AppStateService implements OnDestroy {
 
     setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
         if (position) {
-            const longitude = CesiumMath.toDegrees(position.longitude);
-            const latitude = CesiumMath.toDegrees(position.latitude);
+            const longitude = GeoMath.toDegrees(position.longitude);
+            const latitude = GeoMath.toDegrees(position.latitude);
             this.markedPositionState.next([longitude, latitude]);
         } else {
             this.markedPositionState.next([]);
@@ -1320,7 +1298,6 @@ export class AppStateService implements OnDestroy {
             result.push({
                 visible: layerStateValue(this.layerVisibilityState, viewIndex, fallbackVisibility),
                 level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
-                tileBorders: layerStateValue(this.layerTileBordersState, viewIndex, true),
             });
         }
         return result;
@@ -1350,7 +1327,6 @@ export class AppStateService implements OnDestroy {
         for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
             insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
             insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
-            insertLayerState(this.layerTileBordersState, viewIndex, viewConfig[viewIndex].tileBorders, true);
         }
     }
 
@@ -1488,7 +1464,7 @@ export class AppStateService implements OnDestroy {
         const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
         const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
 
-        // 2) Prune layerNames and per-view layer arrays (visibility, borders, zoom levels)
+        // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
         const oldLayerNames = this.layerNames;
         if (oldLayerNames.length) {
             const keepIndices: number[] = [];
@@ -1512,10 +1488,8 @@ export class AppStateService implements OnDestroy {
                 const views = this.numViews;
                 for (let v = 0; v < views; v++) {
                     const vis = this.layerVisibilityState.getValue(v);
-                    const borders = this.layerTileBordersState.getValue(v);
                     const levels = this.layerZoomLevelState.getValue(v);
                     this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
-                    this.layerTileBordersState.next(v, filterLayerArray<boolean>(borders ?? [], true));
                     this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
                 }
             }
@@ -1566,9 +1540,9 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.mode2dState);
         pruneViews(this.osmEnabledState);
         pruneViews(this.osmOpacityState);
+        pruneViews(this.viewTileBordersState);
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
-        pruneViews(this.layerTileBordersState);
         pruneViews(this.layerZoomLevelState);
 
         // Also prune view-dimension from style option arrays

@@ -1,6 +1,5 @@
 import {
     AppStateService,
-    RendererMode,
     VIEW_SYNC_LAYERS,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
@@ -27,8 +26,6 @@ import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
 import {RightClickMenuService} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
-import {CesiumMapView2D} from "./cesium/cesium-map-view2d";
-import {CesiumMapView3D} from "./cesium/cesium-map-view3d";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
 import {IRenderView} from "./render-view.model";
@@ -92,7 +89,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
-    rendererMode: RendererMode = 'cesium';
     mapView?: IRenderView;
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
@@ -124,7 +120,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     featureIdsContent: string[] = [];
 
     /**
-     * Construct a Cesium View with a Model.
+     * Construct a map view component with deck-backed rendering.
      * @param mapService The map model service providing access to data
      * @param featureSearchService
      * @param stateService The parameter service, used to update
@@ -182,15 +178,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
-            this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.rendererModeState
-        ]).subscribe(([_, mode2d, rendererMode]) => {
+            this.stateService.mode2dState.pipe(this.viewIndex())
+        ]).subscribe(([_, mode2d]) => {
             const needsRebuild =
-                this.is2DMode !== mode2d || this.rendererMode !== rendererMode || !this.mapView;
+                this.is2DMode !== mode2d || !this.mapView;
             this.is2DMode = mode2d;
-            this.rendererMode = rendererMode;
             if (needsRebuild) {
-                this.initializeViewer(mode2d, rendererMode);
+                this.initializeViewer(mode2d);
             }
         });
     }
@@ -203,36 +197,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /**
      * Recreate the viewer with different projection for 2D/3D modes
-     * This is necessary because Cesium doesn't support dynamic projection switching
      */
-    private async createViewerForMode(is2D: boolean, rendererMode: RendererMode) {
+    private async createViewerForMode(is2D: boolean) {
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
         if (this.mapView) {
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
         }
-        const mapView: IRenderView = rendererMode === 'deck'
-            ? (
-                is2D
-                    ? new DeckMapView2D(
-                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
-                    )
-                    : new DeckMapView3D(
-                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
-                    )
+        const mapView: IRenderView = is2D
+            ? new DeckMapView2D(
+                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                this.jumpService, this.menuService, this.coordinatesService, this.stateService
             )
-            : (
-                is2D
-                    ? new CesiumMapView2D(
-                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
-                    )
-                    : new CesiumMapView3D(
-                        this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
-                        this.jumpService, this.menuService, this.coordinatesService, this.stateService
-                    )
+            : new DeckMapView3D(
+                this.viewIndex(), this.canvasId, this.mapService, this.featureSearchService,
+                this.jumpService, this.menuService, this.coordinatesService, this.stateService
             );
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
@@ -258,8 +237,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
     }
 
-    private initializeViewer(mode2d: boolean, rendererMode: RendererMode) {
-        this.createViewerForMode(mode2d, rendererMode).catch((error) => {
+    private initializeViewer(mode2d: boolean) {
+        this.createViewerForMode(mode2d).catch((error) => {
             console.error('Failed to initialize viewer:', error);
             alert('Failed to initialize the map viewer. Please refresh the page.');
         }).finally(() => {
@@ -406,15 +385,17 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.resetRightPressTracking();
                 return;
             }
-            menu.show(event);
+            this.ngZone.run(() => menu.show(event));
             this.resetRightPressTracking();
         };
 
-        viewer.addEventListener("pointerdown", this.viewerPointerDownCapture, true);
-        viewer.addEventListener("pointermove", this.viewerPointerMoveCapture, true);
-        viewer.addEventListener("pointerup", this.viewerPointerUpCapture, true);
-        viewer.addEventListener("pointercancel", this.viewerPointerCancelCapture, true);
-        viewer.addEventListener("contextmenu", this.viewerContextMenuCapture, true);
+        this.ngZone.runOutsideAngular(() => {
+            viewer.addEventListener("pointerdown", this.viewerPointerDownCapture!, true);
+            viewer.addEventListener("pointermove", this.viewerPointerMoveCapture!, true);
+            viewer.addEventListener("pointerup", this.viewerPointerUpCapture!, true);
+            viewer.addEventListener("pointercancel", this.viewerPointerCancelCapture!, true);
+            viewer.addEventListener("contextmenu", this.viewerContextMenuCapture!, true);
+        });
     }
 
     private teardownViewerContextMenuHandling(): void {
@@ -422,21 +403,23 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (!viewer) {
             return;
         }
-        if (this.viewerPointerDownCapture) {
-            viewer.removeEventListener("pointerdown", this.viewerPointerDownCapture, true);
-        }
-        if (this.viewerPointerMoveCapture) {
-            viewer.removeEventListener("pointermove", this.viewerPointerMoveCapture, true);
-        }
-        if (this.viewerPointerUpCapture) {
-            viewer.removeEventListener("pointerup", this.viewerPointerUpCapture, true);
-        }
-        if (this.viewerPointerCancelCapture) {
-            viewer.removeEventListener("pointercancel", this.viewerPointerCancelCapture, true);
-        }
-        if (this.viewerContextMenuCapture) {
-            viewer.removeEventListener("contextmenu", this.viewerContextMenuCapture, true);
-        }
+        this.ngZone.runOutsideAngular(() => {
+            if (this.viewerPointerDownCapture) {
+                viewer.removeEventListener("pointerdown", this.viewerPointerDownCapture, true);
+            }
+            if (this.viewerPointerMoveCapture) {
+                viewer.removeEventListener("pointermove", this.viewerPointerMoveCapture, true);
+            }
+            if (this.viewerPointerUpCapture) {
+                viewer.removeEventListener("pointerup", this.viewerPointerUpCapture, true);
+            }
+            if (this.viewerPointerCancelCapture) {
+                viewer.removeEventListener("pointercancel", this.viewerPointerCancelCapture, true);
+            }
+            if (this.viewerContextMenuCapture) {
+                viewer.removeEventListener("contextmenu", this.viewerContextMenuCapture, true);
+            }
+        });
         this.viewerPointerDownCapture = undefined;
         this.viewerPointerMoveCapture = undefined;
         this.viewerPointerUpCapture = undefined;

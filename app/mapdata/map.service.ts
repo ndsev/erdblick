@@ -1,4 +1,4 @@
-import {Injectable} from "@angular/core";
+import {Injectable, NgZone} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
     MapTileRequestStatus,
@@ -7,7 +7,6 @@ import {
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
-import {CesiumTileVisualization} from "../mapview/cesium/cesium-tile.visualization.model";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {configureDeckRenderWorkerSettings} from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
@@ -24,7 +23,7 @@ import {MergedPointsTile, PointMergeService} from "../mapview/pointmerge.service
 import {KeyboardService} from "../shared/keyboard.service";
 import {MapInfoItem, MapLayerTree, StyleOptionNode, SyncViewsResult} from "./map.tree.model";
 import {ViewVisualizationState} from "../mapview/view.visualization.model";
-import {Cartesian3} from "../integrations/cesium";
+import {Cartesian3} from "../integrations/geo";
 import {deepEquals} from "../shared/app-state";
 import {IRenderSceneHandle, ITileVisualization, RenderRectangle, RenderVector3} from "../mapview/render-view.model";
 
@@ -59,7 +58,20 @@ export interface TileLoadingHudStats {
     vertices: number;
     parseQueueSize: number;
     renderQueueSize: number;
+    frameTimeMs: number;
     viewportRenderSeconds: number;
+}
+
+export interface TileVisualizationRenderTask {
+    visualization: ITileVisualization;
+    onDone?: () => void;
+}
+
+interface RequestedLayerProgressState {
+    mapId: string;
+    layerId: string;
+    tileMaxRequestedStageByKey: Map<string, number>;
+    stageCount: number;
 }
 
 /**
@@ -70,7 +82,7 @@ export interface TileLoadingHudStats {
  *  (3) rendered visualizations per view and affine style sheets.
  *
  * As the viewport changes, it requests new tiles from the mapget server
- * and triggers their conversion to Cesium tiles according to the active
+ * and triggers their conversion to render-ready buffers according to the active
  * style sheets.
  */
 @Injectable({providedIn: 'root'})
@@ -91,13 +103,24 @@ export class MapDataService {
     private blockedTileLoadInfoShown: boolean = false;
     private readonly updateDebounceMs: number = 50;
     private lastUpdateAt: number = 0;
+    private frameTimeMsEwma: number = 0;
+    private lastAnimationFrameTimestampMs: number | null = null;
+    private frameTimeSamplingStarted: boolean = false;
+    private readonly frameTimeEwmaAlpha: number = 0.2;
+    private stageRequestProgress: Array<{done: number; total: number}> = [];
+    private pendingRequestedTileKeysByStage: Array<Set<string>> = [];
+    private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
+    private observedLayerStageCountByKey: Map<string, number> = new Map();
     private dataSourceInfoJson: string | null = null;
     private backendRequestProgress: BackendRequestProgress = {done: 0, total: 0, allDone: true};
     private viewportLoadStartedAtMs: number | null = null;
     private viewportRenderCompletedAtMs: number | null = null;
+    private nextVisualizationViewIndex: number = 0;
+    private inFlightVisualizationRendersByView: number[] = [];
+    private readonly maxInFlightVisualizationRendersPerView: number = 1;
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
-    tileVisualizationTopic: Subject<ITileVisualization>;
+    tileVisualizationTopic: Subject<TileVisualizationRenderTask>;
     tileVisualizationDestructionTopic: Subject<ITileVisualization>;
     mergedTileVisualizationDestructionTopic: Subject<MergedPointsTile>;
     moveToWgs84PositionTopic: Subject<{ targetView: number, x: number, y: number, z?: number }>;
@@ -130,14 +153,15 @@ export class MapDataService {
                 private httpClient: HttpClient,
                 private messageService: InfoMessageService,
                 private pointMergeService: PointMergeService,
-                private keyboardService: KeyboardService) {
+                private keyboardService: KeyboardService,
+                private ngZone: NgZone) {
         this.loadedTileLayers = new Map();
         this.selectionVisualizations = [];
         this.hoverVisualizations = [];
         this.viewVisualizationState = [];
 
         // Triggered when a tile layer is freshly rendered and should be added to the frontend.
-        this.tileVisualizationTopic = new Subject<ITileVisualization>();
+        this.tileVisualizationTopic = new Subject<TileVisualizationRenderTask>();
 
         // Triggered when a tile layer is being removed.
         this.tileVisualizationDestructionTopic = new Subject<ITileVisualization>();
@@ -184,11 +208,16 @@ export class MapDataService {
         this.tileStream = new MapTileStreamClient("/tiles");
         this.tileStream.setPullCompressionEnabled(this.stateService.tilePullCompressionEnabled);
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
-        this.tileStream.onFeatures = (payload) => this.addTileFeatureLayer(payload);
-        this.tileStream.onStatus = (status) => this.handleTilesRequestStatus(status);
+        this.tileStream.onFeatures = (payload) => {
+            this.ngZone.runOutsideAngular(() => this.addTileFeatureLayer(payload));
+        };
+        this.tileStream.onStatus = (status) => {
+            this.ngZone.runOutsideAngular(() => this.handleTilesRequestStatus(status));
+        };
         this.tileStream.onError = (event) => {
             console.error("Tile WebSocket error.", event);
         };
+        this.startFrameTimeSampling();
 
         // Initial call to processVisualizationTasks: will keep calling itself.
         this.processVisualizationTasks();
@@ -306,35 +335,81 @@ export class MapDataService {
 
     private processVisualizationTasks() {
         if (this.tilePipelinePaused) {
-            setTimeout((_: any) => this.processVisualizationTasks(), 100);
+            this.scheduleOutsideAngular(() => this.processVisualizationTasks(), 100);
             return;
+        }
+        const viewCount = this.viewVisualizationState.length;
+        if (this.inFlightVisualizationRendersByView.length !== viewCount) {
+            this.inFlightVisualizationRendersByView = Array.from(
+                {length: viewCount},
+                (_, index) => this.inFlightVisualizationRendersByView[index] ?? 0
+            );
+            this.nextVisualizationViewIndex = viewCount > 0
+                ? this.nextVisualizationViewIndex % viewCount
+                : 0;
         }
 
         const startTime = Date.now();
         const timeBudget = 20; // milliseconds
         let currentQueueLength = this.visualizationQueueLength();
+        let dispatchedAny = false;
+        let blockedByInFlight = false;
 
-        let nextViewIndexToProcess = 0;
-        while (currentQueueLength > 0) {
+        while (currentQueueLength > 0 && viewCount > 0) {
             // Check if the time budget is exceeded.
             if (Date.now() - startTime > timeBudget) {
                 break;
             }
 
-            const viewState = this.viewVisualizationState[nextViewIndexToProcess];
-            const entry = viewState.visualizationQueue.shift();
-            if (entry !== undefined) {
-                this.tileVisualizationTopic.next(entry);
+            let dispatchedInRound = false;
+            blockedByInFlight = false;
+            for (let inspectedViews = 0; inspectedViews < viewCount; inspectedViews++) {
+                const viewIndex = (this.nextVisualizationViewIndex + inspectedViews) % viewCount;
+                const viewState = this.viewVisualizationState[viewIndex];
+                if (!viewState.visualizationQueue.length) {
+                    continue;
+                }
+                if (this.inFlightVisualizationRendersByView[viewIndex] >= this.maxInFlightVisualizationRendersPerView) {
+                    blockedByInFlight = true;
+                    continue;
+                }
+                const entry = viewState.visualizationQueue.shift();
+                if (entry === undefined) {
+                    continue;
+                }
+                this.inFlightVisualizationRendersByView[viewIndex] += 1;
+                let doneCalled = false;
+                const onDone = () => {
+                    if (doneCalled) {
+                        return;
+                    }
+                    doneCalled = true;
+                    this.inFlightVisualizationRendersByView[viewIndex] = Math.max(
+                        0,
+                        this.inFlightVisualizationRendersByView[viewIndex] - 1
+                    );
+                };
+                this.tileVisualizationTopic.next({
+                    visualization: entry,
+                    onDone
+                });
                 currentQueueLength--;
+                dispatchedAny = true;
+                dispatchedInRound = true;
+                this.nextVisualizationViewIndex = (viewIndex + 1) % viewCount;
+                break;
             }
-            nextViewIndexToProcess++;
-            nextViewIndexToProcess %= this.viewVisualizationState.length;
+            if (!dispatchedInRound) {
+                break;
+            }
         }
 
         // Continue visualizing tiles with a delay.
-        const delay = currentQueueLength ? 0 : 10;
+        const delay = currentQueueLength
+            ? (dispatchedAny ? 0 : (blockedByInFlight ? 4 : 10))
+            : 10;
         this.tryFinalizeViewportRenderDuration();
-        setTimeout((_: any) => this.processVisualizationTasks(), delay);
+        this.scheduleOutsideAngular(() => this.processVisualizationTasks(), delay);
     }
 
     public get tileLayerParser(): TileLayerParser {
@@ -346,36 +421,14 @@ export class MapDataService {
             total: 0,
             done: 0
         };
-
-        for (let viewIndex = 0; viewIndex < this.viewVisualizationState.length; viewIndex++) {
-            const view = this.viewVisualizationState[viewIndex];
-            for (const [_, style] of this.styleService.styles) {
-                if (!style.visible) {
-                    continue;
-                }
-                const wasmStyle = style.featureLayerStyle;
-                if (!wasmStyle || !wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT)) {
-                    continue;
-                }
-                for (const tile of this.loadedTileLayers.values()) {
-                    if (!this.viewShowsFeatureTile(viewIndex, tile)) {
-                        continue;
-                    }
-                    if (!wasmStyle.hasLayerAffinity(tile.layerName)) {
-                        continue;
-                    }
-                    ++result.total;
-                    if (!this.tileSatisfiesStyleStage(tile, wasmStyle)) {
-                        continue;
-                    }
-                    const visu = view.getVisualization(style.id, tile.mapTileKey);
-                    if (visu && !visu.isDirty()) {
-                        ++result.done;
-                    }
+        for (const view of this.viewVisualizationState) {
+            for (const visu of view.getVisualizations()) {
+                result.total += 1;
+                if (!visu.isDirty()) {
+                    result.done += 1;
                 }
             }
         }
-
         return result;
     }
 
@@ -415,8 +468,43 @@ export class MapDataService {
             vertices,
             parseQueueSize,
             renderQueueSize,
+            frameTimeMs: this.currentFrameTimeMs(),
             viewportRenderSeconds
         };
+    }
+
+    public getRequestedStageProgress(): Array<{done: number; total: number}> {
+        return this.stageRequestProgress.map(counter => ({...counter}));
+    }
+
+    public getRequestedStageLabels(): string[] {
+        const labelsByStage: Array<Set<string>> = [];
+        const ensureStageLabelSet = (stage: number) => {
+            while (labelsByStage.length <= stage) {
+                labelsByStage.push(new Set<string>());
+            }
+        };
+
+        for (const layerState of this.requestedLayerProgressByKey.values()) {
+            const stageLabels = this.getLayerStageLabels(
+                layerState.mapId,
+                layerState.layerId,
+                layerState.stageCount
+            );
+            for (let stage = 0; stage < layerState.stageCount; stage++) {
+                ensureStageLabelSet(stage);
+                labelsByStage[stage].add(stageLabels[stage] ?? `Stage ${stage}`);
+            }
+        }
+
+        return this.stageRequestProgress.map((_, stage) => {
+            const stageLabels = labelsByStage[stage];
+            if (!stageLabels || stageLabels.size !== 1) {
+                return `Stage ${stage}`;
+            }
+            const [label] = Array.from(stageLabels.values());
+            return label;
+        });
     }
 
     public getTileStreamTransportCompressionStats(): MapTileStreamTransportCompressionStats {
@@ -446,6 +534,244 @@ export class MapDataService {
             (sum, state) => sum + state.visualizationQueue.length,
             0
         );
+    }
+
+    private compareVisualizationRank(lhs: ITileVisualization, rhs: ITileVisualization): number {
+        const lhsRank = lhs.renderRank();
+        const rhsRank = rhs.renderRank();
+        const rankLength = Math.max(lhsRank.length, rhsRank.length);
+        for (let i = 0; i < rankLength; i++) {
+            const lhsValue = lhsRank[i] ?? Number.MAX_SAFE_INTEGER;
+            const rhsValue = rhsRank[i] ?? Number.MAX_SAFE_INTEGER;
+            if (lhsValue !== rhsValue) {
+                return lhsValue - rhsValue;
+            }
+        }
+        const tileKeyCompare = lhs.tile.mapTileKey.localeCompare(rhs.tile.mapTileKey);
+        if (tileKeyCompare !== 0) {
+            return tileKeyCompare;
+        }
+        return lhs.styleId.localeCompare(rhs.styleId);
+    }
+
+    private sortVisualizationQueue(viewState: ViewVisualizationState): void {
+        if (viewState.visualizationQueue.length < 2) {
+            return;
+        }
+        viewState.visualizationQueue.sort((lhs, rhs) => this.compareVisualizationRank(lhs, rhs));
+    }
+
+    private queueVisualization(viewState: ViewVisualizationState, visualization: ITileVisualization): void {
+        if (viewState.visualizationQueue.includes(visualization)) {
+            return;
+        }
+        viewState.visualizationQueue.push(visualization);
+    }
+
+    private startFrameTimeSampling() {
+        if (this.frameTimeSamplingStarted) {
+            return;
+        }
+        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+            return;
+        }
+        this.frameTimeSamplingStarted = true;
+        const sampleFrameTime = (timestampMs: number) => {
+            if (!this.frameTimeSamplingStarted) {
+                return;
+            }
+            if (this.lastAnimationFrameTimestampMs !== null) {
+                const deltaMs = timestampMs - this.lastAnimationFrameTimestampMs;
+                if (Number.isFinite(deltaMs) && deltaMs > 0 && deltaMs < 1000) {
+                    if (this.frameTimeMsEwma <= 0) {
+                        this.frameTimeMsEwma = deltaMs;
+                    } else {
+                        this.frameTimeMsEwma = this.frameTimeEwmaAlpha * deltaMs
+                            + (1 - this.frameTimeEwmaAlpha) * this.frameTimeMsEwma;
+                    }
+                }
+            }
+            this.lastAnimationFrameTimestampMs = timestampMs;
+            this.requestAnimationFrameOutsideAngular(sampleFrameTime);
+        };
+        this.requestAnimationFrameOutsideAngular(sampleFrameTime);
+    }
+
+    private currentFrameTimeMs(): number {
+        return Math.max(0, this.frameTimeMsEwma || 0);
+    }
+
+    private layerRequestKey(mapId: string, layerId: string): string {
+        return `${mapId}/${layerId}`;
+    }
+
+    private getLayerStageLabels(
+        mapId: string,
+        layerId: string,
+        stageCount: number
+    ): string[] {
+        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
+            stageLabels?: unknown;
+        } | undefined;
+        const declaredStageLabels = Array.isArray(layerInfo?.stageLabels)
+            ? layerInfo.stageLabels
+            : [];
+        const result: string[] = [];
+        for (let stage = 0; stage < stageCount; stage++) {
+            const label = declaredStageLabels[stage];
+            if (typeof label === "string" && label.trim().length > 0) {
+                result.push(label.trim());
+            } else {
+                result.push(`Stage ${stage}`);
+            }
+        }
+        return result;
+    }
+
+    private rebuildRequestedStageProgressFromLayerState() {
+        this.stageRequestProgress = [];
+        this.pendingRequestedTileKeysByStage = [];
+        if (!this.requestedLayerProgressByKey.size) {
+            return;
+        }
+
+        const ensureStageCapacity = (stage: number) => {
+            while (this.pendingRequestedTileKeysByStage.length <= stage) {
+                this.pendingRequestedTileKeysByStage.push(new Set<string>());
+            }
+        };
+
+        for (const layerState of this.requestedLayerProgressByKey.values()) {
+            if (!layerState.tileMaxRequestedStageByKey.size) {
+                continue;
+            }
+            for (const [tileKey, maxRequestedStage] of layerState.tileMaxRequestedStageByKey.entries()) {
+                const stageLimit = Math.max(
+                    0,
+                    Math.min(layerState.stageCount - 1, Math.floor(maxRequestedStage))
+                );
+                for (let stage = 0; stage <= stageLimit; stage++) {
+                    ensureStageCapacity(stage);
+                    this.pendingRequestedTileKeysByStage[stage].add(tileKey);
+                }
+            }
+        }
+
+        for (let stage = 0; stage < this.pendingRequestedTileKeysByStage.length; stage++) {
+            const pendingSet = this.pendingRequestedTileKeysByStage[stage];
+            const totalRequested = pendingSet.size;
+            for (const tileKey of Array.from(pendingSet)) {
+                const loadedTile = this.loadedTileLayers.get(tileKey);
+                if (loadedTile && loadedTile.hasStage(stage)) {
+                    pendingSet.delete(tileKey);
+                }
+            }
+            this.stageRequestProgress[stage] = {
+                total: totalRequested,
+                done: Math.max(0, totalRequested - pendingSet.size),
+            };
+        }
+    }
+
+    private resetRequestedStageProgressFromExpected(
+        expectedByLayer: Map<string, {
+            mapId: string;
+            layerId: string;
+            tileIdToRequestedMaxStage: Map<number, number>;
+        }>
+    ) {
+        this.requestedLayerProgressByKey.clear();
+        if (!expectedByLayer.size) {
+            this.rebuildRequestedStageProgressFromLayerState();
+            return;
+        }
+
+        for (const entry of expectedByLayer.values()) {
+            if (!entry.tileIdToRequestedMaxStage.size) {
+                continue;
+            }
+            const layerKey = this.layerRequestKey(entry.mapId, entry.layerId);
+            const layerStageCount = Math.max(1, this.getLayerStageCount(entry.mapId, entry.layerId));
+            const layerState: RequestedLayerProgressState = {
+                mapId: entry.mapId,
+                layerId: entry.layerId,
+                tileMaxRequestedStageByKey: new Map<string, number>(),
+                stageCount: layerStageCount
+            };
+
+            for (const [tileId, requestedMaxStage] of entry.tileIdToRequestedMaxStage.entries()) {
+                const clampedMaxStage = Math.max(
+                    0,
+                    Math.min(layerStageCount - 1, Math.floor(requestedMaxStage))
+                );
+                const tileKey = coreLib.getTileFeatureLayerKey(
+                    entry.mapId,
+                    entry.layerId,
+                    BigInt(tileId)
+                );
+                const existingMaxStage = layerState.tileMaxRequestedStageByKey.get(tileKey) ?? -1;
+                if (clampedMaxStage > existingMaxStage) {
+                    layerState.tileMaxRequestedStageByKey.set(tileKey, clampedMaxStage);
+                }
+            }
+
+            if (!layerState.tileMaxRequestedStageByKey.size) {
+                continue;
+            }
+            this.requestedLayerProgressByKey.set(layerKey, layerState);
+        }
+
+        this.rebuildRequestedStageProgressFromLayerState();
+    }
+
+    private trackObservedLayerStage(
+        mapId: string,
+        layerId: string,
+        stage: number
+    ) {
+        if (!Number.isInteger(stage) || stage < 0) {
+            return;
+        }
+
+        const layerKey = this.layerRequestKey(mapId, layerId);
+        const observedStageCount = Math.max(
+            1,
+            Math.floor(stage) + 1
+        );
+        const previousStageCount = this.observedLayerStageCountByKey.get(layerKey) ?? 1;
+        if (observedStageCount <= previousStageCount) {
+            return;
+        }
+        this.observedLayerStageCountByKey.set(layerKey, observedStageCount);
+
+        const requestedLayerState = this.requestedLayerProgressByKey.get(layerKey);
+        if (!requestedLayerState || observedStageCount <= requestedLayerState.stageCount) {
+            return;
+        }
+        const oldMaxStage = requestedLayerState.stageCount - 1;
+        requestedLayerState.stageCount = observedStageCount;
+        const newMaxStage = observedStageCount - 1;
+        for (const [tileKey, maxRequestedStage] of requestedLayerState.tileMaxRequestedStageByKey.entries()) {
+            if (maxRequestedStage >= oldMaxStage) {
+                requestedLayerState.tileMaxRequestedStageByKey.set(tileKey, newMaxStage);
+            }
+        }
+        this.rebuildRequestedStageProgressFromLayerState();
+    }
+
+    private markRequestedStageAsReceived(tileKey: string, stage: number) {
+        if (!Number.isInteger(stage) || stage < 0 || stage >= this.pendingRequestedTileKeysByStage.length) {
+            return;
+        }
+        const pendingSet = this.pendingRequestedTileKeysByStage[stage];
+        if (!pendingSet.delete(tileKey)) {
+            return;
+        }
+        const counter = this.stageRequestProgress[stage];
+        if (!counter) {
+            return;
+        }
+        counter.done = Math.max(0, counter.total - pendingSet.size);
     }
 
     private tryFinalizeViewportRenderDuration() {
@@ -484,7 +810,7 @@ export class MapDataService {
         }
         this.updateRequestedWhilePaused = this.updateRequestedWhilePaused || this.updatePending;
         this.tileStream?.setFrameProcessingPaused(true);
-        this.messageService.showInfo('Tile pipeline paused');
+        this.showInfoMessage('Tile pipeline paused');
         console.info(`Tile pipeline paused (${source})`);
     }
 
@@ -495,7 +821,7 @@ export class MapDataService {
         this.tilePipelinePaused$.next(false);
         this.blockedTileLoadInfoShown = false;
         this.tileStream?.setFrameProcessingPaused(false);
-        this.messageService.showInfo('Tile pipeline resumed');
+        this.showInfoMessage('Tile pipeline resumed');
         console.info(`Tile pipeline resumed (${source})`);
 
         const needsUpdate = this.updatePending
@@ -503,7 +829,7 @@ export class MapDataService {
             || this.selectionTileRequests.length > 0;
         this.updateRequestedWhilePaused = false;
         if (needsUpdate) {
-            setTimeout(() => this.scheduleUpdate(), 0);
+            this.scheduleOutsideAngular(() => this.scheduleUpdate(), 0);
         }
     }
 
@@ -560,7 +886,7 @@ export class MapDataService {
             .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
             .join(", ");
         const detail = statusMessage ? ` (${statusMessage})` : "";
-        this.messageService.showError(`Tile request failed: ${summary}${detail}`);
+        this.showErrorMessage(`Tile request failed: ${summary}${detail}`);
     }
 
     public scheduleUpdate() {
@@ -574,7 +900,7 @@ export class MapDataService {
         }
         const elapsed = Date.now() - this.lastUpdateAt;
         const delay = Math.max(0, this.updateDebounceMs - elapsed);
-        this.updateTimer = setTimeout(() => {
+        this.updateTimer = this.scheduleOutsideAngular(() => {
             this.updateTimer = null;
             this.runUpdate().then();
         }, delay);
@@ -594,10 +920,9 @@ export class MapDataService {
         this.updatePending = false;
         try {
             // Get the tile IDs for the current viewport for each view.
-            const loadLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
-            const visualizeLimit = this.stateService.tilesVisualizeLimit / this.stateService.numViews;
+            const tileLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
             this.viewVisualizationState.forEach((state, viewIndex) => {
-                state.recalculateTileIds(loadLimit, visualizeLimit, this.maps.allLevels(viewIndex));
+                state.recalculateTileIds(tileLimit, this.maps.allLevels(viewIndex));
             });
 
             await this.updateMapDataRequest();
@@ -619,11 +944,56 @@ export class MapDataService {
 
 
     getLayerStageCount(mapId: string, layerId: string): number {
-        const layerStages = this.maps.maps.get(mapId)?.layers.get(layerId)?.info?.stages;
-        if (typeof layerStages === "number" && Number.isFinite(layerStages) && layerStages > 0) {
-            return Math.max(1, Math.floor(layerStages));
+        let stageCount = 1;
+        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
+            stages?: unknown;
+            stageLabels?: unknown;
+        } | undefined;
+
+        if (typeof layerInfo?.stages === "number"
+            && Number.isFinite(layerInfo.stages)
+            && layerInfo.stages > 0) {
+            stageCount = Math.max(stageCount, Math.floor(layerInfo.stages));
         }
-        return 1;
+        if (Array.isArray(layerInfo?.stageLabels) && layerInfo.stageLabels.length > 0) {
+            stageCount = Math.max(stageCount, layerInfo.stageLabels.length);
+        }
+
+        const layerKey = this.layerRequestKey(mapId, layerId);
+        const trackedRequestState = this.requestedLayerProgressByKey.get(layerKey);
+        if (trackedRequestState) {
+            stageCount = Math.max(stageCount, trackedRequestState.stageCount);
+        }
+        const observedStageCount = this.observedLayerStageCountByKey.get(layerKey);
+        if (typeof observedStageCount === "number" && observedStageCount > 0) {
+            stageCount = Math.max(stageCount, observedStageCount);
+        }
+
+        return stageCount;
+    }
+
+    /**
+     * Returns the highest stage currently expected for this tile.
+     * Visible tiles and pinned selection tiles always target the layer's max stage.
+     * Returns null when the tile is currently not expected by any active view.
+     */
+    public getRequestedMaxStageForTile(tile: FeatureTile): number | null {
+        const stageCount = this.getLayerStageCount(tile.mapName, tile.layerName);
+        const maxLayerStage = Math.max(0, stageCount - 1);
+        let requestedMaxStage: number | null = tile.preventCulling ? maxLayerStage : null;
+
+        for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+            if (!this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName)) {
+                continue;
+            }
+            if (!this.viewShowsFeatureTile(viewIndex, tile)) {
+                continue;
+            }
+            requestedMaxStage = maxLayerStage;
+            break;
+        }
+
+        return requestedMaxStage;
     }
 
     private styleMinimumStage(style: FeatureLayerStyle): number {
@@ -657,17 +1027,60 @@ export class MapDataService {
         return tile.hasData();
     }
 
-    private tileMinimumMissingStage(mapId: string, layerId: string, tileId: bigint): number | undefined {
+    private tileMinimumMissingStage(
+        mapId: string,
+        layerId: string,
+        tileId: bigint,
+        requestedMaxStage?: number
+    ): number | undefined {
         const tileKey = coreLib.getTileFeatureLayerKey(mapId, layerId, tileId);
         const tile = this.loadedTileLayers.get(tileKey);
+        const stageCount = this.getLayerStageCount(mapId, layerId);
+        const clampedMaxStage = Math.max(
+            0,
+            Math.min(
+                stageCount - 1,
+                Math.floor(requestedMaxStage ?? (stageCount - 1))
+            )
+        );
         if (!tile) {
-            return 0;
+            return clampedMaxStage >= 0 ? 0 : undefined;
         }
         const tileWithStages = tile as FeatureTile & { nextMissingStage?: (stageCount: number) => number | undefined };
         if (typeof tileWithStages.nextMissingStage === "function") {
-            return tileWithStages.nextMissingStage(this.getLayerStageCount(mapId, layerId));
+            return tileWithStages.nextMissingStage(clampedMaxStage + 1);
         }
-        return tile.hasData() ? undefined : 0;
+        if (!tile.hasData()) {
+            return clampedMaxStage >= 0 ? 0 : undefined;
+        }
+        const highestLoadedStage = tile.highestLoadedStage();
+        if (highestLoadedStage === null) {
+            return clampedMaxStage >= 0 ? 0 : undefined;
+        }
+        return highestLoadedStage < clampedMaxStage ? highestLoadedStage + 1 : undefined;
+    }
+
+    private tileRenderPolicyForView(viewIndex: number, tile: FeatureTile): {
+        prefersHighFidelity: boolean;
+        maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
+    } {
+        if (tile.preventCulling) {
+            return {
+                prefersHighFidelity: true,
+                maxLowFiLod: null
+            };
+        }
+        const viewPolicy = this.viewVisualizationState[viewIndex].getTileRenderPolicy(tile.tileId);
+        return {
+            prefersHighFidelity: viewPolicy.targetFidelity === "high",
+            maxLowFiLod: viewPolicy.maxLowFiLod
+        };
+    }
+
+    private applyTileRenderPolicyToVisualization(viewIndex: number, visualization: ITileVisualization): void {
+        const policy = this.tileRenderPolicyForView(viewIndex, visualization.tile);
+        visualization.prefersHighFidelity = policy.prefersHighFidelity;
+        visualization.maxLowFiLod = policy.maxLowFiLod;
     }
 
     private canonicalizeMapTileKey(tileKey: string): string {
@@ -756,10 +1169,11 @@ export class MapDataService {
                 const changed = visu.setStyleOption(optionNode.id, optionValue);
                 if (changed || visu.isDirty()) {
                     visu.updateStatus(true);
-                    viewState.visualizationQueue.unshift(visu);
+                    this.queueVisualization(viewState, visu);
                 }
             }
         }
+        this.sortVisualizationQueue(viewState);
     }
 
     public setSyncOptionsForView(viewIndex: number, enabled: boolean) {
@@ -885,8 +1299,19 @@ export class MapDataService {
     }
 
     private updateVisualizations() {
-        // Update visualizations - first, delete stale visualizations.
         this.viewVisualizationState.forEach((state, viewIndex) => {
+            const visibleTileByKey = new Map<string, boolean>();
+            const isVisibleForView = (tile: FeatureTile): boolean => {
+                const cached = visibleTileByKey.get(tile.mapTileKey);
+                if (cached !== undefined) {
+                    return cached;
+                }
+                const visible = !tile.disposed && this.viewShowsFeatureTile(viewIndex, tile);
+                visibleTileByKey.set(tile.mapTileKey, visible);
+                return visible;
+            };
+
+            // Update visualizations - first, delete stale visualizations.
             for (const styleId of state.getVisualizedStyleIds()) {
                 let styleEnabled = false;
                 if (this.styleService.styles.has(styleId)) {
@@ -894,7 +1319,7 @@ export class MapDataService {
                 }
                 const removals: string[] = [];
                 for (const tileVisu of state.getVisualizations(styleId)) {
-                    if (tileVisu.tile.disposed || !this.viewShowsFeatureTile(viewIndex, tileVisu.tile)) {
+                    if (!isVisibleForView(tileVisu.tile)) {
                         this.tileVisualizationDestructionTopic.next(tileVisu);
                         removals.push(tileVisu.tile.mapTileKey);
                         continue;
@@ -905,25 +1330,58 @@ export class MapDataService {
                         continue;
                     }
                     tileVisu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
-                    tileVisu.isHighDetail = state.highDetailTileIds.has(tileVisu.tile.tileId) || tileVisu.tile.preventCulling;
+                    this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
                 }
                 for (const tileKey of removals) {
                     state.removeVisualizations(styleId, tileKey).forEach(_ => _);
                 }
             }
-        });
 
-        // Update Tile Visualization Queue.
-        this.viewVisualizationState.forEach((state, viewIndex) => {
+            const visibleTiles: FeatureTile[] = [];
+            for (const tile of this.loadedTileLayers.values()) {
+                if (isVisibleForView(tile)) {
+                    tile.setRenderOrder(state.getTileOrder(tile.tileId));
+                    visibleTiles.push(tile);
+                }
+            }
+
+            const visibleStyles = Array.from(this.styleService.styles.values())
+                .filter(style => style.visible);
+
+            const renderableStyles = visibleStyles.filter(style => {
+                const wasmStyle = style.featureLayerStyle;
+                return !!wasmStyle && wasmStyle.supportsHighlightMode(coreLib.HighlightMode.NO_HIGHLIGHT);
+            });
+            const visibleTilesByLayer = new Map<string, FeatureTile[]>();
+            for (const tile of visibleTiles) {
+                let tilesForLayer = visibleTilesByLayer.get(tile.layerName);
+                if (!tilesForLayer) {
+                    tilesForLayer = [];
+                    visibleTilesByLayer.set(tile.layerName, tilesForLayer);
+                }
+                tilesForLayer.push(tile);
+            }
+
+            // Update tile visualization queue.
             state.visualizationQueue = [];
             // Schedule new or dirty visualizations.
-            for (const [_, style] of this.styleService.styles) {
-                for (let [_, tile] of this.loadedTileLayers) {
-                    if (this.viewShowsFeatureTile(viewIndex, tile)) {
-                        this.renderTileLayerOnDemand(viewIndex, tile, style);
+            for (const [layerName, tilesForLayer] of visibleTilesByLayer.entries()) {
+                const applicableStyles: ErdblickStyle[] = [];
+                for (const style of renderableStyles) {
+                    if (style.featureLayerStyle.hasLayerAffinity(layerName)) {
+                        applicableStyles.push(style);
+                    }
+                }
+                if (!applicableStyles.length) {
+                    continue;
+                }
+                for (const tile of tilesForLayer) {
+                    for (const style of applicableStyles) {
+                        this.renderTileLayer(viewIndex, tile, style);
                     }
                 }
             }
+            this.sortVisualizationQueue(state);
         });
     }
 
@@ -937,7 +1395,13 @@ export class MapDataService {
             layerId: string;
             tileIdToNextMissingStage: Map<number, number>;
         };
+        type ExpectedLayerEntry = {
+            mapId: string;
+            layerId: string;
+            tileIdToRequestedMaxStage: Map<number, number>;
+        };
         const requestByLayer = new Map<string, LayerRequestEntry>();
+        const expectedByLayer = new Map<string, ExpectedLayerEntry>();
         let placeholdersAdded = false;
         const queueTile = (mapId: string, layerId: string, tileId: number, nextMissingStage: number) => {
             const key = `${mapId}/${layerId}`;
@@ -955,6 +1419,22 @@ export class MapDataService {
                 entry.tileIdToNextMissingStage.set(tileId, nextMissingStage);
             }
         };
+        const trackRequestedTile = (mapId: string, layerId: string, tileId: number, requestedMaxStage: number) => {
+            const key = `${mapId}/${layerId}`;
+            let entry = expectedByLayer.get(key);
+            if (!entry) {
+                entry = {
+                    mapId,
+                    layerId,
+                    tileIdToRequestedMaxStage: new Map<number, number>(),
+                };
+                expectedByLayer.set(key, entry);
+            }
+            const previousMaxStage = entry.tileIdToRequestedMaxStage.get(tileId);
+            if (previousMaxStage === undefined || requestedMaxStage > previousMaxStage) {
+                entry.tileIdToRequestedMaxStage.set(tileId, requestedMaxStage);
+            }
+        };
         for (const selectionTileRequest of this.selectionTileRequests) {
             // Do not go forward with the selection tile request, if it
             // pertains to a map layer that is not available anymore.
@@ -968,10 +1448,22 @@ export class MapDataService {
                         selectionTileRequest.remoteRequest.layerId,
                         BigInt(tileId),
                         true) || placeholdersAdded;
+                    const selectionStageCount = this.getLayerStageCount(
+                        selectionTileRequest.remoteRequest.mapId,
+                        selectionTileRequest.remoteRequest.layerId
+                    );
+                    const selectionRequestedMaxStage = Math.max(0, selectionStageCount - 1);
+                    trackRequestedTile(
+                        selectionTileRequest.remoteRequest.mapId,
+                        selectionTileRequest.remoteRequest.layerId,
+                        tileId,
+                        selectionRequestedMaxStage
+                    );
                     const nextMissingStage = this.tileMinimumMissingStage(
                         selectionTileRequest.remoteRequest.mapId,
                         selectionTileRequest.remoteRequest.layerId,
-                        BigInt(tileId));
+                        BigInt(tileId),
+                        selectionRequestedMaxStage);
                     if (nextMissingStage !== undefined) {
                         queueTile(
                             selectionTileRequest.remoteRequest.mapId,
@@ -1002,7 +1494,21 @@ export class MapDataService {
                         if (!existingTile) {
                             placeholdersAdded = this.ensureTilePlaceholder(mapName, layer.id, tileId, false) || placeholdersAdded;
                         }
-                        const nextMissingStage = this.tileMinimumMissingStage(mapName, layer.id, tileId);
+                        const stageCount = this.getLayerStageCount(mapName, layer.id);
+                        const layerMaxStage = Math.max(0, stageCount - 1);
+                        const requestedMaxStage = layerMaxStage;
+                        // Keep progress bars as overall viewport completeness.
+                        trackRequestedTile(
+                            mapName,
+                            layer.id,
+                            Number(tileId),
+                            layerMaxStage
+                        );
+                        const nextMissingStage = this.tileMinimumMissingStage(
+                            mapName,
+                            layer.id,
+                            tileId,
+                            requestedMaxStage);
                         if (nextMissingStage !== undefined) {
                             queueTile(mapName, layer.id, Number(tileId), nextMissingStage);
                         }
@@ -1042,7 +1548,16 @@ export class MapDataService {
             this.statsDialogNeedsUpdate.next();
         }
 
+        this.resetRequestedStageProgressFromExpected(expectedByLayer);
+
         if (this.tilePipelinePaused) {
+            return;
+        }
+        const hasPendingRequestedStages = this.stageRequestProgress
+            .some(counter => counter.total > 0 && counter.done < counter.total);
+        if (!requests.length && hasPendingRequestedStages) {
+            // Do not replace an active backend request with an empty one while
+            // later stages are still expected to arrive automatically.
             return;
         }
         const requestSent = await this.tileStream!.updateRequest(requests);
@@ -1050,19 +1565,22 @@ export class MapDataService {
             const previousProgress = this.backendRequestProgress;
             const hasPreviousProgress = previousProgress.total > 0;
             const newTotal = requests.length;
-            this.backendRequestProgress = {
-                done: newTotal === 0 && hasPreviousProgress
-                    ? previousProgress.total
-                    : 0,
-                total: newTotal === 0 && hasPreviousProgress
-                    ? previousProgress.total
-                    : newTotal,
-                allDone: newTotal === 0
-            };
-            this.viewportLoadStartedAtMs = performance.now();
-            this.viewportRenderCompletedAtMs = newTotal === 0
-                ? this.viewportLoadStartedAtMs
-                : null;
+            const preservePreviousProgress = newTotal === 0
+                && hasPreviousProgress
+                && !previousProgress.allDone;
+            if (newTotal > 0) {
+                this.backendRequestProgress = {
+                    done: 0,
+                    total: newTotal,
+                    allDone: false
+                };
+                this.viewportLoadStartedAtMs = performance.now();
+                this.viewportRenderCompletedAtMs = null;
+            } else if (!preservePreviousProgress) {
+                this.backendRequestProgress = {done: 0, total: 0, allDone: true};
+                this.viewportLoadStartedAtMs = performance.now();
+                this.viewportRenderCompletedAtMs = this.viewportLoadStartedAtMs;
+            }
         }
     }
 
@@ -1093,6 +1611,8 @@ export class MapDataService {
             tileLayer = new FeatureTile(this.tileLayerParser, tileLayerBlob, preventCulling);
             this.loadedTileLayers.set(canonicalMapTileKey, tileLayer);
         }
+        this.trackObservedLayerStage(mapTileMetadata.mapName, mapTileMetadata.layerName, tileStage);
+        this.markRequestedStageAsReceived(canonicalMapTileKey, tileStage);
 
         // Consider, if this tile is needed by a selection tile request.
         this.selectionTileRequests = this.selectionTileRequests.filter(request => {
@@ -1144,6 +1664,7 @@ export class MapDataService {
             visibleInAnyView = true;
 
             const viewState = this.viewVisualizationState[viewIndex];
+            tileLayer.setRenderOrder(viewState.getTileOrder(tileLayer.tileId));
             const queuedVisualizations = new Set(viewState.visualizationQueue);
             for (const visu of viewState.getVisualizations(undefined, tileKey)) {
                 foundExistingVisualization = true;
@@ -1156,7 +1677,7 @@ export class MapDataService {
                 const isDirty = visu.isDirty();
 
                 visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
-                visu.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
+                this.applyTileRenderPolicyToVisualization(viewIndex, visu);
 
                 if (!isDirty) {
                     continue;
@@ -1164,10 +1685,11 @@ export class MapDataService {
 
                 visu.updateStatus(true);
                 if (!isQueued) {
-                    viewState.visualizationQueue.push(visu);
+                    this.queueVisualization(viewState, visu);
                     queuedVisualizations.add(visu);
                 }
             }
+            this.sortVisualizationQueue(viewState);
         }
 
         return {
@@ -1181,9 +1703,11 @@ export class MapDataService {
             if (!this.viewShowsFeatureTile(viewIndex, tileLayer)) {
                 continue;
             }
+            const viewState = this.viewVisualizationState[viewIndex];
             for (const [_, style] of this.styleService.styles) {
                 this.renderTileLayerOnDemand(viewIndex, tileLayer, style);
             }
+            this.sortVisualizationQueue(viewState);
         }
     }
 
@@ -1200,33 +1724,21 @@ export class MapDataService {
         tile: FeatureTile,
         style: FeatureLayerStyle,
         styleSource: string,
-        highDetail: boolean,
+        prefersHighFidelity: boolean,
+        maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
         highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         featureIdSubset: string[] = [],
         boxGrid = false,
         options: Record<string, boolean | number | string> = {}
     ): ITileVisualization {
-        if (this.stateService.rendererMode === "deck") {
-            return new DeckTileVisualization(
-                viewIndex,
-                tile,
-                this.pointMergeService,
-                style,
-                styleSource,
-                highDetail,
-                highlightMode,
-                featureIdSubset,
-                boxGrid,
-                options
-            );
-        }
-        return new CesiumTileVisualization(
+        return new DeckTileVisualization(
             viewIndex,
             tile,
             this.pointMergeService,
-            (tileKey: string) => this.getFeatureTile(tileKey),
             style,
-            highDetail,
+            styleSource,
+            prefersHighFidelity,
+            maxLowFiLod,
             highlightMode,
             featureIdSubset,
             boxGrid,
@@ -1252,17 +1764,26 @@ export class MapDataService {
         const layerName = tileLayer.layerName;
         const tileKey = tileLayer.mapTileKey;
         const viewState = this.viewVisualizationState[viewIndex];
+        const renderPolicy = this.tileRenderPolicyForView(viewIndex, tileLayer);
+        const requestedStageDiagnostic = Math.max(0, this.getLayerStageCount(mapName, layerName) - 1);
+        tileLayer.stats.set(
+            `Rendering/Policy/View-${viewIndex}/RequestedMaxStage#value`,
+            [requestedStageDiagnostic]);
+        tileLayer.stats.set(
+            `Rendering/Policy/View-${viewIndex}/MaxLowFiLod#value`,
+            [renderPolicy.maxLowFiLod ?? -1]);
         const existing = viewState.getVisualization(styleId, tileKey);
         if (existing) {
             existing.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
-            existing.isHighDetail = tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId);
+            existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
+            existing.maxLowFiLod = renderPolicy.maxLowFiLod;
             if (!stageReady) {
                 existing.updateStatus(false);
                 return;
             }
             if (existing.isDirty()) {
                 existing.updateStatus(true);
-                viewState.visualizationQueue.push(existing);
+                this.queueVisualization(viewState, existing);
             }
             return;
         }
@@ -1271,7 +1792,8 @@ export class MapDataService {
             tileLayer,
             wasmStyle,
             style.source,
-            tileLayer.preventCulling || viewState.highDetailTileIds.has(tileLayer.tileId),
+            renderPolicy.prefersHighFidelity,
+            renderPolicy.maxLowFiLod,
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
             this.maps.getViewTileBorderState(viewIndex),
@@ -1283,7 +1805,7 @@ export class MapDataService {
             return;
         }
         visu.updateStatus(true);
-        viewState.visualizationQueue.push(visu);
+        this.queueVisualization(viewState, visu);
     }
 
     setViewport(viewIndex: number, viewport: Viewport) {
@@ -1322,7 +1844,7 @@ export class MapDataService {
             return;
         }
         this.blockedTileLoadInfoShown = true;
-        this.messageService.showInfo('Tile pipeline is paused; cannot load additional tiles');
+        this.showInfoMessage('Tile pipeline is paused; cannot load additional tiles');
     }
 
     resolveTileFeatureIdByIndex(tileKey: string, featureIndex: number): TileFeatureId | null {
@@ -1338,12 +1860,17 @@ export class MapDataService {
             return null;
         }
         const featureId = tile.featureIdByIndex(featureIndex);
-        if (!featureId) {
-            return null;
+        if (featureId) {
+            return {
+                mapTileKey: canonicalTileKey,
+                featureId,
+                featureIndex
+            };
         }
         return {
             mapTileKey: canonicalTileKey,
-            featureId
+            featureId: `${featureIndex}`,
+            featureIndex
         };
     }
 
@@ -1411,6 +1938,16 @@ export class MapDataService {
 
         // Ensure that the feature really exists in the tile.
         const features: FeatureWrapper[] = [];
+        const parseFeatureIndexToken = (value: string): number | undefined => {
+            if (!/^\d+$/.test(value)) {
+                return undefined;
+            }
+            const parsed = Number(value);
+            if (!Number.isInteger(parsed) || parsed < 0) {
+                return undefined;
+            }
+            return parsed;
+        };
         for (const id of normalizedIds) {
             const tile = tiles.get(id?.mapTileKey || "");
             if (!tile) {
@@ -1426,33 +1963,48 @@ export class MapDataService {
             };
 
             let resolvedFeatureId = id?.featureId || "";
-            const idWithOptionalIndex = id as TileFeatureId & { featureIndex?: number };
-            const resolvedFromExplicitIndex = maybeResolveByIndex(idWithOptionalIndex.featureIndex);
+            let featureIndex = Number.isInteger(id.featureIndex) && id.featureIndex !== undefined && id.featureIndex >= 0
+                ? id.featureIndex
+                : undefined;
+            let resolvedFromFeatureIndex = false;
+
+            const resolvedFromExplicitIndex = maybeResolveByIndex(featureIndex);
             if (resolvedFromExplicitIndex) {
                 resolvedFeatureId = resolvedFromExplicitIndex;
+                resolvedFromFeatureIndex = true;
             } else {
-                const numericFeatureId = Number(resolvedFeatureId);
-                if (Number.isInteger(numericFeatureId) && numericFeatureId >= 0) {
+                const numericFeatureId = parseFeatureIndexToken(resolvedFeatureId);
+                if (numericFeatureId !== undefined) {
+                    featureIndex = featureIndex ?? numericFeatureId;
                     const resolvedFromNumericId = maybeResolveByIndex(numericFeatureId);
                     if (resolvedFromNumericId) {
                         resolvedFeatureId = resolvedFromNumericId;
+                        resolvedFromFeatureIndex = true;
                     }
                 }
             }
 
-            if (!resolvedFeatureId) {
+            if (!resolvedFeatureId && featureIndex === undefined) {
                 continue;
             }
 
-            if (!tile.has(resolvedFeatureId)) {
+            const unresolvedNumericFeatureId =
+                !resolvedFromFeatureIndex &&
+                parseFeatureIndexToken(resolvedFeatureId) !== undefined;
+            const useFeatureIndexFallback =
+                featureIndex !== undefined &&
+                (!resolvedFeatureId || unresolvedNumericFeatureId || !tile.has(resolvedFeatureId));
+            if (useFeatureIndexFallback) {
+                resolvedFeatureId = `${featureIndex}`;
+            } else if (!tile.has(resolvedFeatureId)) {
                 const parsedTileKey = this.parseMapTileKeySafe(id?.mapTileKey || "");
                 const [mapId, layerId, tileId] = parsedTileKey ?? ["", "", 0n];
-                this.messageService.showError(
+                this.showErrorMessage(
                     `The feature ${id?.featureId} does not exist in the ${layerId} layer of tile ${tileId} of map ${mapId}.`);
                 continue;
             }
 
-            features.push(new FeatureWrapper(resolvedFeatureId, tile));
+            features.push(new FeatureWrapper(resolvedFeatureId, tile, featureIndex));
         }
         return features;
     }
@@ -1482,7 +2034,7 @@ export class MapDataService {
     async focusOnFeature(viewIndex: number, tileFeatureId: TileFeatureId) {
         const features = await this.loadFeatures([tileFeatureId]);
         if (!features.length) {
-            this.messageService.showError(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
+            this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
             return;
         }
         const position = features[0].peek((parsedFeature: Feature) => parsedFeature.center());
@@ -1550,7 +2102,7 @@ export class MapDataService {
                     targetView: vi,
                     x: center.x,
                     y: center.y,
-                    // TODO: Calculate height using faux Cesium camera with target view rectangle.
+                    // TODO: Calculate height using a synthetic camera with target view rectangle.
                     z: center.z + 3 * boundingRadius
                 }));
         });
@@ -1618,12 +2170,13 @@ export class MapDataService {
                                 style.featureLayerStyle,
                                 style.source,
                                 true,
+                                null,
                                 mode,
                                 featureIds,
                                 false,
                                 styleOptions
                             );
-                            this.tileVisualizationTopic.next(visualization);
+                            this.tileVisualizationTopic.next({visualization});
                             visualizationCollection.push(visualization);
                         }
                     }
@@ -1656,6 +2209,9 @@ export class MapDataService {
             }
         }
         this.viewVisualizationState[viewIndex].visualizationQueue = [];
+        if (viewIndex >= 0 && viewIndex < this.inFlightVisualizationRendersByView.length) {
+            this.inFlightVisualizationRendersByView[viewIndex] = 0;
+        }
     }
 
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
@@ -1690,6 +2246,22 @@ export class MapDataService {
         }
         return this.maps.getMapLayerVisibility(viewIndex, tile.mapName, tile.layerName) &&
             tile.level() === this.maps.getMapLayerLevel(viewIndex, tile.mapName, tile.layerName);
+    }
+
+    private scheduleOutsideAngular(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
+        return this.ngZone.runOutsideAngular(() => setTimeout(callback, delay));
+    }
+
+    private requestAnimationFrameOutsideAngular(callback: (timestamp: number) => void): number {
+        return this.ngZone.runOutsideAngular(() => window.requestAnimationFrame(callback));
+    }
+
+    private showInfoMessage(message: string) {
+        this.ngZone.run(() => this.messageService.showInfo(message));
+    }
+
+    private showErrorMessage(message: string) {
+        this.ngZone.run(() => this.messageService.showError(message));
     }
 
     /**

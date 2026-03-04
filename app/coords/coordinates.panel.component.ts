@@ -2,7 +2,7 @@ import {Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapDataService} from "../mapdata/map.service";
 import {AppStateService} from "../shared/appstate.service";
-import {CesiumMath} from "../integrations/cesium";
+import {GeoMath} from "../integrations/geo";
 import {ClipboardService} from "../shared/clipboard.service";
 import {coreLib} from "../integrations/wasm";
 import {KeyValue} from "@angular/common";
@@ -119,8 +119,8 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
         this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
             if (!this.markerPosition && coordinates) {
-                this.longitude = CesiumMath.toDegrees(coordinates.longitude);
-                this.latitude = CesiumMath.toDegrees(coordinates.latitude);
+                this.longitude = GeoMath.toDegrees(coordinates.longitude);
+                this.latitude = GeoMath.toDegrees(coordinates.latitude);
                 this.updateValues();
             }
             this.restoreSelectedOptions();

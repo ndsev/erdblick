@@ -33,7 +33,6 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/inter": "^5.2.8",
     "@primeng/themes": "^20.4.0",
-    "cesium": "1.136.0",
     "codemirror": "^6.0.2",
     "js-yaml": "^4.1.1",
     "material-symbols": "0.40.2",

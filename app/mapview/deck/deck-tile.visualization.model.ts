@@ -1,13 +1,19 @@
 import {FeatureTile} from "../../mapdata/features.model";
 import {FeatureLayerStyle, HighlightMode} from "../../../build/libs/core/erdblick-core";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
-import {IconLayer, PathLayer, ScatterplotLayer} from "@deck.gl/layers";
+import {IconLayer, PathLayer, PolygonLayer, ScatterplotLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
 import {deckRenderWorkerPool, isDeckRenderWorkerPoolEnabled} from "./deck-render.worker.pool";
-import {DeckWorkerTimings} from "./deck-render.worker.protocol";
+import {
+    DECK_GEOMETRY_OUTPUT_ALL,
+    DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
+    DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+    DeckGeometryOutputMode,
+    DeckWorkerTimings
+} from "./deck-render.worker.protocol";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
@@ -68,10 +74,26 @@ interface DeckPointRawBuffers {
     featureIds: Uint32Array;
 }
 
+interface DeckWasmRenderOutput {
+    pathLayerData: DeckPathLayerData | null;
+    pointLayerData: DeckPointLayerData | null;
+    arrowLayerData: DeckPathLayerData | null;
+    mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null;
+    vertexCount: number;
+    workerTimings: DeckWorkerTimings | null;
+}
+
 const MAX_DECK_PATH_COUNT = 1_000_000;
 const MAX_DECK_VERTEX_COUNT = 20_000_000;
 const MAX_DECK_POINT_COUNT = 10_000_000;
 const DECK_UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
+const RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA = 0;
+const RENDER_RANK_PRIORITY_DEFAULT = 1;
+const RENDER_RANK_HAS_DATA = 0;
+const RENDER_RANK_MISSING_DATA = 1;
+const TILE_EMPTY_BACKGROUND_COLOR: [number, number, number, number] = [116, 116, 116, 84];
+const TILE_BORDER_COLOR: [number, number, number, number] = [245, 245, 245, 240];
+const TILE_BORDER_WIDTH_PX = 2.0;
 const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
@@ -107,7 +129,8 @@ interface DeckArrowMarker {
  */
 export class DeckTileVisualization implements ITileVisualization {
     tile: FeatureTile;
-    isHighDetail: boolean;
+    prefersHighFidelity: boolean;
+    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     showTileBorder: boolean = false;
     readonly viewIndex: number;
     public readonly styleId: string;
@@ -124,6 +147,8 @@ export class DeckTileVisualization implements ITileVisualization {
     private pointLayerKey: string | null = null;
     private pathLayerKey: string | null = null;
     private arrowLayerKey: string | null = null;
+    private tileEmptyBackgroundLayerKey: string | null = null;
+    private tileBorderLayerKey: string | null = null;
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
@@ -138,7 +163,8 @@ export class DeckTileVisualization implements ITileVisualization {
                 pointMergeService: PointMergeService,
                 style: FeatureLayerStyle,
                 styleSource: string,
-                highDetail: boolean,
+                prefersHighFidelity: boolean,
+                maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 featureIdSubset: string[] = [],
                 boxGrid?: boolean,
@@ -148,7 +174,8 @@ export class DeckTileVisualization implements ITileVisualization {
         this.style = style as StyleWithIsDeleted;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
-        this.isHighDetail = highDetail;
+        this.prefersHighFidelity = prefersHighFidelity;
+        this.maxLowFiLod = maxLowFiLod;
         this.highlightMode = highlightMode;
         this.featureIdSubset = [...featureIdSubset];
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
@@ -181,6 +208,18 @@ export class DeckTileVisualization implements ITileVisualization {
             hoverMode: this.highlightModeLabel(),
             kind: "arrow"
         });
+        const tileEmptyBackgroundLayerKey = makeDeckLayerKey({
+            tileKey: this.tile.mapTileKey,
+            styleId: this.styleId,
+            hoverMode: this.highlightModeLabel(),
+            kind: "tile-empty-background"
+        });
+        const tileBorderLayerKey = makeDeckLayerKey({
+            tileKey: this.tile.mapTileKey,
+            styleId: this.styleId,
+            hoverMode: this.highlightModeLabel(),
+            kind: "tile-border"
+        });
         try {
             for (const removedCornerTile of this.pointMergeService.remove(
                 this.tile.tileId,
@@ -191,7 +230,8 @@ export class DeckTileVisualization implements ITileVisualization {
             this.latestPointLayerData = null;
             this.latestArrowLayerData = null;
             this.latestMergedPointFeatures = null;
-            const pathLayerData = await this.renderWasm();
+            const fidelity = this.currentFidelity();
+            const pathLayerData = await this.renderWasm(fidelity);
             const pointLayerData = this.latestPointLayerData as DeckPointLayerData | null;
             const arrowLayerData = this.latestArrowLayerData as DeckPathLayerData | null;
             const mergedPointFeatures = this.latestMergedPointFeatures as
@@ -268,6 +308,53 @@ export class DeckTileVisualization implements ITileVisualization {
                 registry.remove(this.arrowLayerKey);
                 this.arrowLayerKey = null;
             }
+
+            const hasRenderableGeometry =
+                (pointLayerData !== null && pointLayerData.length > 0) ||
+                (pathLayerData !== null && pathLayerData.length > 0) ||
+                (arrowLayerData !== null && arrowLayerData.length > 0) ||
+                (mergedPointFeatures !== null && Object.keys(mergedPointFeatures).length > 0);
+            const tileOutline = this.tileOutlinePath();
+            if (!hasRenderableGeometry && tileOutline) {
+                const tileEmptyBackgroundLayer = new PolygonLayer({
+                    id: tileEmptyBackgroundLayerKey,
+                    data: [{polygon: tileOutline}],
+                    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                    getPolygon: (feature: {polygon: [number, number][]}) => feature.polygon,
+                    getFillColor: TILE_EMPTY_BACKGROUND_COLOR,
+                    filled: true,
+                    stroked: false,
+                    pickable: false
+                } as any);
+                registry.upsert(tileEmptyBackgroundLayerKey, tileEmptyBackgroundLayer as any, 300);
+                this.tileEmptyBackgroundLayerKey = tileEmptyBackgroundLayerKey;
+            } else if (this.tileEmptyBackgroundLayerKey) {
+                registry.remove(this.tileEmptyBackgroundLayerKey);
+                this.tileEmptyBackgroundLayerKey = null;
+            }
+
+            if (this.showTileBorder && tileOutline) {
+                const tileBorderLayer = new PolygonLayer({
+                    id: tileBorderLayerKey,
+                    data: [{polygon: tileOutline}],
+                    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                    getPolygon: (feature: {polygon: [number, number][]}) => feature.polygon,
+                    filled: false,
+                    stroked: true,
+                    lineWidthUnits: "pixels",
+                    getLineColor: TILE_BORDER_COLOR,
+                    getLineWidth: TILE_BORDER_WIDTH_PX,
+                    lineWidthMinPixels: TILE_BORDER_WIDTH_PX,
+                    parameters: {depthTest: false},
+                    pickable: false
+                } as any);
+                registry.upsert(tileBorderLayerKey, tileBorderLayer as any, 475);
+                this.tileBorderLayerKey = tileBorderLayerKey;
+            } else if (this.tileBorderLayerKey) {
+                registry.remove(this.tileBorderLayerKey);
+                this.tileBorderLayerKey = null;
+            }
+
             if (mergedPointFeatures) {
                 for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
                     for (const finishedCornerTile of this.pointMergeService.insert(
@@ -283,7 +370,7 @@ export class DeckTileVisualization implements ITileVisualization {
             this.rendered = true;
             this.renderQueued = false;
             this.deleted = false;
-            this.lastSignature = this.renderSignature();
+            this.lastSignature = this.renderSignature(fidelity);
             this.hadTileDataAtLastRender = this.tileHasData();
             this.tileFeatureCountAtLastRender = this.tileFeatureCount();
             this.relevantTileDataVersionAtLastRender = this.relevantTileDataVersion();
@@ -314,9 +401,17 @@ export class DeckTileVisualization implements ITileVisualization {
         if (this.arrowLayerKey) {
             registry.remove(this.arrowLayerKey);
         }
+        if (this.tileEmptyBackgroundLayerKey) {
+            registry.remove(this.tileEmptyBackgroundLayerKey);
+        }
+        if (this.tileBorderLayerKey) {
+            registry.remove(this.tileBorderLayerKey);
+        }
         this.pointLayerKey = null;
         this.pathLayerKey = null;
         this.arrowLayerKey = null;
+        this.tileEmptyBackgroundLayerKey = null;
+        this.tileBorderLayerKey = null;
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
@@ -331,6 +426,18 @@ export class DeckTileVisualization implements ITileVisualization {
             this.hadTileDataAtLastRender !== this.tileHasData() ||
             this.tileFeatureCountAtLastRender !== this.tileFeatureCount()
         );
+    }
+
+    renderRank(): readonly number[] {
+        const hasData = this.tileHasData();
+        const priorityBucket = (!this.rendered && hasData)
+            ? RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA
+            : RENDER_RANK_PRIORITY_DEFAULT;
+        return [
+            priorityBucket,
+            this.tile.renderOrder(),
+            hasData ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA
+        ];
     }
 
     updateStatus(renderQueued?: boolean): void {
@@ -355,9 +462,10 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
-    private renderSignature(): string {
+    private renderSignature(fidelity: "low" | "high" | null = this.currentFidelity()): string {
         return JSON.stringify({
-            highDetail: this.isHighDetail,
+            fidelity,
+            maxLowFiLod: this.maxLowFiLod,
             showTileBorder: this.showTileBorder,
             renderQueued: this.renderQueued,
             highlightMode: this.highlightMode.value,
@@ -366,28 +474,78 @@ export class DeckTileVisualization implements ITileVisualization {
         });
     }
 
-    private async renderWasm(): Promise<DeckPathLayerData | null> {
-        if (isDeckRenderWorkerPoolEnabled()) {
-            try {
-                const workerResult = await this.renderWasmInWorker();
-                if (workerResult) {
-                    return workerResult;
-                }
-            } catch (error) {
-                console.error("Deck worker rendering failed; falling back to main thread rendering.", error);
-            }
+    private async renderWasm(fidelity: "low" | "high" | null): Promise<DeckPathLayerData | null> {
+        if (fidelity === null) {
+            return null;
         }
-        return await this.renderWasmOnMainThread();
+
+        if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
+
+        if (!isDeckRenderWorkerPoolEnabled() || !this.canRenderInWorker()) {
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
+
+        try {
+            const [nonPointWorker, pointMainThread] = await Promise.all([
+                this.renderWasmInWorker(fidelity, DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY),
+                this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_POINTS_ONLY)
+            ]);
+            this.setTileVertexCount(Math.max(nonPointWorker.vertexCount, pointMainThread.vertexCount));
+            this.latestWorkerTimings = nonPointWorker.workerTimings;
+            this.latestPointLayerData = pointMainThread.pointLayerData;
+            this.latestArrowLayerData = nonPointWorker.arrowLayerData;
+            this.latestMergedPointFeatures = pointMainThread.mergedPointFeatures;
+            return nonPointWorker.pathLayerData;
+        } catch (error) {
+            console.error("Deck split rendering failed; falling back to main thread rendering.", error);
+            const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(fullMainThread.vertexCount);
+            this.latestWorkerTimings = fullMainThread.workerTimings;
+            this.latestPointLayerData = fullMainThread.pointLayerData;
+            this.latestArrowLayerData = fullMainThread.arrowLayerData;
+            this.latestMergedPointFeatures = fullMainThread.mergedPointFeatures;
+            return fullMainThread.pathLayerData;
+        }
     }
 
-    private async renderWasmInWorker(): Promise<DeckPathLayerData | null> {
+    private canRenderInWorker(): boolean {
         if (this.tile.blobCount() > 1) {
-            // Overlay composition currently happens in FeatureTile.peek() on the main thread.
-            return null;
+            return false;
         }
         const tileBlob = this.tile.tileFeatureLayerBlob;
         if (!tileBlob) {
-            return null;
+            return false;
+        }
+        const tileWithParserContext = this.tile as FeatureTile & {
+            getFieldDictBlob?: () => Uint8Array | null;
+            getDataSourceInfoBlob?: () => Uint8Array | null;
+        };
+        const fieldDictBlob = tileWithParserContext.getFieldDictBlob?.();
+        const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob?.();
+        return !!fieldDictBlob && !!dataSourceInfoBlob;
+    }
+
+    private async renderWasmInWorker(
+        fidelity: "low" | "high",
+        outputMode: DeckGeometryOutputMode
+    ): Promise<DeckWasmRenderOutput> {
+        const tileBlob = this.tile.tileFeatureLayerBlob;
+        if (!tileBlob) {
+            throw new Error("Worker render requested without tile blob.");
         }
         const tileWithParserContext = this.tile as FeatureTile & {
             getFieldDictBlob?: () => Uint8Array | null;
@@ -396,7 +554,7 @@ export class DeckTileVisualization implements ITileVisualization {
         const fieldDictBlob = tileWithParserContext.getFieldDictBlob?.();
         const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob?.();
         if (!fieldDictBlob || !dataSourceInfoBlob) {
-            return null;
+            throw new Error("Worker render requested without parser context blobs.");
         }
         const pool = deckRenderWorkerPool();
         const result = await pool.renderPaths({
@@ -410,36 +568,43 @@ export class DeckTileVisualization implements ITileVisualization {
             styleSource: this.styleSource,
             styleOptions: this.copyStyleOptions(),
             highlightModeValue: this.highlightMode.value,
+            fidelityValue: this.fidelityEnumValue(fidelity).value,
+            maxLowFiLod: this.resolveMaxLowFiLod(fidelity),
+            outputMode,
             featureIdSubset: [...this.featureIdSubset],
             mergeCountSnapshot: this.pointMergeService.makeMergeCountSnapshot(
                 this.tile.tileId,
                 this.mapViewLayerStyleId()
             )
         });
-        this.setTileVertexCount(result.vertexCount);
-        this.latestWorkerTimings = result.workerTimings ?? null;
-        this.latestPointLayerData = this.buildPointLayerData({
-            coordinateOrigin: result.coordinateOrigin,
-            positions: result.pointPositions,
-            colors: result.pointColors,
-            radii: result.pointRadii,
-            featureIds: result.pointFeatureIds
-        });
-        this.latestArrowLayerData = this.buildPathLayerData({
-            coordinateOrigin: result.coordinateOrigin,
-            positions: result.arrowPositions,
-            startIndices: result.arrowStartIndices,
-            colors: result.arrowColors,
-            widths: result.arrowWidths,
-            featureIds: result.arrowFeatureIds
-        });
-        this.latestMergedPointFeatures =
-            (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>;
-        return this.buildPathLayerData(result);
+        return {
+            pathLayerData: this.buildPathLayerData(result),
+            pointLayerData: this.buildPointLayerData({
+                coordinateOrigin: result.coordinateOrigin,
+                positions: result.pointPositions,
+                colors: result.pointColors,
+                radii: result.pointRadii,
+                featureIds: result.pointFeatureIds
+            }),
+            arrowLayerData: this.buildPathLayerData({
+                coordinateOrigin: result.coordinateOrigin,
+                positions: result.arrowPositions,
+                startIndices: result.arrowStartIndices,
+                colors: result.arrowColors,
+                widths: result.arrowWidths,
+                featureIds: result.arrowFeatureIds
+            }),
+            mergedPointFeatures:
+                (result.mergedPointFeatures ?? {}) as Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
+            vertexCount: result.vertexCount,
+            workerTimings: result.workerTimings ?? null
+        };
     }
 
-    private async renderWasmOnMainThread(): Promise<DeckPathLayerData | null> {
-        this.latestWorkerTimings = null;
+    private async renderWasmOnMainThread(
+        fidelity: "low" | "high",
+        outputMode: DeckGeometryOutputMode
+    ): Promise<DeckWasmRenderOutput> {
         let deckVisu: any;
         try {
             deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
@@ -449,16 +614,24 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.options,
                 this.pointMergeService,
                 this.highlightMode,
+                this.fidelityEnumValue(fidelity),
+                this.resolveMaxLowFiLod(fidelity),
+                this.mapGeometryOutputModeForWasm(outputMode),
                 this.featureIdSubset
             );
+            if (typeof deckVisu.setGeometryOutputMode === "function") {
+                deckVisu.setGeometryOutputMode(this.mapGeometryOutputModeForWasm(outputMode));
+            }
+
+            let vertexCount = 0;
 
             await this.tile.peekAsync(async (tileFeatureLayer) => {
-                this.setTileVertexCount(Number(tileFeatureLayer.numVertices()));
+                vertexCount = Number(tileFeatureLayer.numVertices());
                 deckVisu.addTileFeatureLayer(tileFeatureLayer);
                 deckVisu.run();
             });
 
-            const lineLayerData = this.buildPathLayerData({
+            const pathLayerData = this.buildPathLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
                 positions: this.readFloat32Array(deckVisu, "pathPositionsRaw"),
                 startIndices: this.readUint32Array(deckVisu, "pathStartIndicesRaw"),
@@ -468,14 +641,14 @@ export class DeckTileVisualization implements ITileVisualization {
                 dashArrays: this.readFloat32Array(deckVisu, "pathDashArrayRaw"),
                 dashOffsets: this.readFloat32Array(deckVisu, "pathDashOffsetsRaw")
             });
-            this.latestPointLayerData = this.buildPointLayerData({
+            const pointLayerData = this.buildPointLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
                 positions: this.readFloat32Array(deckVisu, "pointPositionsRaw"),
                 colors: this.readUint8Array(deckVisu, "pointColorsRaw"),
                 radii: this.readFloat32Array(deckVisu, "pointRadiiRaw"),
                 featureIds: this.readUint32Array(deckVisu, "pointFeatureIdsRaw")
             });
-            this.latestArrowLayerData = this.buildPathLayerData({
+            const arrowLayerData = this.buildPathLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
                 positions: this.readFloat32Array(deckVisu, "arrowPositionsRaw"),
                 startIndices: this.readUint32Array(deckVisu, "arrowStartIndicesRaw"),
@@ -483,9 +656,15 @@ export class DeckTileVisualization implements ITileVisualization {
                 widths: this.readFloat32Array(deckVisu, "arrowWidthsRaw"),
                 featureIds: this.readUint32Array(deckVisu, "arrowFeatureIdsRaw")
             });
-            this.latestMergedPointFeatures = deckVisu.mergedPointFeatures() as
-                Record<MapViewLayerStyleRule, MergedPointVisualization[]>;
-            return lineLayerData;
+            return {
+                pathLayerData,
+                pointLayerData,
+                arrowLayerData,
+                mergedPointFeatures: deckVisu.mergedPointFeatures() as
+                    Record<MapViewLayerStyleRule, MergedPointVisualization[]>,
+                vertexCount: Math.max(0, Math.floor(vertexCount)),
+                workerTimings: null
+            };
         } finally {
             if (deckVisu && typeof deckVisu.delete === "function") {
                 deckVisu.delete();
@@ -712,12 +891,101 @@ export class DeckTileVisualization implements ITileVisualization {
         }) as Uint8Array;
     }
 
+    private tileOutlinePath(): [number, number][] | null {
+        const tileBox = coreLib.getTileBox(this.tile.tileId) as unknown;
+        if (!Array.isArray(tileBox) || tileBox.length < 4) {
+            return null;
+        }
+        const west = Number(tileBox[0]);
+        const south = Number(tileBox[1]);
+        const east = Number(tileBox[2]);
+        const north = Number(tileBox[3]);
+        if (![west, south, east, north].every(Number.isFinite)) {
+            return null;
+        }
+        return [
+            [west, south],
+            [east, south],
+            [east, north],
+            [west, north],
+            [west, south]
+        ];
+    }
+
     private tileHasData(): boolean {
         return this.tile.hasData();
     }
 
     private tileFeatureCount(): number {
         return (this.tile as any).numFeatures as number;
+    }
+
+    private highFidelityStage(): number {
+        const styleWithHighFidelityStage = this.style as FeatureLayerStyle & { highFidelityStage?: () => number };
+        if (typeof styleWithHighFidelityStage.highFidelityStage !== "function") {
+            return 0;
+        }
+        const rawValue = styleWithHighFidelityStage.highFidelityStage();
+        if (!Number.isFinite(rawValue)) {
+            return 0;
+        }
+        return Math.max(0, Math.floor(rawValue));
+    }
+
+    private highestLoadedStage(): number | null {
+        const tileWithStages = this.tile as FeatureTile & { highestLoadedStage?: () => number | null };
+        if (typeof tileWithStages.highestLoadedStage !== "function") {
+            return this.tile.hasData() ? 0 : null;
+        }
+        return tileWithStages.highestLoadedStage();
+    }
+
+    private currentFidelity(): "low" | "high" | null {
+        if (!this.tile.hasData() || this.tile.numFeatures <= 0) {
+            return null;
+        }
+        const highestLoadedStage = this.highestLoadedStage();
+        if (highestLoadedStage !== null &&
+            this.prefersHighFidelity &&
+            highestLoadedStage >= this.highFidelityStage()) {
+            return "high";
+        }
+        return "low";
+    }
+
+    private fidelityEnumValue(fidelity: "low" | "high"): any {
+        return fidelity === "high"
+            ? (coreLib as any).RuleFidelity.HIGH
+            : (coreLib as any).RuleFidelity.LOW;
+    }
+
+    private resolveMaxLowFiLod(fidelity: "low" | "high"): number {
+        if (fidelity !== "low") {
+            return -1;
+        }
+        if (this.maxLowFiLod === null || this.maxLowFiLod === undefined) {
+            return -1;
+        }
+        return this.maxLowFiLod;
+    }
+
+    private mapGeometryOutputModeForWasm(outputMode: DeckGeometryOutputMode): number {
+        const ctor = (coreLib as any).DeckFeatureLayerVisualization;
+        if (!ctor) {
+            return outputMode;
+        }
+        if (outputMode === DECK_GEOMETRY_OUTPUT_POINTS_ONLY
+            && typeof ctor.GEOMETRY_OUTPUT_POINTS_ONLY === "function") {
+            return ctor.GEOMETRY_OUTPUT_POINTS_ONLY();
+        }
+        if (outputMode === DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY
+            && typeof ctor.GEOMETRY_OUTPUT_NON_POINTS_ONLY === "function") {
+            return ctor.GEOMETRY_OUTPUT_NON_POINTS_ONLY();
+        }
+        if (typeof ctor.GEOMETRY_OUTPUT_ALL === "function") {
+            return ctor.GEOMETRY_OUTPUT_ALL();
+        }
+        return outputMode;
     }
 
     private minimumStage(): number {
@@ -737,7 +1005,17 @@ export class DeckTileVisualization implements ITileVisualization {
         if (typeof tileWithStageVersion.dataVersionUpToStage !== "function") {
             return this.tile.dataVersion;
         }
-        return tileWithStageVersion.dataVersionUpToStage(this.minimumStage());
+        let relevantStage = this.minimumStage();
+        // In high-fidelity mode we must react to every newly loaded stage.
+        // Otherwise a tile can switch to high-fidelity too early, render empty,
+        // and never be considered dirty again when later stages arrive.
+        if (this.prefersHighFidelity) {
+            const highestLoadedStage = this.highestLoadedStage();
+            if (highestLoadedStage !== null) {
+                relevantStage = Math.max(relevantStage, highestLoadedStage);
+            }
+        }
+        return tileWithStageVersion.dataVersionUpToStage(relevantStage);
     }
 
     private setTileVertexCount(count: number): void {

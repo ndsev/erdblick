@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
 import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
-import {BillboardCollection, Cartographic, Cartesian3, Rectangle} from "../integrations/cesium";
+import {Cartographic, Cartesian3, Rectangle} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";

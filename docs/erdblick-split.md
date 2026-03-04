@@ -1,6 +1,6 @@
 # Split-Screen Usage Guide
 
-Erdblick can render multiple independent map views side-by-side. Each view runs its own Cesium instance, has its own camera state, and can synchronize with its neighbors through the built-in view-sync controls. This guide explains how to add/remove views, focus a specific pane, and make the synchronization options work for you.
+Erdblick can render multiple independent map views side-by-side. Each view runs its own render instance, has its own camera state, and can synchronize with its neighbors through the built-in view-sync controls. This guide explains how to add/remove views, focus a specific pane, and make the synchronization options work for you.
 
 ![Split view UI](screenshots/split.png)
 
@@ -32,7 +32,7 @@ The sync settings are encoded in the URL and persisted in `localStorage`, so rel
 Each view maintains independent layer trees:
 
 - **Tabs per view** – the Maps & Layers dialog renders one expandable section per view. The icon next to each header indicates whether the section controls the left or right pane.
-- **Layer sync button** – the circular arrows button in each section copies visibility, zoom level, tile-border flags, and style-option states from that view to all compatible layers. It’s the quickest way to align both panes before you start changing styles.
+- **Layer sync button** – the circular arrows button in each section copies visibility, zoom level, and style-option states from that view to all compatible layers, and also syncs that view’s tile-border flag. It’s the quickest way to align both panes before you start changing styles.
 - **Add/remove** – the **Add View** button creates another view; closing the map tab removes it. All camera and layer selections are serialized into the URL, so you can share a split-view link with colleagues.
 
 ## Typical Workflows

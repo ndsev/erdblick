@@ -5,6 +5,7 @@ import {
     ElementRef,
     input,
     InputSignal,
+    NgZone,
     OnDestroy,
     Signal,
     ViewChild
@@ -16,7 +17,6 @@ import {AppStateService} from "../shared/appstate.service";
 import {toObservable, toSignal} from "@angular/core/rxjs-interop";
 import {Observable, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
-import {SceneMode} from "../integrations/cesium";
 
 @Component({
     selector: 'erdblick-view-ui',
@@ -90,7 +90,8 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
 
     constructor(public appModeService: AppModeService,
                 public stateService: AppStateService,
-                private keyboardService: KeyboardService) {
+                private keyboardService: KeyboardService,
+                private ngZone: NgZone) {
         this.numViews = toSignal(this.stateService.numViewsState, {initialValue: this.stateService.numViewsState.getValue()});
         this.mapView$ = toObservable(this.mapView);
     }
@@ -99,13 +100,13 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
             filter(mv=> mv !== undefined)).subscribe(mapView => {
-                this.projection = mapView?.getSceneMode() === SceneMode.SCENE2D ?
+                this.projection = this.is2D() ?
                     { icon: '2d', label: '2D', mode: '2D projection' } :
                     { icon: '3d', label: '3D', mode: '3D projection' };
                 let currentRotationDeg = 0;
                 const oldTick = this.compassTickByView.get(mapView);
                 if (oldTick) {
-                    mapView.offTick(oldTick);
+                    this.ngZone.runOutsideAngular(() => mapView.offTick(oldTick));
                 }
                 const tick = () => {
                     if (needle && mapView.isAvailable()) {
@@ -127,7 +128,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
                     }
                 };
                 this.compassTickByView.set(mapView, tick);
-                mapView.onTick(tick);
+                this.ngZone.runOutsideAngular(() => mapView.onTick(tick));
             })
         );
 
@@ -139,7 +140,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (mapView) {
             const tick = this.compassTickByView.get(mapView);
             if (tick) {
-                mapView.offTick(tick);
+                this.ngZone.runOutsideAngular(() => mapView.offTick(tick));
                 this.compassTickByView.delete(mapView);
             }
         }

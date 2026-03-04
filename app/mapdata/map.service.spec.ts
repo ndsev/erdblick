@@ -1,7 +1,9 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject, of, Subject} from 'rxjs';
-import {initializeLibrary} from "../integrations/wasm";
+import "@angular/compiler";
+import {coreLib, initializeLibrary} from "../integrations/wasm";
 import {MapTileStreamClient} from './tilestream';
+import {LOW_FI_LOD0_TILE_COUNT_THRESHOLD} from "../mapview/view.visualization.model";
 
 beforeAll(async () => {
     await initializeLibrary();
@@ -107,6 +109,21 @@ vi.mock('./features.model', () => {
             return this.hasDataFlag;
         }
 
+        hasStage(stage: number) {
+            return this.hasDataFlag && stage === 0;
+        }
+
+        highestLoadedStage() {
+            return this.hasDataFlag ? 0 : null;
+        }
+
+        nextMissingStage(stageCount: number) {
+            if (!this.hasDataFlag) {
+                return 0;
+            }
+            return stageCount > 1 ? 1 : undefined;
+        }
+
         hydrateFromBlob(_blob: Uint8Array) {
             this.hasDataFlag = true;
         }
@@ -135,7 +152,9 @@ class AppStateServiceStub {
     selectionState = new BehaviorSubject<any[]>([]);
 
     tilesLoadLimitState = new BehaviorSubject<number>(8);
-    tilesVisualizeLimitState = new BehaviorSubject<number>(4);
+    deckStyleWorkersEnabledState = new BehaviorSubject<boolean>(false);
+    deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
+    deckStyleWorkersCountState = new BehaviorSubject<number>(2);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
 
     get numViews() {
@@ -146,8 +165,16 @@ class AppStateServiceStub {
         return this.tilesLoadLimitState.getValue();
     }
 
-    get tilesVisualizeLimit() {
-        return this.tilesVisualizeLimitState.getValue();
+    get deckStyleWorkersEnabled() {
+        return this.deckStyleWorkersEnabledState.getValue();
+    }
+
+    get deckStyleWorkersOverride() {
+        return this.deckStyleWorkersOverrideState.getValue();
+    }
+
+    get deckStyleWorkersCount() {
+        return this.deckStyleWorkersCountState.getValue();
     }
 
     get tilePullCompressionEnabled() {
@@ -190,6 +217,10 @@ const createMapDataService = () => {
     const infoService = new InfoMessageServiceStub();
     const pointMergeService = new PointMergeServiceStub();
     const keyboardService = new KeyboardServiceStub();
+    const ngZone = {
+        runOutsideAngular: (fn: () => unknown) => fn(),
+        run: (fn: () => unknown) => fn(),
+    };
 
     const service = new MapDataServiceCtor(
         styleService as any,
@@ -198,6 +229,7 @@ const createMapDataService = () => {
         infoService as any,
         pointMergeService as any,
         keyboardService as any,
+        ngZone as any,
     );
 
     // Provide a minimal tile parser stub for update() to use.
@@ -231,7 +263,7 @@ describe('MapDataService', () => {
         vi.clearAllMocks();
     });
 
-    it('computes visible and high-detail tile IDs per view', async () => {
+    it('computes visible and high-fidelity tile IDs per view policy', async () => {
         const {service, stateService} = createMapDataService();
 
         const fakeMapTree = {
@@ -262,9 +294,15 @@ describe('MapDataService', () => {
         const state = viewStates[0];
 
         expect(state.visibleTileIds.size).toBeGreaterThan(0);
-        expect(state.highDetailTileIds.size).toBeGreaterThan(0);
-        expect(state.highDetailTileIds.size).toBeLessThanOrEqual(state.visibleTileIds.size);
-        expect([...state.highDetailTileIds].every((id: bigint) =>
+        const hasLowFidelityOnlyLevel = Array.from(state.visibleTileIdsPerLevel.values())
+            .some((tileIds: bigint[]) => tileIds.length > LOW_FI_LOD0_TILE_COUNT_THRESHOLD);
+        if (hasLowFidelityOnlyLevel) {
+            expect(state.highFidelityTileIds.size).toBe(0);
+        } else {
+            expect(state.highFidelityTileIds.size).toBeGreaterThan(0);
+        }
+        expect(state.highFidelityTileIds.size).toBeLessThanOrEqual(state.visibleTileIds.size);
+        expect([...state.highFidelityTileIds].every((id: bigint) =>
             state.visibleTileIds.has(id))).toBe(true);
     });
 
@@ -279,12 +317,16 @@ describe('MapDataService', () => {
 
         const tileNeeded = {
             mapTileKey: 'm1/l1/1',
+            tileId: 1n,
             preventCulling: false,
+            setRenderOrder: vi.fn(),
             dispose: vi.fn(),
         } as any;
         const tileEvictable = {
             mapTileKey: 'm1/l1/2',
+            tileId: 2n,
             preventCulling: false,
+            setRenderOrder: vi.fn(),
             dispose: vi.fn(),
         } as any;
         service.loadedTileLayers.set(tileNeeded.mapTileKey, tileNeeded);
@@ -303,30 +345,39 @@ describe('MapDataService', () => {
 
     it('updates visualizations, queues dirty ones, and drops hidden/disabled styles', async () => {
         const {service, styleService} = createMapDataService();
+        const tileKey = coreLib.getTileFeatureLayerKey('m1', 'layerA', 1n);
 
         const tile = {
             mapName: 'm1',
             layerName: 'layerA',
-            mapTileKey: 'm1/layerA/1',
+            mapTileKey: tileKey,
             tileId: 1n,
             preventCulling: false,
+            hasData: () => true,
+            highestLoadedStage: () => 0,
+            setRenderOrder: vi.fn(),
             disposed: false,
+            stats: new Map<string, number[]>(),
         } as any;
 
         const enabledVisu = {
             tile,
             styleId: 'enabled-style',
             showTileBorder: false,
-            isHighDetail: false,
+            prefersHighFidelity: false,
+            maxLowFiLod: null,
             isDirty: vi.fn().mockReturnValue(true),
+            renderRank: vi.fn().mockReturnValue([0, 0, 0]),
             updateStatus: vi.fn(),
         } as any;
         const disabledVisu = {
             tile,
             styleId: 'disabled-style',
             showTileBorder: false,
-            isHighDetail: false,
+            prefersHighFidelity: false,
+            maxLowFiLod: null,
             isDirty: vi.fn().mockReturnValue(false),
+            renderRank: vi.fn().mockReturnValue([1, 0, 0]),
             updateStatus: vi.fn(),
         } as any;
 
@@ -339,13 +390,30 @@ describe('MapDataService', () => {
 
         const viewStates = (service as any).viewVisualizationState as any[];
         viewStates[0].visibleTileIds = new Set<bigint>([1n]);
-        viewStates[0].highDetailTileIds = new Set<bigint>([1n]);
+        viewStates[0].highFidelityTileIds = new Set<bigint>([1n]);
+        viewStates[0].tileRenderPolicy = new Map<bigint, any>([
+            [1n, {targetFidelity: 'high', maxLowFiLod: null}]
+        ]);
         viewStates[0].putVisualization('enabled-style', tile.mapTileKey, enabledVisu);
         viewStates[0].putVisualization('disabled-style', tile.mapTileKey, disabledVisu);
 
         styleService.styles = new Map<string, any>([
-            ['enabled-style', {id: 'enabled-style', visible: true, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
-            ['disabled-style', {id: 'disabled-style', visible: false, featureLayerStyle: {hasLayerAffinity: vi.fn().mockReturnValue(true)}}],
+            ['enabled-style', {
+                id: 'enabled-style',
+                visible: true,
+                featureLayerStyle: {
+                    hasLayerAffinity: vi.fn().mockReturnValue(true),
+                    supportsHighlightMode: vi.fn().mockReturnValue(true),
+                }
+            }],
+            ['disabled-style', {
+                id: 'disabled-style',
+                visible: false,
+                featureLayerStyle: {
+                    hasLayerAffinity: vi.fn().mockReturnValue(true),
+                    supportsHighlightMode: vi.fn().mockReturnValue(true),
+                }
+            }],
         ]);
 
         service.loadedTileLayers.set(tile.mapTileKey, tile);
@@ -361,7 +429,7 @@ describe('MapDataService', () => {
         expect(viewStates[0].hasVisualizations('enabled-style')).toBe(true);
 
         expect(enabledVisu.showTileBorder).toBe(true);
-        expect(enabledVisu.isHighDetail).toBe(true);
+        expect(enabledVisu.prefersHighFidelity).toBe(true);
         expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
@@ -417,6 +485,59 @@ describe('MapDataService', () => {
         await selectionTilePromise;
     });
 
+    it('re-requests a visible tile from its first missing stage during low-fidelity interaction', async () => {
+        const {service} = createMapDataService();
+        const tileKey = coreLib.getTileFeatureLayerKey('m1', 'layerA', 1n);
+
+        const fakeMapTree = {
+            allLevels: (_viewIndex: number) => [],
+            getMapLayerVisibility: () => true,
+            getMapLayerLevel: () => 0,
+            maps: new Map<string, any>([
+                ['m1', {
+                    layers: new Map<string, any>([['layerA', {info: {stages: 3}}]]),
+                    allFeatureLayers: () => [{id: 'layerA'}],
+                }],
+            ]),
+        };
+        service.maps$.next(fakeMapTree as any);
+
+        const viewStates = (service as any).viewVisualizationState as any[];
+        viewStates[0].visibleTileIdsPerLevel = new Map<number, bigint[]>([[0, [1n]]]);
+        viewStates[0].getTileRenderPolicy = vi.fn().mockReturnValue({
+            targetFidelity: 'low',
+            maxLowFiLod: 0,
+        });
+
+        const stagedTile = {
+            mapName: 'm1',
+            layerName: 'layerA',
+            mapTileKey: tileKey,
+            tileId: 1n,
+            preventCulling: false,
+            hasData: () => true,
+            hasStage: (stage: number) => stage === 0,
+            nextMissingStage: (stageCount: number) => (stageCount > 1 ? 1 : undefined),
+        } as any;
+        service.loadedTileLayers.set(stagedTile.mapTileKey, stagedTile);
+
+        await (service as any).updateMapDataRequest();
+
+        const tileSocket = wsInstances.find((ws: any) => ws.url.endsWith('/tiles'));
+        expect(tileSocket).toBeDefined();
+        const body = JSON.parse(tileSocket.lastSent);
+        expect(body.requests).toEqual([
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                tileIdsByNextStage: [
+                    [],
+                    [1],
+                ],
+            },
+        ]);
+    });
+
     it('records tile layers and legal info on arrival', () => {
         const {service, tileParser} = createMapDataService();
 
@@ -439,7 +560,7 @@ describe('MapDataService', () => {
 
         service.addTileFeatureLayer(tileBlob as any, null, false);
 
-        expect(service.loadedTileLayers.has('m1/layerA/1')).toBe(true);
+        expect(service.loadedTileLayers.size).toBe(1);
         expect(statsSpy).toHaveBeenCalled();
         expect(legalSpy).toHaveBeenCalledWith(true);
         const legalSet = service.legalInformationPerMap.get('m1')!;

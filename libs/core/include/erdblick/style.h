@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "buffer.h"
 #include "rule.h"
-#include "cesium-interface/cesium-object.h"
+#include "interop/js-object.h"
 
 #include <array>
 #include <string_view>
@@ -61,17 +61,20 @@ public:
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
     [[nodiscard]] bool defaultEnabled() const;
     [[nodiscard]] uint32_t minimumStage() const;
+    [[nodiscard]] uint32_t highFidelityStage() const;
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
     [[nodiscard]] std::vector<uint32_t> const& candidateRuleIndices(
         FeatureStyleRule::HighlightMode mode,
+        FeatureStyleRule::Fidelity fidelity,
         std::string_view featureTypeId) const;
 
 private:
     static constexpr size_t kHighlightModeCount = 3;
+    static constexpr size_t kFidelityCount = 2;
     using RuleIndexList = std::vector<uint32_t>;
     struct RuleIndexCacheEntry {
-        std::array<RuleIndexList, kHighlightModeCount> byMode{};
+        std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> byModeAndFidelity{};
     };
     struct TransparentStringHash {
         using is_transparent = void;
@@ -103,9 +106,10 @@ private:
     bool valid_ = false;
     bool enabled_ = true;
     uint32_t stage_ = 0;
+    uint32_t highFidelityStage_ = 0;
     std::string name_;
     std::optional<std::regex> layerAffinity_;
-    std::array<RuleIndexList, kHighlightModeCount> ruleIndicesByMode_{};
+    std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};
     uint32_t highlightModeMask_ = 0;
     mutable std::unordered_map<std::string, RuleIndexCacheEntry, TransparentStringHash, TransparentStringEqual>
         ruleIndicesByTypeCache_;

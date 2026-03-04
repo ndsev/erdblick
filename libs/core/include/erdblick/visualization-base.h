@@ -26,12 +26,21 @@ namespace erdblick
 class FeatureLayerVisualizationBase
 {
 public:
+    enum class GeometryOutputMode : uint8_t {
+        All = 0,
+        PointsOnly = 1,
+        NonPointsOnly = 2,
+    };
+
     FeatureLayerVisualizationBase(
         int viewIndex,
         std::string const& mapTileKey,
         const FeatureLayerStyle& style,
         NativeJsValue const& rawOptionValues,
         FeatureStyleRule::HighlightMode const& highlightMode,
+        FeatureStyleRule::Fidelity fidelity,
+        int maxLowFiLod,
+        GeometryOutputMode geometryOutputMode = GeometryOutputMode::All,
         NativeJsValue const& rawFeatureIdSubset = {},
         NativeJsValue const& rawFeatureMergeService = {});
     virtual ~FeatureLayerVisualizationBase();
@@ -126,7 +135,7 @@ protected:
         glm::dvec3 const& offset);
     void addGeometry(
         mapget::SelfContainedGeometry const& geom,
-        std::optional<std::string_view> geometryName,
+        std::optional<uint32_t> geometryStage,
         uint32_t tileFeatureId,
         FeatureStyleRule const& rule,
         std::string const& mapLayerStyleRuleId,
@@ -152,6 +161,8 @@ protected:
         const FeatureStyleRule& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);
+    [[nodiscard]] virtual bool includesPointLikeGeometry() const;
+    [[nodiscard]] virtual bool includesNonPointGeometry() const;
     void addMergedPointGeometry(
         uint32_t tileFeatureId,
         const std::string& mapLayerStyleRuleId,
@@ -175,8 +186,12 @@ protected:
     FeatureLayerStyle const& style_;
     std::set<std::string> featureIdSubset_;
     std::set<std::string> featureIdBaseSubset_;
+    std::unordered_set<uint32_t> featureIndexSubset_;
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
+    FeatureStyleRule::Fidelity fidelity_;
+    int maxLowFiLod_ = -1;
+    GeometryOutputMode geometryOutputMode_ = GeometryOutputMode::All;
     JsValue featureMergeService_;
     std::map<std::string,
         std::map<std::string,

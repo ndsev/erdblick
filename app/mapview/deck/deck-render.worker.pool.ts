@@ -1,4 +1,5 @@
 import {
+    DeckGeometryOutputMode,
     DeckPathRenderResult,
     DeckPathRenderTask,
     DeckWorkerTimings,
@@ -20,6 +21,9 @@ export interface DeckPathRenderRequest {
     styleSource: string;
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
+    fidelityValue: number;
+    maxLowFiLod: number;
+    outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
     mergeCountSnapshot: Record<string, number>;
 }
@@ -62,8 +66,11 @@ export class DeckRenderWorkerPool {
     private readonly workers: Worker[] = [];
     private readonly workerBusy: boolean[] = [];
     private readonly runningTaskIdByWorker: Array<string | null> = [];
-    private readonly pendingQueue: PendingTask[] = [];
     private readonly inFlightByTaskId = new Map<string, PendingTask>();
+    private readonly availableWorkerWaiters: Array<{
+        resolve: (workerIndex: number) => void;
+        reject: (reason?: unknown) => void;
+    }> = [];
     private workerBlobUrl: string | null = null;
     private initPromise: Promise<void> | null = null;
     private nextTaskId = 0;
@@ -72,6 +79,7 @@ export class DeckRenderWorkerPool {
 
     async renderPaths(request: DeckPathRenderRequest): Promise<DeckPathRenderBuffers> {
         await this.ensureInitialized();
+        const workerIndex = await this.acquireWorkerSlot();
         return await new Promise<DeckPathRenderBuffers>((resolve, reject) => {
             const task: DeckPathRenderTask = {
                 type: "DeckPathRenderTask",
@@ -79,8 +87,9 @@ export class DeckRenderWorkerPool {
                 ...request
             };
             const pendingTask: PendingTask = {task, resolve, reject};
-            this.pendingQueue.push(pendingTask);
-            this.scheduleAllWorkers();
+            this.inFlightByTaskId.set(task.taskId, pendingTask);
+            this.runningTaskIdByWorker[workerIndex] = task.taskId;
+            this.workers[workerIndex]!.postMessage(task);
         });
     }
 
@@ -150,13 +159,11 @@ export class DeckRenderWorkerPool {
         this.runningTaskIdByWorker[index] = null;
         worker.onmessage = (event: MessageEvent<DeckWorkerOutboundMessage>) => {
             const msg = event.data;
-            this.workerBusy[index] = false;
             this.runningTaskIdByWorker[index] = null;
             this.handleTaskResult(msg as DeckPathRenderResult);
-            this.scheduleWorker(index);
+            this.releaseWorkerSlot(index);
         };
         worker.onerror = (event) => {
-            this.workerBusy[index] = false;
             const runningTaskId = this.runningTaskIdByWorker[index];
             this.runningTaskIdByWorker[index] = null;
             if (runningTaskId) {
@@ -164,7 +171,7 @@ export class DeckRenderWorkerPool {
                 this.inFlightByTaskId.delete(runningTaskId);
                 inFlight!.reject(new Error(event.message || "Deck worker execution failed."));
             }
-            this.scheduleWorker(index);
+            this.releaseWorkerSlot(index);
         };
     }
 
@@ -203,25 +210,27 @@ export class DeckRenderWorkerPool {
         });
     }
 
-    private scheduleAllWorkers(): void {
+    private async acquireWorkerSlot(): Promise<number> {
         for (let i = 0; i < this.workers.length; i++) {
-            this.scheduleWorker(i);
+            if (this.workerBusy[i]) {
+                continue;
+            }
+            this.workerBusy[i] = true;
+            return i;
         }
+        return await new Promise<number>((resolve, reject) => {
+            this.availableWorkerWaiters.push({resolve, reject});
+        });
     }
 
-    private scheduleWorker(index: number): void {
-        if (this.workerBusy[index]) {
+    private releaseWorkerSlot(index: number): void {
+        const waiter = this.availableWorkerWaiters.shift();
+        if (waiter) {
+            this.workerBusy[index] = true;
+            waiter.resolve(index);
             return;
         }
-        const pendingTask = this.pendingQueue.shift();
-        if (!pendingTask) {
-            return;
-        }
-        const worker = this.workers[index]!;
-        this.workerBusy[index] = true;
-        this.inFlightByTaskId.set(pendingTask.task.taskId, pendingTask);
-        this.runningTaskIdByWorker[index] = pendingTask.task.taskId;
-        worker.postMessage(pendingTask.task);
+        this.workerBusy[index] = false;
     }
 
     private makeTaskId(): string {
@@ -256,10 +265,7 @@ export class DeckRenderWorkerPool {
 
     dispose(reason = "Deck render worker pool reset."): void {
         const resetError = new Error(reason);
-        while (this.pendingQueue.length > 0) {
-            const pending = this.pendingQueue.shift()!;
-            pending.reject(resetError);
-        }
+        this.availableWorkerWaiters.splice(0).forEach(waiter => waiter.reject(resetError));
         for (const pending of this.inFlightByTaskId.values()) {
             pending.reject(resetError);
         }

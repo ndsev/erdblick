@@ -1,7 +1,7 @@
 #include "glm/glm.hpp"
 
 #include "geometry.h"
-#include "cesium-interface/point-conversion.h"
+#include "geo/point-conversion.h"
 
 using namespace mapget;
 

@@ -15,6 +15,11 @@ namespace {
 constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
     return static_cast<size_t>(mode);
 }
+
+constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
+    return fidelity == FeatureStyleRule::LowFidelity ? 1U : 0U;
+}
+
 const std::vector<uint32_t> kEmptyRuleIndices{};
 }
 
@@ -41,6 +46,13 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
+    if (auto highFidelityStage = styleYaml["high-fidelity-stage"]) {
+        if (highFidelityStage.IsScalar()) {
+            highFidelityStage_ =
+                static_cast<uint32_t>(std::max(0, highFidelityStage.as<int>()));
+        }
+    }
+
     if (auto layer = styleYaml["layer"]) {
         if (layer.IsScalar())
             layerAffinity_ = layer.as<std::string>();
@@ -64,7 +76,16 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     for (auto const& rule : rules_) {
         auto modeIndex = highlightModeIndex(rule.mode());
-        ruleIndicesByMode_[modeIndex].push_back(rule.index());
+        auto const highFidelityIndex = fidelityIndex(FeatureStyleRule::HighFidelity);
+        auto const lowFidelityIndex = fidelityIndex(FeatureStyleRule::LowFidelity);
+        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
+            rule.fidelity() == FeatureStyleRule::HighFidelity) {
+            ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(rule.index());
+        }
+        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
+            rule.fidelity() == FeatureStyleRule::LowFidelity) {
+            ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(rule.index());
+        }
         highlightModeMask_ |= (1u << modeIndex);
     }
 
@@ -103,6 +124,11 @@ uint32_t FeatureLayerStyle::minimumStage() const
     return stage_;
 }
 
+uint32_t FeatureLayerStyle::highFidelityStage() const
+{
+    return highFidelityStage_;
+}
+
 std::string const& FeatureLayerStyle::name() const {
     return name_;
 }
@@ -119,26 +145,30 @@ bool FeatureLayerStyle::supportsHighlightMode(FeatureStyleRule::HighlightMode mo
 
 std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
     FeatureStyleRule::HighlightMode mode,
+    FeatureStyleRule::Fidelity fidelity,
     std::string_view featureTypeId) const
 {
     auto modeIndex = highlightModeIndex(mode);
+    auto fidelityIdx = fidelityIndex(fidelity);
     if (!supportsHighlightMode(mode)) {
         return kEmptyRuleIndices;
     }
     if (featureTypeId.empty()) {
-        return ruleIndicesByMode_[modeIndex];
+        return ruleIndicesByModeAndFidelity_[modeIndex][fidelityIdx];
     }
 
     auto cacheIt = ruleIndicesByTypeCache_.find(featureTypeId);
     if (cacheIt == ruleIndicesByTypeCache_.end()) {
         RuleIndexCacheEntry entry{};
         for (size_t cacheModeIndex = 0; cacheModeIndex < kHighlightModeCount; ++cacheModeIndex) {
-            auto const& ruleIndices = ruleIndicesByMode_[cacheModeIndex];
-            auto& filtered = entry.byMode[cacheModeIndex];
-            filtered.reserve(ruleIndices.size());
-            for (auto ruleIndex : ruleIndices) {
-                if (rules_[ruleIndex].maybeMatchesType(featureTypeId)) {
-                    filtered.push_back(ruleIndex);
+            for (size_t cacheFidelityIndex = 0; cacheFidelityIndex < kFidelityCount; ++cacheFidelityIndex) {
+                auto const& ruleIndices = ruleIndicesByModeAndFidelity_[cacheModeIndex][cacheFidelityIndex];
+                auto& filtered = entry.byModeAndFidelity[cacheModeIndex][cacheFidelityIndex];
+                filtered.reserve(ruleIndices.size());
+                for (auto ruleIndex : ruleIndices) {
+                    if (rules_[ruleIndex].maybeMatchesType(featureTypeId)) {
+                        filtered.push_back(ruleIndex);
+                    }
                 }
             }
         }
@@ -146,7 +176,7 @@ std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
         cacheIt = insertIt;
     }
 
-    return cacheIt->second.byMode[modeIndex];
+    return cacheIt->second.byModeAndFidelity[modeIndex][fidelityIdx];
 }
 
 FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)

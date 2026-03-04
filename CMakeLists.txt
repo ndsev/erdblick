@@ -5,7 +5,7 @@ include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Treat warnings as errors, with some exceptions for Cesium.
+# Treat warnings as errors.
 set(ERDBLICK_CXX_FLAGS
   "-Wall -Wno-error=sign-conversion -Wno-sign-compare -Wno-sign-conversion -Wno-unused-local-typedefs -Wno-comment -Wno-effc++")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -39,8 +39,6 @@ if (NOT COMMAND CPMAddPackage)
   add_subdirectory(cmake/CPM.cmake)
 endif()
 include(cmake/deps.cmake)
-
-include(cmake/cesium.cmake)
 
 # Erdblick Core Library
 add_subdirectory(libs/core)

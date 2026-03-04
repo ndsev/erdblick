@@ -1,7 +1,7 @@
 import {Component} from "@angular/core";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
 import {MapDataService} from "../mapdata/map.service";
-import {Color, HeightReference, Rectangle} from "../integrations/cesium";
+import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 
 @Component({

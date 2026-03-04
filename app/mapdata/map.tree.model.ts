@@ -26,6 +26,7 @@ export interface LayerInfoItem extends Record<string, any> {
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
     stages?: number;
+    stageLabels?: string[];
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
@@ -89,6 +90,7 @@ export class MapTreeNode {
     type: string = "Map";
     info: MapInfoItem;
     key: string;
+    onlyFeatureLayers: LayerTreeNode[];
     layers: Map<string, LayerTreeNode> = new Map();
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
@@ -100,10 +102,11 @@ export class MapTreeNode {
         this.layers =  new Map(Object.entries(mapInfo.layers).map(([_, layerInfo]) =>
             [layerInfo.layerId, new LayerTreeNode(layerInfo, mapInfo.mapId)])
         );
+        this.onlyFeatureLayers = Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
     }
 
     get children() {
-        return Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
+        return this.onlyFeatureLayers;
     }
 
     updateVisibilityFromChildren(numViews: number) {
@@ -354,23 +357,11 @@ export class MapLayerTree {
     }
 
     setViewTileBorderState(viewIndex: number, enabled: boolean) {
-        for (const layer of this.allFeatureLayers()) {
-            if (layer.viewConfig.length <= viewIndex) {
-                continue;
-            }
-            layer.viewConfig[viewIndex].tileBorders = enabled;
-            this.stateService.setMapLayerConfig(layer.mapId, layer.id, layer.viewConfig);
-        }
+        this.stateService.viewTileBordersState.next(viewIndex, enabled);
     }
 
     getViewTileBorderState(viewIndex: number) {
-        for (const layer of this.allFeatureLayers()) {
-            if (layer.viewConfig.length <= viewIndex) {
-                continue;
-            }
-            return layer.viewConfig[viewIndex].tileBorders;
-        }
-        return true;
+        return this.stateService.viewTileBordersState.getValue(viewIndex);
     }
 
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
@@ -548,12 +539,10 @@ export class MapLayerTree {
                 }
 
                 if (targetConfig.visible !== sourceConfig.visible ||
-                    targetConfig.level !== sourceConfig.level ||
-                    targetConfig.tileBorders !== sourceConfig.tileBorders) {
+                    targetConfig.level !== sourceConfig.level) {
                     layer.viewConfig[targetIndex] = {
                         visible: sourceConfig.visible,
-                        level: sourceConfig.level,
-                        tileBorders: sourceConfig.tileBorders
+                        level: sourceConfig.level
                     };
                     layerConfigMutated = true;
                 }
@@ -589,6 +578,17 @@ export class MapLayerTree {
                         option.value
                     );
                 }
+            }
+        }
+
+        const sourceTileBorders = this.getViewTileBorderState(viewIndex);
+        for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
+            if (targetIndex === viewIndex) {
+                continue;
+            }
+            if (this.getViewTileBorderState(targetIndex) !== sourceTileBorders) {
+                this.setViewTileBorderState(targetIndex, sourceTileBorders);
+                viewConfigChanged = true;
             }
         }
 

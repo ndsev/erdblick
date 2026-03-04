@@ -5,11 +5,9 @@ import {MapDataService} from "../mapdata/map.service";
 import {StyleService} from "../styledata/style.service";
 import {
     MAX_NUM_TILES_TO_LOAD,
-    MAX_NUM_TILES_TO_VISUALIZE,
     MAX_SIMULTANEOUS_INSPECTIONS,
     MAX_DECK_STYLE_WORKERS,
     AppStateService,
-    RendererMode,
     DEFAULT_DECK_STYLE_WORKER_COUNT
 } from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
@@ -29,14 +27,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                     <p-slider [(ngModel)]="tilesToLoadInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
                 </div>
             </div>
-            <!-- Label and input field for MAX_NUM_TILES_TO_VISUALIZE -->
-            <div class="slider-container">
-                <label [for]="tilesToVisualizeInput">Max Tiles to Visualize:</label>
-                <div style="display: inline-block">
-                    <input class="tiles-input w-full" type="text" pInputText [(ngModel)]="tilesToVisualizeInput" (keydown.enter)="applyTileLimits()"/>
-                    <p-slider [(ngModel)]="tilesToVisualizeInput" class="w-full" [min]="0" [max]="MAX_NUM_TILES_TO_VISUALIZE"></p-slider>
-                </div>
-            </div>
             <!-- Apply button -->
             <p-button (click)="applyTileLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
@@ -49,14 +39,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             </div>
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
-            <div class="button-container">
-                <label>Renderer:</label>
-                <p-selectButton [options]="rendererModeOptions"
-                                [(ngModel)]="rendererModeSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setRendererMode($event)"></p-selectButton>
-            </div>
             <div class="button-container">
                 <label>Deck style workers:</label>
                 <p-selectButton [options]="toggleOptions"
@@ -155,13 +137,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     @ViewChild('pref') preferencesDialog?: Dialog;
 
     tilesToLoadInput: number = 0;
-    tilesToVisualizeInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
-    rendererModeSetting: RendererMode = 'cesium';
-    rendererModeOptions = [
-        {label: 'Cesium', value: 'cesium'},
-        {label: 'Deck', value: 'deck'}
-    ];
     deckStyleWorkersEnabledSetting: boolean = false;
     tilePullCompressionEnabledSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
@@ -195,14 +171,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
-        this.subscriptions.push(this.stateService.tilesVisualizeLimitState.subscribe(limit => {
-            this.tilesToVisualizeInput = limit;
-        }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
-        }));
-        this.subscriptions.push(this.stateService.rendererModeState.subscribe(mode => {
-            this.rendererModeSetting = mode;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersEnabledState.subscribe(enabled => {
             this.deckStyleWorkersEnabledSetting = enabled;
@@ -234,13 +204,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     applyTileLimits() {
-        if (isNaN(this.tilesToLoadInput) || isNaN(this.tilesToVisualizeInput) ||
-            this.tilesToLoadInput < 0 || this.tilesToVisualizeInput < 0) {
+        if (isNaN(this.tilesToLoadInput) || this.tilesToLoadInput < 0) {
             this.messageService.showError("Please enter valid tile limits!");
             return;
         }
         this.stateService.tilesLoadLimit = Number(this.tilesToLoadInput);
-        this.stateService.tilesVisualizeLimit = Number(this.tilesToVisualizeInput);
         this.mapService.scheduleUpdate();
         this.messageService.showSuccess("Successfully updated tile limits!");
     }
@@ -265,11 +233,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
-    }
-
-    setRendererMode(mode: RendererMode) {
-        this.rendererModeSetting = mode;
-        this.stateService.rendererMode = mode;
     }
 
     setDeckStyleWorkersEnabled(enabled: boolean) {
@@ -353,7 +316,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     protected readonly MAX_NUM_TILES_TO_LOAD = MAX_NUM_TILES_TO_LOAD;
-    protected readonly MAX_NUM_TILES_TO_VISUALIZE = MAX_NUM_TILES_TO_VISUALIZE;
     protected readonly MAX_SIMULTANEOUS_INSPECTIONS = MAX_SIMULTANEOUS_INSPECTIONS;
     protected readonly MAX_DECK_STYLE_WORKERS = MAX_DECK_STYLE_WORKERS;
 }

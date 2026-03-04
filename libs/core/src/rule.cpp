@@ -80,9 +80,6 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
-    if (yaml["geometry-name"].IsDefined()) {
-        geometryName_ = yaml["geometry-name"].as<std::string>();
-    }
     if (yaml["aspect"].IsDefined()) {
         // Parse the feature aspect that is covered by this rule.
         auto aspectStr = yaml["aspect"].as<std::string>();
@@ -114,6 +111,40 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
         else {
             std::cout << "Unsupported mode: " << modeStr << std::endl;
+        }
+    }
+    if (yaml["fidelity"].IsDefined()) {
+        auto fidelityStr = yaml["fidelity"].as<std::string>();
+        if (fidelityStr == "any") {
+            fidelity_ = AnyFidelity;
+        }
+        else if (fidelityStr == "high") {
+            fidelity_ = HighFidelity;
+        }
+        else if (fidelityStr == "low") {
+            fidelity_ = LowFidelity;
+        }
+        else {
+            std::cout << "Unsupported fidelity: " << fidelityStr << std::endl;
+        }
+    }
+    if (yaml["stage"].IsDefined()) {
+        auto const parsedStage = yaml["stage"].as<int>();
+        if (parsedStage < 0) {
+            std::cout << "Unsupported stage: " << parsedStage << std::endl;
+        }
+        else {
+            stage_ = static_cast<uint32_t>(parsedStage);
+        }
+    }
+    if (yaml["lod"].IsDefined()) {
+        auto const parsedLod = yaml["lod"].as<int>();
+        auto const maxLod = static_cast<int>(mapget::Feature::MAX_LOD);
+        if (parsedLod < 0 || parsedLod > maxLod) {
+            std::cout << "Unsupported lod: " << parsedLod << std::endl;
+        }
+        else {
+            lod_ = static_cast<uint8_t>(parsedLod);
         }
     }
     if (yaml["type"].IsDefined()) {
@@ -388,6 +419,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
 FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
 {
+    if (lod_) {
+        auto const featureLod = static_cast<uint8_t>(feature.lod());
+        if (featureLod != *lod_) {
+            return nullptr;
+        }
+    }
+
     // Filter by feature type regular expression.
     if (type_) {
         auto typeId = feature.typeId();
@@ -441,28 +479,19 @@ uint32_t FeatureStyleRule::geometryTypesMask() const
     return geometryTypes_;
 }
 
-bool FeatureStyleRule::supports(const mapget::GeomType& g, std::optional<std::string_view> geometryName) const
+bool FeatureStyleRule::supports(
+    const mapget::GeomType& g,
+    std::optional<uint32_t> geometryStage) const
 {
+    if (stage_) {
+        if (!geometryStage || *geometryStage != *stage_) {
+            return false;
+        }
+    }
+
     // Ensure that the geometry type is supported by the rule.
     if (!(geometryTypes_ & geomTypeBit(g))) {
         return false;
-    }
-
-    // Ensure that the geometry name matches the rule's requirements
-    if (geometryName_) {
-
-        // Empty regex: explicitly match features without a geometry name
-        // TODO: Check if there is any recognizable performance impact
-        if (std::regex_match("", *geometryName_)) {
-            return !geometryName || geometryName->empty();
-        }
-
-        if (!geometryName) {
-            return false;
-        }
-        if (!std::regex_match(geometryName->begin(), geometryName->end(), *geometryName_)) {
-            return false;
-        }
     }
 
     return true;
@@ -598,6 +627,21 @@ bool FeatureStyleRule::selectable() const
 FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
 {
     return mode_;
+}
+
+FeatureStyleRule::Fidelity FeatureStyleRule::fidelity() const
+{
+    return fidelity_;
+}
+
+std::optional<uint32_t> FeatureStyleRule::stage() const
+{
+    return stage_;
+}
+
+std::optional<uint8_t> FeatureStyleRule::lod() const
+{
+    return lod_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::relationType() const

@@ -17,7 +17,7 @@ When the map stays blank or appears to render nothing at all, work through these
 If the UI feels sluggish or frame rates drop when you move the camera, a few simple changes often restore responsiveness:
 
 - Limit active maps and layers to what you actually need.
-- Lower `Max tiles to load/visualize` in the Preferences dialog.
+- Lower `Max tiles to load` in the Preferences dialog.
 - Use Chromium-based browsers for the best WebGL throughput. Firefox/Safari generally render fewer tiles per frame.
 - Capture screenshots of the statistics dialog for bug reports so we can see tile statistics and budgets.
 

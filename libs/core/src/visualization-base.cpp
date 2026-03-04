@@ -2,6 +2,7 @@
 #include "geometry.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <iostream>
 #include <regex>
@@ -76,6 +77,28 @@ std::optional<std::string_view> parseAnyOptionBoolCheck(std::string_view express
     }
     return inner;
 }
+
+std::optional<uint32_t> parseFeatureIndexToken(std::string_view value) {
+    auto token = trimAsciiWhitespace(value);
+    if (token.empty()) {
+        return std::nullopt;
+    }
+    if (token.front() == '#') {
+        token.remove_prefix(1);
+    }
+    if (token.empty()) {
+        return std::nullopt;
+    }
+
+    uint32_t parsed = 0;
+    auto const* begin = token.data();
+    auto const* end = begin + token.size();
+    auto [ptr, ec] = std::from_chars(begin, end, parsed);
+    if (ec != std::errc{} || ptr != end) {
+        return std::nullopt;
+    }
+    return parsed;
+}
 }
 
 FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
@@ -84,11 +107,17 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     const FeatureLayerStyle& style,
     NativeJsValue const& rawOptionValues,
     FeatureStyleRule::HighlightMode const& highlightMode,
+    FeatureStyleRule::Fidelity fidelity,
+    int maxLowFiLod,
+    GeometryOutputMode geometryOutputMode,
     NativeJsValue const& rawFeatureIdSubset,
     NativeJsValue const& rawFeatureMergeService)
     : viewIndex_(viewIndex),
       style_(style),
       highlightMode_(highlightMode),
+      fidelity_(fidelity),
+      maxLowFiLod_(std::clamp(maxLowFiLod, -1, 7)),
+      geometryOutputMode_(geometryOutputMode),
       featureMergeService_(rawFeatureMergeService)
 {
     (void) mapTileKey;
@@ -111,11 +140,26 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     for (auto i = 0; i < featureIdSubset.size(); ++i) {
         auto featureId = featureIdSubset.at(i).as<std::string>();
         featureIdSubset_.insert(featureId);
-        featureIdBaseSubset_.insert(std::string(stripFeatureIdSuffix(featureId)));
+        auto featureToken = stripFeatureIdSuffix(featureId);
+        if (auto featureIndex = parseFeatureIndexToken(featureToken)) {
+            featureIndexSubset_.insert(*featureIndex);
+            continue;
+        }
+        featureIdBaseSubset_.insert(std::string(featureToken));
     }
 }
 
 FeatureLayerVisualizationBase::~FeatureLayerVisualizationBase() = default;
+
+bool FeatureLayerVisualizationBase::includesPointLikeGeometry() const
+{
+    return geometryOutputMode_ != GeometryOutputMode::NonPointsOnly;
+}
+
+bool FeatureLayerVisualizationBase::includesNonPointGeometry() const
+{
+    return geometryOutputMode_ != GeometryOutputMode::PointsOnly;
+}
 
 std::string FeatureLayerVisualizationBase::makeMapLayerStyleRuleId(uint32_t ruleIndex) const
 {
@@ -294,6 +338,11 @@ void FeatureLayerVisualizationBase::run()
 
     auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
     {
+        if (fidelity_ == FeatureStyleRule::LowFidelity && maxLowFiLod_ >= 0) {
+            if (static_cast<int>(feature->lod()) > maxLowFiLod_) {
+                return;
+            }
+        }
         auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
         std::optional<simfil::model_ptr<simfil::OverlayNode>> evaluationContext;
         auto ensureEvaluationContext = [this, &constFeature, &evaluationContext]()
@@ -324,7 +373,7 @@ void FeatureLayerVisualizationBase::run()
         };
 
         auto const& candidateRuleIndices =
-            style_.candidateRuleIndices(highlightMode_, constFeature.typeId());
+            style_.candidateRuleIndices(highlightMode_, fidelity_, constFeature.typeId());
         uint32_t featureGeomMask = 0;
         bool needsFeatureGeomMask = false;
         for (auto ruleIndex : candidateRuleIndices) {
@@ -359,7 +408,7 @@ void FeatureLayerVisualizationBase::run()
         }
     };
 
-    if (featureIdBaseSubset_.empty()) {
+    if (featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
         for (auto&& feature : *tile_) {
             processFeature(feature);
         }
@@ -388,9 +437,15 @@ void FeatureLayerVisualizationBase::addFeature(
         }
         return *featureId;
     };
-    if (!featureIdBaseSubset_.empty() &&
-        !featureIdBaseSubset_.contains(resolveFeatureId())) {
-        return;
+    if (!featureIdBaseSubset_.empty() || !featureIndexSubset_.empty()) {
+        auto const indexMatches = featureIndexSubset_.contains(featureIndex);
+        bool idMatches = false;
+        if (!featureIdBaseSubset_.empty()) {
+            idMatches = featureIdBaseSubset_.contains(resolveFeatureId());
+        }
+        if (!indexMatches && !idMatches) {
+            return;
+        }
     }
 
     auto offset = glm::dvec3{.0, .0, .0};
@@ -401,14 +456,14 @@ void FeatureLayerVisualizationBase::addFeature(
 
     switch(rule.aspect()) {
     case FeatureStyleRule::Feature: {
-        feature->geom()->forEachGeometry(
-            [this, featureIndex, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
-            {
-                if (rule.supports(geom->geomType(), geom->name())) {
+        if (auto geom = feature->geomOrNull()) {
+            geom->forEachGeometry(
+                [this, featureIndex, &rule, &mapLayerStyleRuleId, &evalFun, &offset](auto&& geom)
+                {
                     addGeometry(geom, featureIndex, rule, mapLayerStyleRuleId, evalFun, offset);
-                }
-                return true;
-            });
+                    return true;
+                });
+        }
         break;
     }
     case FeatureStyleRule::Relation: {
@@ -422,7 +477,7 @@ void FeatureLayerVisualizationBase::addFeature(
         }
 
         auto const hoverAttributeSubsetActive =
-            !featureIdSubset_.empty() &&
+            !featureIdBaseSubset_.empty() &&
             highlightMode_ == FeatureStyleRule::HoverHighlight;
         std::string featureIdForAttributes;
         if (hoverAttributeSubsetActive) {
@@ -473,19 +528,26 @@ void FeatureLayerVisualizationBase::addGeometry(
     if (!geom) {
         return;
     }
-    addGeometry(geom->toSelfContained(), geom->name(), tileFeatureId, rule, mapLayerStyleRuleId, evalFun, offset);
+    addGeometry(
+        geom->toSelfContained(),
+        geom->model().stage(),
+        tileFeatureId,
+        rule,
+        mapLayerStyleRuleId,
+        evalFun,
+        offset);
 }
 
 void FeatureLayerVisualizationBase::addGeometry(
     SelfContainedGeometry const& geom,
-    std::optional<std::string_view> geometryName,
+    std::optional<uint32_t> geometryStage,
     uint32_t tileFeatureId,
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId,
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
-    if (!rule.supports(geom.geomType_, geometryName)) {
+    if (!rule.supports(geom.geomType_, geometryStage)) {
         return;
     }
 
@@ -499,19 +561,24 @@ void FeatureLayerVisualizationBase::addGeometry(
 
     switch (geom.geomType_) {
     case GeomType::Polygon:
-        if (vertsProjected.size() >= 3) {
+        if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
             emitPolygon(vertsProjected, rule, renderFeatureId, evalFun);
         }
         break;
     case GeomType::Line:
-        addPolyLine(vertsProjected, rule, renderFeatureId, evalFun);
+        if (includesNonPointGeometry()) {
+            addPolyLine(vertsProjected, rule, renderFeatureId, evalFun);
+        }
         break;
     case GeomType::Mesh:
-        if (vertsProjected.size() >= 3) {
+        if (includesNonPointGeometry() && vertsProjected.size() >= 3) {
             emitMesh(vertsProjected, rule, renderFeatureId, evalFun);
         }
         break;
     case GeomType::Points:
+        if (!includesPointLikeGeometry()) {
+            break;
+        }
         for (size_t pointIndex = 0; pointIndex < vertsProjected.size(); ++pointIndex) {
             auto const xyzPos = JsValue(vertsProjected[pointIndex]);
             if (auto const& gridCellSize = rule.pointMergeGridCellSize()) {
@@ -548,7 +615,7 @@ void FeatureLayerVisualizationBase::addGeometry(
         break;
     }
 
-    if (rule.hasLabel()) {
+    if (rule.hasLabel() && includesPointLikeGeometry()) {
             auto text = rule.labelText(evalFun);
             if (!text.empty()) {
                 auto wgsPos = geometryCenter(geom);
@@ -646,6 +713,9 @@ void FeatureLayerVisualizationBase::addLine(
     glm::dvec3 const& offset,
     double labelPositionHint)
 {
+    if (!includesNonPointGeometry()) {
+        return;
+    }
     auto pointA = projectWgsPoint(wgsA, offset);
     auto pointB = projectWgsPoint(wgsB, offset);
 

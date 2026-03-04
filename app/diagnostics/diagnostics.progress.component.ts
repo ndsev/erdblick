@@ -6,6 +6,7 @@ interface ProgressBar {
     key: string;
     label: string;
     counter: ProgressCounter;
+    icon?: string;
     color?: Record<string, any>;
 }
 
@@ -16,7 +17,12 @@ interface ProgressBar {
             <div class="diagnostics-progress-list">
                 @for (bar of progressBars; track bar.key) {
                     <div class="diagnostics-progress-item">
-                        <span class="diagnostics-stage-label">{{ bar.label }}</span>
+                        <span class="diagnostics-stage-label">
+                            @if (bar.icon) {
+                                <i [class]="bar.icon" aria-hidden="true"></i>
+                            }
+                            {{ bar.label }}
+                        </span>
                         <div class="diagnostics-stage-bar" [style.--diagnostics-progress]="progressPercent(bar.counter) + '%'">
                             <p-progressBar [value]="progressPercent(bar.counter)" [dt]="bar.color" [showValue]="false"></p-progressBar>
                             <span class="diagnostics-stage-bar-value">
@@ -39,6 +45,7 @@ interface ProgressBar {
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.vertices) }} Verts.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.parseQueueSize) }} ParseQ</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.renderQueueSize) }} RenderQ</span>
+                    <span class="diagnostics-loading-bubble">{{ formatFrameTimeMs(bubbles.frameTimeMs) }}</span>
                     <span class="diagnostics-loading-bubble">{{ formatSeconds(bubbles.renderSeconds) }}</span>
                 </div>
             </div>
@@ -68,24 +75,25 @@ export class DiagnosticsProgressComponent {
         const stageCounters = this.progress?.stages ?? [];
         const stageBars = stageCounters.map((counter, stage) => ({
             key: `stage-${stage}`,
-            label: `Stage ${stage} Received`,
+            label: counter.label,
             counter,
+            icon: 'pi pi-download',
             color: {value: {background: '{cyan.500}'}}
         }));
         return [
             {
-            key: 'backend',
-            label: 'Backend',
-            counter: this.progress?.backend ?? {done: 0, total: 0},
-            color: {value: {background: '{blue.500}'}}
-        },
-        ...stageBars,
-        {
-            key: 'rendered',
-            label: 'Rendered',
-            counter: this.progress?.rendered ?? {done: 0, total: 0},
-            color: {value: {background: '{emerald.500}'}}
-        }
+                key: 'backend',
+                label: 'Backend',
+                counter: this.progress?.backend ?? {done: 0, total: 0},
+                color: {value: {background: '{blue.500}'}}
+            },
+            ...stageBars,
+            {
+                key: 'rendered',
+                label: 'Rendered',
+                counter: this.progress?.rendered ?? {done: 0, total: 0},
+                color: {value: {background: '{emerald.500}'}}
+            }
         ];
     }
 
@@ -102,6 +110,7 @@ export class DiagnosticsProgressComponent {
             vertices: 0,
             parseQueueSize: 0,
             renderQueueSize: 0,
+            frameTimeMs: 0,
             renderSeconds: 0,
         };
     }
@@ -152,5 +161,14 @@ export class DiagnosticsProgressComponent {
     formatSeconds(seconds: number): string {
         const safe = Math.max(0, seconds || 0);
         return `${safe.toFixed(1)} s`;
+    }
+
+    formatFrameTimeMs(frameTimeMs: number): string {
+        const safeMs = Math.max(0, frameTimeMs || 0);
+        if (safeMs <= 0) {
+            return 'Frame n/a';
+        }
+        const fps = 1000 / safeMs;
+        return `${safeMs.toFixed(1)} ms (${fps.toFixed(1)} FPS)`;
     }
 }

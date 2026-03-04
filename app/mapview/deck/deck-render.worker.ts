@@ -1,5 +1,8 @@
 import {initializeLibrary, coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../../integrations/wasm";
 import {
+    DECK_GEOMETRY_OUTPUT_ALL,
+    DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
+    DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
     DeckPathRenderResult,
     DeckPathRenderTask,
     DeckWorkerInboundMessage,
@@ -61,6 +64,17 @@ function resolveHighlightMode(modeValue: number): any {
     return coreLib.HighlightMode.NO_HIGHLIGHT;
 }
 
+function resolveFidelity(fidelityValue: number): any {
+    const ruleFidelity = (coreLib as any).RuleFidelity;
+    if (fidelityValue === ruleFidelity.HIGH.value) {
+        return ruleFidelity.HIGH;
+    }
+    if (fidelityValue === ruleFidelity.LOW.value) {
+        return ruleFidelity.LOW;
+    }
+    return ruleFidelity.ANY;
+}
+
 function createMergeCountProvider(snapshot: Record<string, number>): any {
     const table = snapshot ?? {};
     return {
@@ -91,15 +105,28 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         deserializeMs = performance.now() - deserializeStart;
         const vertexCount = Math.max(0, Math.floor(Number(tile.numVertices())));
 
-        deckVisu = new coreLib.DeckFeatureLayerVisualization(
+        deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
             task.viewIndex,
             task.tileKey,
             style,
             task.styleOptions,
             createMergeCountProvider(task.mergeCountSnapshot),
             resolveHighlightMode(task.highlightModeValue),
+            resolveFidelity(task.fidelityValue),
+            task.maxLowFiLod,
+            task.outputMode,
             task.featureIdSubset
         );
+        const normalizedOutputMode = [
+            DECK_GEOMETRY_OUTPUT_ALL,
+            DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+            DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY
+        ].includes(task.outputMode)
+            ? task.outputMode
+            : DECK_GEOMETRY_OUTPUT_ALL;
+        if (typeof (deckVisu as any).setGeometryOutputMode === "function") {
+            (deckVisu as any).setGeometryOutputMode(normalizedOutputMode);
+        }
         const renderStart = performance.now();
         deckVisu.addTileFeatureLayer(tile);
         deckVisu.run();

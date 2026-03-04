@@ -35,18 +35,6 @@ export default [
         },
 
         rules: {
-            "no-restricted-imports": ["error", {
-                paths: [{
-                    name: "cesium",
-                    message: "Please import Cesium modules only in app/integrations/cesium.ts.",
-                }],
-
-                patterns: [{
-                    group: ["cesium/*"],
-                    message: "Please import Cesium modules only in app/integrations/cesium.ts.",
-                }],
-            }],
-
             "prefer-const": "off",
             "@typescript-eslint/no-explicit-any": "off",
             "@typescript-eslint/no-unused-vars": "off",
@@ -57,13 +45,6 @@ export default [
             "no-constant-condition": "off",
             "no-useless-escape": "off",
             "@typescript-eslint/no-loss-of-precision": "off",
-        },
-    },
-    {
-        files: ["app/integrations/cesium.prod.ts", "app/integrations/cesium.test.ts"],
-
-        rules: {
-            "no-restricted-imports": "off",
         },
     },
 ];

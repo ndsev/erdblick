@@ -12,11 +12,31 @@ export const DEFAULT_VIEWPORT: Viewport = {
     orientation: .0
 };
 
+/**
+ * Visible-tile-count policy for low-fidelity rendering.
+ * For levels with many visible tiles we force low-fidelity stage-0 rendering
+ * and progressively tighten the allowed LOD in stage 0.
+ */
+export const LOW_FI_LOD0_TILE_COUNT_THRESHOLD = 4096;
+export const LOW_FI_LOD1_TILE_COUNT_THRESHOLD = 1024;
+export const LOW_FI_LOD2_TILE_COUNT_THRESHOLD = 512;
+export const LOW_FI_LOD3_TILE_COUNT_THRESHOLD = 256;
+export const LOW_FI_LOD4_TILE_COUNT_THRESHOLD = 128;
+export const LOW_FI_LOD5_TILE_COUNT_THRESHOLD = 64;
+export const LOW_FI_LOD6_TILE_COUNT_THRESHOLD = 32;
+export const LOW_FI_LOD7_TILE_COUNT_THRESHOLD = 16;
+
+export interface TileRenderPolicy {
+    targetFidelity: "low" | "high";
+    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
+}
+
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
     visibleTileIdsPerLevel = new Map<number, Array<bigint>>();
-    highDetailTileIds: Set<bigint> = new Set();
+    tileRenderPolicy = new Map<bigint, TileRenderPolicy>();
+    tileOrder = new Map<bigint, number>();
     visualizationQueue: ITileVisualization[] = [];
     private visualizedTileLayers: Map<string, Map<string, ITileVisualization>> = new Map();
 
@@ -132,24 +152,86 @@ export class ViewVisualizationState {
         }
     }
 
-    recalculateTileIds(loadLimit: number, visualizeLimit: number, levels: Iterable<number>) {
+    recalculateTileIds(tileLimit: number, levels: Iterable<number>) {
         this.visibleTileIds.clear();
-        this.highDetailTileIds.clear();
+        this.tileRenderPolicy.clear();
         this.visibleTileIdsPerLevel.clear();
+        this.tileOrder.clear();
         for (let level of levels) {
             if (this.visibleTileIdsPerLevel.has(level)) {
                 continue;
             }
-            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, loadLimit) as bigint[];
+            const visibleTileIdsForLevel = coreLib.getTileIds(this.viewport, level, tileLimit) as bigint[];
             this.visibleTileIdsPerLevel.set(level, visibleTileIdsForLevel);
             this.visibleTileIds = new Set([
                 ...this.visibleTileIds,
                 ...new Set<bigint>(visibleTileIdsForLevel)
             ]);
-            this.highDetailTileIds = new Set([
-                ...this.highDetailTileIds,
-                ...new Set<bigint>(visibleTileIdsForLevel.slice(0, visualizeLimit))
-            ]);
+
+            let levelPolicy: TileRenderPolicy = {
+                targetFidelity: "high",
+                maxLowFiLod: null
+            };
+            if (visibleTileIdsForLevel.length >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 0
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD1_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 1
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD2_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 2
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD3_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 3
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD4_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 4
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD5_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 5
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD6_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 6
+                };
+            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
+                levelPolicy = {
+                    targetFidelity: "low",
+                    maxLowFiLod: 7
+                };
+            }
+
+            for (const tileId of visibleTileIdsForLevel) {
+                this.tileRenderPolicy.set(tileId, levelPolicy);
+            }
+            for (let order = 0; order < visibleTileIdsForLevel.length; order++) {
+                const tileId = visibleTileIdsForLevel[order];
+                this.tileOrder.set(tileId, order);
+            }
         }
+    }
+
+    getTileRenderPolicy(tileId: bigint): TileRenderPolicy {
+        return this.tileRenderPolicy.get(tileId) ?? {
+            targetFidelity: "low",
+            maxLowFiLod: 0
+        };
+    }
+
+    getTileOrder(tileId: bigint): number {
+        return this.tileOrder.get(tileId) ?? Number.MAX_SAFE_INTEGER;
     }
 }

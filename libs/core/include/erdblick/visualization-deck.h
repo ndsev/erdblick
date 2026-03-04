@@ -16,6 +16,8 @@ namespace erdblick
 class DeckFeatureLayerVisualization : public FeatureLayerVisualizationBase
 {
 public:
+    using GeometryOutputMode = FeatureLayerVisualizationBase::GeometryOutputMode;
+
     DeckFeatureLayerVisualization(
         int viewIndex,
         std::string const& mapTileKey,
@@ -23,10 +25,15 @@ public:
         NativeJsValue const& rawOptionValues,
         NativeJsValue const& rawFeatureMergeService,
         FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
+        FeatureStyleRule::Fidelity fidelity = FeatureStyleRule::AnyFidelity,
+        int maxLowFiLod = -1,
+        int geometryOutputMode = static_cast<int>(GeometryOutputMode::All),
         NativeJsValue const& rawFeatureIdSubset = {});
     ~DeckFeatureLayerVisualization() override;
 
     [[nodiscard]] uint32_t abiVersion() const;
+    void setGeometryOutputMode(int mode);
+    [[nodiscard]] int geometryOutputMode() const;
     void addTileFeatureLayer(TileFeatureLayer const& tile);
 
     void pointPositionsRaw(SharedUint8Array& out) const;
@@ -93,6 +100,8 @@ private:
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun) override;
+    [[nodiscard]] bool includesPointLikeGeometry() const override;
+    [[nodiscard]] bool includesNonPointGeometry() const override;
     void appendPathGeometry(
         std::vector<mapget::Point> const& vertsCartesian,
         FeatureStyleRule const& rule,

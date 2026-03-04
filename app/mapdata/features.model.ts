@@ -10,6 +10,7 @@ import {TileLoadState} from "./tilestream";
  * WASM TileFeatureLayer, use the peek()-function.
  */
 export class FeatureTile {
+    static readonly DEFAULT_RENDER_ORDER = Number.MAX_SAFE_INTEGER;
     mapTileKey: string = "undefined";
     nodeId: string = "undefined";
     mapName: string = "undefined";
@@ -32,6 +33,7 @@ export class FeatureTile {
     disposed: boolean = false;
     status: TileLoadState = TileLoadState.LoadingQueued;
     stats: Map<string, number[]> = new Map<string, number[]>();
+    private renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
 
     static statTileSizePrefix = "Size/Feature-Model";
     static statParseTimePrefix = "Rendering/Feature-Model-Parsing";
@@ -203,6 +205,18 @@ export class FeatureTile {
 
     setVertexCount(count: number): void {
         this.storeVertexCount(count);
+    }
+
+    setRenderOrder(order: number): void {
+        if (!Number.isFinite(order)) {
+            this.renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
+            return;
+        }
+        this.renderOrderRank = Math.max(0, Math.floor(order));
+    }
+
+    renderOrder(): number {
+        return this.renderOrderRank;
     }
 
     vertexCount(): number {
@@ -446,6 +460,7 @@ export class FeatureTile {
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
         this.vertexCountCache = null;
+        this.renderOrderRank = FeatureTile.DEFAULT_RENDER_ORDER;
         this.disposed = true;
     }
 
@@ -541,6 +556,7 @@ export class FeatureTile {
  */
 export class FeatureWrapper implements TileFeatureId {
     public readonly featureId: string;
+    public readonly featureIndex?: number;
     public featureTile: FeatureTile;
 
     get mapTileKey(): string {
@@ -553,9 +569,12 @@ export class FeatureWrapper implements TileFeatureId {
      * @param featureId The feature-id of the feature.
      * @param featureTile {FeatureTile} The feature tile container.
      */
-    constructor(featureId: string, featureTile: FeatureTile) {
+    constructor(featureId: string, featureTile: FeatureTile, featureIndex?: number) {
         this.featureId = featureId;
         this.featureTile = featureTile;
+        this.featureIndex = Number.isInteger(featureIndex) && featureIndex !== undefined && featureIndex >= 0
+            ? featureIndex
+            : undefined;
     }
 
     /**
@@ -565,7 +584,19 @@ export class FeatureWrapper implements TileFeatureId {
      */
     peek(callback: any) {
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
-            let feature = tileFeatureLayer.find(this.featureId);
+            let feature: any = null;
+            if (this.featureIndex !== undefined) {
+                const featureByIndex = (tileFeatureLayer as any).featureByIndex;
+                if (typeof featureByIndex === "function") {
+                    feature = featureByIndex.call(tileFeatureLayer, this.featureIndex);
+                }
+            }
+            if (!feature || feature.isNull()) {
+                if (feature && feature.isNull()) {
+                    feature.delete();
+                }
+                feature = tileFeatureLayer.find(this.featureId);
+            }
             if (feature.isNull()) {
                 feature.delete();
                 return null;
@@ -584,6 +615,10 @@ export class FeatureWrapper implements TileFeatureId {
         if (!other) {
             return false;
         }
+        if (this.featureIndex !== undefined || other.featureIndex !== undefined) {
+            return this.featureTile.mapTileKey == other.featureTile.mapTileKey &&
+                this.featureIndex === other.featureIndex;
+        }
         return this.featureTile.mapTileKey == other.featureTile.mapTileKey && this.featureId == other.featureId;
     }
 
@@ -591,7 +626,8 @@ export class FeatureWrapper implements TileFeatureId {
     key(): TileFeatureId {
         return {
             mapTileKey: this.featureTile.mapTileKey,
-            featureId: this.featureId
+            featureId: this.featureId,
+            featureIndex: this.featureIndex
         };
     }
 }

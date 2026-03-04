@@ -39,6 +39,12 @@ public:
         SelectionHighlight
     };
 
+    enum Fidelity {
+        AnyFidelity,
+        HighFidelity,
+        LowFidelity
+    };
+
     enum Arrow {
         NoArrow,
         ForwardArrow,
@@ -50,8 +56,13 @@ public:
     [[nodiscard]] bool maybeMatchesType(std::string_view typeId) const;
     [[nodiscard]] Aspect aspect() const;
     [[nodiscard]] HighlightMode mode() const;
+    [[nodiscard]] Fidelity fidelity() const;
+    [[nodiscard]] std::optional<uint32_t> stage() const;
+    [[nodiscard]] std::optional<uint8_t> lod() const;
     [[nodiscard]] bool selectable() const;
-    [[nodiscard]] bool supports(mapget::GeomType const& g, std::optional<std::string_view> geometryName={}) const;
+    [[nodiscard]] bool supports(
+        mapget::GeomType const& g,
+        std::optional<uint32_t> geometryStage={}) const;
     [[nodiscard]] uint32_t geometryTypesMask() const;
 
     [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
@@ -116,9 +127,11 @@ private:
 
     Aspect aspect_ = Feature;
     HighlightMode mode_ = NoHighlight;
+    Fidelity fidelity_ = AnyFidelity;
+    std::optional<uint32_t> stage_;
+    std::optional<uint8_t> lod_;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
-    std::optional<std::regex> geometryName_;
     std::optional<std::regex> type_;
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};

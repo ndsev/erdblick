@@ -23,7 +23,7 @@ const char *__asan_default_options() {
 
 #include "aabb.h"
 #include "buffer.h"
-#include "cesium-interface/cesium-object.h"
+#include "interop/js-object.h"
 #include "mapget/model/info.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/simfilutil.h"
@@ -36,9 +36,6 @@ const char *__asan_default_options() {
 #include "geometry.h"
 #include "search.h"
 #include "layer.h"
-
-#include "cesium-interface/point-conversion.h"
-#include "cesium-interface/cesium-primitive.h"
 #include "simfil/exception-handler.h"
 
 #include "mapget/log.h"
@@ -102,6 +99,21 @@ size_t getFreeMemory() {
     uintptr_t totalMemory = getTotalMemory();
     uintptr_t dynamicTop = (uintptr_t)sbrk(0);
     return totalMemory - dynamicTop + i.fordblks;
+}
+
+int deckGeometryOutputAll()
+{
+    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::All);
+}
+
+int deckGeometryOutputPointsOnly()
+{
+    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::PointsOnly);
+}
+
+int deckGeometryOutputNonPointsOnly()
+{
+    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::NonPointsOnly);
 }
 
 /**
@@ -363,6 +375,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("minimumStage", &FeatureLayerStyle::minimumStage)
+        .function("highFidelityStage", &FeatureLayerStyle::highFidelityStage)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -435,6 +448,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("find", &TileFeatureLayer::find)
         .function("attachOverlay", &TileFeatureLayer::attachOverlay)
         .function("featureIdByIndex", &TileFeatureLayer::featureIdByIndex)
+        .function("featureByIndex", &TileFeatureLayer::featureByIndex)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
     ////////// Highlight Modes
@@ -443,19 +457,19 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
         .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
 
-    ////////// CesiumFeatureLayerVisualization
-    em::class_<CesiumFeatureLayerVisualization>("CesiumFeatureLayerVisualization")
-        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
-        .function("addTileFeatureLayer", &CesiumFeatureLayerVisualization::addTileFeatureLayer)
-        .function("run", &CesiumFeatureLayerVisualization::run)
-        .function("primitiveCollection", &CesiumFeatureLayerVisualization::primitiveCollection)
-        .function("mergedPointFeatures", &CesiumFeatureLayerVisualization::mergedPointFeatures)
-        .function("externalReferences", &CesiumFeatureLayerVisualization::externalReferences)
-        .function("processResolvedExternalReferences", &CesiumFeatureLayerVisualization::processResolvedExternalReferences);
+    em::enum_<FeatureStyleRule::Fidelity>("RuleFidelity")
+        .value("ANY", FeatureStyleRule::AnyFidelity)
+        .value("HIGH", FeatureStyleRule::HighFidelity)
+        .value("LOW", FeatureStyleRule::LowFidelity);
 
     ////////// DeckFeatureLayerVisualization
     em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
-        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, em::val>()
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, FeatureStyleRule::Fidelity, int, int, em::val>()
+        .class_function("GEOMETRY_OUTPUT_ALL", &deckGeometryOutputAll)
+        .class_function("GEOMETRY_OUTPUT_POINTS_ONLY", &deckGeometryOutputPointsOnly)
+        .class_function("GEOMETRY_OUTPUT_NON_POINTS_ONLY", &deckGeometryOutputNonPointsOnly)
+        .function("setGeometryOutputMode", &DeckFeatureLayerVisualization::setGeometryOutputMode)
+        .function("geometryOutputMode", &DeckFeatureLayerVisualization::geometryOutputMode)
         .function(
             "addTileFeatureLayer",
             std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(

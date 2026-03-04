@@ -9,15 +9,6 @@ See the LICENSE file for details.
 This software includes or depends upon the following third-party components:
 
 --------------------------------------------------------------------------------
-CesiumJS and Cesium Native
-Copyright 2011-2024 Cesium GS, Inc.
-Licensed under the Apache License, Version 2.0
-https://github.com/CesiumGS/cesium
-https://github.com/CesiumGS/cesium-native
-
-Cesium is used for 3D geospatial visualization and rendering.
-
---------------------------------------------------------------------------------
 mapget
 Copyright (c) Navigation Data Standard e.V.
 Licensed under the BSD 3-Clause License

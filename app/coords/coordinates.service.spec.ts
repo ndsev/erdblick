@@ -1,7 +1,7 @@
 import {describe, it, expect, vi} from 'vitest';
 import {of} from 'rxjs';
 
-vi.mock('../integrations/cesium', () => {
+vi.mock('../integrations/geo', () => {
     class Cartographic {
         constructor(
             public longitude: number,

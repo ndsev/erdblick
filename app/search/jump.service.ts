@@ -2,14 +2,21 @@ import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {HttpClient} from "@angular/common/http";
 import {MapDataService} from "../mapdata/map.service";
-import {LocateResponse} from "../mapview/cesium/cesium-tile.visualization.model";
 import {InfoMessageService} from "../shared/info.service";
 import {coreLib} from "../integrations/wasm";
 import {FeatureSearchService} from "./feature.search.service";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
-import {Cartographic, Rectangle} from "../integrations/cesium";
+import {Cartographic, Rectangle} from "../integrations/geo";
+
+interface LocateResponse {
+    responses: Array<Array<{
+        tileId: string;
+        typeId: string;
+        featureId: Array<string>;
+    }>>;
+}
 
 export interface SearchTarget {
     icon: string;

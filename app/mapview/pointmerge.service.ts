@@ -1,13 +1,6 @@
 import {Injectable} from "@angular/core";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {IconLayer, ScatterplotLayer, TextLayer} from "@deck.gl/layers";
-import {
-    PointPrimitiveCollection,
-    LabelCollection,
-    Viewer,
-    Entity,
-    BillboardCollection
-} from "../integrations/cesium";
 import {coreLib} from "../integrations/wasm";
 import {HighlightMode} from "../../build/libs/core/erdblick-core";
 import {IRenderSceneHandle} from "./render-view.model";
@@ -56,14 +49,13 @@ interface DeckMergedLabel {
 /**
  * Class which represents a set of merged point features for one location.
  * Each merged point feature may be visualized as a label or a point.
- * To this end, the visualization retains visualization parameters for
- * calls to either/both PointPrimitiveCollection.add() and/or LabelCollection.add().
+ * To this end, the visualization retains style parameters consumed by deck layers.
  */
 export interface MergedPointVisualization {
     position: Cartographic,
     positionHash: PositionHash,
-    pointParameters: any,  // Point Visualization Parameters for call to PointPrimitiveCollection.add().
-    labelParameters: any,  // Label Visualization Parameters for call to LabelCollection.add().
+    pointParameters: any,
+    labelParameters: any,
     featureIds: Array<number>,
     idTileKeys?: Array<string>
 }
@@ -76,11 +68,6 @@ export interface MergedPointVisualization {
  */
 export class MergedPointsTile {
     referencingTiles: Array<bigint> = [];
-
-    billboardPrimitives: BillboardCollection|null = null;
-    pointPrimitives: PointPrimitiveCollection|null = null;
-    labelPrimitives: LabelCollection|null = null;
-    debugEntity: Entity|null = null;
 
     features: Map<PositionHash, MergedPointVisualization> = new Map<PositionHash, MergedPointVisualization>;
     readonly viewIndex: number
@@ -142,102 +129,12 @@ export class MergedPointsTile {
         return this.features.has(positionHash) ? this.features.get(positionHash)!.featureIds.length : 0;
     }
 
-    render(viewer: Viewer) {
-        if (this.pointPrimitives || this.labelPrimitives || this.billboardPrimitives) {
-            this.remove(viewer);
-        }
-
-        this.billboardPrimitives = new BillboardCollection();
-        this.pointPrimitives = new PointPrimitiveCollection();
-        this.labelPrimitives = new LabelCollection();
-
-        for (let [_, feature] of this.features) {
-            const pointIds = this.makeCesiumTileFeatureIds(feature);
-            if (feature.pointParameters) {
-                feature.pointParameters["id"] = pointIds;
-                feature.pointParameters["idTileKeys"] = feature.idTileKeys ?? [];
-                if (feature.pointParameters.hasOwnProperty("image")) {
-                    this.billboardPrimitives.add(feature.pointParameters);
-                }
-                else {
-                    this.pointPrimitives.add(feature.pointParameters);
-                }
-            }
-            if (feature.labelParameters) {
-                feature.labelParameters["id"] = pointIds;
-                feature.labelParameters["idTileKeys"] = feature.idTileKeys ?? [];
-                this.labelPrimitives.add(feature.labelParameters);
-            }
-        }
-
-        if (this.pointPrimitives.length) {
-            viewer.scene.primitives.add(this.pointPrimitives)
-        }
-        if (this.billboardPrimitives.length) {
-            viewer.scene.primitives.add(this.billboardPrimitives)
-        }
-        if (this.labelPrimitives.length) {
-            viewer.scene.primitives.add(this.labelPrimitives)
-        }
-
-        // TODO: Move under debug api
-        // On-demand debug visualization:
-        // Adding debug bounding box and label for tile ID and feature count
-        // const tileBounds = coreLib.getCornerTileBox(this.tileId);
-        // this.debugEntity = viewer.entities.add({
-        //     rectangle: {
-        //         coordinates: Rectangle.fromDegrees(...tileBounds),
-        //         material: Color.BLUE.withAlpha(0.2),
-        //         outline: true,
-        //         outlineColor: Color.BLUE,
-        //         outlineWidth: 3,
-        //         height: HeightReference.CLAMP_TO_GROUND,
-        //     },
-        //     position: Cartesian3.fromDegrees(
-        //         (tileBounds[0]+tileBounds[2])*.5,
-        //         (tileBounds[1]+tileBounds[3])*.5
-        //     ),
-        //     label: {
-        //         text: `Tile ID: ${this.tileId.toString()}\nPoints: ${this.features.size}\nreferencingTiles: ${this.referencingTiles}`,
-        //         showBackground: true,
-        //         font: '14pt monospace',
-        //         eyeOffset: new Cartesian3(0, 0, -10), // Ensures label visibility at a higher altitude
-        //         fillColor: Color.YELLOW,
-        //         outlineColor: Color.BLACK,
-        //         outlineWidth: 2,
-        //     }
-        // });
-    }
-
-    remove(viewer: Viewer) {
-        if (this.pointPrimitives && this.pointPrimitives.length) {
-            viewer.scene.primitives.remove(this.pointPrimitives)
-        }
-        if (this.billboardPrimitives && this.billboardPrimitives.length) {
-            viewer.scene.primitives.remove(this.billboardPrimitives)
-        }
-        if (this.labelPrimitives && this.labelPrimitives.length) {
-            viewer.scene.primitives.remove(this.labelPrimitives)
-        }
-        if (this.debugEntity) {
-            viewer.entities.remove(this.debugEntity);
-        }
-    }
-
     renderScene(sceneHandle: IRenderSceneHandle) {
-        if (sceneHandle.renderer === "deck") {
-            this.renderDeck(sceneHandle.scene as DeckScene);
-            return;
-        }
-        this.render(sceneHandle.scene as Viewer);
+        this.renderDeck(sceneHandle.scene as DeckScene);
     }
 
     removeScene(sceneHandle: IRenderSceneHandle) {
-        if (sceneHandle.renderer === "deck") {
-            this.removeDeck(sceneHandle.scene as DeckScene);
-            return;
-        }
-        this.remove(sceneHandle.scene as Viewer);
+        this.removeDeck(sceneHandle.scene as DeckScene);
     }
 
     /**
@@ -413,20 +310,6 @@ export class MergedPointsTile {
 
     private makeDeckLayerKey(kind: string): string {
         return `merged/${this.mapViewLayerStyleRuleId}/${this.tileId.toString()}/${kind}`;
-    }
-
-    private makeCesiumTileFeatureIds(feature: MergedPointVisualization): Array<{
-        featureId: string;
-        featureIndex: number;
-        mapTileKey: string;
-    }> {
-        const idTileKeys = feature.idTileKeys ?? [];
-        const fallbackTileKey = idTileKeys[0] ?? "";
-        return feature.featureIds.map((featureIndex, index) => ({
-            featureId: String(featureIndex),
-            featureIndex,
-            mapTileKey: idTileKeys[index] ?? fallbackTileKey
-        }));
     }
 
     private toDeckColor(input: any, fallback: DeckColor): DeckColor {

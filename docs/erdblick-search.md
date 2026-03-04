@@ -60,7 +60,7 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 <!-- --8<-- [start:feature-search] -->
 Running the **Search Loaded Features** action allows searching the loaded features deeply by their attributes, geometry and relations. Key capabilities:
 
-- **Scope** – searches span every tile currently loaded (or scheduled for loading) in each view. Increase the “Max tiles to load/visualize” limits in Preferences if you need to cover a broader area before launching a search.
+- **Scope** – searches span every tile currently loaded (or scheduled for loading) in each view. Increase the “Max tiles to load” limit in Preferences if you need to cover a broader area before launching a search.
 - **Workers and progress** – queries run inside web workers. Progress shows “processed tiles / scheduled tiles”, so you immediately see whether you have enough data loaded. The map overlay drops temporary markers with a configurable highlight color.
 - **Pause/Resume/Stop** – use the toolbar buttons to pause a long-running search, resume where it left off, or stop it entirely. Pausing preserves current results, and stopping reveals any accumulated worker errors.
 - **Result grouping** – choose how results are organized (by map, layer, feature type, tile) via the multi-select dropdown. Counts per branch keep large sets navigable, and the filter box becomes available as soon as the tree contains entries.

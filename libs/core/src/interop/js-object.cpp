@@ -1,4 +1,4 @@
-#include "cesium-interface/cesium-object.h"
+#include "interop/js-object.h"
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
@@ -242,18 +242,6 @@ mapget::KeyValuePairs JsValue::toKeyValuePairs() const
         }
     }
     return result;
-}
-
-CesiumClass::CesiumClass(const std::string& className)
-    : className_(className)
-{
-    static thread_local auto cesiumLibrary = JsValue::fromGlobal("Cesium");
-    value_ = cesiumLibrary.value_[className];
-}
-
-JsValue CesiumClass::New(std::initializer_list<std::pair<std::string, JsValue>> kwArgs) const
-{
-    return New(*JsValue::Dict(kwArgs));
 }
 
 } // namespace erdblick

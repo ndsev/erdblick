@@ -36,6 +36,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -110,6 +111,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -212,6 +214,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -229,10 +232,10 @@ describe("DeckTileVisualization", () => {
         expect(visu.isDirty()).toBe(false);
     });
 
-    it("ignores tile data version bumps above the style minimum stage", async () => {
+    it("in low-fidelity mode ignores stage bumps above the style minimum stage", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
-        let relevantVersion = 1;
+        const stageVersions = [1, 2, 3];
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
@@ -240,7 +243,14 @@ describe("DeckTileVisualization", () => {
             numFeatures: 2,
             dataVersion: 10,
             hasData: () => true,
-            dataVersionUpToStage: () => relevantVersion,
+            highestLoadedStage: () => 2,
+            dataVersionUpToStage: (maxStage: number) => {
+                let version = 0;
+                for (let stage = 0; stage <= maxStage; stage++) {
+                    version += stageVersions[stage] ?? 0;
+                }
+                return version;
+            },
             stats: new Map<string, number[]>()
         } as any;
         const style = {
@@ -256,7 +266,8 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
-            true,
+            false,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -289,14 +300,87 @@ describe("DeckTileVisualization", () => {
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
 
-        tile.dataVersion += 1;
+        stageVersions[2] += 1;
         expect(visu.isDirty()).toBe(false);
 
-        relevantVersion += 1;
+        stageVersions[0] += 1;
         expect(visu.isDirty()).toBe(true);
     });
 
-    it("does not emit placeholder label layers when no path geometry is available", async () => {
+    it("in high-fidelity mode tracks newly loaded stage versions", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const stageVersions = [1, 2, 0];
+        let highestLoadedStage = 0;
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 2,
+            hasData: () => true,
+            highestLoadedStage: () => highestLoadedStage,
+            dataVersionUpToStage: (maxStage: number) => {
+                let version = 0;
+                for (let stage = 0; stage <= maxStage; stage++) {
+                    version += stageVersions[stage] ?? 0;
+                }
+                return version;
+            },
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            minimumStage: () => 0
+        } as any;
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            true,
+            null,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async () => ({
+            length: 1,
+            coordinateOrigin: [11, 48, 0] as [number, number, number],
+            startIndices: new Uint32Array([0, 2]),
+            featureIds: [null],
+            featureIdsByVertex: [null, null],
+            attributes: {
+                getPath: {
+                    value: new Float32Array([11, 48, 0, 11.001, 48.001, 0]),
+                    size: 3
+                },
+                instanceColors: {
+                    value: new Uint8Array([32, 196, 255, 220]),
+                    size: 4
+                },
+                instanceStrokeWidths: {
+                    value: new Float32Array([2]),
+                    size: 1
+                },
+                instanceDashArrays: {
+                    value: new Float32Array([1, 0]),
+                    size: 2
+                }
+            }
+        });
+
+        await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
+        expect(visu.isDirty()).toBe(false);
+
+        highestLoadedStage = 1;
+        stageVersions[1] += 1;
+        expect(visu.isDirty()).toBe(true);
+    });
+
+    it("renders an empty-state tile background when no geometry is available", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -320,6 +404,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -329,11 +414,57 @@ describe("DeckTileVisualization", () => {
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         registry.flush();
 
-        expect(deck.commits).toHaveLength(0);
-        expect(registry.size).toBe(0);
+        expect(deck.commits).toHaveLength(1);
+        expect(deck.commits[0]).toHaveLength(1);
+        expect(deck.commits[0][0].id).toContain("/tile-empty-background");
+        expect(registry.size).toBe(1);
     });
 
-    it("records render-time samples in tile stats using Cesium-compatible keys", async () => {
+    it("renders tile borders when enabled", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            hasData: () => false,
+            numFeatures: 0,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false
+        } as any;
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            true,
+            null,
+            {value: 0} as any,
+            [],
+            true
+        ) as any;
+
+        visu.renderWasm = async () => null;
+        visu.renderWasmOnMainThread = async () => null;
+
+        await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
+        registry.flush();
+
+        expect(deck.commits).toHaveLength(1);
+        expect(deck.commits[0]).toHaveLength(2);
+        const layerIds = deck.commits[0].map(layer => layer.id);
+        expect(layerIds.some(id => id.includes("/tile-empty-background"))).toBe(true);
+        expect(layerIds.some(id => id.includes("/tile-border"))).toBe(true);
+        expect(registry.size).toBe(2);
+    });
+
+    it("records render-time samples in tile stats using legacy-compatible keys", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -357,6 +488,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -398,6 +530,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -446,6 +579,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -506,6 +640,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 
@@ -571,6 +706,7 @@ describe("DeckTileVisualization", () => {
             style,
             "",
             true,
+            null,
             {value: 0} as any
         ) as any;
 

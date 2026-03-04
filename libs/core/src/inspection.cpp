@@ -74,11 +74,12 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     }
 
     // Basic attributes section.
-    if (auto attrs = featurePtr->attributesOrNull())
-    {
+    if (auto mergedBasicAttrs = featurePtr->mergedAttributesOrNull()) {
         auto scope = push(convertString("Basic Attributes"), "properties", ValueType::Section);
-        for (auto const& [k, v] : attrs->fields()) {
-            convertField(k, v);
+        for (auto i = 0U; i < mergedBasicAttrs->size(); ++i) {
+            convertField(
+                mergedBasicAttrs->keyAt(static_cast<int64_t>(i)),
+                mergedBasicAttrs->at(static_cast<int64_t>(i)));
         }
     }
 
@@ -242,9 +243,6 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     case GeomType::Line: typeString = "Polyline"; break;
     case GeomType::Polygon: typeString = "Polygon"; break;
     case GeomType::Mesh: typeString = "Mesh"; break;
-    }
-    if (g->name()) {
-        typeString += fmt::format(" ({})", *g->name());
     }
     geomScope->value_ = convertString(typeString);
 

@@ -255,11 +255,6 @@ bool Color::isValid() const {
     return valid_ || r != 0 || g != 0 || b != 0;
 }
 
-JsValue Color::toCesiumColor(float opacity) const
-{
-    return Cesium().Color.New((float)r/255., (float)g/255., (float)b/255., opacity);
-}
-
 const std::map<std::string, Color> Color::cssColors = {
     {"aliceblue", Color("#F0F8FF")},
     {"antiquewhite", Color("#FAEBD7")},

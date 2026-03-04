@@ -67,6 +67,9 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
     NativeJsValue const& rawOptionValues,
     NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
+    FeatureStyleRule::Fidelity fidelity,
+    int maxLowFiLod,
+    int geometryOutputMode,
     NativeJsValue const& rawFeatureIdSubset)
     : FeatureLayerVisualizationBase(
           viewIndex,
@@ -74,6 +77,13 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           style,
           rawOptionValues,
           highlightMode,
+          fidelity,
+          maxLowFiLod,
+          geometryOutputMode == static_cast<int>(GeometryOutputMode::PointsOnly)
+              ? GeometryOutputMode::PointsOnly
+              : (geometryOutputMode == static_cast<int>(GeometryOutputMode::NonPointsOnly)
+                  ? GeometryOutputMode::NonPointsOnly
+                  : GeometryOutputMode::All),
           rawFeatureIdSubset,
           rawFeatureMergeService)
 {
@@ -86,6 +96,27 @@ DeckFeatureLayerVisualization::~DeckFeatureLayerVisualization() = default;
 uint32_t DeckFeatureLayerVisualization::abiVersion() const
 {
     return 1u;
+}
+
+void DeckFeatureLayerVisualization::setGeometryOutputMode(int mode)
+{
+    switch (mode) {
+    case static_cast<int>(GeometryOutputMode::PointsOnly):
+        geometryOutputMode_ = GeometryOutputMode::PointsOnly;
+        break;
+    case static_cast<int>(GeometryOutputMode::NonPointsOnly):
+        geometryOutputMode_ = GeometryOutputMode::NonPointsOnly;
+        break;
+    case static_cast<int>(GeometryOutputMode::All):
+    default:
+        geometryOutputMode_ = GeometryOutputMode::All;
+        break;
+    }
+}
+
+int DeckFeatureLayerVisualization::geometryOutputMode() const
+{
+    return static_cast<int>(geometryOutputMode_);
 }
 
 void DeckFeatureLayerVisualization::pointPositionsRaw(SharedUint8Array& out) const {
@@ -201,6 +232,9 @@ void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& 
     if (!isFirstTile) {
         return;
     }
+    if (!includesPointLikeGeometry()) {
+        return;
+    }
     for (auto&& rule : style_.rules()) {
         if (rule.mode() != highlightMode_ || !rule.pointMergeGridCellSize()) {
             continue;
@@ -209,6 +243,16 @@ void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& 
             makeMapLayerStyleRuleId(rule.index()),
             std::map<std::string, std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>());
     }
+}
+
+bool DeckFeatureLayerVisualization::includesPointLikeGeometry() const
+{
+    return FeatureLayerVisualizationBase::includesPointLikeGeometry();
+}
+
+bool DeckFeatureLayerVisualization::includesNonPointGeometry() const
+{
+    return FeatureLayerVisualizationBase::includesNonPointGeometry();
 }
 
 mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(

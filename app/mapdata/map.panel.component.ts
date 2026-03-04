@@ -9,7 +9,7 @@ import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {CoverageRectItem, removeGroupPrefix, StyleOptionNode} from "./map.tree.model";
 import {Subscription} from "rxjs";
-import {CesiumMath, Rectangle} from "../integrations/cesium";
+import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
 
@@ -504,10 +504,10 @@ export class MapPanelComponent {
             {
                 targetView: viewIndex,
                 rectangle: {
-                    west: CesiumMath.toDegrees(targetRect!.west),
-                    south: CesiumMath.toDegrees(targetRect!.south),
-                    east: CesiumMath.toDegrees(targetRect!.east),
-                    north: CesiumMath.toDegrees(targetRect!.north),
+                    west: GeoMath.toDegrees(targetRect!.west),
+                    south: GeoMath.toDegrees(targetRect!.south),
+                    east: GeoMath.toDegrees(targetRect!.east),
+                    north: GeoMath.toDegrees(targetRect!.north),
                 }
             }
         );

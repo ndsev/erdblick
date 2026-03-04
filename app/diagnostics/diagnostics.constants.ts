@@ -3,7 +3,7 @@ export interface DiagnosticsUnitSuffix {
     unit: string;
 }
 
-export const SNAPSHOT_INTERVAL_MS = 400;
+export const SNAPSHOT_INTERVAL_MS = 2500;
 export const PERF_INTERVAL_MS = 2500;
 export const LOG_INTERVAL_MS = 1500;
 export const MAX_LOGS = 1000;
