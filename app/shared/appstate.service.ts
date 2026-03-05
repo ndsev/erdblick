@@ -103,6 +103,8 @@ export interface LayerViewConfig {
     visible: boolean;
 }
 
+export type TileGridMode = "xyz" | "nds";
+
 function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');
@@ -391,6 +393,13 @@ export class AppStateService implements OnDestroy {
         defaultValue: true,
         schema: Boolish,
         urlParamName: 'tb'
+    });
+
+    readonly viewTileGridModeState = this.createMapViewState<TileGridMode>({
+        name: "tileGridMode",
+        defaultValue: "xyz",
+        schema: z.enum(["xyz", "nds"]),
+        urlParamName: 'tgm'
     });
 
     readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
@@ -1541,6 +1550,7 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.osmEnabledState);
         pruneViews(this.osmOpacityState);
         pruneViews(this.viewTileBordersState);
+        pruneViews(this.viewTileGridModeState);
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
         pruneViews(this.layerZoomLevelState);

@@ -1,4 +1,10 @@
-import {AppStateService, InspectionPanelModel, LayerViewConfig, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
+import {
+    AppStateService,
+    InspectionPanelModel,
+    LayerViewConfig,
+    TileGridMode,
+    VIEW_SYNC_LAYERS
+} from "../shared/appstate.service";
 import {filter, take} from "rxjs/operators";
 import {BehaviorSubject, skip, Subscription} from "rxjs";
 import {FeatureWrapper} from "./features.model";
@@ -364,6 +370,14 @@ export class MapLayerTree {
         return this.stateService.viewTileBordersState.getValue(viewIndex);
     }
 
+    setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
+        this.stateService.viewTileGridModeState.next(viewIndex, mode);
+    }
+
+    getViewTileGridMode(viewIndex: number): TileGridMode {
+        return this.stateService.viewTileGridModeState.getValue(viewIndex);
+    }
+
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
@@ -582,12 +596,17 @@ export class MapLayerTree {
         }
 
         const sourceTileBorders = this.getViewTileBorderState(viewIndex);
+        const sourceTileGridMode = this.getViewTileGridMode(viewIndex);
         for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
             if (targetIndex === viewIndex) {
                 continue;
             }
             if (this.getViewTileBorderState(targetIndex) !== sourceTileBorders) {
                 this.setViewTileBorderState(targetIndex, sourceTileBorders);
+                viewConfigChanged = true;
+            }
+            if (this.getViewTileGridMode(targetIndex) !== sourceTileGridMode) {
+                this.setViewTileGridMode(targetIndex, sourceTileGridMode);
                 viewConfigChanged = true;
             }
         }

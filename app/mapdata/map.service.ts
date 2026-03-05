@@ -15,6 +15,7 @@ import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} fr
 import {
     AppStateService,
     InspectionPanelModel,
+    TileGridMode,
     TileFeatureId,
     VIEW_SYNC_LAYERS
 } from "../shared/appstate.service";
@@ -2223,6 +2224,12 @@ export class MapDataService {
     toggleViewTileBorderVisibility(viewIndex: number) {
         const nextState = !this.maps.getViewTileBorderState(viewIndex);
         this.maps.setViewTileBorderState(viewIndex, nextState);
+        this.syncViewsIfEnabled(viewIndex);
+        this.scheduleUpdate();
+    }
+
+    setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
+        this.maps.setViewTileGridMode(viewIndex, mode);
         this.syncViewsIfEnabled(viewIndex);
         this.scheduleUpdate();
     }

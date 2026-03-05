@@ -92,8 +92,6 @@ const RENDER_RANK_PRIORITY_DEFAULT = 1;
 const RENDER_RANK_HAS_DATA = 0;
 const RENDER_RANK_MISSING_DATA = 1;
 const TILE_EMPTY_BACKGROUND_COLOR: [number, number, number, number] = [116, 116, 116, 84];
-const TILE_BORDER_COLOR: [number, number, number, number] = [245, 245, 245, 240];
-const TILE_BORDER_WIDTH_PX = 2.0;
 const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
@@ -148,7 +146,6 @@ export class DeckTileVisualization implements ITileVisualization {
     private pathLayerKey: string | null = null;
     private arrowLayerKey: string | null = null;
     private tileEmptyBackgroundLayerKey: string | null = null;
-    private tileBorderLayerKey: string | null = null;
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
@@ -213,12 +210,6 @@ export class DeckTileVisualization implements ITileVisualization {
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
             kind: "tile-empty-background"
-        });
-        const tileBorderLayerKey = makeDeckLayerKey({
-            tileKey: this.tile.mapTileKey,
-            styleId: this.styleId,
-            hoverMode: this.highlightModeLabel(),
-            kind: "tile-border"
         });
         try {
             for (const removedCornerTile of this.pointMergeService.remove(
@@ -333,28 +324,6 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.tileEmptyBackgroundLayerKey = null;
             }
 
-            if (this.showTileBorder && tileOutline) {
-                const tileBorderLayer = new PolygonLayer({
-                    id: tileBorderLayerKey,
-                    data: [{polygon: tileOutline}],
-                    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                    getPolygon: (feature: {polygon: [number, number][]}) => feature.polygon,
-                    filled: false,
-                    stroked: true,
-                    lineWidthUnits: "pixels",
-                    getLineColor: TILE_BORDER_COLOR,
-                    getLineWidth: TILE_BORDER_WIDTH_PX,
-                    lineWidthMinPixels: TILE_BORDER_WIDTH_PX,
-                    parameters: {depthTest: false},
-                    pickable: false
-                } as any);
-                registry.upsert(tileBorderLayerKey, tileBorderLayer as any, 475);
-                this.tileBorderLayerKey = tileBorderLayerKey;
-            } else if (this.tileBorderLayerKey) {
-                registry.remove(this.tileBorderLayerKey);
-                this.tileBorderLayerKey = null;
-            }
-
             if (mergedPointFeatures) {
                 for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
                     for (const finishedCornerTile of this.pointMergeService.insert(
@@ -404,14 +373,10 @@ export class DeckTileVisualization implements ITileVisualization {
         if (this.tileEmptyBackgroundLayerKey) {
             registry.remove(this.tileEmptyBackgroundLayerKey);
         }
-        if (this.tileBorderLayerKey) {
-            registry.remove(this.tileBorderLayerKey);
-        }
         this.pointLayerKey = null;
         this.pathLayerKey = null;
         this.arrowLayerKey = null;
         this.tileEmptyBackgroundLayerKey = null;
-        this.tileBorderLayerKey = null;
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
@@ -466,7 +431,6 @@ export class DeckTileVisualization implements ITileVisualization {
         return JSON.stringify({
             fidelity,
             maxLowFiLod: this.maxLowFiLod,
-            showTileBorder: this.showTileBorder,
             renderQueued: this.renderQueued,
             highlightMode: this.highlightMode.value,
             featureIdSubset: this.featureIdSubset,

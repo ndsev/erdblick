@@ -1,5 +1,5 @@
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
-import {Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
+import {COORDINATE_SYSTEM, Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
 import {BitmapLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
 import {Cartographic, GeoMath, SceneMode} from "../../integrations/geo";
@@ -8,12 +8,13 @@ import {FeatureSearchService} from "../../search/feature.search.service";
 import {JumpTargetService} from "../../search/jump.service";
 import {RightClickMenuService} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
-import {AppStateService, CameraViewState, TileFeatureId} from "../../shared/appstate.service";
+import {AppStateService, CameraViewState, TileFeatureId, TileGridMode} from "../../shared/appstate.service";
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {environment} from "../../environments/environment";
 import {MergedPointsTile} from "../pointmerge.service";
+import {TileGridOverlayLayer, tileGridOverlayData} from "./deck-tile-grid-overlay.layer";
 
 interface DeckCameraState {
     longitude: number;
@@ -21,6 +22,14 @@ interface DeckCameraState {
     zoom: number;
     pitch: number;
     bearing: number;
+}
+
+interface TileGridOverlayGeometry {
+    polygon: [number, number][];
+    localMin: [number, number];
+    localSize: [number, number];
+    subdivisionsX: number[];
+    subdivisionsY: number[];
 }
 
 /**
@@ -34,6 +43,11 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
     private static readonly OSM_LAYER_KEY = "osm/tile-layer";
     private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
+    private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 240];
+    private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
+    // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
+    private static readonly TILE_GRID_DEBUG_SOLID = false;
 
     protected readonly _viewIndex: number;
     readonly canvasId: string;
@@ -62,6 +76,9 @@ export abstract class DeckMapView implements IRenderView {
     private tickHandle: number | null = null;
     private osmLayerEnabled = false;
     private osmLayerOpacity = -1;
+    private tileGridEnabled = false;
+    private tileGridMode: TileGridMode = "xyz";
+    private lastTileGridDiagnosticSignature = "";
 
     get viewIndex() {
         return this._viewIndex;
@@ -120,8 +137,10 @@ export abstract class DeckMapView implements IRenderView {
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
         this.osmLayerEnabled = false;
         this.osmLayerOpacity = -1;
+        this.tileGridEnabled = false;
         this.layerRegistry.destroy();
         this.mapService.clearAllTileVisualizations(this._viewIndex, this.getSceneHandle());
 
@@ -392,6 +411,36 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
+            this.stateService.viewTileBordersState
+                .pipe(this._viewIndex, distinctUntilChanged())
+                .subscribe(enabled => {
+                    this.tileGridEnabled = enabled;
+                    this.updateTileGridOverlay();
+                })
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridModeState
+                .pipe(this._viewIndex, distinctUntilChanged())
+                .subscribe(mode => {
+                    this.tileGridMode = mode;
+                    this.updateTileGridOverlay();
+                })
+        );
+        this.subscriptions.push(
+            this.stateService.layerVisibilityState
+                .pipe(this._viewIndex)
+                .subscribe(() => this.updateTileGridOverlay())
+        );
+        this.subscriptions.push(
+            this.stateService.layerZoomLevelState
+                .pipe(this._viewIndex)
+                .subscribe(() => this.updateTileGridOverlay())
+        );
+        this.subscriptions.push(
+            this.mapService.maps$.subscribe(() => this.updateTileGridOverlay())
+        );
+
+        this.subscriptions.push(
             this.mapService.moveToWgs84PositionTopic.subscribe(value => {
                 if (value.targetView !== this._viewIndex) {
                     return;
@@ -434,11 +483,6 @@ export abstract class DeckMapView implements IRenderView {
                     return;
                 }
                 tileVis.render(this.getSceneHandle())
-                    .then(wasRendered => {
-                        if (wasRendered) {
-                            this.requestRender();
-                        }
-                    })
                     .catch(error => {
                         console.error("Tile visualization render failed.", error);
                     })
@@ -454,7 +498,6 @@ export abstract class DeckMapView implements IRenderView {
                     return;
                 }
                 tileVis.destroy(this.getSceneHandle());
-                this.requestRender();
             })
         );
 
@@ -464,9 +507,12 @@ export abstract class DeckMapView implements IRenderView {
                     return;
                 }
                 tileVis.removeScene(this.getSceneHandle());
-                this.requestRender();
             })
         );
+
+        this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
+        this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
+        this.updateTileGridOverlay();
     }
 
     private onViewStateChange(rawViewState: any): void {
@@ -588,6 +634,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.stateService.osmEnabledState.getValue(this._viewIndex),
                 this.stateService.osmOpacityState.getValue(this._viewIndex) / 100
             );
+            this.updateTileGridOverlay();
         }
     }
 
@@ -690,6 +737,212 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer as any, -1000);
         this.osmLayerEnabled = true;
         this.osmLayerOpacity = clampedOpacity;
+    }
+
+    private updateTileGridOverlay(): void {
+        if (!this.deck || !this.tileGridEnabled) {
+            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.logTileGridDiagnostic("disabled");
+            return;
+        }
+        const levels = this.visibleMapLayerLevels();
+        if (!levels.length) {
+            this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.logTileGridDiagnostic("no-levels");
+            return;
+        }
+        const layer = this.createTileGridLayer(levels);
+        this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer as any, 490);
+        this.logTileGridDiagnostic(
+            `enabled mode=${this.tileGridMode} levels=[${levels.join(",")}] debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
+        );
+    }
+
+    private createTileGridLayer(levels: number[]): TileGridOverlayLayer {
+        const overlayGeometry = DeckMapView.TILE_GRID_DEBUG_SOLID
+            ? this.tileGridDebugGeometry(levels)
+            : this.tileGridOverlayGeometry(levels);
+        const layerId = DeckMapView.TILE_GRID_LAYER_KEY;
+        const overlayData = [{polygon: overlayGeometry.polygon}];
+        return new TileGridOverlayLayer({
+            id: layerId,
+            data: overlayData,
+            getPolygon: (datum: {polygon: [number, number][]}) => datum.polygon,
+            getFillColor: [0, 0, 0, 0],
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            filled: true,
+            stroked: false,
+            extruded: false,
+            wrapLongitude: true,
+            pickable: false,
+            levels,
+            gridMode: this.tileGridMode,
+            localMin: overlayGeometry.localMin,
+            localSize: overlayGeometry.localSize,
+            subdivisionsX: overlayGeometry.subdivisionsX,
+            subdivisionsY: overlayGeometry.subdivisionsY,
+            lineColor: DeckMapView.TILE_GRID_LINE_COLOR,
+            lineWidthPixels: DeckMapView.TILE_GRID_LINE_WIDTH_PX,
+            debugSolid: DeckMapView.TILE_GRID_DEBUG_SOLID,
+            parameters: {depthTest: false, cull: false}
+        } as any);
+    }
+
+    private visibleMapLayerLevels(): number[] {
+        const levels = new Set<number>();
+        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+            for (const layer of map.allFeatureLayers()) {
+                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                    continue;
+                }
+                const level = this.mapService.maps.getMapLayerLevel(this._viewIndex, mapId, layer.id);
+                if (!Number.isFinite(level)) {
+                    continue;
+                }
+                levels.add(Math.max(0, Math.floor(level)));
+            }
+        }
+        if (!levels.size) {
+            levels.add(Math.max(0, Math.min(22, Math.floor(this.viewState.zoom))));
+        }
+        return Array.from(levels.values()).sort((lhs, rhs) => lhs - rhs);
+    }
+
+    private tileGridDebugPolygon(): [number, number][] {
+        const halfWidth = 1.5;
+        const halfHeight = 1.0;
+        const west = this.normalizeLongitude(this.viewState.longitude - halfWidth);
+        const east = this.normalizeLongitude(this.viewState.longitude + halfWidth);
+        const south = Math.max(-85.05112878, this.viewState.latitude - halfHeight);
+        const north = Math.min(85.05112878, this.viewState.latitude + halfHeight);
+        return [
+            [west, south],
+            [west, north],
+            [east, north],
+            [east, south]
+        ];
+    }
+
+    private tileGridDebugGeometry(levels: number[]): TileGridOverlayGeometry {
+        const base = this.tileGridOverlayGeometry(levels);
+        return {
+            ...base,
+            polygon: this.tileGridDebugPolygon()
+        };
+    }
+
+    private tileGridOverlayGeometry(levels: number[]): TileGridOverlayGeometry {
+        const viewport = this.computeViewport();
+        if (!viewport) {
+            const polygon = tileGridOverlayData()[0].polygon;
+            return {
+                polygon,
+                localMin: [0, 0],
+                localSize: [1, 1],
+                subdivisionsX: levels.map(() => 1),
+                subdivisionsY: levels.map(() => 1)
+            };
+        }
+        const referenceLevel = levels.length ? levels[0] : Math.max(0, Math.floor(this.viewState.zoom));
+        const safeLevel = Math.max(0, Math.min(22, referenceLevel));
+
+        const viewportWest = viewport.west;
+        const viewportEast = viewport.west + viewport.width;
+        const viewportSouth = viewport.south;
+        const viewportNorth = viewport.south + viewport.height;
+
+        const westNorm = this.tileGridLonToNormX(viewportWest);
+        const eastNorm = this.tileGridLonToNormX(viewportEast);
+        const southNorm = this.tileGridLatToNormY(viewportSouth, this.tileGridMode);
+        const northNorm = this.tileGridLatToNormY(viewportNorth, this.tileGridMode);
+
+        const rowCount = Math.pow(2, safeLevel);
+        const colCount = this.tileGridMode === "nds" ? rowCount * 2 : rowCount;
+
+        const normMinX = Math.min(westNorm, eastNorm);
+        const normMaxX = Math.max(westNorm, eastNorm);
+        const normMinY = Math.min(northNorm, southNorm);
+        const normMaxY = Math.max(northNorm, southNorm);
+        const marginTiles = 2;
+
+        const minCol = Math.floor(normMinX * colCount) - marginTiles;
+        const maxCol = Math.ceil(normMaxX * colCount) + marginTiles;
+        const minRow = Math.max(0, Math.floor(normMinY * rowCount) - marginTiles);
+        const maxRow = Math.min(rowCount, Math.ceil(normMaxY * rowCount) + marginTiles);
+
+        const west = this.tileGridNormXToLon(minCol / colCount);
+        const east = this.tileGridNormXToLon(maxCol / colCount);
+        const north = this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode);
+        const south = this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode);
+        const alignedMinX = minCol / colCount;
+        const alignedMaxX = maxCol / colCount;
+        const alignedMinY = minRow / rowCount;
+        const alignedMaxY = maxRow / rowCount;
+        const localMin: [number, number] = [alignedMinX, alignedMinY];
+        const localSize: [number, number] = [
+            Math.max(1e-6, alignedMaxX - alignedMinX),
+            Math.max(1e-6, alignedMaxY - alignedMinY)
+        ];
+        const subdivisionsX = levels.map(level => {
+            const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
+            const colsForLevel = this.tileGridMode === "nds" ? rowsForLevel * 2 : rowsForLevel;
+            return Math.max(1, Math.round(localSize[0] * colsForLevel));
+        });
+        const subdivisionsY = levels.map(level => {
+            const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
+            return Math.max(1, Math.round(localSize[1] * rowsForLevel));
+        });
+        const polygon: [number, number][] = [
+            [west, south],
+            [west, north],
+            [east, north],
+            [east, south]
+        ];
+        return {
+            polygon,
+            localMin,
+            localSize,
+            subdivisionsX,
+            subdivisionsY
+        };
+    }
+
+    private tileGridLonToNormX(lon: number): number {
+        return (lon + 180.0) / 360.0;
+    }
+
+    private tileGridNormXToLon(normX: number): number {
+        return normX * 360.0 - 180.0;
+    }
+
+    private tileGridLatToNormY(lat: number, mode: TileGridMode): number {
+        if (mode === "nds") {
+            const clampedLat = Math.max(-90.0, Math.min(90.0, lat));
+            return (90.0 - clampedLat) / 180.0;
+        }
+        const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+        const sinLat = Math.sin((clampedLat * Math.PI) / 180.0);
+        const mercatorY = 0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI);
+        return Math.max(0, Math.min(1, mercatorY));
+    }
+
+    private tileGridNormYToLat(normY: number, mode: TileGridMode): number {
+        const clampedY = Math.max(0, Math.min(1, normY));
+        if (mode === "nds") {
+            return 90.0 - clampedY * 180.0;
+        }
+        const exponent = Math.exp(Math.PI * (1 - 2 * clampedY));
+        const latRad = 2 * Math.atan(exponent) - Math.PI / 2;
+        return (latRad * 180.0) / Math.PI;
+    }
+
+    private logTileGridDiagnostic(message: string): void {
+        const signature = `view=${this._viewIndex} ${message}`;
+        if (signature === this.lastTileGridDiagnosticSignature) {
+            return;
+        }
+        this.lastTileGridDiagnosticSignature = signature;
+        console.info(`[DeckTileGrid] ${signature}`);
     }
 
     private normalizeLongitude(lon: number): number {

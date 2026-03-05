@@ -1,6 +1,6 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapDataService} from "./map.service";
-import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
+import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
 import {Dialog} from "primeng/dialog";
 import {coreLib} from "../integrations/wasm";
 import {MenuItem} from "primeng/api";
@@ -66,6 +66,14 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                             <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                 {{ tileBordersEnabled[index] ? "border_outer" : "border_clear" }}
                             </span>
+                        </p-button>
+                        <p-button onEnterClick (click)="toggleViewTileGridMode(index)"
+                                  [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-primary' : 'map-controls-button p-button-secondary'"
+                                  [style]="{'min-width': '3.5em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                  [disabled]="!tileBordersEnabled[index]"
+                                  [label]="tileGridModes[index].toUpperCase()"
+                                  pTooltip="Switch tile grid mode (XYZ/NDS)"
+                                  tooltipPosition="bottom" tabindex="0">
                         </p-button>
                         <p-divider layout="vertical" styleClass="hidden md:flex"></p-divider>
                         <div class="osm-controls">
@@ -257,6 +265,7 @@ export class MapPanelComponent {
     osmEnabled: boolean[] = [true];
     osmOpacityValue: number[] = [30];
     tileBordersEnabled: boolean[] = [];
+    tileGridModes: TileGridMode[] = [];
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
@@ -296,6 +305,8 @@ export class MapPanelComponent {
                 const numViews = this.stateService.numViews;
                 this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
                     this.mapService.maps.getViewTileBorderState(index));
+                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                    this.mapService.maps.getViewTileGridMode(index));
             })
         );
 
@@ -304,11 +315,13 @@ export class MapPanelComponent {
                 this.osmEnabled = [];
                 this.osmOpacityValue = [];
                 this.tileBordersEnabled = [];
+                this.tileGridModes = [];
                 const viewIndices = Array.from({length: numViews}, (_, i) => i);
                 viewIndices.forEach(viewIndex => {
                     this.osmEnabled.push(this.stateService.osmEnabledState.getValue(viewIndex));
                     this.osmOpacityValue.push(this.stateService.osmOpacityState.getValue(viewIndex));
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
+                    this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
                 while (this.mapsCollapsed.length < viewIndices.length) {
                     this.mapsCollapsed.push(false);
@@ -344,6 +357,22 @@ export class MapPanelComponent {
                 const numViews = this.stateService.numViews;
                 this.osmOpacityValue = Array.from({length: numViews}, (_, index) =>
                     this.stateService.osmOpacityState.getValue(index));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.viewTileBordersState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.viewTileBordersState.getValue(index));
+            })
+        );
+
+        this.subscriptions.push(
+            this.stateService.viewTileGridModeState.appState.subscribe(_ => {
+                const numViews = this.stateService.numViews;
+                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                    this.stateService.viewTileGridModeState.getValue(index));
             })
         );
 
@@ -544,6 +573,13 @@ export class MapPanelComponent {
     toggleViewTileBorders(viewIndex: number) {
         this.mapService.toggleViewTileBorderVisibility(viewIndex);
         this.tileBordersEnabled[viewIndex] = this.mapService.maps.getViewTileBorderState(viewIndex);
+    }
+
+    toggleViewTileGridMode(viewIndex: number) {
+        const currentMode = this.tileGridModes[viewIndex] ?? "xyz";
+        const nextMode: TileGridMode = currentMode === "xyz" ? "nds" : "xyz";
+        this.tileGridModes[viewIndex] = nextMode;
+        this.mapService.setViewTileGridMode(viewIndex, nextMode);
     }
 
     onLayerLevelChanged(event: Event, viewIndex: number, mapName: string, layerName: string) {

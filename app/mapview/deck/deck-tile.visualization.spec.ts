@@ -420,50 +420,6 @@ describe("DeckTileVisualization", () => {
         expect(registry.size).toBe(1);
     });
 
-    it("renders tile borders when enabled", async () => {
-        const deck = new DeckStub();
-        const registry = new DeckLayerRegistry(deck);
-        const tile = {
-            mapTileKey: "Island-6-Local/Lane/42",
-            layerName: "Lane",
-            tileId: 42n,
-            hasData: () => false,
-            numFeatures: 0,
-            stats: new Map<string, number[]>()
-        } as any;
-        const style = {
-            name: () => "test-style",
-            isDeleted: () => false
-        } as any;
-        const pointMergeService = new PointMergeService();
-
-        const visu = new DeckTileVisualization(
-            0,
-            tile,
-            pointMergeService,
-            style,
-            "",
-            true,
-            null,
-            {value: 0} as any,
-            [],
-            true
-        ) as any;
-
-        visu.renderWasm = async () => null;
-        visu.renderWasmOnMainThread = async () => null;
-
-        await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
-        registry.flush();
-
-        expect(deck.commits).toHaveLength(1);
-        expect(deck.commits[0]).toHaveLength(2);
-        const layerIds = deck.commits[0].map(layer => layer.id);
-        expect(layerIds.some(id => id.includes("/tile-empty-background"))).toBe(true);
-        expect(layerIds.some(id => id.includes("/tile-border"))).toBe(true);
-        expect(registry.size).toBe(2);
-    });
-
     it("records render-time samples in tile stats using legacy-compatible keys", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
