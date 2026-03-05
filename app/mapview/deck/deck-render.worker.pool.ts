@@ -6,14 +6,14 @@ import {
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
 
-const AUTO_WORKER_CAP = 8;
-const AUTO_WORKER_FALLBACK = 4;
+const AUTO_WORKER_MIN = 2;
+const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
 const WORKER_OVERRIDE_CAP = 32;
 
 export interface DeckPathRenderRequest {
     viewIndex: number;
     tileKey: string;
-    tileBlob: Uint8Array;
+    tileStageBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;
@@ -52,7 +52,6 @@ export interface DeckPathRenderBuffers {
 }
 
 export interface DeckRenderWorkerSettings {
-    enabled: boolean;
     workerCountOverride: number | null;
 }
 
@@ -285,7 +284,6 @@ export class DeckRenderWorkerPool {
 }
 
 let settings: DeckRenderWorkerSettings = {
-    enabled: false,
     workerCountOverride: null
 };
 
@@ -302,11 +300,15 @@ function sanitizeWorkerOverride(workerCountOverride: number | null): number | nu
 }
 
 function resolveAutoWorkerCount(): number {
-    const rawConcurrency = Number((globalThis as any).navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK);
-    if (!Number.isFinite(rawConcurrency) || rawConcurrency < 1) {
-        return AUTO_WORKER_FALLBACK;
-    }
-    return Math.max(1, Math.min(Math.floor(rawConcurrency), AUTO_WORKER_CAP));
+    const rawCpuCount = Number(
+        (globalThis as any).navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK_CPU_COUNT
+    );
+    const normalizedCpuCount =
+        Number.isFinite(rawCpuCount) && rawCpuCount >= 1
+            ? Math.floor(rawCpuCount)
+            : AUTO_WORKER_FALLBACK_CPU_COUNT;
+    const halfCpuCount = Math.floor(normalizedCpuCount / 2);
+    return Math.max(AUTO_WORKER_MIN, Math.min(halfCpuCount, WORKER_OVERRIDE_CAP));
 }
 
 function resolveConfiguredWorkerCount(): number {
@@ -318,20 +320,14 @@ function resolveConfiguredWorkerCount(): number {
 
 export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings): void {
     const normalized: DeckRenderWorkerSettings = {
-        enabled: !!next.enabled,
         workerCountOverride: sanitizeWorkerOverride(next.workerCountOverride)
     };
-    const changed = settings.enabled !== normalized.enabled ||
-        settings.workerCountOverride !== normalized.workerCountOverride;
+    const changed = settings.workerCountOverride !== normalized.workerCountOverride;
     settings = normalized;
     if (changed && singleton) {
         singleton.dispose("Deck render worker pool reconfigured.");
         singleton = null;
     }
-}
-
-export function isDeckRenderWorkerPoolEnabled(): boolean {
-    return settings.enabled;
 }
 
 export function deckRenderWorkerPool(): DeckRenderWorkerPool {

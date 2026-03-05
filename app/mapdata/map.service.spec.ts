@@ -152,7 +152,6 @@ class AppStateServiceStub {
     selectionState = new BehaviorSubject<any[]>([]);
 
     tilesLoadLimitState = new BehaviorSubject<number>(8);
-    deckStyleWorkersEnabledState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
@@ -163,10 +162,6 @@ class AppStateServiceStub {
 
     get tilesLoadLimit() {
         return this.tilesLoadLimitState.getValue();
-    }
-
-    get deckStyleWorkersEnabled() {
-        return this.deckStyleWorkersEnabledState.getValue();
     }
 
     get deckStyleWorkersOverride() {
@@ -367,7 +362,7 @@ describe('MapDataService', () => {
             prefersHighFidelity: false,
             maxLowFiLod: null,
             isDirty: vi.fn().mockReturnValue(true),
-            renderRank: vi.fn().mockReturnValue([0, 0, 0]),
+            renderRank: vi.fn().mockReturnValue(0),
             updateStatus: vi.fn(),
         } as any;
         const disabledVisu = {
@@ -377,7 +372,7 @@ describe('MapDataService', () => {
             prefersHighFidelity: false,
             maxLowFiLod: null,
             isDirty: vi.fn().mockReturnValue(false),
-            renderRank: vi.fn().mockReturnValue([1, 0, 0]),
+            renderRank: vi.fn().mockReturnValue(1),
             updateStatus: vi.fn(),
         } as any;
 

@@ -92,18 +92,41 @@ function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
     }) as Uint8Array;
 }
 
+function attachOverlayChain(baseLayer: any, overlays: any[]): void {
+    const maybeAttach = baseLayer?.attachOverlay;
+    if (typeof maybeAttach !== "function") {
+        return;
+    }
+    for (const overlay of overlays) {
+        maybeAttach.call(baseLayer, overlay);
+    }
+}
+
 function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
     const totalStart = performance.now();
     let deserializeMs = 0;
-    let tile: any = null;
+    let baseLayer: any = null;
+    const overlays: any[] = [];
     let deckVisu: any = null;
     try {
         const parser = getOrCreateParser(task);
         const style = getOrCreateStyle(task.styleSource);
         const deserializeStart = performance.now();
-        tile = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), task.tileBlob) as any;
+        const deserializedLayers: any[] = [];
+        for (const tileBlob of task.tileStageBlobs) {
+            const layer = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), tileBlob) as any;
+            if (layer) {
+                deserializedLayers.push(layer);
+            }
+        }
         deserializeMs = performance.now() - deserializeStart;
-        const vertexCount = Math.max(0, Math.floor(Number(tile.numVertices())));
+        if (!deserializedLayers.length) {
+            throw new Error("Worker render requested without any deserializable tile layers.");
+        }
+        baseLayer = deserializedLayers[0];
+        overlays.push(...deserializedLayers.slice(1));
+        attachOverlayChain(baseLayer, overlays);
+        const vertexCount = Math.max(0, Math.floor(Number(baseLayer.numVertices())));
 
         deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
             task.viewIndex,
@@ -128,7 +151,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             (deckVisu as any).setGeometryOutputMode(normalizedOutputMode);
         }
         const renderStart = performance.now();
-        deckVisu.addTileFeatureLayer(tile);
+        deckVisu.addTileFeatureLayer(baseLayer);
         deckVisu.run();
 
         const pointPositions = readRawBytes(deckVisu, "pointPositionsRaw");
@@ -184,8 +207,13 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         if (deckVisu && typeof deckVisu.delete === "function") {
             deckVisu.delete();
         }
-        if (tile && typeof tile.delete === "function") {
-            tile.delete();
+        for (const overlay of overlays) {
+            if (overlay && typeof overlay.delete === "function") {
+                overlay.delete();
+            }
+        }
+        if (baseLayer && typeof baseLayer.delete === "function") {
+            baseLayer.delete();
         }
     }
 }

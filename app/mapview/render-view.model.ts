@@ -39,7 +39,7 @@ export interface ITileVisualization {
     render(sceneHandle: IRenderSceneHandle): Promise<boolean>;
     destroy(sceneHandle: IRenderSceneHandle): void;
     isDirty(): boolean;
-    renderRank(): readonly number[];
+    renderRank(): number;
     updateStatus(renderQueued?: boolean): void;
     setStyleOption(optionId: string, value: string | number | boolean): boolean;
 }

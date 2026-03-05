@@ -11,7 +11,7 @@ export interface DeckPathRenderTask {
     taskId: string;
     viewIndex: number;
     tileKey: string;
-    tileBlob: Uint8Array;
+    tileStageBlobs: Uint8Array[];
     fieldDictBlob: Uint8Array;
     dataSourceInfoBlob: Uint8Array;
     nodeId: string;

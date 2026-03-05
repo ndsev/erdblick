@@ -174,14 +174,12 @@ export class MapDataService {
 
         const applyDeckWorkerSettings = () => {
             configureDeckRenderWorkerSettings({
-                enabled: this.stateService.deckStyleWorkersEnabled,
                 workerCountOverride: this.stateService.deckStyleWorkersOverride
                     ? this.stateService.deckStyleWorkersCount
                     : null
             });
         };
         applyDeckWorkerSettings();
-        this.stateService.deckStyleWorkersEnabledState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -537,29 +535,35 @@ export class MapDataService {
         );
     }
 
-    private compareVisualizationRank(lhs: ITileVisualization, rhs: ITileVisualization): number {
-        const lhsRank = lhs.renderRank();
-        const rhsRank = rhs.renderRank();
-        const rankLength = Math.max(lhsRank.length, rhsRank.length);
-        for (let i = 0; i < rankLength; i++) {
-            const lhsValue = lhsRank[i] ?? Number.MAX_SAFE_INTEGER;
-            const rhsValue = rhsRank[i] ?? Number.MAX_SAFE_INTEGER;
-            if (lhsValue !== rhsValue) {
-                return lhsValue - rhsValue;
-            }
-        }
-        const tileKeyCompare = lhs.tile.mapTileKey.localeCompare(rhs.tile.mapTileKey);
-        if (tileKeyCompare !== 0) {
-            return tileKeyCompare;
-        }
-        return lhs.styleId.localeCompare(rhs.styleId);
-    }
-
     private sortVisualizationQueue(viewState: ViewVisualizationState): void {
-        if (viewState.visualizationQueue.length < 2) {
+        const queue = viewState.visualizationQueue;
+        if (queue.length < 2) {
             return;
         }
-        viewState.visualizationQueue.sort((lhs, rhs) => this.compareVisualizationRank(lhs, rhs));
+        const rankedQueue = queue.map((visualization, index) => ({
+            visualization,
+            rank: visualization.renderRank(),
+            tileKey: visualization.tile.mapTileKey,
+            styleId: visualization.styleId,
+            index
+        }));
+        rankedQueue.sort((lhs, rhs) => {
+            if (lhs.rank !== rhs.rank) {
+                return lhs.rank - rhs.rank;
+            }
+            const tileKeyCompare = lhs.tileKey.localeCompare(rhs.tileKey);
+            if (tileKeyCompare !== 0) {
+                return tileKeyCompare;
+            }
+            const styleIdCompare = lhs.styleId.localeCompare(rhs.styleId);
+            if (styleIdCompare !== 0) {
+                return styleIdCompare;
+            }
+            return lhs.index - rhs.index;
+        });
+        for (let i = 0; i < rankedQueue.length; i++) {
+            queue[i] = rankedQueue[i].visualization;
+        }
     }
 
     private queueVisualization(viewState: ViewVisualizationState, visualization: ITileVisualization): void {
@@ -1820,15 +1824,40 @@ export class MapDataService {
     }
 
     getPrioritisedTiles(viewIndex: number) {
-        let tiles = new Array<[number, FeatureTile]>();
+        const viewState = this.viewVisualizationState[viewIndex];
+        let tiles = new Array<{
+            visibilityRank: number;
+            renderOrderRank: number;
+            priorityRank: number;
+            tile: FeatureTile;
+        }>();
         for (const [_, tile] of this.loadedTileLayers) {
             if (!tile.hasData()) {
                 continue;
             }
-            tiles.push([coreLib.getTilePriorityById(this.viewVisualizationState[viewIndex].viewport, tile.tileId), tile]);
+            const isVisibleInView = this.viewShowsFeatureTile(viewIndex, tile);
+            const renderOrderRank = viewState.getTileOrder(tile.tileId);
+            const priorityRank = coreLib.getTilePriorityById(viewState.viewport, tile.tileId);
+            tiles.push({
+                visibilityRank: isVisibleInView ? 0 : 1,
+                renderOrderRank,
+                priorityRank,
+                tile
+            });
         }
-        tiles.sort((a, b) => b[0] - a[0]);
-        return tiles.map(val => val[1]);
+        tiles.sort((lhs, rhs) => {
+            if (lhs.visibilityRank !== rhs.visibilityRank) {
+                return lhs.visibilityRank - rhs.visibilityRank;
+            }
+            if (lhs.renderOrderRank !== rhs.renderOrderRank) {
+                return lhs.renderOrderRank - rhs.renderOrderRank;
+            }
+            if (lhs.priorityRank !== rhs.priorityRank) {
+                return rhs.priorityRank - lhs.priorityRank;
+            }
+            return lhs.tile.mapTileKey.localeCompare(rhs.tile.mapTileKey);
+        });
+        return tiles.map(val => val.tile);
     }
 
     getFeatureTile(tileKey: string): FeatureTile | null {

@@ -14,7 +14,14 @@ import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 import {environment} from "../../environments/environment";
 import {MergedPointsTile} from "../pointmerge.service";
-import {TileGridOverlayLayer, tileGridOverlayData} from "./deck-tile-grid-overlay.layer";
+import {coreLib} from "../../integrations/wasm";
+import {
+    TILE_STATE_KIND_EMPTY,
+    TILE_STATE_KIND_ERROR,
+    TileGridOverlayLayer,
+    tileGridOverlayData
+} from "./deck-tile-grid-overlay.layer";
+import {SearchResultClusterLayer, SearchResultClusterPoint} from "./deck-search-result-cluster.layer";
 
 interface DeckCameraState {
     longitude: number;
@@ -32,6 +39,27 @@ interface TileGridOverlayGeometry {
     subdivisionsY: number[];
 }
 
+interface VisibleLayerRef {
+    mapId: string;
+    layerId: string;
+}
+
+interface TileGridLevelExtent {
+    level: number;
+    rowCount: number;
+    colCount: number;
+    minCol: number;
+    maxCol: number;
+    minRow: number;
+    maxRow: number;
+    width: number;
+    height: number;
+    west: number;
+    east: number;
+    south: number;
+    north: number;
+}
+
 /**
  * Minimal deck.gl map view scaffold used to wire renderer switching and camera-state sync.
  * Detailed deck tile rendering is introduced in later migration tasks.
@@ -44,8 +72,12 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly OSM_LAYER_KEY = "osm/tile-layer";
     private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
+    private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
+    private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 240];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
+    private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
+    private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
     private static readonly TILE_GRID_DEBUG_SOLID = false;
 
@@ -79,6 +111,11 @@ export abstract class DeckMapView implements IRenderView {
     private tileGridEnabled = false;
     private tileGridMode: TileGridMode = "xyz";
     private lastTileGridDiagnosticSignature = "";
+    private tileStateLayerKeys = new Set<string>();
+    private tileGridOverlayUpdateRaf: number | null = null;
+    private tileGridOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    private searchResultsOverlayUpdateRaf: number | null = null;
+    private searchResultsOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     get viewIndex() {
         return this._viewIndex;
@@ -134,10 +171,14 @@ export abstract class DeckMapView implements IRenderView {
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions.length = 0;
         this.stopTickLoop();
+        this.cancelTileGridOverlayUpdateScheduling();
+        this.cancelSearchResultsOverlayScheduling();
         this.tickCallbacks.clear();
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+        this.removeTileStateLayers();
         this.osmLayerEnabled = false;
         this.osmLayerOpacity = -1;
         this.tileGridEnabled = false;
@@ -415,7 +456,7 @@ export abstract class DeckMapView implements IRenderView {
                 .pipe(this._viewIndex, distinctUntilChanged())
                 .subscribe(enabled => {
                     this.tileGridEnabled = enabled;
-                    this.updateTileGridOverlay();
+                    this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
@@ -423,21 +464,27 @@ export abstract class DeckMapView implements IRenderView {
                 .pipe(this._viewIndex, distinctUntilChanged())
                 .subscribe(mode => {
                     this.tileGridMode = mode;
-                    this.updateTileGridOverlay();
+                    this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
             this.stateService.layerVisibilityState
                 .pipe(this._viewIndex)
-                .subscribe(() => this.updateTileGridOverlay())
+                .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
             this.stateService.layerZoomLevelState
                 .pipe(this._viewIndex)
-                .subscribe(() => this.updateTileGridOverlay())
+                .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.mapService.maps$.subscribe(() => this.updateTileGridOverlay())
+            this.mapService.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
+        );
+        this.subscriptions.push(
+            this.mapService.statsDialogNeedsUpdate.subscribe(() => this.scheduleTileGridOverlayDataRefresh())
+        );
+        this.subscriptions.push(
+            this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())
         );
 
         this.subscriptions.push(
@@ -512,7 +559,8 @@ export abstract class DeckMapView implements IRenderView {
 
         this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
         this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
-        this.updateTileGridOverlay();
+        this.scheduleTileGridOverlayUpdate();
+        this.scheduleSearchResultsOverlayUpdate();
     }
 
     private onViewStateChange(rawViewState: any): void {
@@ -634,7 +682,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.stateService.osmEnabledState.getValue(this._viewIndex),
                 this.stateService.osmOpacityState.getValue(this._viewIndex) / 100
             );
-            this.updateTileGridOverlay();
+            this.scheduleTileGridOverlayUpdate();
         }
     }
 
@@ -739,22 +787,154 @@ export abstract class DeckMapView implements IRenderView {
         this.osmLayerOpacity = clampedOpacity;
     }
 
+    private scheduleTileGridOverlayUpdate(): void {
+        if (this.tileGridOverlayUpdateRaf !== null) {
+            return;
+        }
+        this.tileGridOverlayUpdateRaf = requestAnimationFrame(() => {
+            this.tileGridOverlayUpdateRaf = null;
+            this.updateTileGridOverlay();
+        });
+    }
+
+    private scheduleTileGridOverlayDataRefresh(): void {
+        if (!this.tileGridEnabled) {
+            return;
+        }
+        if (this.tileGridOverlayDataRefreshTimer !== null) {
+            return;
+        }
+        this.tileGridOverlayDataRefreshTimer = setTimeout(() => {
+            this.tileGridOverlayDataRefreshTimer = null;
+            this.scheduleTileGridOverlayUpdate();
+        }, 120);
+    }
+
+    private cancelTileGridOverlayUpdateScheduling(): void {
+        if (this.tileGridOverlayUpdateRaf !== null) {
+            cancelAnimationFrame(this.tileGridOverlayUpdateRaf);
+            this.tileGridOverlayUpdateRaf = null;
+        }
+        if (this.tileGridOverlayDataRefreshTimer !== null) {
+            clearTimeout(this.tileGridOverlayDataRefreshTimer);
+            this.tileGridOverlayDataRefreshTimer = null;
+        }
+    }
+
+    private scheduleSearchResultsOverlayUpdate(): void {
+        if (this.searchResultsOverlayUpdateRaf !== null) {
+            return;
+        }
+        this.searchResultsOverlayUpdateRaf = requestAnimationFrame(() => {
+            this.searchResultsOverlayUpdateRaf = null;
+            this.updateSearchResultsOverlay();
+        });
+    }
+
+    private scheduleSearchResultsOverlayDataRefresh(): void {
+        if (this.searchResultsOverlayDataRefreshTimer !== null) {
+            return;
+        }
+        this.searchResultsOverlayDataRefreshTimer = setTimeout(() => {
+            this.searchResultsOverlayDataRefreshTimer = null;
+            this.scheduleSearchResultsOverlayUpdate();
+        }, 120);
+    }
+
+    private cancelSearchResultsOverlayScheduling(): void {
+        if (this.searchResultsOverlayUpdateRaf !== null) {
+            cancelAnimationFrame(this.searchResultsOverlayUpdateRaf);
+            this.searchResultsOverlayUpdateRaf = null;
+        }
+        if (this.searchResultsOverlayDataRefreshTimer !== null) {
+            clearTimeout(this.searchResultsOverlayDataRefreshTimer);
+            this.searchResultsOverlayDataRefreshTimer = null;
+        }
+    }
+
+    private updateSearchResultsOverlay(): void {
+        if (!this.deck) {
+            this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+            return;
+        }
+        const points = this.currentSearchResultPoints();
+        if (!points.length) {
+            this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+            return;
+        }
+        const layer = new SearchResultClusterLayer({
+            id: DeckMapView.SEARCH_RESULTS_LAYER_KEY,
+            data: points,
+            pickable: false,
+            sizeScale: 40,
+            getPosition: (point: SearchResultClusterPoint) => point.coordinates,
+            iconAtlas: this.featureSearchService.getSearchClusterIconAtlasUrl(),
+            iconMapping: this.featureSearchService.getSearchClusterIconMappingUrl()
+        });
+        this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer as any, 650);
+    }
+
+    private currentSearchResultPoints(): SearchResultClusterPoint[] {
+        const points: SearchResultClusterPoint[] = [];
+        const seenFeatureKeys = new Set<string>();
+        for (const tileResult of this.featureSearchService.resultsPerTile.values()) {
+            for (const [mapTileKey, featureId, position] of tileResult.matches) {
+                const cartographicRad = position?.cartographicRad;
+                if (!cartographicRad) {
+                    continue;
+                }
+                const lon = GeoMath.toDegrees(cartographicRad.longitude);
+                const lat = GeoMath.toDegrees(cartographicRad.latitude);
+                if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+                    continue;
+                }
+                let mapId = "";
+                let layerId = "";
+                try {
+                    const parsed = coreLib.parseMapTileKey(mapTileKey);
+                    mapId = String(parsed[0]);
+                    layerId = String(parsed[1]);
+                } catch (_error) {
+                    const parts = mapTileKey.split("/");
+                    mapId = parts[0] ?? "";
+                    layerId = parts[1] ?? "";
+                }
+                const featureKey = `${mapId}/${layerId}/${featureId}`;
+                if (seenFeatureKeys.has(featureKey)) {
+                    continue;
+                }
+                seenFeatureKeys.add(featureKey);
+                points.push({
+                    coordinates: [lon, lat],
+                    mapId,
+                    layerId,
+                    featureId,
+                    featureKey
+                });
+            }
+        }
+        return points;
+    }
+
     private updateTileGridOverlay(): void {
         if (!this.deck || !this.tileGridEnabled) {
             this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileStateLayers();
             this.logTileGridDiagnostic("disabled");
             return;
         }
         const levels = this.visibleMapLayerLevels();
         if (!levels.length) {
             this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+            this.removeTileStateLayers();
             this.logTileGridDiagnostic("no-levels");
             return;
         }
+        const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels);
         const layer = this.createTileGridLayer(levels);
         this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer as any, 490);
         this.logTileGridDiagnostic(
-            `enabled mode=${this.tileGridMode} levels=[${levels.join(",")}] debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
+            `enabled mode=${this.tileGridMode} levels=[${levels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
         );
     }
 
@@ -788,6 +968,86 @@ export abstract class DeckMapView implements IRenderView {
         } as any);
     }
 
+    private updateTileStateOverlays(levels: number[]): {layerCount: number; coloredTileCount: number} {
+        const viewport = this.computeViewport();
+        if (!viewport) {
+            this.removeTileStateLayers();
+            return {layerCount: 0, coloredTileCount: 0};
+        }
+
+        const visibleLayersByLevel = this.visibleMapLayersByLevel(levels);
+        const nextLayerKeys = new Set<string>();
+        const tileLimitPerView = this.tileLimitPerView();
+        let coloredTileCount = 0;
+        for (const level of levels) {
+            const visibleLayers = visibleLayersByLevel.get(level) ?? [];
+            if (!visibleLayers.length) {
+                continue;
+            }
+            const extent = this.tileGridExtentForLevel(level, viewport);
+            if (!extent) {
+                continue;
+            }
+
+            const pixels = new Uint8ClampedArray(extent.width * extent.height * 4);
+            const visibleTileIds = coreLib.getTileIds(viewport, level, tileLimitPerView) as bigint[];
+            for (const tileId of visibleTileIds) {
+                const stateKind = this.tileStateKindForTile(tileId, visibleLayers);
+                if (stateKind === 0) {
+                    continue;
+                }
+                const cell = this.tileGridCellForTile(tileId, extent);
+                if (!cell) {
+                    continue;
+                }
+                const pixelIndex = (cell.row * extent.width + cell.col) * 4;
+                if (stateKind === TILE_STATE_KIND_ERROR) {
+                    pixels[pixelIndex + 0] = DeckMapView.TILE_STATE_ERROR_COLOR[0];
+                    pixels[pixelIndex + 1] = DeckMapView.TILE_STATE_ERROR_COLOR[1];
+                    pixels[pixelIndex + 2] = DeckMapView.TILE_STATE_ERROR_COLOR[2];
+                    pixels[pixelIndex + 3] = DeckMapView.TILE_STATE_ERROR_COLOR[3];
+                } else if (stateKind === TILE_STATE_KIND_EMPTY) {
+                    pixels[pixelIndex + 0] = DeckMapView.TILE_STATE_EMPTY_COLOR[0];
+                    pixels[pixelIndex + 1] = DeckMapView.TILE_STATE_EMPTY_COLOR[1];
+                    pixels[pixelIndex + 2] = DeckMapView.TILE_STATE_EMPTY_COLOR[2];
+                    pixels[pixelIndex + 3] = DeckMapView.TILE_STATE_EMPTY_COLOR[3];
+                }
+                coloredTileCount += 1;
+            }
+
+            const imageData = new ImageData(pixels, extent.width, extent.height);
+            const layerKey = `${DeckMapView.TILE_STATE_LAYER_KEY}/${level}`;
+            const layer = new BitmapLayer({
+                id: layerKey,
+                data: null,
+                image: imageData,
+                bounds: [extent.west, extent.south, extent.east, extent.north],
+                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                wrapLongitude: false,
+                opacity: 1.0,
+                pickable: false,
+                textureParameters: {
+                    minFilter: "nearest",
+                    magFilter: "nearest",
+                    mipmapFilter: "nearest",
+                    addressModeU: "clamp-to-edge",
+                    addressModeV: "clamp-to-edge"
+                },
+                parameters: {depthTest: false}
+            } as any);
+            this.layerRegistry.upsert(layerKey, layer as any, 360);
+            nextLayerKeys.add(layerKey);
+        }
+
+        for (const key of this.tileStateLayerKeys) {
+            if (!nextLayerKeys.has(key)) {
+                this.layerRegistry.remove(key);
+            }
+        }
+        this.tileStateLayerKeys = nextLayerKeys;
+        return {layerCount: nextLayerKeys.size, coloredTileCount};
+    }
+
     private visibleMapLayerLevels(): number[] {
         const levels = new Set<number>();
         for (const [mapId, map] of this.mapService.maps.maps.entries()) {
@@ -806,6 +1066,166 @@ export abstract class DeckMapView implements IRenderView {
             levels.add(Math.max(0, Math.min(22, Math.floor(this.viewState.zoom))));
         }
         return Array.from(levels.values()).sort((lhs, rhs) => lhs - rhs);
+    }
+
+    private visibleMapLayersByLevel(levels: number[]): Map<number, VisibleLayerRef[]> {
+        const levelSet = new Set(levels);
+        const result = new Map<number, VisibleLayerRef[]>();
+        for (const level of levels) {
+            result.set(level, []);
+        }
+
+        for (const [mapId, map] of this.mapService.maps.maps.entries()) {
+            for (const layer of map.allFeatureLayers()) {
+                if (!this.mapService.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
+                    continue;
+                }
+                const level = this.mapService.maps.getMapLayerLevel(this._viewIndex, mapId, layer.id);
+                if (!Number.isFinite(level)) {
+                    continue;
+                }
+                const normalizedLevel = Math.max(0, Math.floor(level));
+                if (!levelSet.has(normalizedLevel)) {
+                    continue;
+                }
+                const list = result.get(normalizedLevel);
+                if (!list) {
+                    continue;
+                }
+                list.push({mapId, layerId: layer.id});
+            }
+        }
+        return result;
+    }
+
+    private removeTileStateLayers(): void {
+        for (const key of this.tileStateLayerKeys) {
+            this.layerRegistry.remove(key);
+        }
+        this.tileStateLayerKeys.clear();
+    }
+
+    private tileGridExtentForLevel(level: number, viewport: Viewport): TileGridLevelExtent | null {
+        if (!Number.isFinite(level) || level < 0) {
+            return null;
+        }
+        const safeLevel = Math.max(0, Math.min(22, Math.floor(level)));
+        const viewportWest = viewport.west;
+        const viewportEast = viewport.west + viewport.width;
+        const viewportSouth = viewport.south;
+        const viewportNorth = viewport.south + viewport.height;
+        const westNorm = this.tileGridLonToNormX(viewportWest);
+        const eastNorm = this.tileGridLonToNormX(viewportEast);
+        const southNorm = this.tileGridLatToNormY(viewportSouth, this.tileGridMode);
+        const northNorm = this.tileGridLatToNormY(viewportNorth, this.tileGridMode);
+        const rowCount = Math.pow(2, safeLevel);
+        const colCount = this.tileGridMode === "nds" ? rowCount * 2 : rowCount;
+        const normMinX = Math.min(westNorm, eastNorm);
+        const normMaxX = Math.max(westNorm, eastNorm);
+        const normMinY = Math.min(northNorm, southNorm);
+        const normMaxY = Math.max(northNorm, southNorm);
+        const marginTiles = 2;
+        const minCol = Math.floor(normMinX * colCount) - marginTiles;
+        const maxCol = Math.ceil(normMaxX * colCount) + marginTiles;
+        const minRow = Math.max(0, Math.floor(normMinY * rowCount) - marginTiles);
+        const maxRow = Math.min(rowCount, Math.ceil(normMaxY * rowCount) + marginTiles);
+        const width = Math.max(1, maxCol - minCol);
+        const height = Math.max(1, maxRow - minRow);
+        return {
+            level: safeLevel,
+            rowCount,
+            colCount,
+            minCol,
+            maxCol,
+            minRow,
+            maxRow,
+            width,
+            height,
+            west: this.tileGridNormXToLon(minCol / colCount),
+            east: this.tileGridNormXToLon(maxCol / colCount),
+            north: this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode),
+            south: this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode)
+        };
+    }
+
+    private tileStateKindForTile(tileId: bigint, visibleLayers: VisibleLayerRef[]): number {
+        let hasParticipant = false;
+        let hasPendingParticipant = false;
+        let hasEmptyParticipant = false;
+        let hasNonEmptyData = false;
+        for (const layer of visibleLayers) {
+            const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.layerId, tileId);
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile) {
+                continue;
+            }
+            hasParticipant = true;
+            if (tile.error) {
+                return TILE_STATE_KIND_ERROR;
+            }
+            if (!tile.hasData()) {
+                hasPendingParticipant = true;
+                continue;
+            }
+            if (tile.numFeatures > 0) {
+                hasNonEmptyData = true;
+                continue;
+            }
+            hasEmptyParticipant = true;
+        }
+        // Aggregation rule per tile across participating layers:
+        // error > non-empty > empty > unknown/loading.
+        if (hasNonEmptyData) {
+            return 0;
+        }
+        if (hasParticipant && hasEmptyParticipant && !hasPendingParticipant) {
+            return TILE_STATE_KIND_EMPTY;
+        }
+        return 0;
+    }
+
+    private tileGridCellForTile(tileId: bigint, extent: TileGridLevelExtent): {col: number; row: number} | null {
+        const tileBox = coreLib.getTileBox(tileId) as unknown;
+        if (!Array.isArray(tileBox) || tileBox.length < 4) {
+            return null;
+        }
+        const west = Number(tileBox[0]);
+        const north = Number(tileBox[3]);
+        if (!Number.isFinite(west) || !Number.isFinite(north)) {
+            return null;
+        }
+        const colNorm = this.tileGridLonToNormX(west);
+        const rowNorm = this.tileGridLatToNormY(north, this.tileGridMode);
+        const rawCol = Math.floor(colNorm * extent.colCount + 1e-9);
+        const rawRow = Math.floor(rowNorm * extent.rowCount + 1e-9);
+        const row = Math.max(0, Math.min(extent.rowCount - 1, rawRow));
+        const col = this.wrapColumnIntoExtent(rawCol, extent);
+        if (col < 0 || col >= extent.width) {
+            return null;
+        }
+        const rowInExtent = row - extent.minRow;
+        if (rowInExtent < 0 || rowInExtent >= extent.height) {
+            return null;
+        }
+        return {col, row: rowInExtent};
+    }
+
+    private wrapColumnIntoExtent(rawCol: number, extent: TileGridLevelExtent): number {
+        const normalizedCol = ((rawCol % extent.colCount) + extent.colCount) % extent.colCount;
+        const repeatsToNearExtent = Math.round((extent.minCol - normalizedCol) / extent.colCount);
+        let repeatedCol = normalizedCol + repeatsToNearExtent * extent.colCount;
+        while (repeatedCol < extent.minCol) {
+            repeatedCol += extent.colCount;
+        }
+        while (repeatedCol >= extent.maxCol) {
+            repeatedCol -= extent.colCount;
+        }
+        return repeatedCol - extent.minCol;
+    }
+
+    private tileLimitPerView(): number {
+        const viewCount = Math.max(1, this.stateService.numViews);
+        return Math.max(1, Math.floor(this.stateService.tilesLoadLimit / viewCount));
     }
 
     private tileGridDebugPolygon(): [number, number][] {

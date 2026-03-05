@@ -329,12 +329,6 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly deckStyleWorkersEnabledState = this.createState<boolean>({
-        name: 'deckStyleWorkersEnabled',
-        defaultValue: false,
-        schema: Boolish
-    });
-
     readonly deckStyleWorkersOverrideState = this.createState<boolean>({
         name: 'deckStyleWorkersOverride',
         defaultValue: false,
@@ -775,8 +769,6 @@ export class AppStateService implements OnDestroy {
 
     get numViews() {return this.numViewsState.getValue();}
     set numViews(val: number) {this.numViewsState.next(val);};
-    get deckStyleWorkersEnabled() {return this.deckStyleWorkersEnabledState.getValue();}
-    set deckStyleWorkersEnabled(val: boolean) {this.deckStyleWorkersEnabledState.next(val);};
     get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
     set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
     get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}

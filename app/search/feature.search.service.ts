@@ -231,6 +231,9 @@ export class SearchState extends JobGroup {
 
 @Injectable({providedIn: 'root'})
 export class FeatureSearchService {
+    private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
+    private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
+
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
     private diagnosticsQueue: Array<WorkerTask> = [];
@@ -249,7 +252,6 @@ export class FeatureSearchService {
     timeElapsed: string = this.formatTime(0);
     totalFeatureCount: number = 0;
     progress: Subject<SearchState|null> = new Subject<SearchState|null>();
-    pinGraphicsByTier: Map<number, string> = new Map<number, string>;
     searchResults: Array<{ label: string; mapId: string; layerId: string; featureId: string }> = [];
     traceResults: Array<any> = [];
 
@@ -264,31 +266,26 @@ export class FeatureSearchService {
 
     showFeatureSearchDialog: boolean = false;
 
-    pinTiers = [
-        9000, 8000, 7000, 6000, 5000, 4000, 3000, 2000, 1000,
-        900, 800, 700, 600, 500, 400, 300, 200, 100,
-        90, 80, 70, 60, 50, 40, 30, 20, 10,
-        9, 8, 7, 6, 5, 4, 3, 2, 1
-    ];
-
     private startTime: number = 0;
     private endTime: number = 0;
     public errors: Set<string> = new Set();
+    private tintedAtlasByColor = new Map<string, string>();
+    private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
+    private clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
-    markerGraphics = () => {
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48">
-           <path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z"
-            fill="white"/>
-        </svg>`
-        return `data:image/svg+xml;base64,${btoa(svg)}`;
-    };
-
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
-        // Instantiate pin graphics
-        this.makeClusterPins();
+        this.updatePointColor();
+    }
+
+    getSearchClusterIconAtlasUrl(): string {
+        return this.clusterIconAtlasUrl;
+    }
+
+    getSearchClusterIconMappingUrl(): string {
+        return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
     }
 
     public initializeWorkers(): Promise<void> {
@@ -367,51 +364,6 @@ export class FeatureSearchService {
         };
     }
 
-    private createCustomPin(text: string): string {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const context = canvas.getContext('2d');
-        if (context) {
-            // Draw the triangle
-            context.fillStyle = this.pointColor;
-            context.beginPath();
-            context.moveTo(20, 16); // Top left point
-            context.lineTo(44, 16); // Top right point
-            context.lineTo(32, 64); // Bottom point
-            context.closePath();
-            context.fill();
-
-            // Draw the circle
-            context.fillStyle = this.pointColor;
-            context.beginPath();
-            context.arc(32, 24, 20, 0, 2 * Math.PI, false);
-            context.fill();
-
-            // Draw the text
-            context.fillStyle = "#ffffff";
-            context.font = "bold 12px sans-serif";
-            context.textAlign = "center";
-            context.textBaseline = "middle";
-            context.fillText(text, 32, 25);
-        }
-        return canvas.toDataURL();
-    }
-
-    private makeClusterPins() {
-        for (const n of this.pinTiers) {
-            let s = "";
-            if (n / 1000 >= 1) {
-                s = (n / 1000 | 0).toString().concat('k+');
-            } else if (n >= 10) {
-                s = n.toString().concat('+');
-            } else {
-                s = n.toString();
-            }
-            this.pinGraphicsByTier.set(n, this.createCustomPin(s));
-        }
-    }
-
     run(query: string) {
         // Fresh search.
         this.clear();
@@ -455,10 +407,8 @@ export class FeatureSearchService {
             return task;
         };
 
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
-                makeTask(tile);
-            });
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            makeTask(tile);
         }
 
         this.progress.next(this.currentSearch);
@@ -578,15 +528,11 @@ export class FeatureSearchService {
         };
 
         let diagTasks: DiagnosticsWorkerTask[] = [];
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            // TODO: Simplify this, see simfil issue #131
-            this.mapService.getPrioritisedTiles(viewIndex).some((tile: FeatureTile) => {
-                const task = makeDiagnosticsTask(tile);
-                if (task) {
-                    diagTasks.push(task);
-                }
-                return true;
-            });
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            const task = makeDiagnosticsTask(tile);
+            if (task) {
+                diagTasks.push(task);
+            }
         }
         this.diagnosticsQueue.push(...diagTasks);
         this.runWorkers();
@@ -644,10 +590,8 @@ export class FeatureSearchService {
         this.completionPending.next(true);
         this.completionCandidates.next([]);
 
-        for (let viewIndex = 0; viewIndex < this.stateService.numViewsState.getValue(); viewIndex++) {
-            this.mapService.getPrioritisedTiles(viewIndex).forEach((tile: FeatureTile) => {
-                makeTask(tile);
-            });
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            makeTask(tile);
         }
         this.runWorkers();
     }
@@ -775,8 +719,101 @@ export class FeatureSearchService {
     }
 
     updatePointColor() {
-        this.makeClusterPins();
-        this.progress.next(this.currentSearch);
+        const normalizedColor = this.normalizeHexColor(this.pointColor);
+        this.pointColor = normalizedColor;
+        this.ensureTintedClusterAtlas(normalizedColor)
+            .then(atlasUrl => {
+                this.clusterIconAtlasUrl = atlasUrl;
+                this.progress.next(this.currentSearch);
+            })
+            .catch(() => {
+                this.clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+                this.progress.next(this.currentSearch);
+            });
+    }
+
+    private orderedTilesForSearchProcessing(): FeatureTile[] {
+        const viewCount = this.stateService.numViewsState.getValue();
+        if (viewCount <= 0) {
+            return [];
+        }
+        const focusedView = this.stateService.focusedView;
+        const viewIndex = Math.max(0, Math.min(viewCount - 1, focusedView));
+        return this.mapService.getPrioritisedTiles(viewIndex);
+    }
+
+    private normalizeHexColor(color: string): string {
+        const hex = (color || "").trim();
+        const validHex = /^#([0-9a-f]{6})$/i.exec(hex);
+        if (validHex) {
+            return `#${validHex[1].toLowerCase()}`;
+        }
+        const shortHex = /^#([0-9a-f]{3})$/i.exec(hex);
+        if (shortHex) {
+            const [r, g, b] = shortHex[1].split("");
+            return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+        }
+        return "#ea4336";
+    }
+
+    private parseHexRgb(color: string): [number, number, number] {
+        return [
+            parseInt(color.slice(1, 3), 16),
+            parseInt(color.slice(3, 5), 16),
+            parseInt(color.slice(5, 7), 16)
+        ];
+    }
+
+    private async ensureTintedClusterAtlas(color: string): Promise<string> {
+        const cached = this.tintedAtlasByColor.get(color);
+        if (cached) {
+            return cached;
+        }
+        const baseAtlasImage = await this.loadBaseClusterAtlasImage();
+        const [targetR, targetG, targetB] = this.parseHexRgb(color);
+        const canvas = document.createElement("canvas");
+        canvas.width = baseAtlasImage.naturalWidth || baseAtlasImage.width;
+        canvas.height = baseAtlasImage.naturalHeight || baseAtlasImage.height;
+        const context = canvas.getContext("2d", {willReadFrequently: true});
+        if (!context) {
+            return FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+        }
+        context.drawImage(baseAtlasImage, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const alpha = data[i + 3];
+            if (alpha === 0) {
+                continue;
+            }
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            if (r > 235 && g > 235 && b > 235) {
+                continue;
+            }
+            data[i] = Math.round((r / 255) * targetR);
+            data[i + 1] = Math.round((g / 255) * targetG);
+            data[i + 2] = Math.round((b / 255) * targetB);
+        }
+        context.putImageData(imageData, 0, 0);
+        const tintedAtlasUrl = canvas.toDataURL("image/png");
+        this.tintedAtlasByColor.set(color, tintedAtlasUrl);
+        return tintedAtlasUrl;
+    }
+
+    private loadBaseClusterAtlasImage(): Promise<HTMLImageElement> {
+        if (this.baseAtlasImagePromise) {
+            return this.baseAtlasImagePromise;
+        }
+        this.baseAtlasImagePromise = new Promise((resolve, reject) => {
+            const image = new Image();
+            image.decoding = "async";
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error("Failed to load search cluster icon atlas."));
+            image.src = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+        });
+        return this.baseAtlasImagePromise;
     }
 
     private formatTime(milliseconds: number): string {
@@ -791,9 +828,4 @@ export class FeatureSearchService {
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
 
-    getPinGraphics(count: number) {
-        // Find the appropriate tier for the given count
-        let key = this.pinTiers.find(tier => count >= tier) || 1;
-        return this.pinGraphicsByTier.get(key);
-    }
 }

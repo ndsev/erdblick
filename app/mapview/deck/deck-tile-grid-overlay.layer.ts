@@ -12,6 +12,10 @@ const TILE_GRID_WORLD_RING: [number, number][] = [
     [-180, TILE_GRID_LAT_LIMIT]
 ];
 
+export const TILE_STATE_KIND_NONE = 0;
+export const TILE_STATE_KIND_ERROR = 1;
+export const TILE_STATE_KIND_EMPTY = 2;
+
 interface TileGridShaderModuleProps {
     localMin?: [number, number];
     localSize?: [number, number];
@@ -131,6 +135,7 @@ uniform tileGridOverlayUniforms {
         };
     }
 };
+
 
 export interface TileGridOverlayDatum {
     polygon: [number, number][];

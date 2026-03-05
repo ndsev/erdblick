@@ -6,7 +6,7 @@ import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
-import {deckRenderWorkerPool, isDeckRenderWorkerPoolEnabled} from "./deck-render.worker.pool";
+import {deckRenderWorkerPool} from "./deck-render.worker.pool";
 import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
@@ -91,7 +91,9 @@ const RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA = 0;
 const RENDER_RANK_PRIORITY_DEFAULT = 1;
 const RENDER_RANK_HAS_DATA = 0;
 const RENDER_RANK_MISSING_DATA = 1;
-const TILE_EMPTY_BACKGROUND_COLOR: [number, number, number, number] = [116, 116, 116, 84];
+const RENDER_RANK_RENDER_ORDER_MAX = (2 ** 51) - 1;
+const RENDER_RANK_ORDER_STRIDE = 2;
+const RENDER_RANK_PRIORITY_STRIDE = 2 ** 52;
 const DECK_ARROW_ANGLE_SIGN = -1;
 const DECK_ARROW_ANGLE_OFFSET_DEG = 0;
 const DECK_ARROW_ICON_SIZE = 64;
@@ -145,7 +147,6 @@ export class DeckTileVisualization implements ITileVisualization {
     private pointLayerKey: string | null = null;
     private pathLayerKey: string | null = null;
     private arrowLayerKey: string | null = null;
-    private tileEmptyBackgroundLayerKey: string | null = null;
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
@@ -204,12 +205,6 @@ export class DeckTileVisualization implements ITileVisualization {
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
             kind: "arrow"
-        });
-        const tileEmptyBackgroundLayerKey = makeDeckLayerKey({
-            tileKey: this.tile.mapTileKey,
-            styleId: this.styleId,
-            hoverMode: this.highlightModeLabel(),
-            kind: "tile-empty-background"
         });
         try {
             for (const removedCornerTile of this.pointMergeService.remove(
@@ -300,30 +295,6 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.arrowLayerKey = null;
             }
 
-            const hasRenderableGeometry =
-                (pointLayerData !== null && pointLayerData.length > 0) ||
-                (pathLayerData !== null && pathLayerData.length > 0) ||
-                (arrowLayerData !== null && arrowLayerData.length > 0) ||
-                (mergedPointFeatures !== null && Object.keys(mergedPointFeatures).length > 0);
-            const tileOutline = this.tileOutlinePath();
-            if (!hasRenderableGeometry && tileOutline) {
-                const tileEmptyBackgroundLayer = new PolygonLayer({
-                    id: tileEmptyBackgroundLayerKey,
-                    data: [{polygon: tileOutline}],
-                    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                    getPolygon: (feature: {polygon: [number, number][]}) => feature.polygon,
-                    getFillColor: TILE_EMPTY_BACKGROUND_COLOR,
-                    filled: true,
-                    stroked: false,
-                    pickable: false
-                } as any);
-                registry.upsert(tileEmptyBackgroundLayerKey, tileEmptyBackgroundLayer as any, 300);
-                this.tileEmptyBackgroundLayerKey = tileEmptyBackgroundLayerKey;
-            } else if (this.tileEmptyBackgroundLayerKey) {
-                registry.remove(this.tileEmptyBackgroundLayerKey);
-                this.tileEmptyBackgroundLayerKey = null;
-            }
-
             if (mergedPointFeatures) {
                 for (const [mapLayerStyleRuleId, mergedPointVisualizations] of Object.entries(mergedPointFeatures)) {
                     for (const finishedCornerTile of this.pointMergeService.insert(
@@ -370,13 +341,9 @@ export class DeckTileVisualization implements ITileVisualization {
         if (this.arrowLayerKey) {
             registry.remove(this.arrowLayerKey);
         }
-        if (this.tileEmptyBackgroundLayerKey) {
-            registry.remove(this.tileEmptyBackgroundLayerKey);
-        }
         this.pointLayerKey = null;
         this.pathLayerKey = null;
         this.arrowLayerKey = null;
-        this.tileEmptyBackgroundLayerKey = null;
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
@@ -393,16 +360,19 @@ export class DeckTileVisualization implements ITileVisualization {
         );
     }
 
-    renderRank(): readonly number[] {
+    renderRank(): number {
         const hasData = this.tileHasData();
         const priorityBucket = (!this.rendered && hasData)
             ? RENDER_RANK_PRIORITY_NEVER_RENDERED_WITH_DATA
             : RENDER_RANK_PRIORITY_DEFAULT;
-        return [
-            priorityBucket,
-            this.tile.renderOrder(),
-            hasData ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA
-        ];
+        const rawRenderOrder = this.tile.renderOrder();
+        const renderOrder = Number.isFinite(rawRenderOrder)
+            ? Math.max(0, Math.min(Math.floor(rawRenderOrder), RENDER_RANK_RENDER_ORDER_MAX))
+            : RENDER_RANK_RENDER_ORDER_MAX;
+        const hasDataRank = hasData ? RENDER_RANK_HAS_DATA : RENDER_RANK_MISSING_DATA;
+        return priorityBucket * RENDER_RANK_PRIORITY_STRIDE
+            + renderOrder * RENDER_RANK_ORDER_STRIDE
+            + hasDataRank;
     }
 
     updateStatus(renderQueued?: boolean): void {
@@ -443,7 +413,9 @@ export class DeckTileVisualization implements ITileVisualization {
             return null;
         }
 
-        if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
+        // Keep selection rendering synchronous to minimize interaction latency
+        // and avoid ordering races while selection state changes.
+        if (this.highlightMode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
             this.setTileVertexCount(fullMainThread.vertexCount);
             this.latestWorkerTimings = fullMainThread.workerTimings;
@@ -453,7 +425,9 @@ export class DeckTileVisualization implements ITileVisualization {
             return fullMainThread.pathLayerData;
         }
 
-        if (!isDeckRenderWorkerPoolEnabled() || !this.canRenderInWorker()) {
+        // Non-point rendering is expected to run in the worker path.
+        // Fallback is only used when worker prerequisites are unavailable.
+        if (!this.canRenderInWorker()) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
             this.setTileVertexCount(fullMainThread.vertexCount);
             this.latestWorkerTimings = fullMainThread.workerTimings;
@@ -487,11 +461,7 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private canRenderInWorker(): boolean {
-        if (this.tile.blobCount() > 1) {
-            return false;
-        }
-        const tileBlob = this.tile.tileFeatureLayerBlob;
-        if (!tileBlob) {
+        if (!this.tile.blobCount() && !this.tile.tileFeatureLayerBlob) {
             return false;
         }
         const tileWithParserContext = this.tile as FeatureTile & {
@@ -507,10 +477,6 @@ export class DeckTileVisualization implements ITileVisualization {
         fidelity: "low" | "high",
         outputMode: DeckGeometryOutputMode
     ): Promise<DeckWasmRenderOutput> {
-        const tileBlob = this.tile.tileFeatureLayerBlob;
-        if (!tileBlob) {
-            throw new Error("Worker render requested without tile blob.");
-        }
         const tileWithParserContext = this.tile as FeatureTile & {
             getFieldDictBlob?: () => Uint8Array | null;
             getDataSourceInfoBlob?: () => Uint8Array | null;
@@ -520,11 +486,18 @@ export class DeckTileVisualization implements ITileVisualization {
         if (!fieldDictBlob || !dataSourceInfoBlob) {
             throw new Error("Worker render requested without parser context blobs.");
         }
+        const tileStageBlobs = this.tile.stageBlobs().map(entry => entry.blob);
+        if (!tileStageBlobs.length && this.tile.tileFeatureLayerBlob) {
+            tileStageBlobs.push(this.tile.tileFeatureLayerBlob);
+        }
+        if (!tileStageBlobs.length) {
+            throw new Error("Worker render requested without tile data blobs.");
+        }
         const pool = deckRenderWorkerPool();
         const result = await pool.renderPaths({
             viewIndex: this.viewIndex,
             tileKey: this.tile.mapTileKey,
-            tileBlob,
+            tileStageBlobs,
             fieldDictBlob,
             dataSourceInfoBlob,
             nodeId: this.tile.nodeId,

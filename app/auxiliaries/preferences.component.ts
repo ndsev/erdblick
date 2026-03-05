@@ -40,14 +40,6 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button (click)="applyInspectionsLimits()" label="Apply" icon="pi pi-check"></p-button>
             <p-divider></p-divider>
             <div class="button-container">
-                <label>Deck style workers:</label>
-                <p-selectButton [options]="toggleOptions"
-                                [(ngModel)]="deckStyleWorkersEnabledSetting"
-                                optionLabel="label"
-                                optionValue="value"
-                                (ngModelChange)="setDeckStyleWorkersEnabled($event)"></p-selectButton>
-            </div>
-            <div class="button-container">
                 <label>Tile pull compression:</label>
                 <p-selectButton [options]="toggleOptions"
                                 [(ngModel)]="tilePullCompressionEnabledSetting"
@@ -138,7 +130,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     tilesToLoadInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
-    deckStyleWorkersEnabledSetting: boolean = false;
     tilePullCompressionEnabledSetting: boolean = false;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
@@ -173,9 +164,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
-        }));
-        this.subscriptions.push(this.stateService.deckStyleWorkersEnabledState.subscribe(enabled => {
-            this.deckStyleWorkersEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
@@ -233,11 +221,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             }
         }
         this.styleService.clearStorageForBuiltinStyles();
-    }
-
-    setDeckStyleWorkersEnabled(enabled: boolean) {
-        this.deckStyleWorkersEnabledSetting = enabled;
-        this.stateService.deckStyleWorkersEnabled = enabled;
     }
 
     setTilePullCompressionEnabled(enabled: boolean) {
