@@ -212,8 +212,18 @@ float tile_grid_line_mask_for_level(int levelIndex, vec2 localCoords) {
     float distPxToVertical = edge.x / pixelSpanX;
     float distPxToHorizontal = edge.y / pixelSpanY;
     float halfWidthPx = max(0.5 * tileGridOverlay.lineWidthPx, 0.5);
-    float verticalMask = 1.0 - smoothstep(halfWidthPx, halfWidthPx, distPxToVertical);
-    float horizontalMask = 1.0 - smoothstep(halfWidthPx, halfWidthPx, distPxToHorizontal);
+    // Keep smoothstep edges distinct. Equal edges are undefined on some GPU
+    // drivers (notably Metal), which can collapse the mask to zero.
+    float verticalMask = 1.0 - smoothstep(
+        max(0.0, halfWidthPx - 0.5),
+        halfWidthPx + 0.5,
+        distPxToVertical
+    );
+    float horizontalMask = 1.0 - smoothstep(
+        max(0.0, halfWidthPx - 0.5),
+        halfWidthPx + 0.5,
+        distPxToHorizontal
+    );
     return max(verticalMask, horizontalMask);
 }`,
                 "fs:DECKGL_FILTER_COLOR": `${existingFilter}
