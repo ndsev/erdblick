@@ -232,8 +232,32 @@ class FeatureSearchQuadTree {
 }
 
 export class SearchState extends JobGroup {
+    private pendingTileKeys: Set<string> = new Set<string>();
+
     constructor(query: string, id: string, public paused = false) {
         super('search', query, id);
+    }
+
+    markTilePending(tileKey: string): void {
+        if (!tileKey) {
+            return;
+        }
+        this.pendingTileKeys.add(tileKey);
+    }
+
+    markTileReady(tileKey: string): void {
+        if (!tileKey) {
+            return;
+        }
+        this.pendingTileKeys.delete(tileKey);
+    }
+
+    override isComplete(): boolean {
+        return super.isComplete() && !this.pendingTileKeys.size;
+    }
+
+    override getTaskCount(): number {
+        return super.getTaskCount() + this.pendingTileKeys.size;
     }
 }
 
@@ -254,6 +278,7 @@ export class FeatureSearchService {
 
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
+    private pendingSearchTilesByKey = new Map<string, FeatureTile>();
     private searchResultPointsByFeatureKey = new Map<string, SearchResultPoint>();
     private searchResultPointsCache: SearchResultPoint[] = [];
     private searchResultPointsCacheDirty = false;
@@ -270,6 +295,7 @@ export class FeatureSearchService {
     diagnosticsMessages: Subject<DiagnosticsMessage[]> = new Subject<DiagnosticsMessage[]>();
     diagnosticsMessageLimit: number = 25;
     private diagnosticsMessagesList: DiagnosticsMessage[] = [];
+    private diagnosticsStartedForSearchGroupId: string | null = null;
 
     completionPending: Subject<boolean> = new Subject<boolean>();
     completionCandidates: Subject<CompletionCandidate[]> = new Subject<CompletionCandidate[]>();
@@ -290,6 +316,9 @@ export class FeatureSearchService {
     constructor(private mapService: MapDataService,
                 private stateService: AppStateService) {
         this.updatePointColor();
+        this.mapService.statsDialogNeedsUpdate.subscribe(() => {
+            this.enqueueReadyPendingSearchTiles();
+        });
     }
 
     getSearchClusterIconAtlasUrl(): string {
@@ -394,48 +423,30 @@ export class FeatureSearchService {
         this.startTime = Date.now();
 
         this.currentSearch = new SearchState(query, this.generateTaskGroupId());
+        this.diagnosticsStartedForSearchGroupId = null;
         this.jobGroupManager.addGroup(this.currentSearch);
+
+        this.pendingSearchTilesByKey.clear();
+
+        for (const tile of this.orderedTilesForSearchProcessing()) {
+            if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                this.pendingSearchTilesByKey.set(tile.mapTileKey, tile);
+                this.currentSearch.markTilePending(tile.mapTileKey);
+                continue;
+            }
+            this.enqueueSearchTask(tile, this.currentSearch);
+        }
 
         // Set up completion callback to trigger diagnostics after
         // all tasks of the group are done. Note: This will only ever
         // be called if a search truly finishes (is not superseded by a newer one).
         this.currentSearch.onComplete((group: JobGroup) => {
-            console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
-            this.startDiagnosticsForCompletedSearch(group.query, group.id);
+            this.maybeStartDiagnosticsForCompletedSearch(group);
         });
 
-        const tileParser = this.mapService.tileLayerParser;
-        const makeTask = (tile: FeatureTile): SearchWorkerTask | null => {
-            const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
-            if (!tileBlobs.length) {
-                return null;
-            }
-            const taskId = this.generateTaskId();
-            const task: SearchWorkerTask = {
-                type: TASK_SEARCH,
-                tileId: tile.tileId,
-                tileBlobs,
-                fieldDictBlob: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getFieldDict(buf, tile.nodeId)
-                })!,
-                query: query,
-                dataSourceInfo: uint8ArrayFromWasm((buf) => {
-                    tileParser?.getDataSourceInfo(buf, tile.mapName)
-                })!,
-                nodeId: tile.nodeId,
-                taskId: taskId,
-                groupId: this.currentSearch!.id
-            };
-
-            this.jobGroupManager.addTask(task);
-            return task;
-        };
-
-        for (const tile of this.orderedTilesForSearchProcessing()) {
-            makeTask(tile);
-        }
-
         this.progress.next(this.currentSearch);
+        this.enqueueReadyPendingSearchTiles();
+        this.maybeStartDiagnosticsForCompletedSearch(this.currentSearch);
         this.runWorkers();
     }
 
@@ -485,12 +496,14 @@ export class FeatureSearchService {
         this.stop();
         this.resultTree = new FeatureSearchQuadTree();
         this.resultsPerTile.clear();
+        this.pendingSearchTilesByKey.clear();
         this.clearSearchResultPoints();
         this.progress.next(null);
         this.searchResults = [];
         this.traceResults = [];
         this.diagnosticsMessagesList = [];
         this.diagnosticsMessages.next([]);
+        this.diagnosticsStartedForSearchGroupId = null;
         this.totalFeatureCount = 0;
         this.startTime = 0;
         this.endTime = 0;
@@ -561,6 +574,21 @@ export class FeatureSearchService {
         }
         this.diagnosticsQueue.push(...diagTasks);
         this.runWorkers();
+    }
+
+    private maybeStartDiagnosticsForCompletedSearch(group: JobGroup): void {
+        if (group.type !== 'search' || !group.isComplete()) {
+            return;
+        }
+        if (!this.currentSearch || this.currentSearch.id !== group.id) {
+            return;
+        }
+        if (this.diagnosticsStartedForSearchGroupId === group.id) {
+            return;
+        }
+        this.diagnosticsStartedForSearchGroupId = group.id;
+        console.debug(`Search group completed (id: ${group.id}). Collecting diagnostics for query ${group.query}`);
+        this.startDiagnosticsForCompletedSearch(group.query, group.id);
     }
 
     public clearCurrentCompletion() {
@@ -772,6 +800,75 @@ export class FeatureSearchService {
         const focusedView = this.stateService.focusedView;
         const viewIndex = Math.max(0, Math.min(viewCount - 1, focusedView));
         return this.mapService.getPrioritisedTiles(viewIndex);
+    }
+
+    private createSearchTask(tile: FeatureTile, search: SearchState): SearchWorkerTask | null {
+        const tileBlobs = tile.stageBlobs().map(stageBlob => stageBlob.blob);
+        if (!tileBlobs.length) {
+            return null;
+        }
+        const tileParser = this.mapService.tileLayerParser;
+        return {
+            type: TASK_SEARCH,
+            tileId: tile.tileId,
+            tileBlobs,
+            fieldDictBlob: uint8ArrayFromWasm((buf) => {
+                tileParser?.getFieldDict(buf, tile.nodeId)
+            })!,
+            query: search.query,
+            dataSourceInfo: uint8ArrayFromWasm((buf) => {
+                tileParser?.getDataSourceInfo(buf, tile.mapName)
+            })!,
+            nodeId: tile.nodeId,
+            taskId: this.generateTaskId(),
+            groupId: search.id
+        };
+    }
+
+    private enqueueSearchTask(tile: FeatureTile, search: SearchState): boolean {
+        const task = this.createSearchTask(tile, search);
+        if (!task) {
+            return false;
+        }
+        this.jobGroupManager.addTask(task);
+        return true;
+    }
+
+    private enqueueReadyPendingSearchTiles() {
+        const activeSearch = this.currentSearch;
+        if (!activeSearch || !this.pendingSearchTilesByKey.size) {
+            return;
+        }
+
+        let stateChanged = false;
+        let enqueuedTask = false;
+
+        for (const [tileKey] of Array.from(this.pendingSearchTilesByKey.entries())) {
+            const tile = this.mapService.loadedTileLayers.get(tileKey);
+            if (!tile || tile.disposed) {
+                this.pendingSearchTilesByKey.delete(tileKey);
+                activeSearch.markTileReady(tileKey);
+                stateChanged = true;
+                continue;
+            }
+            if (!this.mapService.isTileInspectionDataComplete(tile)) {
+                continue;
+            }
+            this.pendingSearchTilesByKey.delete(tileKey);
+            activeSearch.markTileReady(tileKey);
+            enqueuedTask = this.enqueueSearchTask(tile, activeSearch) || enqueuedTask;
+            stateChanged = true;
+        }
+
+        if (!stateChanged) {
+            return;
+        }
+
+        this.progress.next(activeSearch);
+        this.maybeStartDiagnosticsForCompletedSearch(activeSearch);
+        if (enqueuedTask) {
+            this.runWorkers();
+        }
     }
 
     private normalizeHexColor(color: string): string {
