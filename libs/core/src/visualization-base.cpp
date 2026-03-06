@@ -1,5 +1,7 @@
 #include "visualization-base.h"
 #include "geometry.h"
+#include "mapget/model/simfilutil.h"
+#include "simfil/simfil.h"
 
 #include <algorithm>
 #include <charconv>
@@ -44,38 +46,14 @@ std::string_view trimAsciiWhitespace(std::string_view value) {
     return value;
 }
 
-bool isSimpleIdentifier(std::string_view value) {
-    if (value.empty()) {
-        return false;
-    }
-    auto isIdentifierHead = [](char c) {
-        return std::isalpha(static_cast<unsigned char>(c)) != 0 || c == '_';
-    };
-    auto isIdentifierChar = [&](char c) {
-        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
-    };
-    if (!isIdentifierHead(value.front())) {
-        return false;
-    }
-    for (size_t i = 1; i < value.size(); ++i) {
-        if (!isIdentifierChar(value[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-std::optional<std::string_view> parseAnyOptionBoolCheck(std::string_view expression) {
-    auto trimmed = trimAsciiWhitespace(expression);
-    constexpr std::string_view anyPrefix = "any(";
-    if (!trimmed.starts_with(anyPrefix) || !trimmed.ends_with(')')) {
-        return std::nullopt;
-    }
-    auto inner = trimAsciiWhitespace(trimmed.substr(anyPrefix.size(), trimmed.size() - anyPrefix.size() - 1));
-    if (!isSimpleIdentifier(inner)) {
-        return std::nullopt;
-    }
-    return inner;
+std::string makeExpressionCacheKey(std::string_view expression, bool anyMode, bool autoWildcard) {
+    std::string key;
+    key.reserve(expression.size() + 3);
+    key.push_back(anyMode ? '1' : '0');
+    key.push_back(autoWildcard ? '1' : '0');
+    key.push_back(':');
+    key.append(expression);
+    return key;
 }
 
 std::optional<uint32_t> parseFeatureIndexToken(std::string_view value) {
@@ -361,11 +339,8 @@ void FeatureLayerVisualizationBase::run()
         };
         boundEvalFun.eval_ = [this, &ensureEvaluationContext, &boundEvalFun](auto&& str)
         {
-            if (auto optionName = parseAnyOptionBoolCheck(str)) {
-                auto optionIt = optionValues_.find(std::string(*optionName));
-                if (optionIt != optionValues_.end() && optionIt->second.isa(simfil::ValueType::Bool)) {
-                    return optionIt->second;
-                }
+            if (auto constantValue = evaluateConstantExpression(str, false, false)) {
+                return std::move(*constantValue);
             }
             auto& context = ensureEvaluationContext();
             boundEvalFun.context_ = context;
@@ -772,29 +747,118 @@ void FeatureLayerVisualizationBase::addPolyLine(
     }
 }
 
+void FeatureLayerVisualizationBase::ensureEvaluationEnvironment()
+{
+    if (evalEnvironment_) {
+        return;
+    }
+    if (!internalStringPoolCopy_) {
+        return;
+    }
+
+    evalEnvironment_ = mapget::makeEnvironment(internalStringPoolCopy_);
+    for (auto const& [key, value] : optionValues_) {
+        evalEnvironment_->constants.insert_or_assign(key, value);
+    }
+}
+
+FeatureLayerVisualizationBase::CachedExpression*
+FeatureLayerVisualizationBase::getOrCompileExpression(
+    std::string const& expression,
+    bool anyMode,
+    bool autoWildcard)
+{
+    ensureEvaluationEnvironment();
+    if (!evalEnvironment_) {
+        return nullptr;
+    }
+
+    auto cacheKey = makeExpressionCacheKey(expression, anyMode, autoWildcard);
+    auto [iter, inserted] = expressionCache_.try_emplace(std::move(cacheKey));
+    if (!inserted) {
+        return &iter->second;
+    }
+
+    auto ast = simfil::compile(*evalEnvironment_, expression, anyMode, autoWildcard);
+    if (!ast) {
+        std::cout << "Error compiling " << expression << ": " << ast.error().message
+                  << std::endl;
+        expressionCache_.erase(iter);
+        return nullptr;
+    }
+    iter->second.ast_ = std::move(*ast);
+    return &iter->second;
+}
+
+void FeatureLayerVisualizationBase::resolveCachedConstant(CachedExpression& cached)
+{
+    if (cached.constantResolved_) {
+        return;
+    }
+    cached.constantResolved_ = true;
+
+    if (!cached.ast_ || !cached.ast_->expr().constant() || !tile_ || !evalEnvironment_) {
+        return;
+    }
+
+    auto rootResult = tile_->root(0);
+    if (!rootResult) {
+        return;
+    }
+
+    auto results = simfil::eval(*evalEnvironment_, *cached.ast_, **rootResult, nullptr);
+    if (!results) {
+        std::cout << "Error evaluating constant expression " << cached.ast_->query()
+                  << ": " << results.error().message << std::endl;
+        return;
+    }
+    if (!results->empty()) {
+        cached.constantValue_ = std::move((*results)[0]);
+    }
+}
+
+std::optional<simfil::Value> FeatureLayerVisualizationBase::evaluateConstantExpression(
+    std::string const& expression,
+    bool anyMode,
+    bool autoWildcard)
+{
+    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    if (!cached) {
+        return std::nullopt;
+    }
+    resolveCachedConstant(*cached);
+    if (cached->constantValue_.has_value()) {
+        return cached->constantValue_;
+    }
+    return std::nullopt;
+}
+
 simfil::Value FeatureLayerVisualizationBase::evaluateExpression(
     std::string const& expression,
     simfil::ModelNode const& ctx,
     bool anyMode,
-    bool autoWildcard) const
+    bool autoWildcard)
 {
-    if (auto optionName = parseAnyOptionBoolCheck(expression)) {
-        auto optionIt = optionValues_.find(std::string(*optionName));
-        if (optionIt != optionValues_.end() && optionIt->second.isa(simfil::ValueType::Bool)) {
-            return optionIt->second;
-        }
+    auto* cached = getOrCompileExpression(expression, anyMode, autoWildcard);
+    if (!cached || !cached->ast_ || !evalEnvironment_) {
+        return simfil::Value::null();
+    }
+    resolveCachedConstant(*cached);
+    if (cached->constantValue_.has_value()) {
+        return *cached->constantValue_;
     }
 
     try
     {
-        auto results = tile_->evaluate(expression, ctx, anyMode, autoWildcard);
+        auto results = simfil::eval(*evalEnvironment_, *cached->ast_, ctx, nullptr);
         if (!results) {
             std::cout << "Error evaluating " << expression << ": " << results.error().message
                       << std::endl;
+            return simfil::Value::null();
         }
 
-        if (!results->values.empty()) {
-            return std::move(results->values[0]);
+        if (!results->empty()) {
+            return std::move((*results)[0]);
         }
     }
     catch (std::exception const& e) {

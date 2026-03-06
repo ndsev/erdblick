@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "layer.h"
+#include "simfil/environment.h"
+#include "simfil/expression.h"
 #include "simfil/overlay.h"
 #include "style.h"
 
@@ -175,7 +177,22 @@ protected:
         std::string const& expression,
         simfil::ModelNode const& ctx,
         bool anyMode,
-        bool autoWildcard) const;
+        bool autoWildcard);
+    std::optional<simfil::Value> evaluateConstantExpression(
+        std::string const& expression,
+        bool anyMode,
+        bool autoWildcard);
+    struct CachedExpression {
+        simfil::ASTPtr ast_;
+        std::optional<simfil::Value> constantValue_;
+        bool constantResolved_ = false;
+    };
+    void ensureEvaluationEnvironment();
+    CachedExpression* getOrCompileExpression(
+        std::string const& expression,
+        bool anyMode,
+        bool autoWildcard);
+    void resolveCachedConstant(CachedExpression& cached);
     void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
     static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
     static std::pair<JsValue, JsValue> encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points);
@@ -199,6 +216,8 @@ protected:
     mapget::TileFeatureLayer::Ptr tile_;
     std::vector<mapget::TileFeatureLayer::Ptr> allTiles_;
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
+    std::unique_ptr<simfil::Environment> evalEnvironment_;
+    std::map<std::string, CachedExpression, std::less<>> expressionCache_;
 };
 
 }  // namespace erdblick
