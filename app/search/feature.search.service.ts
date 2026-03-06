@@ -2,7 +2,7 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapDataService} from "../mapdata/map.service";
 import {CompletionCandidate, CompletionCandidatesForTile, CompletionWorkerTask, DiagnosticsMessage, DiagnosticsResultsForTile, DiagnosticsWorkerTask, SearchResultForTile, SearchResultPosition, SearchWorkerTask, TraceResult, WorkerResult, WorkerTask} from "./search.worker";
-import {Cartographic, Cartesian3, Rectangle} from "../integrations/geo";
+import {Cartographic, Cartesian3, GeoMath, Rectangle} from "../integrations/geo";
 import {FeatureTile} from "../mapdata/features.model";
 import {coreLib, uint8ArrayFromWasm} from "../integrations/wasm";
 import {JobGroup, JobGroupManager, JobGroupType} from "./job-group";
@@ -15,6 +15,14 @@ export const SAFE_ZOOM_LEVEL = 10;
 export interface SearchResultPrimitiveId {
     type: string,
     index: number
+}
+
+export interface SearchResultPoint {
+    coordinates: [number, number];
+    mapId: string;
+    layerId: string;
+    featureId: string;
+    featureKey: string;
 }
 
 const TASK_SEARCH = 'SearchWorkerTask' as const;
@@ -246,6 +254,10 @@ export class FeatureSearchService {
 
     resultTree: FeatureSearchQuadTree = new FeatureSearchQuadTree();
     resultsPerTile: Map<string, SearchResultForTile> = new Map<string, SearchResultForTile>();
+    private searchResultPointsByFeatureKey = new Map<string, SearchResultPoint>();
+    private searchResultPointsCache: SearchResultPoint[] = [];
+    private searchResultPointsCacheDirty = false;
+    private searchResultPointsVersionValue = 0;
 
     currentSearch: SearchState|null = null;
     pointColor: string = "#ea4336";
@@ -286,6 +298,18 @@ export class FeatureSearchService {
 
     getSearchClusterIconMappingUrl(): string {
         return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
+    }
+
+    get searchResultPointsVersion(): number {
+        return this.searchResultPointsVersionValue;
+    }
+
+    getSearchResultPoints(): SearchResultPoint[] {
+        if (this.searchResultPointsCacheDirty) {
+            this.searchResultPointsCache = Array.from(this.searchResultPointsByFeatureKey.values());
+            this.searchResultPointsCacheDirty = false;
+        }
+        return this.searchResultPointsCache;
     }
 
     public initializeWorkers(): Promise<void> {
@@ -461,6 +485,7 @@ export class FeatureSearchService {
         this.stop();
         this.resultTree = new FeatureSearchQuadTree();
         this.resultsPerTile.clear();
+        this.clearSearchResultPoints();
         this.progress.next(null);
         this.searchResults = [];
         this.traceResults = [];
@@ -669,13 +694,15 @@ export class FeatureSearchService {
         // Add visualizations and register the search result.
         if (dedupedMatches.length && tileResult.tileId) {
             const mapTileKey = dedupedMatches[0][0];
-            const [mapId, layerId, _] = coreLib.parseMapTileKey(mapTileKey);
+            const {mapId, layerId} = this.parseMapLayerIds(mapTileKey);
             const mapLayerId = `${mapId}/${layerId}`;
             this.resultsPerTile.set(mapTileKey, {
                 ...tileResult,
                 matches: dedupedMatches
             });
-            this.resultTree.insert(tileResult.tileId, mapLayerId, dedupedMatches.map(result => {
+            let addedPoint = false;
+            const treeResults: Array<[SearchResultPrimitiveId, SearchResultPosition, string]> = [];
+            for (const result of dedupedMatches) {
                 if (result[2].cartographic) {
                     result[2].cartographicRad = Cartographic.fromDegrees(
                         result[2].cartographic.x,
@@ -684,11 +711,16 @@ export class FeatureSearchService {
                     );
                 }
                 result[2].cartographic = null;
+                addedPoint = this.tryAddSearchResultPoint(mapId, layerId, result[1], result[2]) || addedPoint;
                 const featureId = result[1];
                 const id: SearchResultPrimitiveId = {type: "SearchResult", index: this.searchResults.length};
                 this.searchResults.push({label: `${featureId}`, mapId: mapId, layerId: layerId, featureId: featureId});
-                return [id, result[2], mapLayerId];
-            }));
+                treeResults.push([id, result[2], mapLayerId]);
+            }
+            if (addedPoint) {
+                this.searchResultPointsVersionValue += 1;
+            }
+            this.resultTree.insert(tileResult.tileId, mapLayerId, treeResults);
         }
 
         // Broadcast the search progress.
@@ -762,6 +794,58 @@ export class FeatureSearchService {
             parseInt(color.slice(3, 5), 16),
             parseInt(color.slice(5, 7), 16)
         ];
+    }
+
+    private parseMapLayerIds(mapTileKey: string): {mapId: string; layerId: string} {
+        try {
+            const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
+            return {mapId: String(mapId), layerId: String(layerId)};
+        } catch (_error) {
+            const [mapId = "", layerId = ""] = mapTileKey.split("/");
+            return {mapId, layerId};
+        }
+    }
+
+    private tryAddSearchResultPoint(
+        mapId: string,
+        layerId: string,
+        featureId: string,
+        position: SearchResultPosition
+    ): boolean {
+        const cartographicRad = position.cartographicRad;
+        if (!cartographicRad) {
+            return false;
+        }
+        const lon = GeoMath.toDegrees(cartographicRad.longitude);
+        const lat = GeoMath.toDegrees(cartographicRad.latitude);
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+            return false;
+        }
+        const featureKey = `${mapId}/${layerId}/${featureId}`;
+        if (this.searchResultPointsByFeatureKey.has(featureKey)) {
+            return false;
+        }
+        this.searchResultPointsByFeatureKey.set(featureKey, {
+            coordinates: [lon, lat],
+            mapId,
+            layerId,
+            featureId,
+            featureKey
+        });
+        this.searchResultPointsCacheDirty = true;
+        return true;
+    }
+
+    private clearSearchResultPoints(): void {
+        if (!this.searchResultPointsByFeatureKey.size
+            && !this.searchResultPointsCache.length
+            && !this.searchResultPointsCacheDirty) {
+            return;
+        }
+        this.searchResultPointsByFeatureKey.clear();
+        this.searchResultPointsCache = [];
+        this.searchResultPointsCacheDirty = false;
+        this.searchResultPointsVersionValue += 1;
     }
 
     private async ensureTintedClusterAtlas(color: string): Promise<string> {
