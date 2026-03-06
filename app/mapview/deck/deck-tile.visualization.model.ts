@@ -6,7 +6,10 @@ import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
 import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
-import {deckRenderWorkerPool} from "./deck-render.worker.pool";
+import {
+    deckRenderWorkerPool,
+    isDeckRenderWorkerPipelineEnabled
+} from "./deck-render.worker.pool";
 import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
@@ -154,7 +157,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private latestPointLayerData: DeckPointLayerData | null = null;
     private latestArrowLayerData: DeckPathLayerData | null = null;
     private latestMergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null = null;
-    private relevantTileDataVersionAtLastRender = -1;
+
 
     constructor(viewIndex: number,
                 tile: FeatureTile,
@@ -313,7 +316,6 @@ export class DeckTileVisualization implements ITileVisualization {
             this.lastSignature = this.renderSignature(fidelity);
             this.hadTileDataAtLastRender = this.tileHasData();
             this.tileFeatureCountAtLastRender = this.tileFeatureCount();
-            this.relevantTileDataVersionAtLastRender = this.relevantTileDataVersion();
             return true;
         } finally {
             const workerTimings = this.consumeLatestWorkerTimings();
@@ -347,14 +349,12 @@ export class DeckTileVisualization implements ITileVisualization {
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
-        this.relevantTileDataVersionAtLastRender = -1;
     }
 
     isDirty(): boolean {
         return (
             !this.rendered ||
             this.lastSignature !== this.renderSignature() ||
-            this.relevantTileDataVersionAtLastRender !== this.relevantTileDataVersion() ||
             this.hadTileDataAtLastRender !== this.tileHasData() ||
             this.tileFeatureCountAtLastRender !== this.tileFeatureCount()
         );
@@ -413,9 +413,9 @@ export class DeckTileVisualization implements ITileVisualization {
             return null;
         }
 
-        // Keep selection rendering synchronous to minimize interaction latency
-        // and avoid ordering races while selection state changes.
-        if (this.highlightMode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value) {
+        // Keep non-base highlighting synchronous to minimize interaction latency
+        // and avoid ordering races while selection/hover state changes.
+        if (this.highlightMode.value !== coreLib.HighlightMode.NO_HIGHLIGHT.value) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
             this.setTileVertexCount(fullMainThread.vertexCount);
             this.latestWorkerTimings = fullMainThread.workerTimings;
@@ -425,9 +425,7 @@ export class DeckTileVisualization implements ITileVisualization {
             return fullMainThread.pathLayerData;
         }
 
-        // Non-point rendering is expected to run in the worker path.
-        // Fallback is only used when worker prerequisites are unavailable.
-        if (!this.canRenderInWorker()) {
+        if (!isDeckRenderWorkerPipelineEnabled()) {
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
             this.setTileVertexCount(fullMainThread.vertexCount);
             this.latestWorkerTimings = fullMainThread.workerTimings;
@@ -438,18 +436,15 @@ export class DeckTileVisualization implements ITileVisualization {
         }
 
         try {
-            const [nonPointWorker, pointMainThread] = await Promise.all([
-                this.renderWasmInWorker(fidelity, DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY),
-                this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_POINTS_ONLY)
-            ]);
-            this.setTileVertexCount(Math.max(nonPointWorker.vertexCount, pointMainThread.vertexCount));
-            this.latestWorkerTimings = nonPointWorker.workerTimings;
-            this.latestPointLayerData = pointMainThread.pointLayerData;
-            this.latestArrowLayerData = nonPointWorker.arrowLayerData;
-            this.latestMergedPointFeatures = pointMainThread.mergedPointFeatures;
-            return nonPointWorker.pathLayerData;
+            const workerOutput = await this.renderWasmInWorker(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
+            this.setTileVertexCount(workerOutput.vertexCount);
+            this.latestWorkerTimings = workerOutput.workerTimings;
+            this.latestPointLayerData = workerOutput.pointLayerData;
+            this.latestArrowLayerData = workerOutput.arrowLayerData;
+            this.latestMergedPointFeatures = workerOutput.mergedPointFeatures;
+            return workerOutput.pathLayerData;
         } catch (error) {
-            console.error("Deck split rendering failed; falling back to main thread rendering.", error);
+            console.error("Deck worker rendering failed; falling back to main thread rendering.", error);
             const fullMainThread = await this.renderWasmOnMainThread(fidelity, DECK_GEOMETRY_OUTPUT_ALL);
             this.setTileVertexCount(fullMainThread.vertexCount);
             this.latestWorkerTimings = fullMainThread.workerTimings;
@@ -460,29 +455,12 @@ export class DeckTileVisualization implements ITileVisualization {
         }
     }
 
-    private canRenderInWorker(): boolean {
-        if (!this.tile.blobCount() && !this.tile.tileFeatureLayerBlob) {
-            return false;
-        }
-        const tileWithParserContext = this.tile as FeatureTile & {
-            getFieldDictBlob?: () => Uint8Array | null;
-            getDataSourceInfoBlob?: () => Uint8Array | null;
-        };
-        const fieldDictBlob = tileWithParserContext.getFieldDictBlob?.();
-        const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob?.();
-        return !!fieldDictBlob && !!dataSourceInfoBlob;
-    }
-
     private async renderWasmInWorker(
         fidelity: "low" | "high",
         outputMode: DeckGeometryOutputMode
     ): Promise<DeckWasmRenderOutput> {
-        const tileWithParserContext = this.tile as FeatureTile & {
-            getFieldDictBlob?: () => Uint8Array | null;
-            getDataSourceInfoBlob?: () => Uint8Array | null;
-        };
-        const fieldDictBlob = tileWithParserContext.getFieldDictBlob?.();
-        const dataSourceInfoBlob = tileWithParserContext.getDataSourceInfoBlob?.();
+        const fieldDictBlob = this.tile.getFieldDictBlob();
+        const dataSourceInfoBlob = this.tile.getDataSourceInfoBlob();
         if (!fieldDictBlob || !dataSourceInfoBlob) {
             throw new Error("Worker render requested without parser context blobs.");
         }
@@ -828,27 +806,6 @@ export class DeckTileVisualization implements ITileVisualization {
         }) as Uint8Array;
     }
 
-    private tileOutlinePath(): [number, number][] | null {
-        const tileBox = coreLib.getTileBox(this.tile.tileId) as unknown;
-        if (!Array.isArray(tileBox) || tileBox.length < 4) {
-            return null;
-        }
-        const west = Number(tileBox[0]);
-        const south = Number(tileBox[1]);
-        const east = Number(tileBox[2]);
-        const north = Number(tileBox[3]);
-        if (![west, south, east, north].every(Number.isFinite)) {
-            return null;
-        }
-        return [
-            [west, south],
-            [east, south],
-            [east, north],
-            [west, north],
-            [west, south]
-        ];
-    }
-
     private tileHasData(): boolean {
         return this.tile.hasData();
     }
@@ -858,30 +815,18 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private highFidelityStage(): number {
-        const styleWithHighFidelityStage = this.style as FeatureLayerStyle & { highFidelityStage?: () => number };
-        if (typeof styleWithHighFidelityStage.highFidelityStage !== "function") {
-            return 0;
-        }
-        const rawValue = styleWithHighFidelityStage.highFidelityStage();
+        const rawValue = this.style.highFidelityStage();
         if (!Number.isFinite(rawValue)) {
             return 0;
         }
         return Math.max(0, Math.floor(rawValue));
     }
 
-    private highestLoadedStage(): number | null {
-        const tileWithStages = this.tile as FeatureTile & { highestLoadedStage?: () => number | null };
-        if (typeof tileWithStages.highestLoadedStage !== "function") {
-            return this.tile.hasData() ? 0 : null;
-        }
-        return tileWithStages.highestLoadedStage();
-    }
-
     private currentFidelity(): "low" | "high" | null {
         if (!this.tile.hasData() || this.tile.numFeatures <= 0) {
             return null;
         }
-        const highestLoadedStage = this.highestLoadedStage();
+        const highestLoadedStage = this.tile.highestLoadedStage();
         if (highestLoadedStage !== null &&
             this.prefersHighFidelity &&
             highestLoadedStage >= this.highFidelityStage()) {
@@ -925,36 +870,6 @@ export class DeckTileVisualization implements ITileVisualization {
         return outputMode;
     }
 
-    private minimumStage(): number {
-        const styleWithMinimumStage = this.style as FeatureLayerStyle & { minimumStage?: () => number };
-        if (typeof styleWithMinimumStage.minimumStage !== "function") {
-            return 0;
-        }
-        const rawValue = styleWithMinimumStage.minimumStage();
-        if (!Number.isFinite(rawValue)) {
-            return 0;
-        }
-        return Math.max(0, Math.floor(rawValue));
-    }
-
-    private relevantTileDataVersion(): number {
-        const tileWithStageVersion = this.tile as FeatureTile & { dataVersionUpToStage?: (maxStage: number) => number };
-        if (typeof tileWithStageVersion.dataVersionUpToStage !== "function") {
-            return this.tile.dataVersion;
-        }
-        let relevantStage = this.minimumStage();
-        // In high-fidelity mode we must react to every newly loaded stage.
-        // Otherwise a tile can switch to high-fidelity too early, render empty,
-        // and never be considered dirty again when later stages arrive.
-        if (this.prefersHighFidelity) {
-            const highestLoadedStage = this.highestLoadedStage();
-            if (highestLoadedStage !== null) {
-                relevantStage = Math.max(relevantStage, highestLoadedStage);
-            }
-        }
-        return tileWithStageVersion.dataVersionUpToStage(relevantStage);
-    }
-
     private setTileVertexCount(count: number): void {
         this.tile.setVertexCount(Math.max(0, Math.floor(Number(count))));
     }
@@ -977,27 +892,25 @@ export class DeckTileVisualization implements ITileVisualization {
         const sampleDuration = Number.isFinite(measuredDurationMs)
             ? measuredDurationMs as number
             : durationMs;
-        const tileWithStats = this.tile as unknown as { stats: Map<string, number[]> };
         const timingListKey = `Rendering/${this.statsHighlightModeLabel()}/${this.styleId}#ms`;
-        const timingList = tileWithStats.stats.get(timingListKey);
+        const timingList = this.tile.stats.get(timingListKey);
         if (timingList) {
             timingList.push(sampleDuration);
             return;
         }
-        tileWithStats.stats.set(timingListKey, [sampleDuration]);
+        this.tile.stats.set(timingListKey, [sampleDuration]);
     }
 
     private recordWorkerParseTimeSample(durationMs?: number): void {
         if (!Number.isFinite(durationMs)) {
             return;
         }
-        const tileWithStats = this.tile as unknown as { stats: Map<string, number[]> };
-        const parseTimes = tileWithStats.stats.get(FeatureTile.statParseTime);
+        const parseTimes = this.tile.stats.get(FeatureTile.statParseTime);
         if (parseTimes) {
             parseTimes.push(durationMs as number);
             return;
         }
-        tileWithStats.stats.set(FeatureTile.statParseTime, [durationMs as number]);
+        this.tile.stats.set(FeatureTile.statParseTime, [durationMs as number]);
     }
 
     private statsHighlightModeLabel(): string {

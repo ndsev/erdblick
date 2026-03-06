@@ -116,6 +116,9 @@ export abstract class DeckMapView implements IRenderView {
     private tileGridOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private searchResultsOverlayUpdateRaf: number | null = null;
     private searchResultsOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    private lastSearchResultsPointsVersion = -1;
+    private lastSearchResultsIconAtlasUrl = "";
+    private lastSearchResultsIconMappingUrl = "";
 
     get viewIndex() {
         return this._viewIndex;
@@ -853,67 +856,39 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     private updateSearchResultsOverlay(): void {
+        const pointsVersion = this.featureSearchService.searchResultPointsVersion;
+        const iconAtlasUrl = this.featureSearchService.getSearchClusterIconAtlasUrl();
+        const iconMappingUrl = this.featureSearchService.getSearchClusterIconMappingUrl();
         if (!this.deck) {
             this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+            this.lastSearchResultsPointsVersion = -1;
+            this.lastSearchResultsIconAtlasUrl = "";
+            this.lastSearchResultsIconMappingUrl = "";
             return;
         }
-        const points = this.currentSearchResultPoints();
+        if (this.lastSearchResultsPointsVersion === pointsVersion
+            && this.lastSearchResultsIconAtlasUrl === iconAtlasUrl
+            && this.lastSearchResultsIconMappingUrl === iconMappingUrl) {
+            return;
+        }
+        const points = this.featureSearchService.getSearchResultPoints();
+        this.lastSearchResultsPointsVersion = pointsVersion;
+        this.lastSearchResultsIconAtlasUrl = iconAtlasUrl;
+        this.lastSearchResultsIconMappingUrl = iconMappingUrl;
         if (!points.length) {
             this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
             return;
         }
         const layer = new SearchResultClusterLayer({
             id: DeckMapView.SEARCH_RESULTS_LAYER_KEY,
-            data: points,
+            data: points as SearchResultClusterPoint[],
             pickable: false,
             sizeScale: 40,
             getPosition: (point: SearchResultClusterPoint) => point.coordinates,
-            iconAtlas: this.featureSearchService.getSearchClusterIconAtlasUrl(),
-            iconMapping: this.featureSearchService.getSearchClusterIconMappingUrl()
+            iconAtlas: iconAtlasUrl,
+            iconMapping: iconMappingUrl
         });
         this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer as any, 650);
-    }
-
-    private currentSearchResultPoints(): SearchResultClusterPoint[] {
-        const points: SearchResultClusterPoint[] = [];
-        const seenFeatureKeys = new Set<string>();
-        for (const tileResult of this.featureSearchService.resultsPerTile.values()) {
-            for (const [mapTileKey, featureId, position] of tileResult.matches) {
-                const cartographicRad = position?.cartographicRad;
-                if (!cartographicRad) {
-                    continue;
-                }
-                const lon = GeoMath.toDegrees(cartographicRad.longitude);
-                const lat = GeoMath.toDegrees(cartographicRad.latitude);
-                if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-                    continue;
-                }
-                let mapId = "";
-                let layerId = "";
-                try {
-                    const parsed = coreLib.parseMapTileKey(mapTileKey);
-                    mapId = String(parsed[0]);
-                    layerId = String(parsed[1]);
-                } catch (_error) {
-                    const parts = mapTileKey.split("/");
-                    mapId = parts[0] ?? "";
-                    layerId = parts[1] ?? "";
-                }
-                const featureKey = `${mapId}/${layerId}/${featureId}`;
-                if (seenFeatureKeys.has(featureKey)) {
-                    continue;
-                }
-                seenFeatureKeys.add(featureKey);
-                points.push({
-                    coordinates: [lon, lat],
-                    mapId,
-                    layerId,
-                    featureId,
-                    featureKey
-                });
-            }
-        }
-        return points;
     }
 
     private updateTileGridOverlay(): void {

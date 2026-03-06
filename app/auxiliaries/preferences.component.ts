@@ -48,8 +48,17 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                                 (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
             </div>
             <div class="button-container">
+                <label>Threaded tile rendering:</label>
+                <p-selectButton [options]="toggleOptions"
+                                [(ngModel)]="deckThreadedRenderingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckThreadedRenderingEnabled($event)"></p-selectButton>
+            </div>
+            <div class="button-container">
                 <label>Deck worker count override:</label>
                 <p-toggleswitch [(ngModel)]="deckStyleWorkersOverrideSetting"
+                                [disabled]="!deckThreadedRenderingEnabledSetting"
                                 (ngModelChange)="setDeckStyleWorkersOverride($event)" />
             </div>
             <div class="slider-container">
@@ -59,11 +68,11 @@ import {DialogStackService} from "../shared/dialog-stack.service";
                            type="text"
                            pInputText
                            [(ngModel)]="deckStyleWorkersCountInput"
-                           [disabled]="!deckStyleWorkersOverrideSetting"
+                           [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
                            (keydown.enter)="applyDeckStyleWorkersCount()"/>
                     <p-slider [(ngModel)]="deckStyleWorkersCountInput"
                               class="w-full"
-                              [disabled]="!deckStyleWorkersOverrideSetting"
+                              [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"
                               [min]="1"
                               [max]="MAX_DECK_STYLE_WORKERS"></p-slider>
                 </div>
@@ -71,7 +80,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
             <p-button (click)="applyDeckStyleWorkersCount()"
                       label="Apply Worker Count"
                       icon="pi pi-check"
-                      [disabled]="!deckStyleWorkersOverrideSetting"></p-button>
+                      [disabled]="!deckThreadedRenderingEnabledSetting || !deckStyleWorkersOverrideSetting"></p-button>
             <div class="button-container">
                 <label>Dark Mode:</label>
                 <p-selectButton [options]="darkModeOptions" [(ngModel)]="darkModeSetting" optionLabel="label" optionValue="value" (ngModelChange)="setDarkMode($event)"></p-selectButton>
@@ -131,6 +140,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilesToLoadInput: number = 0;
     limitSimultaneousInspectionsInput: number = 0;
     tilePullCompressionEnabledSetting: boolean = false;
+    deckThreadedRenderingEnabledSetting: boolean = true;
     deckStyleWorkersOverrideSetting: boolean = false;
     deckStyleWorkersCountInput: number = DEFAULT_DECK_STYLE_WORKER_COUNT;
     toggleOptions = [
@@ -167,6 +177,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.deckThreadedRenderingEnabledState.subscribe(enabled => {
+            this.deckThreadedRenderingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.deckStyleWorkersOverrideState.subscribe(enabled => {
             this.deckStyleWorkersOverrideSetting = enabled;
@@ -228,13 +241,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.tilePullCompressionEnabled = enabled;
     }
 
+    setDeckThreadedRenderingEnabled(enabled: boolean) {
+        this.deckThreadedRenderingEnabledSetting = enabled;
+        this.stateService.deckThreadedRenderingEnabled = enabled;
+    }
+
     setDeckStyleWorkersOverride(enabled: boolean) {
         this.deckStyleWorkersOverrideSetting = enabled;
         this.stateService.deckStyleWorkersOverride = enabled;
     }
 
     applyDeckStyleWorkersCount() {
-        if (!this.deckStyleWorkersOverrideSetting) {
+        if (!this.deckThreadedRenderingEnabledSetting || !this.deckStyleWorkersOverrideSetting) {
             return;
         }
         const count = Number(this.deckStyleWorkersCountInput);

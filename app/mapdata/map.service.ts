@@ -8,7 +8,11 @@ import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats}
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
-import {configureDeckRenderWorkerSettings} from "../mapview/deck/deck-render.worker.pool";
+import {
+    configureDeckRenderWorkerSettings,
+    getDeckRenderWorkerConcurrency,
+    isDeckRenderWorkerPipelineEnabled
+} from "../mapview/deck/deck-render.worker.pool";
 import {BehaviorSubject, distinctUntilChanged, firstValueFrom, skip, Subject} from "rxjs";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {Feature, FeatureLayerStyle, HighlightMode, Viewport, TileLayerParser} from '../../build/libs/core/erdblick-core';
@@ -118,7 +122,7 @@ export class MapDataService {
     private viewportRenderCompletedAtMs: number | null = null;
     private nextVisualizationViewIndex: number = 0;
     private inFlightVisualizationRendersByView: number[] = [];
-    private readonly maxInFlightVisualizationRendersPerView: number = 1;
+    private inFlightBlockedTileIdsByView: Array<Map<bigint, number>> = [];
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
     tileVisualizationTopic: Subject<TileVisualizationRenderTask>;
@@ -174,12 +178,14 @@ export class MapDataService {
 
         const applyDeckWorkerSettings = () => {
             configureDeckRenderWorkerSettings({
+                threadedRenderingEnabled: this.stateService.deckThreadedRenderingEnabled,
                 workerCountOverride: this.stateService.deckStyleWorkersOverride
                     ? this.stateService.deckStyleWorkersCount
                     : null
             });
         };
         applyDeckWorkerSettings();
+        this.stateService.deckThreadedRenderingEnabledState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersOverrideState.subscribe(applyDeckWorkerSettings);
         this.stateService.deckStyleWorkersCountState.subscribe(applyDeckWorkerSettings);
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
@@ -347,12 +353,20 @@ export class MapDataService {
                 ? this.nextVisualizationViewIndex % viewCount
                 : 0;
         }
+        if (this.inFlightBlockedTileIdsByView.length !== viewCount) {
+            this.inFlightBlockedTileIdsByView = Array.from(
+                {length: viewCount},
+                (_, index) => this.inFlightBlockedTileIdsByView[index] ?? new Map<bigint, number>()
+            );
+        }
+        const maxInFlightPerView = this.maxInFlightVisualizationRendersPerView();
 
         const startTime = Date.now();
         const timeBudget = 20; // milliseconds
         let currentQueueLength = this.visualizationQueueLength();
         let dispatchedAny = false;
         let blockedByInFlight = false;
+        let blockedByNeighbor = false;
 
         while (currentQueueLength > 0 && viewCount > 0) {
             // Check if the time budget is exceeded.
@@ -368,24 +382,28 @@ export class MapDataService {
                 if (!viewState.visualizationQueue.length) {
                     continue;
                 }
-                if (this.inFlightVisualizationRendersByView[viewIndex] >= this.maxInFlightVisualizationRendersPerView) {
+                if (this.inFlightVisualizationRendersByView[viewIndex] >= maxInFlightPerView) {
                     blockedByInFlight = true;
                     continue;
                 }
-                const entry = viewState.visualizationQueue.shift();
+                const entry = this.dequeueNextRenderableVisualization(viewIndex, viewState);
                 if (entry === undefined) {
+                    blockedByNeighbor = true;
                     continue;
                 }
                 this.inFlightVisualizationRendersByView[viewIndex] += 1;
+                this.markTileInFlightForView(viewIndex, entry.tile.tileId);
                 let doneCalled = false;
                 const onDone = () => {
                     if (doneCalled) {
                         return;
                     }
                     doneCalled = true;
+                    this.unmarkTileInFlightForView(viewIndex, entry.tile.tileId);
+                    const inFlightCount = this.inFlightVisualizationRendersByView[viewIndex] ?? 0;
                     this.inFlightVisualizationRendersByView[viewIndex] = Math.max(
                         0,
-                        this.inFlightVisualizationRendersByView[viewIndex] - 1
+                        inFlightCount - 1
                     );
                 };
                 this.tileVisualizationTopic.next({
@@ -405,7 +423,7 @@ export class MapDataService {
 
         // Continue visualizing tiles with a delay.
         const delay = currentQueueLength
-            ? (dispatchedAny ? 0 : (blockedByInFlight ? 4 : 10))
+            ? (dispatchedAny ? 0 : ((blockedByInFlight || blockedByNeighbor) ? 4 : 10))
             : 10;
         this.tryFinalizeViewportRenderDuration();
         this.scheduleOutsideAngular(() => this.processVisualizationTasks(), delay);
@@ -533,6 +551,86 @@ export class MapDataService {
             (sum, state) => sum + state.visualizationQueue.length,
             0
         );
+    }
+
+    private maxInFlightVisualizationRendersPerView(): number {
+        if (!isDeckRenderWorkerPipelineEnabled()) {
+            return 1;
+        }
+        const configuredConcurrency = getDeckRenderWorkerConcurrency();
+        if (!Number.isFinite(configuredConcurrency) || configuredConcurrency < 1) {
+            return 1;
+        }
+        return Math.max(1, Math.floor(configuredConcurrency));
+    }
+
+    private tileNeighborhoodForConcurrentRenderBlock(tileId: bigint): bigint[] {
+        const blockedTileIds = new Set<bigint>();
+        blockedTileIds.add(tileId);
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                try {
+                    blockedTileIds.add(BigInt(coreLib.getTileNeighbor(tileId, dx, dy)));
+                } catch (_error) {
+                    // Keep rendering robust at tile-grid boundaries.
+                }
+            }
+        }
+        return Array.from(blockedTileIds.values());
+    }
+
+    private markTileInFlightForView(viewIndex: number, tileId: bigint): void {
+        const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
+        if (!blockedByView) {
+            return;
+        }
+        for (const blockedTileId of this.tileNeighborhoodForConcurrentRenderBlock(tileId)) {
+            blockedByView.set(
+                blockedTileId,
+                (blockedByView.get(blockedTileId) ?? 0) + 1
+            );
+        }
+    }
+
+    private unmarkTileInFlightForView(viewIndex: number, tileId: bigint): void {
+        const blockedByView = this.inFlightBlockedTileIdsByView[viewIndex];
+        if (!blockedByView) {
+            return;
+        }
+        for (const blockedTileId of this.tileNeighborhoodForConcurrentRenderBlock(tileId)) {
+            const remaining = (blockedByView.get(blockedTileId) ?? 0) - 1;
+            if (remaining <= 0) {
+                blockedByView.delete(blockedTileId);
+            } else {
+                blockedByView.set(blockedTileId, remaining);
+            }
+        }
+    }
+
+    private dequeueNextRenderableVisualization(
+        viewIndex: number,
+        viewState: ViewVisualizationState
+    ): ITileVisualization | undefined {
+        const queue = viewState.visualizationQueue;
+        if (!queue.length) {
+            return undefined;
+        }
+        const blockedTileIds = this.inFlightBlockedTileIdsByView[viewIndex];
+        if (!blockedTileIds || !blockedTileIds.size) {
+            return queue.shift();
+        }
+        for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
+            const candidate = queue[queueIndex];
+            if (blockedTileIds.has(candidate.tile.tileId)) {
+                continue;
+            }
+            if (queueIndex === 0) {
+                return queue.shift();
+            }
+            const [entry] = queue.splice(queueIndex, 1);
+            return entry;
+        }
+        return undefined;
     }
 
     private sortVisualizationQueue(viewState: ViewVisualizationState): void {
@@ -2241,6 +2339,9 @@ export class MapDataService {
         this.viewVisualizationState[viewIndex].visualizationQueue = [];
         if (viewIndex >= 0 && viewIndex < this.inFlightVisualizationRendersByView.length) {
             this.inFlightVisualizationRendersByView[viewIndex] = 0;
+        }
+        if (viewIndex >= 0 && viewIndex < this.inFlightBlockedTileIdsByView.length) {
+            this.inFlightBlockedTileIdsByView[viewIndex].clear();
         }
     }
 

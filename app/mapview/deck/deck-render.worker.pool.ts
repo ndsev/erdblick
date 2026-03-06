@@ -52,6 +52,7 @@ export interface DeckPathRenderBuffers {
 }
 
 export interface DeckRenderWorkerSettings {
+    threadedRenderingEnabled: boolean;
     workerCountOverride: number | null;
 }
 
@@ -284,6 +285,7 @@ export class DeckRenderWorkerPool {
 }
 
 let settings: DeckRenderWorkerSettings = {
+    threadedRenderingEnabled: true,
     workerCountOverride: null
 };
 
@@ -312,6 +314,9 @@ function resolveAutoWorkerCount(): number {
 }
 
 function resolveConfiguredWorkerCount(): number {
+    if (!settings.threadedRenderingEnabled) {
+        return 0;
+    }
     if (settings.workerCountOverride !== null) {
         return settings.workerCountOverride;
     }
@@ -320,9 +325,12 @@ function resolveConfiguredWorkerCount(): number {
 
 export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings): void {
     const normalized: DeckRenderWorkerSettings = {
+        threadedRenderingEnabled: next.threadedRenderingEnabled !== false,
         workerCountOverride: sanitizeWorkerOverride(next.workerCountOverride)
     };
-    const changed = settings.workerCountOverride !== normalized.workerCountOverride;
+    const changed =
+        settings.threadedRenderingEnabled !== normalized.threadedRenderingEnabled
+        || settings.workerCountOverride !== normalized.workerCountOverride;
     settings = normalized;
     if (changed && singleton) {
         singleton.dispose("Deck render worker pool reconfigured.");
@@ -330,7 +338,18 @@ export function configureDeckRenderWorkerSettings(next: DeckRenderWorkerSettings
     }
 }
 
+export function isDeckRenderWorkerPipelineEnabled(): boolean {
+    return settings.threadedRenderingEnabled;
+}
+
+export function getDeckRenderWorkerConcurrency(): number {
+    return resolveConfiguredWorkerCount();
+}
+
 export function deckRenderWorkerPool(): DeckRenderWorkerPool {
+    if (!settings.threadedRenderingEnabled) {
+        throw new Error("Deck render worker pipeline is disabled.");
+    }
     if (!singleton) {
         singleton = new DeckRenderWorkerPool(resolveConfiguredWorkerCount());
     }

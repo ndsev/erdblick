@@ -152,6 +152,7 @@ class AppStateServiceStub {
     selectionState = new BehaviorSubject<any[]>([]);
 
     tilesLoadLimitState = new BehaviorSubject<number>(8);
+    deckThreadedRenderingEnabledState = new BehaviorSubject<boolean>(true);
     deckStyleWorkersOverrideState = new BehaviorSubject<boolean>(false);
     deckStyleWorkersCountState = new BehaviorSubject<number>(2);
     tilePullCompressionEnabledState = new BehaviorSubject<boolean>(false);
@@ -166,6 +167,10 @@ class AppStateServiceStub {
 
     get deckStyleWorkersOverride() {
         return this.deckStyleWorkersOverrideState.getValue();
+    }
+
+    get deckThreadedRenderingEnabled() {
+        return this.deckThreadedRenderingEnabledState.getValue();
     }
 
     get deckStyleWorkersCount() {
