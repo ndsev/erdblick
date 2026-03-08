@@ -123,6 +123,10 @@ export class MapDataService {
     private nextVisualizationViewIndex: number = 0;
     private inFlightVisualizationRendersByView: number[] = [];
     private inFlightBlockedTileIdsByView: Array<Map<bigint, number>> = [];
+    // Increments for every selection-state emission. Async selection projection
+    // work captures this value and bails out if a newer emission started meanwhile.
+    // This prevents stale async completions from overwriting newer close/dock updates.
+    private selectionSyncRevision: number = 0;
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
 
     tileVisualizationTopic: Subject<TileVisualizationRenderTask>;
@@ -280,8 +284,16 @@ export class MapDataService {
             this.stateService.prune(this.maps.maps, this.styleService.styles);
         });
         this.stateService.selectionState.subscribe(async selected => {
+            // Selection -> panel projection is async because loadFeatures() may await tile loading.
+            // Capture a revision token so only the newest projection run can publish results.
+            const syncRevision = ++this.selectionSyncRevision;
             const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             for (const selection of selected) {
+                // A newer selection update arrived while we were iterating.
+                // Abort this stale run to avoid reintroducing outdated panel state.
+                if (syncRevision !== this.selectionSyncRevision) {
+                    return;
+                }
                 // Only push a new panel if the selection changed. Otherwise,
                 // just reuse the old panel so that the inspection trees in existing
                 // opened panels are not recalculated.
@@ -296,6 +308,11 @@ export class MapDataService {
                     continue;
                 }
                 const features = await this.loadFeatures(selection.features);
+                // Feature loading completed after a newer selection revision started.
+                // Do not publish stale panel data.
+                if (syncRevision !== this.selectionSyncRevision) {
+                    return;
+                }
                 convertedSelections.push({
                     id: selection.id,
                     locked: selection.locked,
@@ -306,6 +323,10 @@ export class MapDataService {
                     undocked: selection.undocked ?? false,
                     inspectionDialogLayoutEntry: selection.inspectionDialogLayoutEntry
                 });
+            }
+            // Final stale-run guard right before publishing.
+            if (syncRevision !== this.selectionSyncRevision) {
+                return;
             }
             this.selectionTopic.next(convertedSelections);
         });
