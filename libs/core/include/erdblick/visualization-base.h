@@ -41,6 +41,7 @@ public:
         NativeJsValue const& rawOptionValues,
         FeatureStyleRule::HighlightMode const& highlightMode,
         FeatureStyleRule::Fidelity fidelity,
+        int highFidelityStage,
         int maxLowFiLod,
         GeometryOutputMode geometryOutputMode = GeometryOutputMode::All,
         NativeJsValue const& rawFeatureIdSubset = {},
@@ -62,6 +63,10 @@ protected:
         BoundEvalFun& evalFun,
         FeatureStyleRule const& rule,
         std::string const& mapLayerStyleRuleId);
+    // Called once per feature before style-rule evaluation.
+    virtual void onFeatureForRendering(mapget::Feature const& feature);
+    // Allows derived classes to bypass the global low-fi max-lod filter.
+    [[nodiscard]] virtual bool bypassLowFiMaxLodFilter() const;
 
     virtual void emitPolygon(
         std::vector<mapget::Point> const& vertsCartesian,
@@ -207,6 +212,7 @@ protected:
     std::map<std::string, simfil::Value> optionValues_;
     FeatureStyleRule::HighlightMode highlightMode_;
     FeatureStyleRule::Fidelity fidelity_;
+    uint32_t highFidelityStage_ = 0;
     int maxLowFiLod_ = -1;
     GeometryOutputMode geometryOutputMode_ = GeometryOutputMode::All;
     JsValue featureMergeService_;

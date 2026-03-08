@@ -86,6 +86,7 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
     NativeJsValue const& rawOptionValues,
     FeatureStyleRule::HighlightMode const& highlightMode,
     FeatureStyleRule::Fidelity fidelity,
+    int highFidelityStage,
     int maxLowFiLod,
     GeometryOutputMode geometryOutputMode,
     NativeJsValue const& rawFeatureIdSubset,
@@ -94,6 +95,7 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
       style_(style),
       highlightMode_(highlightMode),
       fidelity_(fidelity),
+      highFidelityStage_(std::max(0, highFidelityStage)),
       maxLowFiLod_(std::clamp(maxLowFiLod, -1, 7)),
       geometryOutputMode_(geometryOutputMode),
       featureMergeService_(rawFeatureMergeService)
@@ -155,6 +157,16 @@ void FeatureLayerVisualizationBase::onRelationStyle(
     (void) evalFun;
     (void) rule;
     (void) mapLayerStyleRuleId;
+}
+
+void FeatureLayerVisualizationBase::onFeatureForRendering(mapget::Feature const& feature)
+{
+    (void) feature;
+}
+
+bool FeatureLayerVisualizationBase::bypassLowFiMaxLodFilter() const
+{
+    return false;
 }
 
 void FeatureLayerVisualizationBase::emitPolygon(
@@ -316,11 +328,14 @@ void FeatureLayerVisualizationBase::run()
 
     auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
     {
-        if (fidelity_ == FeatureStyleRule::LowFidelity && maxLowFiLod_ >= 0) {
+        if (fidelity_ == FeatureStyleRule::LowFidelity
+            && maxLowFiLod_ >= 0
+            && !bypassLowFiMaxLodFilter()) {
             if (static_cast<int>(feature->lod()) > maxLowFiLod_) {
                 return;
             }
         }
+        onFeatureForRendering(static_cast<mapget::Feature const&>(*feature));
         auto const& constFeature = static_cast<mapget::Feature const&>(*feature);
         std::optional<simfil::model_ptr<simfil::OverlayNode>> evaluationContext;
         auto ensureEvaluationContext = [this, &constFeature, &evaluationContext]()
@@ -522,6 +537,18 @@ void FeatureLayerVisualizationBase::addGeometry(
     BoundEvalFun& evalFun,
     glm::dvec3 const& offset)
 {
+    auto const resolvedGeometryStage = geometryStage.value_or(0U);
+    if (fidelity_ == FeatureStyleRule::LowFidelity) {
+        auto const lowFidelityStageMax = highFidelityStage_ > 0U ? highFidelityStage_ - 1U : 0U;
+        if (resolvedGeometryStage > lowFidelityStageMax) {
+            return;
+        }
+    } else if (fidelity_ == FeatureStyleRule::HighFidelity) {
+        if (resolvedGeometryStage < highFidelityStage_) {
+            return;
+        }
+    }
+
     if (!rule.supports(geom.geomType_, geometryStage)) {
         return;
     }

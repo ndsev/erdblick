@@ -46,13 +46,6 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
-    if (auto highFidelityStage = styleYaml["high-fidelity-stage"]) {
-        if (highFidelityStage.IsScalar()) {
-            highFidelityStage_ =
-                static_cast<uint32_t>(std::max(0, highFidelityStage.as<int>()));
-        }
-    }
-
     if (auto layer = styleYaml["layer"]) {
         if (layer.IsScalar())
             layerAffinity_ = layer.as<std::string>();
@@ -122,11 +115,6 @@ bool FeatureLayerStyle::defaultEnabled() const
 uint32_t FeatureLayerStyle::minimumStage() const
 {
     return stage_;
-}
-
-uint32_t FeatureLayerStyle::highFidelityStage() const
-{
-    return highFidelityStage_;
 }
 
 std::string const& FeatureLayerStyle::name() const {

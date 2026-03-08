@@ -2357,7 +2357,11 @@ export class MapDataService {
         }
 
         // Apply highlight styles.
-        for (const group of groups) {
+        for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            const group = groups[groupIndex];
+            const groupKey = mode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value
+                ? `selection-${group.id ?? groupIndex}`
+                : `hover-${group.id ?? groupIndex}`;
             const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
             for (const wrapper of group.features) {
                 if (!featureWrappersForTile.has(wrapper.featureTile)) {
@@ -2383,15 +2387,18 @@ export class MapDataService {
                             if (group.color) {
                                 styleOptions["selectableFeatureHighlightColor"] = group.color;
                             }
+                            const renderPolicy = this.tileRenderPolicyForView(viewIndex, featureTile);
                             let visualization = this.createTileVisualization(
                                 viewIndex,
                                 featureTile,
                                 style.featureLayerStyle,
                                 style.source,
-                                true,
-                                null,
+                                this.getLayerHighFidelityStage(featureTile.mapName, featureTile.layerName),
+                                renderPolicy.prefersHighFidelity,
+                                renderPolicy.maxLowFiLod,
                                 mode,
                                 featureIds,
+                                groupKey,
                                 false,
                                 styleOptions
                             );

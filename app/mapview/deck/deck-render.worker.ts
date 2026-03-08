@@ -136,6 +136,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             createMergeCountProvider(task.mergeCountSnapshot),
             resolveHighlightMode(task.highlightModeValue),
             resolveFidelity(task.fidelityValue),
+            task.highFidelityStage,
             task.maxLowFiLod,
             task.outputMode,
             task.featureIdSubset

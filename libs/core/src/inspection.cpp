@@ -2,6 +2,7 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 
@@ -44,6 +45,24 @@ auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
     if (auto decoded = value.decodeBigEndianI64())
         return std::to_string(*decoded);
     return "0x" + value.toHex(false);
+}
+
+uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
+{
+    auto const layerInfo = layer.layerInfo();
+    auto const stages = std::max<uint32_t>(1U, layerInfo ? layerInfo->stages_ : 1U);
+    auto const fallback = stages > 1U ? 1U : 0U;
+    auto const configured = layerInfo ? layerInfo->highFidelityStage_ : fallback;
+    return std::min(stages - 1U, configured);
+}
+
+std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
+{
+    auto const layerInfo = layer.layerInfo();
+    if (layerInfo && stage < layerInfo->stageLabels_.size()) {
+        return layerInfo->stageLabels_[stage];
+    }
+    return fmt::format("Stage {}", stage);
 }
 
 }
@@ -109,8 +128,13 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto geomCollection = featurePtr->geomOrNull())
     {
         auto scope = push(convertString("Geometry"), "geometry", ValueType::Section);
+        const auto highFiStage = highFidelityStage(featurePtr->model());
         uint32_t geomIndex = 0;
-        geomCollection->forEachGeometry([this, &geomIndex](model_ptr<Geometry> const& geom) -> bool {
+        geomCollection->forEachGeometry([this, &geomIndex, highFiStage](model_ptr<Geometry> const& geom) -> bool {
+            const auto geometryStage = geom->model().stage().value_or(0U);
+            if (geometryStage < highFiStage) {
+                return true;
+            }
             convertGeometry(JsValue(geomIndex++), geom);
             return true;
         });
@@ -245,6 +269,9 @@ void InspectionConverter::convertGeometry(JsValue const& key, const model_ptr<Ge
     case GeomType::Mesh: typeString = "Mesh"; break;
     }
     geomScope->value_ = convertString(typeString);
+    auto const geomStage = g->model().stage().value_or(0U);
+    push("stage", "stage", ValueType::Number)->value_ = JsValue(geomStage);
+    push("stageLabel", "stageLabel", ValueType::String)->value_ = convertString(stageLabel(g->model(), geomStage));
 
     convertSourceDataReferences(g->sourceDataReferences(), *geomScope);
 
@@ -296,12 +323,18 @@ void InspectionConverter::convertValidity(
         }
 
         if (auto geom = v.simpleGeometry()) {
-            convertGeometry(JsValue("simpleGeometry"), geom);
+            auto const highFiStage = highFidelityStage(v.model());
+            auto const geometryStage = geom->model().stage().value_or(0U);
+            if (geometryStage >= highFiStage) {
+                convertGeometry(JsValue("simpleGeometry"), geom);
+            }
             return true;
         }
 
-        if (auto geomName = v.geometryName()) {
-            push("geometryName", "geometryName", ValueType::String)->value_ = convertString(*geomName);
+        if (auto geometryStage = v.geometryStage()) {
+            push("geometryStage", "geometryStage", ValueType::Number)->value_ = JsValue(*geometryStage);
+            push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
+                convertString(stageLabel(v.model(), *geometryStage));
         }
 
         auto renderOffset = [this, &v](Point const& data, std::string_view const& name)

@@ -375,7 +375,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("minimumStage", &FeatureLayerStyle::minimumStage)
-        .function("highFidelityStage", &FeatureLayerStyle::highFidelityStage)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -464,7 +463,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// DeckFeatureLayerVisualization
     em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
-        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, FeatureStyleRule::Fidelity, int, int, em::val>()
+        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, FeatureStyleRule::Fidelity, int, int, int, em::val>()
         .class_function("GEOMETRY_OUTPUT_ALL", &deckGeometryOutputAll)
         .class_function("GEOMETRY_OUTPUT_POINTS_ONLY", &deckGeometryOutputPointsOnly)
         .class_function("GEOMETRY_OUTPUT_NON_POINTS_ONLY", &deckGeometryOutputNonPointsOnly)

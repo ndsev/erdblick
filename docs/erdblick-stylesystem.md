@@ -40,8 +40,8 @@ options:
 - `name` – Mandatory. Free to set. May contain slash-separated grouping.
 - `layer` – Optional regex to limit which mapget layers the style sheet is applied to.
 - `stage` – Optional minimum tile stage required before any rule in the style can render.
-- `high-fidelity-stage` – Optional stage threshold for switching a tile from `fidelity: low` to `fidelity: high` when that tile's view policy targets high fidelity.
-- Low-fidelity requests currently fetch stage `0` only; the frontend may apply an additional per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
+- High-vs-low fidelity stage cutover now comes from layer metadata (`LayerInfo.highFidelityStage`), not from style-sheet YAML.
+- Low-fidelity rendering uses stages below that metadata threshold; high-fidelity rendering uses stages at/above it. The frontend may additionally apply a per-view `lod` cap (`LOD_0..LOD_7`) before rules run.
 - `rules` – ordered list of rule objects. Each rule is evaluated for every feature in the loaded tiles.
 - `options` – optional array of UI controls. Each option becomes available as `$options.<id>` inside expressions.
 

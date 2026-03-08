@@ -34,10 +34,12 @@ export interface DeckLayerKeyParts {
     styleId: string;
     hoverMode: string;
     kind: string;
+    variant?: string;
 }
 
 export function makeDeckLayerKey(parts: DeckLayerKeyParts): string {
-    return `${parts.tileKey}/${parts.styleId}/${parts.hoverMode}/${parts.kind}`;
+    const baseKey = `${parts.tileKey}/${parts.styleId}/${parts.hoverMode}/${parts.kind}`;
+    return parts.variant ? `${baseKey}/${parts.variant}` : baseKey;
 }
 
 export function makeDeckLayerTilePrefix(tileKey: string): string {

@@ -33,6 +33,7 @@ export interface LayerInfoItem extends Record<string, any> {
     layerId: string;
     stages?: number;
     stageLabels?: string[];
+    highFidelityStage?: number;
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;

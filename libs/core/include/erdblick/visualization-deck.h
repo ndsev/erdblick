@@ -26,6 +26,7 @@ public:
         NativeJsValue const& rawFeatureMergeService,
         FeatureStyleRule::HighlightMode const& highlightMode = FeatureStyleRule::NoHighlight,
         FeatureStyleRule::Fidelity fidelity = FeatureStyleRule::AnyFidelity,
+        int highFidelityStage = 0,
         int maxLowFiLod = -1,
         int geometryOutputMode = static_cast<int>(GeometryOutputMode::All),
         NativeJsValue const& rawFeatureIdSubset = {});

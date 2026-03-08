@@ -68,6 +68,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
     NativeJsValue const& rawFeatureMergeService,
     FeatureStyleRule::HighlightMode const& highlightMode,
     FeatureStyleRule::Fidelity fidelity,
+    int highFidelityStage,
     int maxLowFiLod,
     int geometryOutputMode,
     NativeJsValue const& rawFeatureIdSubset)
@@ -78,6 +79,7 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           rawOptionValues,
           highlightMode,
           fidelity,
+          highFidelityStage,
           maxLowFiLod,
           geometryOutputMode == static_cast<int>(GeometryOutputMode::PointsOnly)
               ? GeometryOutputMode::PointsOnly

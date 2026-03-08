@@ -132,6 +132,7 @@ interface DeckArrowMarker {
  */
 export class DeckTileVisualization implements ITileVisualization {
     tile: FeatureTile;
+    highFidelityStage: number;
     prefersHighFidelity: boolean;
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     showTileBorder: boolean = false;
@@ -140,6 +141,7 @@ export class DeckTileVisualization implements ITileVisualization {
 
     private readonly style: StyleWithIsDeleted;
     private readonly styleSource: string;
+    private readonly layerKeySuffix: string;
     private readonly pointMergeService: PointMergeService;
     private readonly highlightMode: HighlightMode;
     private readonly featureIdSubset: string[];
@@ -164,10 +166,12 @@ export class DeckTileVisualization implements ITileVisualization {
                 pointMergeService: PointMergeService,
                 style: FeatureLayerStyle,
                 styleSource: string,
+                highFidelityStage: number,
                 prefersHighFidelity: boolean,
                 maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
                 highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
                 featureIdSubset: string[] = [],
+                layerKeySuffix: string = "",
                 boxGrid?: boolean,
                 options?: Record<string, boolean | number | string>) {
         this.tile = tile;
@@ -175,10 +179,12 @@ export class DeckTileVisualization implements ITileVisualization {
         this.style = style as StyleWithIsDeleted;
         this.styleSource = styleSource;
         this.styleId = this.style.name();
+        this.highFidelityStage = Math.max(0, Math.floor(highFidelityStage));
         this.prefersHighFidelity = prefersHighFidelity;
         this.maxLowFiLod = maxLowFiLod;
         this.highlightMode = highlightMode;
         this.featureIdSubset = [...featureIdSubset];
+        this.layerKeySuffix = layerKeySuffix;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
         this.viewIndex = viewIndex;
@@ -195,19 +201,22 @@ export class DeckTileVisualization implements ITileVisualization {
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
-            kind: "path"
+            kind: "path",
+            variant: this.layerKeySuffix
         });
         const pointLayerKey = makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
-            kind: "point"
+            kind: "point",
+            variant: this.layerKeySuffix
         });
         const arrowLayerKey = makeDeckLayerKey({
             tileKey: this.tile.mapTileKey,
             styleId: this.styleId,
             hoverMode: this.highlightModeLabel(),
-            kind: "arrow"
+            kind: "arrow",
+            variant: this.layerKeySuffix
         });
         try {
             for (const removedCornerTile of this.pointMergeService.remove(
@@ -400,6 +409,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private renderSignature(fidelity: "low" | "high" | null = this.currentFidelity()): string {
         return JSON.stringify({
             fidelity,
+            highFidelityStage: this.highFidelityStage,
             maxLowFiLod: this.maxLowFiLod,
             renderQueued: this.renderQueued,
             highlightMode: this.highlightMode.value,
@@ -484,6 +494,7 @@ export class DeckTileVisualization implements ITileVisualization {
             styleOptions: this.copyStyleOptions(),
             highlightModeValue: this.highlightMode.value,
             fidelityValue: this.fidelityEnumValue(fidelity).value,
+            highFidelityStage: this.resolvedHighFidelityStage(),
             maxLowFiLod: this.resolveMaxLowFiLod(fidelity),
             outputMode,
             featureIdSubset: [...this.featureIdSubset],
@@ -530,6 +541,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 this.pointMergeService,
                 this.highlightMode,
                 this.fidelityEnumValue(fidelity),
+                this.resolvedHighFidelityStage(),
                 this.resolveMaxLowFiLod(fidelity),
                 this.mapGeometryOutputModeForWasm(outputMode),
                 this.featureIdSubset
@@ -814,12 +826,8 @@ export class DeckTileVisualization implements ITileVisualization {
         return (this.tile as any).numFeatures as number;
     }
 
-    private highFidelityStage(): number {
-        const rawValue = this.style.highFidelityStage();
-        if (!Number.isFinite(rawValue)) {
-            return 0;
-        }
-        return Math.max(0, Math.floor(rawValue));
+    private resolvedHighFidelityStage(): number {
+        return this.highFidelityStage;
     }
 
     private currentFidelity(): "low" | "high" | null {
@@ -829,7 +837,7 @@ export class DeckTileVisualization implements ITileVisualization {
         const highestLoadedStage = this.tile.highestLoadedStage();
         if (highestLoadedStage !== null &&
             this.prefersHighFidelity &&
-            highestLoadedStage >= this.highFidelityStage()) {
+            highestLoadedStage >= this.resolvedHighFidelityStage()) {
             return "high";
         }
         return "low";

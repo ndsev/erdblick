@@ -19,7 +19,6 @@ const completionsList = [
     {label: "geometry", type: "property"},
     {label: "stage", type: "property"},
     {label: "lod", type: "property"},
-    {label: "high-fidelity-stage", type: "property"},
     {label: "aspect", type: "property"},
     {label: "mode", type: "property"},
     {label: "fidelity", type: "property"},

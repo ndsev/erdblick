@@ -35,6 +35,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -110,6 +111,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -213,6 +215,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -266,6 +269,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             false,
             null,
             {value: 0} as any
@@ -341,6 +345,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -403,6 +408,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -443,6 +449,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -485,6 +492,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -534,6 +542,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -595,6 +604,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any
@@ -661,6 +671,7 @@ describe("DeckTileVisualization", () => {
             pointMergeService,
             style,
             "",
+            1,
             true,
             null,
             {value: 0} as any

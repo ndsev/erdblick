@@ -20,6 +20,7 @@ export interface DeckPathRenderTask {
     styleOptions: Record<string, boolean | number | string>;
     highlightModeValue: number;
     fidelityValue: number;
+    highFidelityStage: number;
     maxLowFiLod: number;
     outputMode: DeckGeometryOutputMode;
     featureIdSubset: string[];
