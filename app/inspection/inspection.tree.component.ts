@@ -96,6 +96,9 @@ export class FeatureFilterOptions {
                                           style="cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis"
                                           [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
                                     </span>
+                                    @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
+                                        <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
                                             <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
@@ -123,6 +126,9 @@ export class FeatureFilterOptions {
                                           (mouseout)="onNodeHoverExit($event, rowData)"
                                           style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
                                     </span>
+                                    @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
+                                        <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
                                             <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
@@ -189,6 +195,20 @@ export class FeatureFilterOptions {
             cursor: pointer;
             text-decoration: underline dotted;
             font-style: italic;
+        }
+
+        .inspection-stage-label-badge {
+            align-items: center;
+            background: var(--p-primary-100);
+            border: 1px solid var(--p-primary-300);
+            border-radius: 999px;
+            color: var(--p-primary-900);
+            display: inline-flex;
+            font-size: 0.8em;
+            font-weight: 600;
+            line-height: 1;
+            padding: 0.15em 0.55em;
+            white-space: nowrap;
         }
 
         @media only screen and (max-width: 56em) {

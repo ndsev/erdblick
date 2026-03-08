@@ -94,24 +94,46 @@ export class SourceDataPanelComponent {
         };
 
         let layer: TileSourceDataLayer | null = null;
-        const socket = new MapTileStreamClient("tiles");
+        let sourceDataParseError: Error | null = null;
+        const socket = new MapTileStreamClient("/tiles");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
             socket.setDataSourceInfoJson(dataSourceInfoJson);
         }
 
         socket.withSourceDataCallback((payload) => {
-            layer = uint8ArrayToWasm((wasmBlob) => {
-                return socket.parser.readTileSourceDataLayer(wasmBlob);
-            }, payload);
+            try {
+                const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
+                    return socket.parser.readTileSourceDataLayer(wasmBlob);
+                }, payload);
+                if (parsedLayer) {
+                    (layer as any)?.delete();
+                    layer = parsedLayer;
+                }
+            } catch (err) {
+                sourceDataParseError = err instanceof Error ? err : new Error(`${err}`);
+            }
         });
 
         let status;
         try {
-            status = await socket.sendRequest(requestBody).waitAndDestroy();
+            socket.sendRequest(requestBody);
+            status = await socket.waitForCompletion();
+
+            const waitUntil = Date.now() + 5000;
+            while (!layer && !sourceDataParseError && Date.now() < waitUntil) {
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
         } catch (err) {
             (layer as any)?.delete();
             throw err instanceof Error ? err : new Error(`${err}`);
+        } finally {
+            socket.destroy();
+        }
+
+        if (sourceDataParseError) {
+            (layer as any)?.delete();
+            throw sourceDataParseError;
         }
 
         const statusMessage = status.message || "";
@@ -125,7 +147,7 @@ export class SourceDataPanelComponent {
         }
 
         if (!layer) {
-            throw new Error(statusMessage || "Unknown error while loading layer.");
+            throw new Error(statusMessage || "Unknown error while loading layer (no SourceData payload received).");
         }
 
         const error = (layer as unknown as { getError: () => string }).getError();

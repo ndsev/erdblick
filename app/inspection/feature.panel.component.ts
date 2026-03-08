@@ -104,13 +104,31 @@ export class FeaturePanelComponent implements OnDestroy {
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         const selectedFeatureGeoJsonTexts: string[] = [];
         this.selectedFeatures.forEach(featureWrapper => {
-            featureWrapper.peek((feature: Feature) => {
-                selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
-                selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
-            });
+            try {
+                featureWrapper.peek((feature: Feature) => {
+                    selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
+                    selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
+                });
+            } catch (error) {
+                console.error("Failed to read inspection model for selected feature.", {
+                    panelId: this.panel().id,
+                    mapTileKey: featureWrapper.mapTileKey,
+                    featureId: featureWrapper.featureId,
+                    error
+                });
+            }
         });
         const nextGeoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
-        const nextTreeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
+        let nextTreeData: TreeTableNode[] = [];
+        try {
+            nextTreeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
+        } catch (error) {
+            console.error("getFeatureTreeDataFromModel failed.", {
+                panelId: this.panel().id,
+                selectedFeatureCount: this.selectedFeatures.length,
+                error
+            });
+        }
 
         // During staged loading, keep the existing tree until inspection data is available.
         if (!nextTreeData.length && this.loading && this.treeData.length) {
@@ -123,73 +141,147 @@ export class FeaturePanelComponent implements OnDestroy {
     }
 
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
-        let convertToTreeTableNodes = (dataNodes: Array<InspectionModelData>, featureIndex: number): TreeTableNode[] => {
-            let treeNodes: Array<TreeTableNode> = [];
+        const isGeometryTypeValue = (value: unknown): boolean => {
+            if (typeof value !== "string") {
+                return false;
+            }
+            return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
+        };
+
+        const hideHiFiStageLabelChild = (children: TreeTableNode[]): TreeTableNode[] => {
+            const stageLabelNode = children.find(child => child.data?.["key"] === "stageLabel");
+            const stageLabel = stageLabelNode?.data?.["value"];
+            if (typeof stageLabel !== "string") {
+                return children;
+            }
+            const normalized = stageLabel.trim().toLowerCase();
+            if (normalized !== "hi-fi" && normalized !== "high-fi" && normalized !== "high fi") {
+                return children;
+            }
+            return children.filter(child => child.data?.["key"] !== "stageLabel");
+        };
+
+        const extractGeometryStageBubble = (children: TreeTableNode[]): string | null => {
+            const stageLabelNode = children.find(child => child.data?.["key"] === "stageLabel");
+            const stageLabel = stageLabelNode?.data?.["value"];
+            if (typeof stageLabel !== "string") {
+                return null;
+            }
+            const trimmed = stageLabel.trim();
+            if (!trimmed.length) {
+                return null;
+            }
+            const normalized = trimmed.toLowerCase();
+            if (normalized === "hi-fi" || normalized === "high-fi" || normalized === "high fi") {
+                return null;
+            }
+            return trimmed;
+        };
+
+        const convertToTreeTableNodes = (
+            dataNodes: Array<InspectionModelData> | undefined,
+            featureIndex: number
+        ): TreeTableNode[] => {
+            if (!Array.isArray(dataNodes) || !dataNodes.length) {
+                return [];
+            }
+            const treeNodes: TreeTableNode[] = [];
             for (const data of dataNodes) {
                 const node: TreeTableNode = {};
-                let value = data.value;
-                if (data.type == coreLib.ValueType.NULL.value && data.children === undefined) {
+                const valueType = Number(data?.type ?? coreLib.ValueType.NULL.value);
+                let value = data?.value;
+                if (valueType === coreLib.ValueType.NULL.value && data?.children === undefined) {
                     value = "NULL";
-                } else if ((data.type & coreLib.ValueType.ARRAY.value) && (data.type & coreLib.ValueType.NUMBER.value)) {
+                } else if ((valueType & coreLib.ValueType.ARRAY.value)
+                    && (valueType & coreLib.ValueType.NUMBER.value)
+                    && Array.isArray(value)) {
                     for (let i = 0; i < value.length; i++) {
                         if (!Number.isInteger(value[i])) {
-                            const strValue = String(value[i])
-                            const index = strValue.indexOf('.');
+                            const strValue = String(value[i]);
+                            const index = strValue.indexOf(".");
                             if (index !== -1 && strValue.length - index - 1 > 8) {
-                                value[i] = value[i].toFixed(8);
+                                value[i] = Number(value[i]).toFixed(8);
                             }
                         }
                     }
                 }
 
-                if (data.type & coreLib.ValueType.ARRAY.value) {
-                    value = value.join(", ");
+                if (valueType & coreLib.ValueType.ARRAY.value) {
+                    if (Array.isArray(value)) {
+                        value = value.join(", ");
+                    } else if (value === null || value === undefined) {
+                        value = "";
+                    } else {
+                        value = String(value);
+                    }
                 }
 
                 node.data = {
-                    key: data.key,
+                    key: data?.key ?? "",
                     value: value ?? "",
-                    type: data.type
+                    type: valueType
                 };
-                if (data.hasOwnProperty("info")) {
+                if (data?.hasOwnProperty("info")) {
                     node.data["info"] = data.info;
                 }
-                if (data.hasOwnProperty("hoverId")) {
+                if (data?.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
-                    // Necessary to query one of the selectedFeatures for its mapTileKey
                     node.data["featureIndex"] = featureIndex;
                 }
-                if (data.hasOwnProperty("mapId")) {
+                if (data?.hasOwnProperty("mapId")) {
                     node.data["mapId"] = data.mapId;
                 }
-                if (data.hasOwnProperty("geoJsonPath")) {
+                if (data?.hasOwnProperty("geoJsonPath")) {
                     node.data["geoJsonPath"] = data.geoJsonPath;
                 }
-                if (data.hasOwnProperty("sourceDataReferences")) {
+                if (data?.hasOwnProperty("sourceDataReferences")) {
                     node.data["sourceDataReferences"] = data.sourceDataReferences;
                 }
-                node.children = data.hasOwnProperty("children") ? convertToTreeTableNodes(data.children, featureIndex) : [];
+
+                let children = convertToTreeTableNodes(
+                    Array.isArray(data?.children) ? data.children : [],
+                    featureIndex
+                );
+                if (isGeometryTypeValue(node.data["value"])) {
+                    const stageBubble = extractGeometryStageBubble(children);
+                    if (stageBubble) {
+                        node.data["stageLabelBubble"] = stageBubble;
+                    }
+                    children = hideHiFiStageLabelChild(children);
+                }
+                node.children = children;
                 treeNodes.push(node);
             }
             return treeNodes;
-        }
+        };
 
-        let treeNodes: Array<TreeTableNode> = [];
-        if (inspectionModelsByFeature) {
-            for (let featureIndex = 0; featureIndex < inspectionModelsByFeature.length; featureIndex++) {
-                const inspectionModels = inspectionModelsByFeature[featureIndex];
-                for (const section of inspectionModels) {
-                    const node: TreeTableNode = {};
-                    node.data = {key: section.key, value: section.value, type: section.type};
-                    if (section.hasOwnProperty("info")) {
-                        node.data["info"] = section.info;
-                    }
-                    if (section.hasOwnProperty("sourceDataReferences")) {
-                        node.data["sourceDataReferences"] = section.sourceDataReferences;
-                    }
-                    node.children = convertToTreeTableNodes(section.children, featureIndex);
-                    treeNodes.push(node);
+        const treeNodes: Array<TreeTableNode> = [];
+        if (!Array.isArray(inspectionModelsByFeature)) {
+            return treeNodes;
+        }
+        for (let featureIndex = 0; featureIndex < inspectionModelsByFeature.length; featureIndex++) {
+            const inspectionModels = inspectionModelsByFeature[featureIndex];
+            if (!Array.isArray(inspectionModels)) {
+                continue;
+            }
+            for (const section of inspectionModels) {
+                const node: TreeTableNode = {};
+                node.data = {
+                    key: section?.key ?? "",
+                    value: section?.value ?? "",
+                    type: section?.type ?? coreLib.ValueType.NULL.value
+                };
+                if (section?.hasOwnProperty("info")) {
+                    node.data["info"] = section.info;
                 }
+                if (section?.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = section.sourceDataReferences;
+                }
+                node.children = convertToTreeTableNodes(
+                    Array.isArray(section?.children) ? section.children : [],
+                    featureIndex
+                );
+                treeNodes.push(node);
             }
         }
         return treeNodes;
