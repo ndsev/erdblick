@@ -692,6 +692,12 @@ export class MapDataService {
         viewState.visualizationQueue.push(visualization);
     }
 
+    private clearMergedPointsForMapViewLayerStyleId(mapViewLayerStyleId: string): void {
+        for (const removedMergedPointsTile of this.pointMergeService.clear(mapViewLayerStyleId)) {
+            this.mergedTileVisualizationDestructionTopic.next(removedMergedPointsTile);
+        }
+    }
+
     private startFrameTimeSampling() {
         if (this.frameTimeSamplingStarted) {
             return;
@@ -1096,6 +1102,19 @@ export class MapDataService {
         return stageCount;
     }
 
+    private getLayerHighFidelityStage(mapId: string, layerId: string): number {
+        const stageCount = this.getLayerStageCount(mapId, layerId);
+        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
+            highFidelityStage?: unknown;
+        } | undefined;
+        const fallback = stageCount > 1 ? 1 : 0;
+        if (typeof layerInfo?.highFidelityStage !== "number"
+            || !Number.isFinite(layerInfo.highFidelityStage)) {
+            return fallback;
+        }
+        return Math.max(0, Math.min(stageCount - 1, Math.floor(layerInfo.highFidelityStage)));
+    }
+
     /**
      * Returns the highest stage currently expected for this tile.
      * Visible tiles and pinned selection tiles always target the layer's max stage.
@@ -1188,12 +1207,6 @@ export class MapDataService {
         prefersHighFidelity: boolean;
         maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
     } {
-        if (tile.preventCulling) {
-            return {
-                prefersHighFidelity: true,
-                maxLowFiLod: null
-            };
-        }
         const viewPolicy = this.viewVisualizationState[viewIndex].getTileRenderPolicy(tile.tileId);
         return {
             prefersHighFidelity: viewPolicy.targetFidelity === "high",
@@ -1203,6 +1216,10 @@ export class MapDataService {
 
     private applyTileRenderPolicyToVisualization(viewIndex: number, visualization: ITileVisualization): void {
         const policy = this.tileRenderPolicyForView(viewIndex, visualization.tile);
+        visualization.highFidelityStage = this.getLayerHighFidelityStage(
+            visualization.tile.mapName,
+            visualization.tile.layerName
+        );
         visualization.prefersHighFidelity = policy.prefersHighFidelity;
         visualization.maxLowFiLod = policy.maxLowFiLod;
     }
@@ -1423,7 +1440,9 @@ export class MapDataService {
     }
 
     private updateVisualizations() {
+        let anyRenderPolicyChanged = false;
         this.viewVisualizationState.forEach((state, viewIndex) => {
+            const mapViewLayerStyleIdsWithPolicyChange = new Set<string>();
             const visibleTileByKey = new Map<string, boolean>();
             const isVisibleForView = (tile: FeatureTile): boolean => {
                 const cached = visibleTileByKey.get(tile.mapTileKey);
@@ -1454,11 +1473,33 @@ export class MapDataService {
                         continue;
                     }
                     tileVisu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
+                    const previousHighFidelityStage = tileVisu.highFidelityStage;
+                    const previousPrefersHighFidelity = tileVisu.prefersHighFidelity;
+                    const previousMaxLowFiLod = tileVisu.maxLowFiLod;
                     this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
+                    if (previousHighFidelityStage !== tileVisu.highFidelityStage
+                        || previousPrefersHighFidelity !== tileVisu.prefersHighFidelity
+                        || previousMaxLowFiLod !== tileVisu.maxLowFiLod) {
+                        const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
+                            viewIndex,
+                            tileVisu.tile.mapName,
+                            tileVisu.tile.layerName,
+                            tileVisu.styleId,
+                            coreLib.HighlightMode.NO_HIGHLIGHT
+                        );
+                        mapViewLayerStyleIdsWithPolicyChange.add(mapViewLayerStyleId);
+                    }
                 }
                 for (const tileKey of removals) {
                     state.removeVisualizations(styleId, tileKey).forEach(_ => _);
                 }
+            }
+
+            for (const mapViewLayerStyleId of mapViewLayerStyleIdsWithPolicyChange) {
+                this.clearMergedPointsForMapViewLayerStyleId(mapViewLayerStyleId);
+            }
+            if (mapViewLayerStyleIdsWithPolicyChange.size > 0) {
+                anyRenderPolicyChanged = true;
             }
 
             const visibleTiles: FeatureTile[] = [];
@@ -1507,6 +1548,24 @@ export class MapDataService {
             }
             this.sortVisualizationQueue(state);
         });
+        const hasActiveHighlights =
+            this.selectionVisualizations.length > 0 || this.hoverVisualizations.length > 0;
+        if (anyRenderPolicyChanged || hasActiveHighlights) {
+            this.refreshHighlightVisualizationsForCurrentPolicies();
+        }
+    }
+
+    private refreshHighlightVisualizationsForCurrentPolicies(): void {
+        const selectionGroups = this.selectionTopic.getValue();
+        if (selectionGroups.length > 0) {
+            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups);
+        }
+        const hoveredFeatureWrappers = this.hoverTopic.getValue();
+        if (hoveredFeatureWrappers.length > 0) {
+            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
+                features: hoveredFeatureWrappers
+            }]);
+        }
     }
 
     private async updateMapDataRequest() {
@@ -1798,10 +1857,10 @@ export class MapDataService {
                     continue;
                 }
                 const isQueued = queuedVisualizations.has(visu);
-                const isDirty = visu.isDirty();
 
                 visu.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
                 this.applyTileRenderPolicyToVisualization(viewIndex, visu);
+                const isDirty = visu.isDirty();
 
                 if (!isDirty) {
                     continue;
@@ -1848,10 +1907,12 @@ export class MapDataService {
         tile: FeatureTile,
         style: FeatureLayerStyle,
         styleSource: string,
+        highFidelityStage: number,
         prefersHighFidelity: boolean,
         maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null,
         highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         featureIdSubset: string[] = [],
+        layerKeySuffix = "",
         boxGrid = false,
         options: Record<string, boolean | number | string> = {}
     ): ITileVisualization {
@@ -1861,10 +1922,12 @@ export class MapDataService {
             this.pointMergeService,
             style,
             styleSource,
+            highFidelityStage,
             prefersHighFidelity,
             maxLowFiLod,
             highlightMode,
             featureIdSubset,
+            layerKeySuffix,
             boxGrid,
             options
         );
@@ -1889,16 +1952,21 @@ export class MapDataService {
         const tileKey = tileLayer.mapTileKey;
         const viewState = this.viewVisualizationState[viewIndex];
         const renderPolicy = this.tileRenderPolicyForView(viewIndex, tileLayer);
+        const highFidelityStage = this.getLayerHighFidelityStage(mapName, layerName);
         const requestedStageDiagnostic = Math.max(0, this.getLayerStageCount(mapName, layerName) - 1);
         tileLayer.stats.set(
             `Rendering/Policy/View-${viewIndex}/RequestedMaxStage#value`,
             [requestedStageDiagnostic]);
+        tileLayer.stats.set(
+            `Rendering/Policy/View-${viewIndex}/HighFidelityStage#value`,
+            [highFidelityStage]);
         tileLayer.stats.set(
             `Rendering/Policy/View-${viewIndex}/MaxLowFiLod#value`,
             [renderPolicy.maxLowFiLod ?? -1]);
         const existing = viewState.getVisualization(styleId, tileKey);
         if (existing) {
             existing.showTileBorder = this.maps.getViewTileBorderState(viewIndex);
+            existing.highFidelityStage = highFidelityStage;
             existing.prefersHighFidelity = renderPolicy.prefersHighFidelity;
             existing.maxLowFiLod = renderPolicy.maxLowFiLod;
             if (!stageReady) {
@@ -1916,10 +1984,12 @@ export class MapDataService {
             tileLayer,
             wasmStyle,
             style.source,
+            highFidelityStage,
             renderPolicy.prefersHighFidelity,
             renderPolicy.maxLowFiLod,
             coreLib.HighlightMode.NO_HIGHLIGHT,
             [],
+            "",
             this.maps.getViewTileBorderState(viewIndex),
             this.maps.getLayerStyleOptions(viewIndex, mapName, layerName, styleId)
         );
