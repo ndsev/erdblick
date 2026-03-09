@@ -1477,9 +1477,17 @@ export class MapDataService {
                     const previousPrefersHighFidelity = tileVisu.prefersHighFidelity;
                     const previousMaxLowFiLod = tileVisu.maxLowFiLod;
                     this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
+                    const styleEntry = this.styleService.styles.get(styleId);
+                    const styleHasExplicitLowFidelityRules =
+                        typeof (styleEntry?.featureLayerStyle as any)?.hasExplicitLowFidelityRules === "function"
+                            ? !!(styleEntry?.featureLayerStyle as any).hasExplicitLowFidelityRules()
+                            : true;
+                    const lowFiLodPolicyChanged =
+                        styleHasExplicitLowFidelityRules
+                        && previousMaxLowFiLod !== tileVisu.maxLowFiLod;
                     if (previousHighFidelityStage !== tileVisu.highFidelityStage
                         || previousPrefersHighFidelity !== tileVisu.prefersHighFidelity
-                        || previousMaxLowFiLod !== tileVisu.maxLowFiLod) {
+                        || lowFiLodPolicyChanged) {
                         const mapViewLayerStyleId = this.pointMergeService.makeMapViewLayerStyleId(
                             viewIndex,
                             tileVisu.tile.mapName,

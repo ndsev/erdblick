@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -35,19 +36,19 @@ public:
     [[nodiscard]] uint32_t abiVersion() const;
     void setGeometryOutputMode(int mode);
     [[nodiscard]] int geometryOutputMode() const;
+    void setLowFiOutputLod(int lod);
+    void availableLowFiLodsRaw(SharedUint8Array& out) const;
     void addTileFeatureLayer(TileFeatureLayer const& tile);
 
     void pointPositionsRaw(SharedUint8Array& out) const;
     void pointColorsRaw(SharedUint8Array& out) const;
     void pointRadiiRaw(SharedUint8Array& out) const;
-    void pointFeatureStartRaw(SharedUint8Array& out) const;
     void pointFeatureIdsRaw(SharedUint8Array& out) const;
 
     void pathPositionsRaw(SharedUint8Array& out) const;
     void pathStartIndicesRaw(SharedUint8Array& out) const;
     void pathColorsRaw(SharedUint8Array& out) const;
     void pathWidthsRaw(SharedUint8Array& out) const;
-    void pathFeatureStartRaw(SharedUint8Array& out) const;
     void pathFeatureIdsRaw(SharedUint8Array& out) const;
     void pathDashArrayRaw(SharedUint8Array& out) const;
     void pathDashOffsetsRaw(SharedUint8Array& out) const;
@@ -56,7 +57,6 @@ public:
     void arrowStartIndicesRaw(SharedUint8Array& out) const;
     void arrowColorsRaw(SharedUint8Array& out) const;
     void arrowWidthsRaw(SharedUint8Array& out) const;
-    void arrowFeatureStartRaw(SharedUint8Array& out) const;
     void arrowFeatureIdsRaw(SharedUint8Array& out) const;
     [[nodiscard]] NativeJsValue mergedPointFeatures() const;
 
@@ -64,6 +64,8 @@ private:
     mapget::Point projectWgsPoint(
         mapget::Point const& wgsPoint,
         glm::dvec3 const& wgsOffset) const override;
+    void onFeatureForRendering(mapget::Feature const& feature) override;
+    [[nodiscard]] bool bypassLowFiMaxLodFilter() const override;
     std::string makeMapLayerStyleRuleId(uint32_t ruleIndex) const override;
     void emitPoint(
         JsValue const& xyzPos,
@@ -124,26 +126,36 @@ private:
         float width,
         BoundEvalFun& evalFun);
     static std::uint8_t toColorByte(float value);
+    [[nodiscard]] bool lowFiBundleModeEnabled() const;
+    [[nodiscard]] bool emitToAggregateForCurrentFeatureLod() const;
+    [[nodiscard]] uint8_t activeLodBucket() const;
+    struct GeometryBuffers {
+        std::vector<float> pointPositions;
+        std::vector<uint8_t> pointColors;
+        std::vector<float> pointRadii;
+        std::vector<uint32_t> pointFeatureIds;
+        std::vector<float> pathPositions;
+        std::vector<uint32_t> pathStartIndices;
+        std::vector<uint8_t> pathColors;
+        std::vector<float> pathWidths;
+        std::vector<uint32_t> pathFeatureIds;
+        std::vector<float> pathDashArray;
+        std::vector<float> pathDashOffsets;
+        std::vector<float> arrowPositions;
+        std::vector<uint32_t> arrowStartIndices;
+        std::vector<uint8_t> arrowColors;
+        std::vector<float> arrowWidths;
+        std::vector<uint32_t> arrowFeatureIds;
+    };
+    [[nodiscard]] static bool hasGeometry(GeometryBuffers const& buffers);
+    [[nodiscard]] const GeometryBuffers* selectedLowFiBuffers() const;
+    [[nodiscard]] bool hasLowFiGeometryForLod(size_t lod) const;
+    GeometryBuffers& lowFiBuffersForLod(size_t lod);
 
-    std::vector<float> pointPositionsBuffer_;
-    std::vector<uint8_t> pointColorsBuffer_;
-    std::vector<float> pointRadiiBuffer_;
-    std::vector<uint32_t> pointFeatureStartBuffer_;
-    std::vector<uint32_t> pointFeatureIdsBuffer_;
-    std::vector<float> pathPositionsBuffer_;
-    std::vector<uint32_t> pathStartIndicesBuffer_;
-    std::vector<uint8_t> pathColorsBuffer_;
-    std::vector<float> pathWidthsBuffer_;
-    std::vector<uint32_t> pathFeatureStartBuffer_;
-    std::vector<uint32_t> pathFeatureIdsBuffer_;
-    std::vector<float> pathDashArrayBuffer_;
-    std::vector<float> pathDashOffsetsBuffer_;
-    std::vector<float> arrowPositionsBuffer_;
-    std::vector<uint32_t> arrowStartIndicesBuffer_;
-    std::vector<uint8_t> arrowColorsBuffer_;
-    std::vector<float> arrowWidthsBuffer_;
-    std::vector<uint32_t> arrowFeatureStartBuffer_;
-    std::vector<uint32_t> arrowFeatureIdsBuffer_;
+    GeometryBuffers aggregateBuffers_;
+    std::array<GeometryBuffers, 8> lowFiLodBuffers_;
+    uint8_t activeFeatureLod_ = 0;
+    int selectedLowFiOutputLod_ = -1;
     mutable bool hasPathCoordinateOriginWgs_ = false;
     mutable mapget::Point pathCoordinateOriginWgs_ = {.0, .0, .0};
 };

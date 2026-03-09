@@ -89,8 +89,13 @@ DeckFeatureLayerVisualization::DeckFeatureLayerVisualization(
           rawFeatureIdSubset,
           rawFeatureMergeService)
 {
-    pathStartIndicesBuffer_.push_back(0);
-    arrowStartIndicesBuffer_.push_back(0);
+    aggregateBuffers_.pathStartIndices.push_back(0);
+    aggregateBuffers_.arrowStartIndices.push_back(0);
+    for (auto& lowFiLodBuffer : lowFiLodBuffers_) {
+        lowFiLodBuffer.pathStartIndices.push_back(0);
+        lowFiLodBuffer.arrowStartIndices.push_back(0);
+    }
+    selectedLowFiOutputLod_ = std::clamp(maxLowFiLod, -1, 7);
 }
 
 DeckFeatureLayerVisualization::~DeckFeatureLayerVisualization() = default;
@@ -121,56 +126,110 @@ int DeckFeatureLayerVisualization::geometryOutputMode() const
     return static_cast<int>(geometryOutputMode_);
 }
 
+void DeckFeatureLayerVisualization::setLowFiOutputLod(int lod)
+{
+    selectedLowFiOutputLod_ = std::clamp(lod, -1, 7);
+}
+
+void DeckFeatureLayerVisualization::availableLowFiLodsRaw(SharedUint8Array& out) const
+{
+    std::vector<uint8_t> availableLods;
+    availableLods.reserve(lowFiLodBuffers_.size());
+    for (size_t lod = 0; lod < lowFiLodBuffers_.size(); ++lod) {
+        if (!hasLowFiGeometryForLod(lod)) {
+            continue;
+        }
+        availableLods.push_back(static_cast<uint8_t>(lod));
+    }
+    writeVectorToSharedBuffer(out, availableLods);
+}
+
 void DeckFeatureLayerVisualization::pointPositionsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pointPositionsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pointPositions);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pointPositions);
 }
 
 void DeckFeatureLayerVisualization::pointColorsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pointColorsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pointColors);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pointColors);
 }
 
 void DeckFeatureLayerVisualization::pointRadiiRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pointRadiiBuffer_);
-}
-
-void DeckFeatureLayerVisualization::pointFeatureStartRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pointFeatureStartBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pointRadii);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pointRadii);
 }
 
 void DeckFeatureLayerVisualization::pointFeatureIdsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pointFeatureIdsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pointFeatureIds);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pointFeatureIds);
 }
 
 void DeckFeatureLayerVisualization::pathPositionsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathPositionsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathPositions);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathPositions);
 }
 
 void DeckFeatureLayerVisualization::pathStartIndicesRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathStartIndicesBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathStartIndices);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathStartIndices);
 }
 
 void DeckFeatureLayerVisualization::pathColorsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathColorsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathColors);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathColors);
 }
 
 void DeckFeatureLayerVisualization::pathWidthsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathWidthsBuffer_);
-}
-
-void DeckFeatureLayerVisualization::pathFeatureStartRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathFeatureStartBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathWidths);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathWidths);
 }
 
 void DeckFeatureLayerVisualization::pathFeatureIdsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathFeatureIdsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathFeatureIds);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathFeatureIds);
 }
 
 void DeckFeatureLayerVisualization::pathDashArrayRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathDashArrayBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathDashArray);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathDashArray);
 }
 
 void DeckFeatureLayerVisualization::pathDashOffsetsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, pathDashOffsetsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->pathDashOffsets);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.pathDashOffsets);
 }
 
 void DeckFeatureLayerVisualization::pathCoordinateOriginRaw(SharedUint8Array& out) const
@@ -189,27 +248,43 @@ void DeckFeatureLayerVisualization::pathCoordinateOriginRaw(SharedUint8Array& ou
 }
 
 void DeckFeatureLayerVisualization::arrowPositionsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowPositionsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowPositions);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowPositions);
 }
 
 void DeckFeatureLayerVisualization::arrowStartIndicesRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowStartIndicesBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowStartIndices);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowStartIndices);
 }
 
 void DeckFeatureLayerVisualization::arrowColorsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowColorsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowColors);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowColors);
 }
 
 void DeckFeatureLayerVisualization::arrowWidthsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowWidthsBuffer_);
-}
-
-void DeckFeatureLayerVisualization::arrowFeatureStartRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowFeatureStartBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowWidths);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowWidths);
 }
 
 void DeckFeatureLayerVisualization::arrowFeatureIdsRaw(SharedUint8Array& out) const {
-    writeVectorToSharedBuffer(out, arrowFeatureIdsBuffer_);
+    if (auto const* lowFiBuffers = selectedLowFiBuffers()) {
+        writeVectorToSharedBuffer(out, lowFiBuffers->arrowFeatureIds);
+        return;
+    }
+    writeVectorToSharedBuffer(out, aggregateBuffers_.arrowFeatureIds);
 }
 
 NativeJsValue DeckFeatureLayerVisualization::mergedPointFeatures() const
@@ -245,6 +320,74 @@ void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& 
             makeMapLayerStyleRuleId(rule.index()),
             std::map<std::string, std::pair<std::unordered_set<uint32_t>, std::optional<JsValue>>>());
     }
+}
+
+void DeckFeatureLayerVisualization::onFeatureForRendering(mapget::Feature const& feature)
+{
+    activeFeatureLod_ = static_cast<uint8_t>(
+        std::clamp<int>(static_cast<int>(feature.lod()), 0, 7));
+}
+
+bool DeckFeatureLayerVisualization::bypassLowFiMaxLodFilter() const
+{
+    return lowFiBundleModeEnabled();
+}
+
+bool DeckFeatureLayerVisualization::lowFiBundleModeEnabled() const
+{
+    return fidelity_ == FeatureStyleRule::LowFidelity;
+}
+
+bool DeckFeatureLayerVisualization::emitToAggregateForCurrentFeatureLod() const
+{
+    if (fidelity_ != FeatureStyleRule::LowFidelity) {
+        return true;
+    }
+    if (maxLowFiLod_ < 0) {
+        return true;
+    }
+    return static_cast<int>(activeFeatureLod_) <= maxLowFiLod_;
+}
+
+uint8_t DeckFeatureLayerVisualization::activeLodBucket() const
+{
+    return static_cast<uint8_t>(std::clamp<int>(activeFeatureLod_, 0, 7));
+}
+
+bool DeckFeatureLayerVisualization::hasGeometry(GeometryBuffers const& buffers)
+{
+    return !buffers.pointPositions.empty()
+        || buffers.pathStartIndices.size() > 1
+        || buffers.arrowStartIndices.size() > 1;
+}
+
+const DeckFeatureLayerVisualization::GeometryBuffers* DeckFeatureLayerVisualization::selectedLowFiBuffers() const
+{
+    if (!lowFiBundleModeEnabled()) {
+        return nullptr;
+    }
+    if (selectedLowFiOutputLod_ < 0 || selectedLowFiOutputLod_ > 7) {
+        return nullptr;
+    }
+    auto const lod = static_cast<size_t>(selectedLowFiOutputLod_);
+    if (!hasLowFiGeometryForLod(lod)) {
+        return nullptr;
+    }
+    return &lowFiLodBuffers_[lod];
+}
+
+bool DeckFeatureLayerVisualization::hasLowFiGeometryForLod(size_t lod) const
+{
+    if (lod >= lowFiLodBuffers_.size()) {
+        return false;
+    }
+    return hasGeometry(lowFiLodBuffers_[lod]);
+}
+
+DeckFeatureLayerVisualization::GeometryBuffers& DeckFeatureLayerVisualization::lowFiBuffersForLod(size_t lod)
+{
+    auto const clampedLod = std::min<size_t>(lod, lowFiLodBuffers_.size() - 1);
+    return lowFiLodBuffers_[clampedLod];
 }
 
 bool DeckFeatureLayerVisualization::includesPointLikeGeometry() const
@@ -383,22 +526,31 @@ void DeckFeatureLayerVisualization::appendPointGeometry(
     uint32_t tileFeatureId,
     BoundEvalFun& evalFun)
 {
-    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.x));
-    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.y));
-    pointPositionsBuffer_.push_back(static_cast<float>(pointCartesian.z));
-
     auto const color = rule.color(evalFun);
-    pointColorsBuffer_.push_back(toColorByte(color.r));
-    pointColorsBuffer_.push_back(toColorByte(color.g));
-    pointColorsBuffer_.push_back(toColorByte(color.b));
-    pointColorsBuffer_.push_back(toColorByte(color.a));
+    auto const radius = std::max(0.0f, rule.width() * 0.5f);
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+    auto appendToBuffers = [&](GeometryBuffers& buffers)
+    {
+        buffers.pointPositions.push_back(static_cast<float>(pointCartesian.x));
+        buffers.pointPositions.push_back(static_cast<float>(pointCartesian.y));
+        buffers.pointPositions.push_back(static_cast<float>(pointCartesian.z));
 
-    pointRadiiBuffer_.push_back(std::max(0.0f, rule.width() * 0.5f));
+        buffers.pointColors.push_back(toColorByte(color.r));
+        buffers.pointColors.push_back(toColorByte(color.g));
+        buffers.pointColors.push_back(toColorByte(color.b));
+        buffers.pointColors.push_back(toColorByte(color.a));
 
-    auto const pointIndex = static_cast<uint32_t>(pointFeatureStartBuffer_.size());
-    pointFeatureStartBuffer_.push_back(pointIndex);
-    pointFeatureIdsBuffer_.push_back(
-        rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
+        buffers.pointRadii.push_back(radius);
+        buffers.pointFeatureIds.push_back(selectableFeatureId);
+    };
+
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_);
+    }
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod));
+    }
 
     featuresAdded_ = true;
 }
@@ -418,11 +570,11 @@ void DeckFeatureLayerVisualization::addPolyLine(
         return;
     }
 
-    if (pathStartIndicesBuffer_.empty()) {
-        pathStartIndicesBuffer_.push_back(0);
+    if (aggregateBuffers_.pathStartIndices.empty()) {
+        aggregateBuffers_.pathStartIndices.push_back(0);
     }
-    if (arrowStartIndicesBuffer_.empty()) {
-        arrowStartIndicesBuffer_.push_back(0);
+    if (aggregateBuffers_.arrowStartIndices.empty()) {
+        aggregateBuffers_.arrowStartIndices.push_back(0);
     }
 
     auto const arrowType = rule.arrow(evalFun);
@@ -465,36 +617,45 @@ void DeckFeatureLayerVisualization::appendPathGeometry(
     BoundEvalFun& evalFun,
     bool enableDash)
 {
-    for (auto const& point : vertsCartesian) {
-        pathPositionsBuffer_.push_back(static_cast<float>(point.x));
-        pathPositionsBuffer_.push_back(static_cast<float>(point.y));
-        pathPositionsBuffer_.push_back(static_cast<float>(point.z));
-    }
-    pathStartIndicesBuffer_.push_back(static_cast<uint32_t>(pathPositionsBuffer_.size() / 3));
-
     const auto color = rule.color(evalFun);
-    pathColorsBuffer_.push_back(toColorByte(color.r));
-    pathColorsBuffer_.push_back(toColorByte(color.g));
-    pathColorsBuffer_.push_back(toColorByte(color.b));
-    pathColorsBuffer_.push_back(toColorByte(color.a));
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+    auto const dashed = enableDash && rule.isDashed();
+    auto const dashLength = static_cast<float>(std::max(1, rule.dashLength()));
+    auto appendToBuffers = [&](GeometryBuffers& buffers)
+    {
+        for (auto const& point : vertsCartesian) {
+            buffers.pathPositions.push_back(static_cast<float>(point.x));
+            buffers.pathPositions.push_back(static_cast<float>(point.y));
+            buffers.pathPositions.push_back(static_cast<float>(point.z));
+        }
+        buffers.pathStartIndices.push_back(static_cast<uint32_t>(buffers.pathPositions.size() / 3));
 
-    pathWidthsBuffer_.push_back(width);
+        buffers.pathColors.push_back(toColorByte(color.r));
+        buffers.pathColors.push_back(toColorByte(color.g));
+        buffers.pathColors.push_back(toColorByte(color.b));
+        buffers.pathColors.push_back(toColorByte(color.a));
+        buffers.pathWidths.push_back(width);
 
-    const auto pathIndex = static_cast<uint32_t>(pathFeatureStartBuffer_.size());
-    pathFeatureStartBuffer_.push_back(pathIndex);
-    pathFeatureIdsBuffer_.push_back(
-        rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
+        buffers.pathFeatureIds.push_back(selectableFeatureId);
 
-    if (enableDash && rule.isDashed()) {
-        const auto dashLength = static_cast<float>(std::max(1, rule.dashLength()));
-        pathDashArrayBuffer_.push_back(dashLength);
-        pathDashArrayBuffer_.push_back(dashLength);
+        if (dashed) {
+            buffers.pathDashArray.push_back(dashLength);
+            buffers.pathDashArray.push_back(dashLength);
+        }
+        else {
+            buffers.pathDashArray.push_back(1.0f);
+            buffers.pathDashArray.push_back(0.0f);
+        }
+        buffers.pathDashOffsets.push_back(0.0f);
+    };
+
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_);
     }
-    else {
-        pathDashArrayBuffer_.push_back(1.0f);
-        pathDashArrayBuffer_.push_back(0.0f);
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod));
     }
-    pathDashOffsetsBuffer_.push_back(0.0f);
 
     featuresAdded_ = true;
 }
@@ -510,25 +671,34 @@ void DeckFeatureLayerVisualization::appendArrowGeometry(
         return;
     }
 
-    for (auto const& point : vertsCartesian) {
-        arrowPositionsBuffer_.push_back(static_cast<float>(point.x));
-        arrowPositionsBuffer_.push_back(static_cast<float>(point.y));
-        arrowPositionsBuffer_.push_back(static_cast<float>(point.z));
-    }
-    arrowStartIndicesBuffer_.push_back(static_cast<uint32_t>(arrowPositionsBuffer_.size() / 3));
-
     auto const color = rule.color(evalFun);
-    arrowColorsBuffer_.push_back(toColorByte(color.r));
-    arrowColorsBuffer_.push_back(toColorByte(color.g));
-    arrowColorsBuffer_.push_back(toColorByte(color.b));
-    arrowColorsBuffer_.push_back(toColorByte(color.a));
+    auto const selectableFeatureId = rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex;
+    auto const normalizedWidth = std::max(1.0f, width);
+    auto appendToBuffers = [&](GeometryBuffers& buffers)
+    {
+        for (auto const& point : vertsCartesian) {
+            buffers.arrowPositions.push_back(static_cast<float>(point.x));
+            buffers.arrowPositions.push_back(static_cast<float>(point.y));
+            buffers.arrowPositions.push_back(static_cast<float>(point.z));
+        }
+        buffers.arrowStartIndices.push_back(static_cast<uint32_t>(buffers.arrowPositions.size() / 3));
 
-    arrowWidthsBuffer_.push_back(std::max(1.0f, width));
+        buffers.arrowColors.push_back(toColorByte(color.r));
+        buffers.arrowColors.push_back(toColorByte(color.g));
+        buffers.arrowColors.push_back(toColorByte(color.b));
+        buffers.arrowColors.push_back(toColorByte(color.a));
 
-    const auto arrowIndex = static_cast<uint32_t>(arrowFeatureStartBuffer_.size());
-    arrowFeatureStartBuffer_.push_back(arrowIndex);
-    arrowFeatureIdsBuffer_.push_back(
-        rule.selectable() ? tileFeatureId : kUnselectableFeatureIndex);
+        buffers.arrowWidths.push_back(normalizedWidth);
+        buffers.arrowFeatureIds.push_back(selectableFeatureId);
+    };
+
+    if (emitToAggregateForCurrentFeatureLod()) {
+        appendToBuffers(aggregateBuffers_);
+    }
+    if (lowFiBundleModeEnabled()) {
+        auto const featureLod = static_cast<size_t>(activeLodBucket());
+        appendToBuffers(lowFiBuffersForLod(featureLod));
+    }
 
     featuresAdded_ = true;
 }

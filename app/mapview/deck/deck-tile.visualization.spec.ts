@@ -235,10 +235,9 @@ describe("DeckTileVisualization", () => {
         expect(visu.isDirty()).toBe(false);
     });
 
-    it("in low-fidelity mode ignores stage bumps above the style minimum stage", async () => {
+    it("in low-fidelity mode does not track per-stage version bumps", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
-        const stageVersions = [1, 2, 3];
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
             layerName: "Lane",
@@ -247,13 +246,6 @@ describe("DeckTileVisualization", () => {
             dataVersion: 10,
             hasData: () => true,
             highestLoadedStage: () => 2,
-            dataVersionUpToStage: (maxStage: number) => {
-                let version = 0;
-                for (let stage = 0; stage <= maxStage; stage++) {
-                    version += stageVersions[stage] ?? 0;
-                }
-                return version;
-            },
             stats: new Map<string, number[]>()
         } as any;
         const style = {
@@ -303,18 +295,11 @@ describe("DeckTileVisualization", () => {
 
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         expect(visu.isDirty()).toBe(false);
-
-        stageVersions[2] += 1;
-        expect(visu.isDirty()).toBe(false);
-
-        stageVersions[0] += 1;
-        expect(visu.isDirty()).toBe(true);
     });
 
-    it("in high-fidelity mode tracks newly loaded stage versions", async () => {
+    it("in high-fidelity mode tracks newly loaded stages", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
-        const stageVersions = [1, 2, 0];
         let highestLoadedStage = 0;
         const tile = {
             mapTileKey: "Island-6-Local/Lane/42",
@@ -323,13 +308,6 @@ describe("DeckTileVisualization", () => {
             numFeatures: 2,
             hasData: () => true,
             highestLoadedStage: () => highestLoadedStage,
-            dataVersionUpToStage: (maxStage: number) => {
-                let version = 0;
-                for (let stage = 0; stage <= maxStage; stage++) {
-                    version += stageVersions[stage] ?? 0;
-                }
-                return version;
-            },
             stats: new Map<string, number[]>()
         } as any;
         const style = {
@@ -381,11 +359,10 @@ describe("DeckTileVisualization", () => {
         expect(visu.isDirty()).toBe(false);
 
         highestLoadedStage = 1;
-        stageVersions[1] += 1;
         expect(visu.isDirty()).toBe(true);
     });
 
-    it("renders an empty-state tile background when no geometry is available", async () => {
+    it("does not upsert deck geometry layers when no geometry is available", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -420,10 +397,8 @@ describe("DeckTileVisualization", () => {
         await visu.render({renderer: "deck", scene: {layerRegistry: registry}});
         registry.flush();
 
-        expect(deck.commits).toHaveLength(1);
-        expect(deck.commits[0]).toHaveLength(1);
-        expect(deck.commits[0][0].id).toContain("/tile-empty-background");
-        expect(registry.size).toBe(1);
+        expect(deck.commits).toHaveLength(0);
+        expect(registry.size).toBe(0);
     });
 
     it("records render-time samples in tile stats using legacy-compatible keys", async () => {

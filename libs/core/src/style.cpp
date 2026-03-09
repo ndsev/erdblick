@@ -79,6 +79,9 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
             rule.fidelity() == FeatureStyleRule::LowFidelity) {
             ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(rule.index());
         }
+        if (rule.fidelity() == FeatureStyleRule::LowFidelity) {
+            hasExplicitLowFidelityRules_ = true;
+        }
         highlightModeMask_ |= (1u << modeIndex);
     }
 
@@ -129,6 +132,11 @@ uint32_t FeatureLayerStyle::supportedHighlightModesMask() const
 bool FeatureLayerStyle::supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const
 {
     return (highlightModeMask_ & (1u << highlightModeIndex(mode))) != 0;
+}
+
+bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
+{
+    return hasExplicitLowFidelityRules_;
 }
 
 std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(

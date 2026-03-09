@@ -24,7 +24,6 @@ export class FeatureTile {
     private dataSourceInfoBlobCache: Uint8Array | null = null;
     private featureIdByIndexCache: Map<number, string> = new Map<number, string>();
     private tileFeatureLayerBlobsByStage: Map<number, Uint8Array> = new Map<number, Uint8Array>();
-    private stageDataVersionByStage: Map<number, number> = new Map<number, number>();
     private vertexCountCache: number | null = null;
     private stageLoadStates: Map<number, TileLoadState> = new Map<number, TileLoadState>();
     preventCulling: boolean = false;
@@ -94,7 +93,6 @@ export class FeatureTile {
         const canonicalMapTileKey = this.canonicalMapTileKeyForMetadata(mapTileMetadata);
 
         this.tileFeatureLayerBlobsByStage.set(stage, tileFeatureLayerBlob);
-        this.stageDataVersionByStage.set(stage, (this.stageDataVersionByStage.get(stage) || 0) + 1);
         this.tileFeatureLayerBlob = this.highestStageBlob();
         this.fieldDictBlobCache = null;
         this.dataSourceInfoBlobCache = null;
@@ -168,17 +166,6 @@ export class FeatureTile {
 
     hasStage(stage: number): boolean {
         return this.tileFeatureLayerBlobsByStage.has(stage);
-    }
-
-    dataVersionUpToStage(maxStage: number): number {
-        const normalizedMaxStage = Math.max(0, Math.floor(maxStage));
-        let version = 0;
-        for (const [stage, stageVersion] of this.stageDataVersionByStage.entries()) {
-            if (stage <= normalizedMaxStage) {
-                version += stageVersion;
-            }
-        }
-        return version;
     }
 
     nextMissingStage(stageCount: number): number | undefined {
@@ -456,7 +443,6 @@ export class FeatureTile {
      */
     dispose() {
         this.tileFeatureLayerBlobsByStage.clear();
-        this.stageDataVersionByStage.clear();
         this.stageLoadStates.clear();
         this.tileFeatureLayerBlob = null;
         this.vertexCountCache = null;

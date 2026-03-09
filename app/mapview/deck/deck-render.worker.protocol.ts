@@ -42,6 +42,26 @@ export interface DeckWorkerTimings {
     totalMs: number;
 }
 
+export interface DeckLowFiBundleResult {
+    lod: number;
+    pointPositions: ArrayBuffer;
+    pointColors: ArrayBuffer;
+    pointRadii: ArrayBuffer;
+    pointFeatureIds: ArrayBuffer;
+    positions: ArrayBuffer;
+    startIndices: ArrayBuffer;
+    colors: ArrayBuffer;
+    widths: ArrayBuffer;
+    featureIds: ArrayBuffer;
+    dashArrays: ArrayBuffer;
+    dashOffsets: ArrayBuffer;
+    arrowPositions: ArrayBuffer;
+    arrowStartIndices: ArrayBuffer;
+    arrowColors: ArrayBuffer;
+    arrowWidths: ArrayBuffer;
+    arrowFeatureIds: ArrayBuffer;
+}
+
 export interface DeckPathRenderResult {
     type: "DeckPathRenderResult";
     taskId: string;
@@ -64,6 +84,7 @@ export interface DeckPathRenderResult {
     arrowColors: ArrayBuffer;
     arrowWidths: ArrayBuffer;
     arrowFeatureIds: ArrayBuffer;
+    lowFiBundles: DeckLowFiBundleResult[];
     mergedPointFeatures: Record<string, any[]>;
     timings?: DeckWorkerTimings;
     error?: string;

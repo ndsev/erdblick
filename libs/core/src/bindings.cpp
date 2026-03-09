@@ -375,6 +375,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("minimumStage", &FeatureLayerStyle::minimumStage)
+        .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -469,6 +470,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .class_function("GEOMETRY_OUTPUT_NON_POINTS_ONLY", &deckGeometryOutputNonPointsOnly)
         .function("setGeometryOutputMode", &DeckFeatureLayerVisualization::setGeometryOutputMode)
         .function("geometryOutputMode", &DeckFeatureLayerVisualization::geometryOutputMode)
+        .function("setLowFiOutputLod", &DeckFeatureLayerVisualization::setLowFiOutputLod)
+        .function("availableLowFiLodsRaw", &DeckFeatureLayerVisualization::availableLowFiLodsRaw)
         .function(
             "addTileFeatureLayer",
             std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(
@@ -487,13 +490,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("pointPositionsRaw", &DeckFeatureLayerVisualization::pointPositionsRaw)
         .function("pointColorsRaw", &DeckFeatureLayerVisualization::pointColorsRaw)
         .function("pointRadiiRaw", &DeckFeatureLayerVisualization::pointRadiiRaw)
-        .function("pointFeatureStartRaw", &DeckFeatureLayerVisualization::pointFeatureStartRaw)
         .function("pointFeatureIdsRaw", &DeckFeatureLayerVisualization::pointFeatureIdsRaw)
         .function("pathPositionsRaw", &DeckFeatureLayerVisualization::pathPositionsRaw)
         .function("pathStartIndicesRaw", &DeckFeatureLayerVisualization::pathStartIndicesRaw)
         .function("pathColorsRaw", &DeckFeatureLayerVisualization::pathColorsRaw)
         .function("pathWidthsRaw", &DeckFeatureLayerVisualization::pathWidthsRaw)
-        .function("pathFeatureStartRaw", &DeckFeatureLayerVisualization::pathFeatureStartRaw)
         .function("pathFeatureIdsRaw", &DeckFeatureLayerVisualization::pathFeatureIdsRaw)
         .function("pathDashArrayRaw", &DeckFeatureLayerVisualization::pathDashArrayRaw)
         .function("pathDashOffsetsRaw", &DeckFeatureLayerVisualization::pathDashOffsetsRaw)
@@ -502,7 +503,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("arrowStartIndicesRaw", &DeckFeatureLayerVisualization::arrowStartIndicesRaw)
         .function("arrowColorsRaw", &DeckFeatureLayerVisualization::arrowColorsRaw)
         .function("arrowWidthsRaw", &DeckFeatureLayerVisualization::arrowWidthsRaw)
-        .function("arrowFeatureStartRaw", &DeckFeatureLayerVisualization::arrowFeatureStartRaw)
         .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw)
         .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures);
 

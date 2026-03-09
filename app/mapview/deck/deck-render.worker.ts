@@ -3,11 +3,13 @@ import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
+    DeckLowFiBundleResult,
     DeckPathRenderResult,
     DeckPathRenderTask,
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
+import {collectLowFiRawBundles} from "./deck-lowfi-bundle";
 
 const styleTextEncoder = new TextEncoder();
 const parserCache = new Map<string, any>();
@@ -92,6 +94,31 @@ function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
     }) as Uint8Array;
 }
 
+function readLowFiBundles(deckVisu: any): DeckLowFiBundleResult[] {
+    return collectLowFiRawBundles(
+        deckVisu,
+        (accessorName) => readRawBytes(deckVisu, accessorName)
+    ).map((bundle) => ({
+        lod: bundle.lod,
+        pointPositions: bundle.pointPositions.buffer,
+        pointColors: bundle.pointColors.buffer,
+        pointRadii: bundle.pointRadii.buffer,
+        pointFeatureIds: bundle.pointFeatureIds.buffer,
+        positions: bundle.positions.buffer,
+        startIndices: bundle.startIndices.buffer,
+        colors: bundle.colors.buffer,
+        widths: bundle.widths.buffer,
+        featureIds: bundle.featureIds.buffer,
+        dashArrays: bundle.dashArrays.buffer,
+        dashOffsets: bundle.dashOffsets.buffer,
+        arrowPositions: bundle.arrowPositions.buffer,
+        arrowStartIndices: bundle.arrowStartIndices.buffer,
+        arrowColors: bundle.arrowColors.buffer,
+        arrowWidths: bundle.arrowWidths.buffer,
+        arrowFeatureIds: bundle.arrowFeatureIds.buffer
+    }));
+}
+
 function attachOverlayChain(baseLayer: any, overlays: any[]): void {
     const maybeAttach = baseLayer?.attachOverlay;
     if (typeof maybeAttach !== "function") {
@@ -172,6 +199,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const arrowColors = readRawBytes(deckVisu, "arrowColorsRaw");
         const arrowWidths = readRawBytes(deckVisu, "arrowWidthsRaw");
         const arrowFeatureIds = readRawBytes(deckVisu, "arrowFeatureIdsRaw");
+        const lowFiBundles = readLowFiBundles(deckVisu);
         const mergedPointFeatures = deckVisu.mergedPointFeatures() as Record<string, any[]>;
         const renderMs = performance.now() - renderStart;
 
@@ -197,6 +225,7 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
             arrowColors: arrowColors.buffer,
             arrowWidths: arrowWidths.buffer,
             arrowFeatureIds: arrowFeatureIds.buffer,
+            lowFiBundles,
             mergedPointFeatures,
             timings: {
                 deserializeMs,
@@ -238,6 +267,7 @@ function emptyResultBuffers() {
         arrowColors: new ArrayBuffer(0),
         arrowWidths: new ArrayBuffer(0),
         arrowFeatureIds: new ArrayBuffer(0),
+        lowFiBundles: [] as DeckLowFiBundleResult[],
         mergedPointFeatures: {} as Record<string, any[]>
     };
 }
@@ -265,6 +295,27 @@ addEventListener("message", async ({data}) => {
         await initializeLibrary();
 
         const result = processPathRenderTask(task);
+        const lowFiBundleTransfers: ArrayBuffer[] = [];
+        for (const bundle of result.lowFiBundles) {
+            lowFiBundleTransfers.push(
+                bundle.pointPositions,
+                bundle.pointColors,
+                bundle.pointRadii,
+                bundle.pointFeatureIds,
+                bundle.positions,
+                bundle.startIndices,
+                bundle.colors,
+                bundle.widths,
+                bundle.featureIds,
+                bundle.dashArrays,
+                bundle.dashOffsets,
+                bundle.arrowPositions,
+                bundle.arrowStartIndices,
+                bundle.arrowColors,
+                bundle.arrowWidths,
+                bundle.arrowFeatureIds
+            );
+        }
         postMessage(result, [
             result.pointPositions,
             result.pointColors,
@@ -282,7 +333,8 @@ addEventListener("message", async ({data}) => {
             result.arrowStartIndices,
             result.arrowColors,
             result.arrowWidths,
-            result.arrowFeatureIds
+            result.arrowFeatureIds,
+            ...lowFiBundleTransfers
         ]);
     } catch (error) {
         const buffers = emptyResultBuffers();

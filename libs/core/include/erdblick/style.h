@@ -63,6 +63,7 @@ public:
     [[nodiscard]] uint32_t minimumStage() const;
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
+    [[nodiscard]] bool hasExplicitLowFidelityRules() const;
     [[nodiscard]] std::vector<uint32_t> const& candidateRuleIndices(
         FeatureStyleRule::HighlightMode mode,
         FeatureStyleRule::Fidelity fidelity,
@@ -109,6 +110,7 @@ private:
     std::optional<std::regex> layerAffinity_;
     std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};
     uint32_t highlightModeMask_ = 0;
+    bool hasExplicitLowFidelityRules_ = false;
     mutable std::unordered_map<std::string, RuleIndexCacheEntry, TransparentStringHash, TransparentStringEqual>
         ruleIndicesByTypeCache_;
 };
