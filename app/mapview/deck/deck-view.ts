@@ -17,9 +17,11 @@ import {environment} from "../../environments/environment";
 import {MergedPointsTile} from "../pointmerge.service";
 import {coreLib} from "../../integrations/wasm";
 import {
+    TileGridOverlayDatum,
     TILE_STATE_KIND_EMPTY,
     TILE_STATE_KIND_ERROR,
     TileGridOverlayLayer,
+    TileGridStateOverlayLayer,
     tileGridOverlayData
 } from "./deck-tile-grid-overlay.layer";
 import {SearchResultClusterLayer, SearchResultClusterPoint} from "./deck-search-result-cluster.layer";
@@ -33,7 +35,7 @@ interface DeckCameraState {
 }
 
 interface TileGridOverlayGeometry {
-    polygon: [number, number][];
+    data: TileGridOverlayDatum[];
     localMin: [number, number];
     localSize: [number, number];
     subdivisionsX: number[];
@@ -49,6 +51,7 @@ interface TileGridLevelExtent {
     level: number;
     rowCount: number;
     colCount: number;
+    coversFullWorldX: boolean;
     minCol: number;
     maxCol: number;
     minRow: number;
@@ -969,17 +972,18 @@ export abstract class DeckMapView implements IRenderView {
             ? this.tileGridDebugGeometry(levels)
             : this.tileGridOverlayGeometry(levels);
         const layerId = DeckMapView.TILE_GRID_LAYER_KEY;
-        const overlayData = [{polygon: overlayGeometry.polygon}];
         return new TileGridOverlayLayer({
             id: layerId,
-            data: overlayData,
-            getPolygon: (datum: {polygon: [number, number][]}) => datum.polygon,
+            data: overlayGeometry.data,
+            getPolygon: (datum: TileGridOverlayDatum) => datum.polygon,
             getFillColor: [0, 0, 0, 0],
             coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
             filled: true,
             stroked: false,
             extruded: false,
-            wrapLongitude: true,
+            // Keep the overlay quad in unwrapped longitude space. The shader
+            // already works with unwrapped/projection-space X coordinates.
+            wrapLongitude: false,
             pickable: false,
             levels,
             gridMode: this.tileGridMode,
@@ -1043,23 +1047,23 @@ export abstract class DeckMapView implements IRenderView {
 
             const imageData = new ImageData(pixels, extent.width, extent.height);
             const layerKey = `${DeckMapView.TILE_STATE_LAYER_KEY}/${level}`;
-            const layer = new BitmapLayer({
+            const overlayGeometry = this.tileStateOverlayGeometry(extent);
+            const layer = new TileGridStateOverlayLayer({
                 id: layerKey,
-                data: null,
-                image: imageData,
-                bounds: [extent.west, extent.south, extent.east, extent.north],
+                data: overlayGeometry.data,
+                getPolygon: (datum: TileGridOverlayDatum) => datum.polygon,
+                getFillColor: [255, 255, 255, 255],
                 coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+                filled: true,
+                stroked: false,
+                extruded: false,
                 wrapLongitude: false,
-                opacity: 1.0,
                 pickable: false,
-                textureParameters: {
-                    minFilter: "nearest",
-                    magFilter: "nearest",
-                    mipmapFilter: "nearest",
-                    addressModeU: "clamp-to-edge",
-                    addressModeV: "clamp-to-edge"
-                },
-                parameters: {depthTest: false}
+                gridMode: this.tileGridMode,
+                localMin: overlayGeometry.localMin,
+                localSize: overlayGeometry.localSize,
+                imageData,
+                parameters: {depthTest: false, cull: false}
             } as any);
             this.layerRegistry.upsert(layerKey, layer as any, 360);
             nextLayerKeys.add(layerKey);
@@ -1146,21 +1150,25 @@ export abstract class DeckMapView implements IRenderView {
         const northNorm = this.tileGridLatToNormY(viewportNorth, this.tileGridMode);
         const rowCount = Math.pow(2, safeLevel);
         const colCount = this.tileGridMode === "nds" ? rowCount * 2 : rowCount;
-        const normMinX = Math.min(westNorm, eastNorm);
-        const normMaxX = Math.max(westNorm, eastNorm);
+        const coversFullWorldX = eastNorm - westNorm >= 1 - 1e-9;
+        const normMinX = coversFullWorldX ? 0 : Math.min(westNorm, eastNorm);
+        const normMaxX = coversFullWorldX ? 1 : Math.max(westNorm, eastNorm);
         const normMinY = Math.min(northNorm, southNorm);
         const normMaxY = Math.max(northNorm, southNorm);
         const marginTiles = 2;
-        const minCol = Math.floor(normMinX * colCount) - marginTiles;
-        const maxCol = Math.ceil(normMaxX * colCount) + marginTiles;
+        const minCol = coversFullWorldX ? 0 : Math.floor(normMinX * colCount) - marginTiles;
+        const maxCol = coversFullWorldX ? colCount : Math.ceil(normMaxX * colCount) + marginTiles;
         const minRow = Math.max(0, Math.floor(normMinY * rowCount) - marginTiles);
         const maxRow = Math.min(rowCount, Math.ceil(normMaxY * rowCount) + marginTiles);
         const width = Math.max(1, maxCol - minCol);
         const height = Math.max(1, maxRow - minRow);
+        const north = this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode);
+        const south = this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode);
         return {
             level: safeLevel,
             rowCount,
             colCount,
+            coversFullWorldX,
             minCol,
             maxCol,
             minRow,
@@ -1169,8 +1177,8 @@ export abstract class DeckMapView implements IRenderView {
             height,
             west: this.tileGridNormXToLon(minCol / colCount),
             east: this.tileGridNormXToLon(maxCol / colCount),
-            north: this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode),
-            south: this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode)
+            north: Math.min(north, DeckMapView.WEB_MERCATOR_MAX_LATITUDE),
+            south: Math.max(south, -DeckMapView.WEB_MERCATOR_MAX_LATITUDE)
         };
     }
 
@@ -1273,16 +1281,38 @@ export abstract class DeckMapView implements IRenderView {
         const base = this.tileGridOverlayGeometry(levels);
         return {
             ...base,
-            polygon: this.tileGridDebugPolygon()
+            data: [{
+                polygon: this.tileGridDebugPolygon(),
+                ndsYCorrection: [0, 1, 0]
+            }]
+        };
+    }
+
+    private tileStateOverlayGeometry(extent: TileGridLevelExtent): TileGridOverlayGeometry {
+        const {localMin, localSize} = this.tileGridLocalBounds(extent);
+        return {
+            data: this.buildTileGridOverlayData(
+                extent.west,
+                extent.east,
+                extent.south,
+                extent.north,
+                [extent.level],
+                localMin,
+                localSize,
+                extent.coversFullWorldX
+            ),
+            localMin,
+            localSize,
+            subdivisionsX: [extent.width],
+            subdivisionsY: [extent.height]
         };
     }
 
     private tileGridOverlayGeometry(levels: number[]): TileGridOverlayGeometry {
         const viewport = this.computeViewport();
         if (!viewport) {
-            const polygon = tileGridOverlayData()[0].polygon;
             return {
-                polygon,
+                data: tileGridOverlayData(),
                 localMin: [0, 0],
                 localSize: [1, 1],
                 subdivisionsX: levels.map(() => 1),
@@ -1290,45 +1320,17 @@ export abstract class DeckMapView implements IRenderView {
             };
         }
         const referenceLevel = levels.length ? levels[0] : Math.max(0, Math.floor(this.viewState.zoom));
-        const safeLevel = Math.max(0, Math.min(22, referenceLevel));
-
-        const viewportWest = viewport.west;
-        const viewportEast = viewport.west + viewport.width;
-        const viewportSouth = viewport.south;
-        const viewportNorth = viewport.south + viewport.height;
-
-        const westNorm = this.tileGridLonToNormX(viewportWest);
-        const eastNorm = this.tileGridLonToNormX(viewportEast);
-        const southNorm = this.tileGridLatToNormY(viewportSouth, this.tileGridMode);
-        const northNorm = this.tileGridLatToNormY(viewportNorth, this.tileGridMode);
-
-        const rowCount = Math.pow(2, safeLevel);
-        const colCount = this.tileGridMode === "nds" ? rowCount * 2 : rowCount;
-
-        const normMinX = Math.min(westNorm, eastNorm);
-        const normMaxX = Math.max(westNorm, eastNorm);
-        const normMinY = Math.min(northNorm, southNorm);
-        const normMaxY = Math.max(northNorm, southNorm);
-        const marginTiles = 2;
-
-        const minCol = Math.floor(normMinX * colCount) - marginTiles;
-        const maxCol = Math.ceil(normMaxX * colCount) + marginTiles;
-        const minRow = Math.max(0, Math.floor(normMinY * rowCount) - marginTiles);
-        const maxRow = Math.min(rowCount, Math.ceil(normMaxY * rowCount) + marginTiles);
-
-        const west = this.tileGridNormXToLon(minCol / colCount);
-        const east = this.tileGridNormXToLon(maxCol / colCount);
-        const north = this.tileGridNormYToLat(minRow / rowCount, this.tileGridMode);
-        const south = this.tileGridNormYToLat(maxRow / rowCount, this.tileGridMode);
-        const alignedMinX = minCol / colCount;
-        const alignedMaxX = maxCol / colCount;
-        const alignedMinY = minRow / rowCount;
-        const alignedMaxY = maxRow / rowCount;
-        const localMin: [number, number] = [alignedMinX, alignedMinY];
-        const localSize: [number, number] = [
-            Math.max(1e-6, alignedMaxX - alignedMinX),
-            Math.max(1e-6, alignedMaxY - alignedMinY)
-        ];
+        const extent = this.tileGridExtentForLevel(referenceLevel, viewport);
+        if (!extent) {
+            return {
+                data: tileGridOverlayData(),
+                localMin: [0, 0],
+                localSize: [1, 1],
+                subdivisionsX: levels.map(() => 1),
+                subdivisionsY: levels.map(() => 1)
+            };
+        }
+        const {localMin, localSize} = this.tileGridLocalBounds(extent);
         const subdivisionsX = levels.map(level => {
             const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
             const colsForLevel = this.tileGridMode === "nds" ? rowsForLevel * 2 : rowsForLevel;
@@ -1338,19 +1340,211 @@ export abstract class DeckMapView implements IRenderView {
             const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
             return Math.max(1, Math.round(localSize[1] * rowsForLevel));
         });
-        const polygon: [number, number][] = [
-            [west, south],
-            [west, north],
-            [east, north],
-            [east, south]
-        ];
         return {
-            polygon,
+            data: this.buildTileGridOverlayData(
+                extent.west,
+                extent.east,
+                extent.south,
+                extent.north,
+                levels,
+                localMin,
+                localSize,
+                extent.coversFullWorldX
+            ),
             localMin,
             localSize,
             subdivisionsX,
             subdivisionsY
         };
+    }
+
+    private tileGridLocalBounds(extent: TileGridLevelExtent): {localMin: [number, number]; localSize: [number, number]} {
+        return {
+            localMin: [
+                extent.minCol / extent.colCount,
+                extent.minRow / extent.rowCount
+            ],
+            localSize: [
+                Math.max(1e-6, (extent.maxCol - extent.minCol) / extent.colCount),
+                Math.max(1e-6, (extent.maxRow - extent.minRow) / extent.rowCount)
+            ]
+        };
+    }
+
+    private buildTileGridOverlayData(
+        west: number,
+        east: number,
+        south: number,
+        north: number,
+        levels: number[],
+        localMin: [number, number],
+        localSize: [number, number],
+        coversFullWorldX: boolean
+    ): TileGridOverlayDatum[] {
+        const polygonsForBounds = (bandSouth: number, bandNorth: number): [number, number][][] => {
+            if (!coversFullWorldX) {
+                return [[
+                    [west, bandSouth],
+                    [west, bandNorth],
+                    [east, bandNorth],
+                    [east, bandSouth]
+                ]];
+            }
+            return this.tileGridFullWorldPolygons(
+                -180,
+                180,
+                bandSouth,
+                bandNorth,
+                this.tileGridFullWorldSplitLongitude(levels)
+            );
+        };
+
+        if (this.tileGridMode !== "nds") {
+            return polygonsForBounds(south, north).map(polygon => ({
+                polygon,
+                ndsYCorrection: [0, 1, 0]
+            }));
+        }
+
+        const bandCount = this.tileGridNdsBandCount(north, south);
+        const mercatorNorth = this.tileGridLatToNormY(north, "xyz");
+        const mercatorSouth = this.tileGridLatToNormY(south, "xyz");
+        const data: TileGridOverlayDatum[] = [];
+        for (let bandIndex = 0; bandIndex < bandCount; bandIndex++) {
+            const t0 = bandIndex / bandCount;
+            const t1 = (bandIndex + 1) / bandCount;
+            const bandMercatorNorth = mercatorNorth + (mercatorSouth - mercatorNorth) * t0;
+            const bandMercatorSouth = mercatorNorth + (mercatorSouth - mercatorNorth) * t1;
+            const bandNorth = this.tileGridNormYToLat(bandMercatorNorth, "xyz");
+            const bandSouth = this.tileGridNormYToLat(bandMercatorSouth, "xyz");
+            const ndsYCorrection = this.tileGridNdsBandCorrection(localMin[1], localSize[1], bandNorth, bandSouth);
+            for (const polygon of polygonsForBounds(bandSouth, bandNorth)) {
+                data.push({polygon, ndsYCorrection});
+            }
+        }
+        return data;
+    }
+
+    /**
+     * A single 360-degree quad is unstable in deck's LNGLAT path. Split the
+     * full-world overlay into two adjacent primitives and keep shader space continuous.
+     */
+    private tileGridFullWorldPolygons(
+        west: number,
+        east: number,
+        south: number,
+        north: number,
+        splitLongitude: number
+    ): [number, number][][] {
+        return [
+            [
+                [west, south],
+                [west, north],
+                [splitLongitude, north],
+                [splitLongitude, south]
+            ],
+            [
+                [splitLongitude, south],
+                [splitLongitude, north],
+                [east, north],
+                [east, south]
+            ]
+        ];
+    }
+
+    /**
+     * Keep the full-world split seam away from all visible vertical grid lines.
+     * Otherwise the seam itself can swallow one subdivision family.
+     */
+    private tileGridFullWorldSplitLongitude(levels: number[]): number {
+        const finestLevel = levels.reduce(
+            (maxLevel, level) => Math.max(maxLevel, Math.max(0, Math.min(22, Math.floor(level)))),
+            0
+        );
+        const finestRowCount = Math.pow(2, finestLevel);
+        const finestColCount = this.tileGridMode === "nds" ? finestRowCount * 2 : finestRowCount;
+        const splitNormX = 0.5 + 0.5 / Math.max(2, finestColCount);
+        return -180 + 360 * splitNormX;
+    }
+
+    /**
+     * Computes the local Y correction that bends the linear NDS field toward Mercator.
+     * The correction stays centered on the latitude midpoint to preserve precision.
+     */
+    private tileGridNdsBandCount(north: number, south: number): number {
+        const mercatorNorth = this.tileGridLatToNormY(north, "xyz");
+        const mercatorSouth = this.tileGridLatToNormY(south, "xyz");
+        const mercatorSpan = Math.abs(mercatorSouth - mercatorNorth);
+        if (mercatorSpan >= 0.75) {
+            return 8;
+        }
+        if (mercatorSpan >= 0.4) {
+            return 4;
+        }
+        if (mercatorSpan >= 0.18) {
+            return 2;
+        }
+        return 1;
+    }
+
+    /**
+     * Fits a local quadratic for one latitude band in global overlay space.
+     * The rasterizer interpolates the NDS Y values linearly in Mercator space,
+     * so we fit the inverse of that distortion over each band separately.
+     */
+    private tileGridNdsBandCorrection(
+        localMinY: number,
+        localSizeY: number,
+        north: number,
+        south: number
+    ): [number, number, number] {
+        if (localSizeY <= 1e-9) {
+            return [0, 1, 0];
+        }
+        const northLocalY = this.tileGridLocalNdsY(north, localMinY, localSizeY);
+        const southLocalY = this.tileGridLocalNdsY(south, localMinY, localSizeY);
+        const mercatorNorthY = this.tileGridLatToNormY(north, "xyz");
+        const mercatorSouthY = this.tileGridLatToNormY(south, "xyz");
+        const mercatorMidY = 0.5 * (mercatorNorthY + mercatorSouthY);
+        const midpointLat = this.tileGridNormYToLat(mercatorMidY, "xyz");
+        const midpointInputY = 0.5 * (northLocalY + southLocalY);
+        const midpointOutputY = this.tileGridLocalNdsY(midpointLat, localMinY, localSizeY);
+        return this.tileGridQuadraticThroughPoints(
+            northLocalY,
+            northLocalY,
+            midpointInputY,
+            midpointOutputY,
+            southLocalY,
+            southLocalY
+        );
+    }
+
+    private tileGridLocalNdsY(lat: number, localMinY: number, localSizeY: number): number {
+        const ndsY = this.tileGridLatToNormY(lat, "nds");
+        return (ndsY - localMinY) / Math.max(1e-6, localSizeY);
+    }
+
+    private tileGridQuadraticThroughPoints(
+        x0: number,
+        y0: number,
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number
+    ): [number, number, number] {
+        const d0 = (x0 - x1) * (x0 - x2);
+        const d1 = (x1 - x0) * (x1 - x2);
+        const d2 = (x2 - x0) * (x2 - x1);
+        if (Math.abs(d0) < 1e-9 || Math.abs(d1) < 1e-9 || Math.abs(d2) < 1e-9) {
+            return [0, 1, 0];
+        }
+        const l0 = y0 / d0;
+        const l1 = y1 / d1;
+        const l2 = y2 / d2;
+        const quadratic = l0 + l1 + l2;
+        const linear = -l0 * (x1 + x2) - l1 * (x0 + x2) - l2 * (x0 + x1);
+        const constant = l0 * x1 * x2 + l1 * x0 * x2 + l2 * x0 * x1;
+        return [constant, linear, quadratic];
     }
 
     private tileGridLonToNormX(lon: number): number {
