@@ -2,6 +2,7 @@ import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from
 import {COORDINATE_SYSTEM, Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
 import {BitmapLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
+import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
 import {Cartographic, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
@@ -69,6 +70,8 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly WEB_MERCATOR_TILE_SIZE = 512;
     private static readonly ASSUMED_VERTICAL_FOV_RADIANS = GeoMath.toRadians(60);
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
+    private static readonly MAX_VIEWPORT_LONGITUDE_SPAN = 360;
+    private static readonly WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
     private static readonly OSM_LAYER_KEY = "osm/tile-layer";
     private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
@@ -354,30 +357,78 @@ export abstract class DeckMapView implements IRenderView {
             return undefined;
         }
 
-        const width = Math.max(1, viewport.width);
-        const height = Math.max(1, viewport.height);
-        const [westRaw, northRaw] = viewport.unproject([0, 0]);
-        const [eastRaw, southRaw] = viewport.unproject([width, height]);
+        // Use the full ground-footprint quad instead of diagonal screen samples.
+        // The diagonal approximation collapses under pitch/bearing and briefly turns the
+        // tile-loading viewport into a thin strip while the camera is rotating.
+        const corners = getWebMercatorBounds(
+            viewport as unknown as Parameters<typeof getWebMercatorBounds>[0],
+            0
+        );
+        if (!Array.isArray(corners) || corners.length !== 4) {
+            return undefined;
+        }
 
-        const west = Math.min(westRaw, eastRaw);
-        const east = Math.max(westRaw, eastRaw);
-        const south = Math.min(southRaw, northRaw);
-        const north = Math.max(southRaw, northRaw);
+        const centerLon = this.viewState.longitude;
+        const longitudes = corners.map(corner => this.unwrapLongitudeNear(centerLon, Number(corner[0])));
+        const latitudes = corners.map(corner => Number(corner[1]));
+        if (![...longitudes, ...latitudes].every(Number.isFinite)) {
+            return undefined;
+        }
+
+        const west = Math.min(...longitudes);
+        const east = Math.max(...longitudes);
+        const south = Math.min(...latitudes);
+        const north = Math.max(...latitudes);
         const sizeLon = Math.abs(east - west);
         const sizeLat = Math.abs(north - south);
+        if (![west, east, south, north, sizeLon, sizeLat].every(Number.isFinite)) {
+            return undefined;
+        }
+        if (sizeLon >= DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN) {
+            const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south);
+            const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north);
+            const fullWorldViewport: Viewport = {
+                south: clampedSouth,
+                west: this.viewState.longitude - DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN / 2,
+                width: DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN,
+                height: Math.max(0, clampedNorth - clampedSouth),
+                camPosLon: this.viewState.longitude,
+                camPosLat: this.viewState.latitude,
+                orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
+            };
+            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+        }
         const expandLon = sizeLon * 0.05;
         const expandLat = sizeLat * 0.05;
+        const expandedWidth = sizeLon + expandLon * 2;
+        if (expandedWidth >= DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN) {
+            const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
+            const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north + expandLat);
+            const fullWorldViewport: Viewport = {
+                south: clampedSouth,
+                west: this.viewState.longitude - DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN / 2,
+                width: DeckMapView.MAX_VIEWPORT_LONGITUDE_SPAN,
+                height: Math.max(0, clampedNorth - clampedSouth),
+                camPosLon: this.viewState.longitude,
+                camPosLat: this.viewState.latitude,
+                orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
+            };
+            return Object.values(fullWorldViewport).every(Number.isFinite) ? fullWorldViewport : undefined;
+        }
+        const clampedSouth = Math.max(-DeckMapView.WEB_MERCATOR_MAX_LATITUDE, south - expandLat);
+        const clampedNorth = Math.min(DeckMapView.WEB_MERCATOR_MAX_LATITUDE, north + expandLat);
 
-        return {
-            south: south - expandLat,
+        const nextViewport: Viewport = {
+            south: clampedSouth,
             west: west - expandLon,
-            width: sizeLon + expandLon * 2,
-            height: sizeLat + expandLat * 2,
+            width: expandedWidth,
+            height: Math.max(0, clampedNorth - clampedSouth),
             camPosLon: this.viewState.longitude,
             camPosLat: this.viewState.latitude,
             // Keep tile-priority orientation consistent with the legacy viewport contract.
             orientation: -GeoMath.toRadians(this.viewState.bearing) + Math.PI * 0.5
         };
+        return Object.values(nextViewport).every(Number.isFinite) ? nextViewport : undefined;
     }
 
     moveUp(): void {
@@ -1346,6 +1397,17 @@ export abstract class DeckMapView implements IRenderView {
             value += 360;
         }
         while (value > 180) {
+            value -= 360;
+        }
+        return value;
+    }
+
+    private unwrapLongitudeNear(referenceLon: number, lon: number): number {
+        let value = lon;
+        while (value - referenceLon <= -180) {
+            value += 360;
+        }
+        while (value - referenceLon > 180) {
             value -= 360;
         }
         return value;
