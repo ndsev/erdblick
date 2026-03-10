@@ -270,6 +270,18 @@ export class DeckTileVisualization implements ITileVisualization {
                 }
             }
 
+            if (this.shouldKeepActiveLowFiFallback(
+                fidelity,
+                pathLayerData,
+                pointLayerData,
+                arrowLayerData,
+                mergedPointFeatures
+            )) {
+                this.completeRender(fidelity, activeLowFiLods);
+                return true;
+            }
+
+            this.clearMergedPointVisualizations(sceneHandle);
             if (fidelity === "low" && selectedLowFiBundles.length > 0) {
                 this.applyLowFiBundleDataToRegistry(registry, selectedLowFiBundles);
             } else {
@@ -482,8 +494,44 @@ export class DeckTileVisualization implements ITileVisualization {
         this.lastSignature = this.renderSignature(fidelity);
         this.hadTileDataAtLastRender = this.tileHasData();
         this.tileFeatureCountAtLastRender = this.tileFeatureCount();
+        this.tileDataVersionAtLastRender = this.tile.dataVersion;
         this.activeRenderedFidelity = fidelity;
         this.activeRenderedLowFiLods = fidelity === "low" ? [...activeLowFiLods] : [];
+    }
+
+    private hasRenderableLayerData(
+        pathLayerData: DeckPathLayerData | null,
+        pointLayerData: DeckPointLayerData | null,
+        arrowLayerData: DeckPathLayerData | null
+    ): boolean {
+        return (!!pathLayerData && pathLayerData.length > 0)
+            || (!!pointLayerData && pointLayerData.length > 0)
+            || (!!arrowLayerData && arrowLayerData.length > 0);
+    }
+
+    private hasRenderableMergedPointFeatures(
+        mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
+    ): boolean {
+        if (!mergedPointFeatures) {
+            return false;
+        }
+        return Object.values(mergedPointFeatures).some(features => features.length > 0);
+    }
+
+    private shouldKeepActiveLowFiFallback(
+        fidelity: "low" | "high" | "any" | null,
+        pathLayerData: DeckPathLayerData | null,
+        pointLayerData: DeckPointLayerData | null,
+        arrowLayerData: DeckPathLayerData | null,
+        mergedPointFeatures: Record<MapViewLayerStyleRule, MergedPointVisualization[]> | null
+    ): boolean {
+        if (fidelity !== "high"
+            || this.activeRenderedFidelity !== "low"
+            || this.activeRenderedLowFiLods.length === 0) {
+            return false;
+        }
+        return !this.hasRenderableLayerData(pathLayerData, pointLayerData, arrowLayerData)
+            && !this.hasRenderableMergedPointFeatures(mergedPointFeatures);
     }
 
     private updateLowFiBundleCache(lowFiBundles: DeckLowFiBundleData[]): void {
@@ -536,9 +584,6 @@ export class DeckTileVisualization implements ITileVisualization {
             return false;
         }
         const selectedLowFiBundles = this.selectLowFiBundlesForCurrentRequest();
-        if (selectedLowFiBundles.length === 0) {
-            return false;
-        }
         const selectedLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
         if (this.activeRenderedFidelity === "low" &&
             this.sameLowFiLodSelection(this.activeRenderedLowFiLods, selectedLowFiLods)) {
@@ -556,17 +601,12 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private hasPendingLowFiSwitch(): boolean {
-        if (!this.rendered || this.currentFidelity() !== "low") {
+        if (!this.rendered
+            || this.currentFidelity() !== "low"
+            || this.activeRenderedFidelity !== "low") {
             return false;
         }
-        const selectedLowFiLods = this.lowFiLodSelection();
-        if (selectedLowFiLods.length === 0) {
-            return false;
-        }
-        if (this.activeRenderedFidelity !== "low") {
-            return true;
-        }
-        return !this.sameLowFiLodSelection(this.activeRenderedLowFiLods, selectedLowFiLods);
+        return !this.sameLowFiLodSelection(this.activeRenderedLowFiLods, this.lowFiLodSelection());
     }
 
     private hasPendingFidelitySwitch(): boolean {
@@ -608,6 +648,7 @@ export class DeckTileVisualization implements ITileVisualization {
         this.rendered = false;
         this.hadTileDataAtLastRender = false;
         this.tileFeatureCountAtLastRender = 0;
+        this.tileDataVersionAtLastRender = -1;
     }
 
     isDirty(): boolean {
@@ -615,7 +656,8 @@ export class DeckTileVisualization implements ITileVisualization {
             !this.rendered ||
             this.lastSignature !== this.renderSignature() ||
             this.hadTileDataAtLastRender !== this.tileHasData() ||
-            this.tileFeatureCountAtLastRender !== this.tileFeatureCount()
+            this.tileFeatureCountAtLastRender !== this.tileFeatureCount() ||
+            this.tileDataVersionAtLastRender !== this.tile.dataVersion
         );
     }
 
@@ -738,7 +780,7 @@ export class DeckTileVisualization implements ITileVisualization {
             throw new Error("Worker render requested without tile data blobs.");
         }
         const pool = deckRenderWorkerPool();
-        const result = await pool.renderPaths({
+        const result = await pool.renderTile({
             viewIndex: this.viewIndex,
             tileKey: this.tile.mapTileKey,
             tileStageBlobs,

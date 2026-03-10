@@ -433,6 +433,85 @@ describe('MapDataService', () => {
         expect(viewStates[0].visualizationQueue).toContain(enabledVisu);
     });
 
+    it('requeues a visualization immediately when it finishes stale after an in-flight policy change', () => {
+        const {service, styleService} = createMapDataService();
+        const tileKey = coreLib.getTileFeatureLayerKey('m1', 'layerA', 1n);
+
+        const tile = {
+            mapName: 'm1',
+            layerName: 'layerA',
+            mapTileKey: tileKey,
+            tileId: 1n,
+            preventCulling: false,
+            disposed: false,
+            hasData: () => true,
+            level: () => 0,
+            setRenderOrder: vi.fn(),
+            renderOrder: () => 0,
+            stats: new Map<string, number[]>(),
+            numFeatures: 1,
+        } as any;
+
+        const visu = {
+            tile,
+            styleId: 'enabled-style',
+            viewIndex: 0,
+            showTileBorder: false,
+            highFidelityStage: 0,
+            prefersHighFidelity: false,
+            maxLowFiLod: 0,
+            isDirty: vi.fn().mockReturnValue(true),
+            renderRank: vi.fn().mockReturnValue(0),
+            updateStatus: vi.fn(),
+        } as any;
+
+        const fakeMapTree = {
+            allLevels: (_viewIndex: number) => [],
+            maps: new Map(),
+            getViewTileBorderState: vi.fn().mockReturnValue(false),
+            getMapLayerVisibility: vi.fn().mockReturnValue(true),
+            getMapLayerLevel: vi.fn().mockReturnValue(0),
+        };
+        service.maps$.next(fakeMapTree as any);
+
+        styleService.styles = new Map<string, any>([
+            ['enabled-style', {
+                id: 'enabled-style',
+                visible: true,
+                featureLayerStyle: {}
+            }],
+        ]);
+
+        const scheduleOutsideAngularSpy = vi
+            .spyOn(service as any, 'scheduleOutsideAngular')
+            .mockImplementation(() => 0 as any);
+        vi.spyOn(service as any, 'viewShowsFeatureTile').mockReturnValue(true);
+
+        const viewStates = (service as any).viewVisualizationState as any[];
+        viewStates[0].visibleTileIds = new Set<bigint>([1n]);
+        viewStates[0].putVisualization('enabled-style', tile.mapTileKey, visu);
+        viewStates[0].visualizationQueue = [visu];
+
+        let dispatchedTask: any = null;
+        const subscription = service.tileVisualizationTopic.subscribe(task => {
+            dispatchedTask = task;
+        });
+
+        (service as any).processVisualizationTasks();
+
+        expect(dispatchedTask).toBeTruthy();
+        expect(dispatchedTask.visualization).toBe(visu);
+        expect(viewStates[0].visualizationQueue).toHaveLength(0);
+
+        dispatchedTask.onDone();
+
+        expect(visu.updateStatus).toHaveBeenCalledWith(true);
+        expect(viewStates[0].visualizationQueue).toContain(visu);
+
+        subscription.unsubscribe();
+        scheduleOutsideAngularSpy.mockRestore();
+    });
+
     it('builds a tiles WebSocket request body based on selection tile requests', async () => {
         const {service} = createMapDataService();
 

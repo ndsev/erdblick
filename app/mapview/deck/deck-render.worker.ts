@@ -4,8 +4,8 @@ import {
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
     DECK_GEOMETRY_OUTPUT_POINTS_ONLY,
     DeckLowFiBundleResult,
-    DeckPathRenderResult,
-    DeckPathRenderTask,
+    DeckTileRenderResult,
+    DeckTileRenderTask,
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
@@ -23,7 +23,7 @@ function blobSignature(blob: Uint8Array): string {
     return `${blob.length}:${blob[0]}:${mid}:${blob[blob.length - 1]}`;
 }
 
-function parserCacheKey(task: DeckPathRenderTask): string {
+function parserCacheKey(task: DeckTileRenderTask): string {
     return [
         task.nodeId,
         task.mapName,
@@ -32,7 +32,7 @@ function parserCacheKey(task: DeckPathRenderTask): string {
     ].join("|");
 }
 
-function getOrCreateParser(task: DeckPathRenderTask): any {
+function getOrCreateParser(task: DeckTileRenderTask): any {
     const key = parserCacheKey(task);
     const cached = parserCache.get(key);
     if (cached) {
@@ -100,22 +100,22 @@ function readLowFiBundles(deckVisu: any): DeckLowFiBundleResult[] {
         (accessorName) => readRawBytes(deckVisu, accessorName)
     ).map((bundle) => ({
         lod: bundle.lod,
-        pointPositions: bundle.pointPositions.buffer,
-        pointColors: bundle.pointColors.buffer,
-        pointRadii: bundle.pointRadii.buffer,
-        pointFeatureIds: bundle.pointFeatureIds.buffer,
-        positions: bundle.positions.buffer,
-        startIndices: bundle.startIndices.buffer,
-        colors: bundle.colors.buffer,
-        widths: bundle.widths.buffer,
-        featureIds: bundle.featureIds.buffer,
-        dashArrays: bundle.dashArrays.buffer,
-        dashOffsets: bundle.dashOffsets.buffer,
-        arrowPositions: bundle.arrowPositions.buffer,
-        arrowStartIndices: bundle.arrowStartIndices.buffer,
-        arrowColors: bundle.arrowColors.buffer,
-        arrowWidths: bundle.arrowWidths.buffer,
-        arrowFeatureIds: bundle.arrowFeatureIds.buffer
+        pointPositions: bundle.pointPositions.buffer as ArrayBuffer,
+        pointColors: bundle.pointColors.buffer as ArrayBuffer,
+        pointRadii: bundle.pointRadii.buffer as ArrayBuffer,
+        pointFeatureIds: bundle.pointFeatureIds.buffer as ArrayBuffer,
+        positions: bundle.positions.buffer as ArrayBuffer,
+        startIndices: bundle.startIndices.buffer as ArrayBuffer,
+        colors: bundle.colors.buffer as ArrayBuffer,
+        widths: bundle.widths.buffer as ArrayBuffer,
+        featureIds: bundle.featureIds.buffer as ArrayBuffer,
+        dashArrays: bundle.dashArrays.buffer as ArrayBuffer,
+        dashOffsets: bundle.dashOffsets.buffer as ArrayBuffer,
+        arrowPositions: bundle.arrowPositions.buffer as ArrayBuffer,
+        arrowStartIndices: bundle.arrowStartIndices.buffer as ArrayBuffer,
+        arrowColors: bundle.arrowColors.buffer as ArrayBuffer,
+        arrowWidths: bundle.arrowWidths.buffer as ArrayBuffer,
+        arrowFeatureIds: bundle.arrowFeatureIds.buffer as ArrayBuffer
     }));
 }
 
@@ -129,7 +129,7 @@ function attachOverlayChain(baseLayer: any, overlays: any[]): void {
     }
 }
 
-function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
+function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     const totalStart = performance.now();
     let deserializeMs = 0;
     let baseLayer: any = null;
@@ -204,27 +204,27 @@ function processPathRenderTask(task: DeckPathRenderTask): DeckPathRenderResult {
         const renderMs = performance.now() - renderStart;
 
         return {
-            type: "DeckPathRenderResult",
+            type: "DeckTileRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
             vertexCount,
-            pointPositions: pointPositions.buffer,
-            pointColors: pointColors.buffer,
-            pointRadii: pointRadii.buffer,
-            pointFeatureIds: pointFeatureIds.buffer,
-            coordinateOrigin: coordinateOrigin.buffer,
-            positions: positions.buffer,
-            startIndices: startIndices.buffer,
-            colors: colors.buffer,
-            widths: widths.buffer,
-            featureIds: featureIds.buffer,
-            dashArrays: dashArrays.buffer,
-            dashOffsets: dashOffsets.buffer,
-            arrowPositions: arrowPositions.buffer,
-            arrowStartIndices: arrowStartIndices.buffer,
-            arrowColors: arrowColors.buffer,
-            arrowWidths: arrowWidths.buffer,
-            arrowFeatureIds: arrowFeatureIds.buffer,
+            pointPositions: pointPositions.buffer as ArrayBuffer,
+            pointColors: pointColors.buffer as ArrayBuffer,
+            pointRadii: pointRadii.buffer as ArrayBuffer,
+            pointFeatureIds: pointFeatureIds.buffer as ArrayBuffer,
+            coordinateOrigin: coordinateOrigin.buffer as ArrayBuffer,
+            positions: positions.buffer as ArrayBuffer,
+            startIndices: startIndices.buffer as ArrayBuffer,
+            colors: colors.buffer as ArrayBuffer,
+            widths: widths.buffer as ArrayBuffer,
+            featureIds: featureIds.buffer as ArrayBuffer,
+            dashArrays: dashArrays.buffer as ArrayBuffer,
+            dashOffsets: dashOffsets.buffer as ArrayBuffer,
+            arrowPositions: arrowPositions.buffer as ArrayBuffer,
+            arrowStartIndices: arrowStartIndices.buffer as ArrayBuffer,
+            arrowColors: arrowColors.buffer as ArrayBuffer,
+            arrowWidths: arrowWidths.buffer as ArrayBuffer,
+            arrowFeatureIds: arrowFeatureIds.buffer as ArrayBuffer,
             lowFiBundles,
             mergedPointFeatures,
             timings: {
@@ -290,11 +290,11 @@ addEventListener("message", async ({data}) => {
         return;
     }
 
-    const task = message as DeckPathRenderTask;
+    const task = message as DeckTileRenderTask;
     try {
         await initializeLibrary();
 
-        const result = processPathRenderTask(task);
+        const result = processTileRenderTask(task);
         const lowFiBundleTransfers: ArrayBuffer[] = [];
         for (const bundle of result.lowFiBundles) {
             lowFiBundleTransfers.push(
@@ -316,6 +316,7 @@ addEventListener("message", async ({data}) => {
                 bundle.arrowFeatureIds
             );
         }
+        // @ts-expect-error: transfer list accepts ArrayBuffer entries extracted from the typed result payload.
         postMessage(result, [
             result.pointPositions,
             result.pointColors,
@@ -338,8 +339,8 @@ addEventListener("message", async ({data}) => {
         ]);
     } catch (error) {
         const buffers = emptyResultBuffers();
-        const failure: DeckPathRenderResult = {
-            type: "DeckPathRenderResult",
+        const failure: DeckTileRenderResult = {
+            type: "DeckTileRenderResult",
             taskId: task.taskId,
             tileKey: task.tileKey,
             vertexCount: 0,

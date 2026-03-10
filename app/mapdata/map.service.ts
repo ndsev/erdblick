@@ -420,6 +420,11 @@ export class MapDataService {
                         return;
                     }
                     doneCalled = true;
+                    if (this.shouldRequeueVisualizationAfterRender(viewIndex, entry)) {
+                        entry.updateStatus(true);
+                        this.queueVisualization(viewState, entry);
+                        this.sortVisualizationQueue(viewState);
+                    }
                     this.unmarkTileInFlightForView(viewIndex, entry.tile.tileId);
                     const inFlightCount = this.inFlightVisualizationRendersByView[viewIndex] ?? 0;
                     this.inFlightVisualizationRendersByView[viewIndex] = Math.max(
@@ -690,6 +695,27 @@ export class MapDataService {
             return;
         }
         viewState.visualizationQueue.push(visualization);
+    }
+
+    private shouldRequeueVisualizationAfterRender(
+        viewIndex: number,
+        visualization: ITileVisualization
+    ): boolean {
+        const viewState = this.viewVisualizationState[viewIndex];
+        if (!viewState) {
+            return false;
+        }
+        if (viewState.getVisualization(visualization.styleId, visualization.tile.mapTileKey) !== visualization) {
+            return false;
+        }
+        if (visualization.tile.disposed || !this.viewShowsFeatureTile(viewIndex, visualization.tile)) {
+            return false;
+        }
+        const style = this.styleService.styles.get(visualization.styleId);
+        if (visualization.styleId !== "_builtin" && (!style || !style.visible)) {
+            return false;
+        }
+        return visualization.isDirty();
     }
 
     private clearMergedPointsForMapViewLayerStyleId(mapViewLayerStyleId: string): void {

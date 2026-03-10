@@ -1,4 +1,4 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {DeckLayerLike, DeckLayerRegistry, DeckLike} from "./deck-layer-registry";
 import {DeckTileVisualization} from "./deck-tile.visualization.model";
 import {PointMergeService} from "../pointmerge.service";
@@ -673,5 +673,175 @@ describe("DeckTileVisualization", () => {
         expect(Array.from(pointData!.attributes.getPosition.value)).toEqual([0, 0, 0, 10, 20, 0]);
         expect(Array.from(pointData!.attributes.getFillColor.value)).toEqual([255, 128, 0, 255, 32, 196, 255, 200]);
         expect(Array.from(pointData!.attributes.getRadius.value)).toEqual([4, 6]);
+    });
+
+    it("treats a switch to an empty low-fi bundle selection as pending", () => {
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 0,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            hasExplicitLowFidelityRules: () => true
+        } as any;
+        const pointMergeService = new PointMergeService();
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            0,
+            false,
+            0
+        ) as any;
+
+        visu.rendered = true;
+        visu.activeRenderedFidelity = "low";
+        visu.activeRenderedLowFiLods = [1];
+        visu.lowFiBundleByLod.clear();
+
+        expect(visu.hasPendingLowFiSwitch()).toBe(true);
+    });
+
+    it("applies a cached low-fi switch even when the requested selection is empty", () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 0,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            hasExplicitLowFidelityRules: () => true
+        } as any;
+        const pointMergeService = new PointMergeService();
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            0,
+            false,
+            0
+        ) as any;
+
+        visu.rendered = true;
+        visu.activeRenderedFidelity = "low";
+        visu.activeRenderedLowFiLods = [1];
+        visu.lowFiBundleByLod.clear();
+        visu.clearMergedPointVisualizations = () => {};
+        visu.completeRender = vi.fn();
+        visu.applyLowFiBundleDataToRegistry = vi.fn();
+
+        const switched = visu.tryApplyCachedLowFiSwitch(
+            {renderer: "deck", scene: {layerRegistry: registry}},
+            registry,
+            "low"
+        );
+
+        expect(switched).toBe(true);
+        expect(visu.applyLowFiBundleDataToRegistry).toHaveBeenCalledWith(registry, []);
+        expect(visu.completeRender).toHaveBeenCalledWith("low", []);
+    });
+
+    it("keeps the active low-fi render when a requested high-fi render returns empty", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 1,
+            dataVersion: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            hasExplicitLowFidelityRules: () => true
+        } as any;
+        const pointMergeService = new PointMergeService();
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            true,
+            0
+        ) as any;
+
+        visu.rendered = true;
+        visu.activeRenderedFidelity = "low";
+        visu.activeRenderedLowFiLods = [0];
+        visu.clearMergedPointVisualizations = vi.fn();
+        visu.applyLayerDataToRegistry = vi.fn();
+        visu.renderWasm = async () => null;
+
+        const rendered = await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+
+        expect(rendered).toBe(true);
+        expect(visu.clearMergedPointVisualizations).not.toHaveBeenCalled();
+        expect(visu.applyLayerDataToRegistry).not.toHaveBeenCalled();
+        expect(visu.activeRenderedFidelity).toBe("high");
+    });
+
+    it("becomes dirty when tile data changes without changing the feature count", () => {
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            tileId: 42n,
+            numFeatures: 1,
+            dataVersion: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = {
+            name: () => "test-style",
+            isDeleted: () => false,
+            hasExplicitLowFidelityRules: () => true
+        } as any;
+        const pointMergeService = new PointMergeService();
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            true,
+            0
+        ) as any;
+
+        visu.rendered = true;
+        visu.hadTileDataAtLastRender = true;
+        visu.tileFeatureCountAtLastRender = 1;
+        visu.tileDataVersionAtLastRender = 1;
+        visu.lastSignature = visu.renderSignature();
+
+        tile.dataVersion = 2;
+
+        expect(visu.isDirty()).toBe(true);
     });
 });

@@ -6,8 +6,8 @@ export type DeckGeometryOutputMode =
     typeof DECK_GEOMETRY_OUTPUT_POINTS_ONLY |
     typeof DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY;
 
-export interface DeckPathRenderTask {
-    type: "DeckPathRenderTask";
+export interface DeckTileRenderTask {
+    type: "DeckTileRenderTask";
     taskId: string;
     viewIndex: number;
     tileKey: string;
@@ -62,8 +62,8 @@ export interface DeckLowFiBundleResult {
     arrowFeatureIds: ArrayBuffer;
 }
 
-export interface DeckPathRenderResult {
-    type: "DeckPathRenderResult";
+export interface DeckTileRenderResult {
+    type: "DeckTileRenderResult";
     taskId: string;
     tileKey: string;
     vertexCount: number;
@@ -90,5 +90,5 @@ export interface DeckPathRenderResult {
     error?: string;
 }
 
-export type DeckWorkerInboundMessage = DeckPathRenderTask | DeckWorkerInitMessage;
-export type DeckWorkerOutboundMessage = DeckPathRenderResult | DeckWorkerReadyMessage;
+export type DeckWorkerInboundMessage = DeckTileRenderTask | DeckWorkerInitMessage;
+export type DeckWorkerOutboundMessage = DeckTileRenderResult | DeckWorkerReadyMessage;

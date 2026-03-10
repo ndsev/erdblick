@@ -1,7 +1,7 @@
 import {
     DeckGeometryOutputMode,
-    DeckPathRenderResult,
-    DeckPathRenderTask,
+    DeckTileRenderResult,
+    DeckTileRenderTask,
     DeckWorkerTimings,
     DeckWorkerOutboundMessage
 } from "./deck-render.worker.protocol";
@@ -10,7 +10,7 @@ const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
 const WORKER_OVERRIDE_CAP = 32;
 
-export interface DeckPathRenderRequest {
+export interface DeckTileRenderRequest {
     viewIndex: number;
     tileKey: string;
     tileStageBlobs: Uint8Array[];
@@ -29,7 +29,7 @@ export interface DeckPathRenderRequest {
     mergeCountSnapshot: Record<string, number>;
 }
 
-export interface DeckPathRenderBuffers {
+export interface DeckTileRenderBuffers {
     vertexCount: number;
     pointPositions: Float32Array;
     pointColors: Uint8Array;
@@ -79,8 +79,8 @@ export interface DeckRenderWorkerSettings {
 }
 
 type PendingTask = {
-    task: DeckPathRenderTask;
-    resolve: (value: DeckPathRenderBuffers) => void;
+    task: DeckTileRenderTask;
+    resolve: (value: DeckTileRenderBuffers) => void;
     reject: (reason?: unknown) => void;
 };
 
@@ -99,12 +99,12 @@ export class DeckRenderWorkerPool {
 
     constructor(private readonly maxWorkers: number) {}
 
-    async renderPaths(request: DeckPathRenderRequest): Promise<DeckPathRenderBuffers> {
+    async renderTile(request: DeckTileRenderRequest): Promise<DeckTileRenderBuffers> {
         await this.ensureInitialized();
         const workerIndex = await this.acquireWorkerSlot();
-        return await new Promise<DeckPathRenderBuffers>((resolve, reject) => {
-            const task: DeckPathRenderTask = {
-                type: "DeckPathRenderTask",
+        return await new Promise<DeckTileRenderBuffers>((resolve, reject) => {
+            const task: DeckTileRenderTask = {
+                type: "DeckTileRenderTask",
                 taskId: this.makeTaskId(),
                 ...request
             };
@@ -182,7 +182,7 @@ export class DeckRenderWorkerPool {
         worker.onmessage = (event: MessageEvent<DeckWorkerOutboundMessage>) => {
             const msg = event.data;
             this.runningTaskIdByWorker[index] = null;
-            this.handleTaskResult(msg as DeckPathRenderResult);
+            this.handleTaskResult(msg as DeckTileRenderResult);
             this.releaseWorkerSlot(index);
         };
         worker.onerror = (event) => {
@@ -197,7 +197,7 @@ export class DeckRenderWorkerPool {
         };
     }
 
-    private handleTaskResult(result: DeckPathRenderResult): void {
+    private handleTaskResult(result: DeckTileRenderResult): void {
         const pending = this.inFlightByTaskId.get(result.taskId);
         if (!pending) {
             return;
