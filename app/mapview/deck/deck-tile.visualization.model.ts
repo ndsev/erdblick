@@ -1,11 +1,17 @@
 import {FeatureTile} from "../../mapdata/features.model";
-import {FeatureLayerStyle, HighlightMode} from "../../../build/libs/core/erdblick-core";
+import {
+    DeckFeatureLayerVisualization,
+    FeatureLayerStyle,
+    HighlightMode,
+    RuleFidelity,
+    TileFeatureLayer
+} from "../../../build/libs/core/erdblick-core";
 import {ITileVisualization, IRenderSceneHandle} from "../render-view.model";
 import {IconLayer, PathLayer, ScatterplotLayer} from "@deck.gl/layers";
 import {PathStyleExtension} from "@deck.gl/extensions";
 import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {DeckLayerRegistry, makeDeckLayerKey} from "./deck-layer-registry";
-import {coreLib, uint8ArrayFromWasm} from "../../integrations/wasm";
+import {coreLib, type ErdblickCore_, uint8ArrayFromWasm} from "../../integrations/wasm";
 import {
     DeckLowFiBundleBuffers,
     deckRenderWorkerPool,
@@ -19,16 +25,28 @@ import {
     DeckWorkerTimings
 } from "./deck-render.worker.protocol";
 import {MapViewLayerStyleRule, MergedPointVisualization, PointMergeService} from "../pointmerge.service";
-import {collectLowFiRawBundles} from "./deck-lowfi-bundle";
+import {collectLowFiRawBundles, type DeckLowFiRawAccessor} from "./deck-lowfi-bundle";
+import {RelationLocateRequest, RelationLocateResult} from "../../mapdata/relation-locate.model";
 
 interface StyleWithIsDeleted extends FeatureLayerStyle {
     isDeleted(): boolean;
     hasExplicitLowFidelityRules(): boolean;
+    hasRelationRules(mode: HighlightMode): boolean;
 }
 
 interface DeckSceneHandle {
     deck?: unknown;
     layerRegistry?: DeckLayerRegistry;
+}
+
+interface DeckPickLayerMetadata {
+    tileKey: string;
+    featureIds?: Array<number | null>;
+    featureIdsByVertex?: Array<number | null>;
+}
+
+interface DeckPathLayerMetadata extends DeckPickLayerMetadata {
+    dashJustified?: boolean;
 }
 
 interface DeckBinaryAttribute<T extends ArrayLike<number>> {
@@ -129,6 +147,18 @@ const DECK_ARROW_ICON_MAPPING = {
     }
 };
 
+type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+type DeckRuleFidelityEnum = ErdblickCore_["RuleFidelity"];
+type DeckVisualizationRawAccessor = DeckLowFiRawAccessor | "pathCoordinateOriginRaw";
+
+function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
+    return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
+}
+
+function deckRuleFidelityEnum(): DeckRuleFidelityEnum {
+    return coreLib.RuleFidelity as DeckRuleFidelityEnum;
+}
+
 interface DeckArrowMarker {
     id: number | null;
     position: [number, number, number];
@@ -173,6 +203,8 @@ export class DeckTileVisualization implements ITileVisualization {
     private readonly featureIdSubset: string[];
     private readonly options: Record<string, boolean | number | string>;
     private readonly styleHasExplicitLowFidelityRules: boolean;
+    private readonly styleHasRelationRules: boolean;
+    private readonly relationExternalTileLoader: (requests: RelationLocateRequest[]) => Promise<RelationLocateResult>;
     private renderQueued = false;
     private deleted = false;
     private rendered = false;
@@ -182,6 +214,7 @@ export class DeckTileVisualization implements ITileVisualization {
     private lastSignature = "";
     private hadTileDataAtLastRender = false;
     private tileFeatureCountAtLastRender = 0;
+    private tileDataVersionAtLastRender = -1;
     private latestWorkerTimings: DeckWorkerTimings | null = null;
     private latestPointLayerData: DeckPointLayerData | null = null;
     private latestArrowLayerData: DeckPathLayerData | null = null;
@@ -204,7 +237,9 @@ export class DeckTileVisualization implements ITileVisualization {
                 featureIdSubset: string[] = [],
                 layerKeySuffix: string = "",
                 boxGrid?: boolean,
-                options?: Record<string, boolean | number | string>) {
+                options?: Record<string, boolean | number | string>,
+                relationExternalTileLoader: (requests: RelationLocateRequest[]) => Promise<RelationLocateResult> =
+                    async () => ({responses: [], tiles: []})) {
         this.tile = tile;
         this.pointMergeService = pointMergeService;
         this.style = style as StyleWithIsDeleted;
@@ -218,13 +253,9 @@ export class DeckTileVisualization implements ITileVisualization {
         this.layerKeySuffix = layerKeySuffix;
         this.showTileBorder = boxGrid === undefined ? false : boxGrid;
         this.options = options || {};
-        const styleWithLowFidelityIntrospection = this.style as FeatureLayerStyle & {
-            hasExplicitLowFidelityRules?: () => boolean;
-        };
-        this.styleHasExplicitLowFidelityRules =
-            typeof styleWithLowFidelityIntrospection.hasExplicitLowFidelityRules === "function"
-                ? styleWithLowFidelityIntrospection.hasExplicitLowFidelityRules()
-                : true;
+        this.relationExternalTileLoader = relationExternalTileLoader;
+        this.styleHasExplicitLowFidelityRules = this.style.hasExplicitLowFidelityRules();
+        this.styleHasRelationRules = this.style.hasRelationRules(this.highlightMode);
         this.viewIndex = viewIndex;
     }
 
@@ -241,7 +272,6 @@ export class DeckTileVisualization implements ITileVisualization {
                 return true;
             }
 
-            this.clearMergedPointVisualizations(sceneHandle);
             this.latestPointLayerData = null;
             this.latestArrowLayerData = null;
             this.latestLowFiBundleData = [];
@@ -400,9 +430,9 @@ export class DeckTileVisualization implements ITileVisualization {
         for (const entry of entries) {
             const layerKeys = this.resolveLayerKeys(entry.variantSuffix);
             if (entry.pointLayerData && entry.pointLayerData.length > 0) {
-                const pointLayer = new ScatterplotLayer({
+                const pointLayer = new ScatterplotLayer<DeckPointLayerData, DeckPickLayerMetadata>({
                     id: layerKeys.pointLayerKey,
-                    data: entry.pointLayerData as any,
+                    data: entry.pointLayerData,
                     coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
                     coordinateOrigin: entry.pointLayerData.coordinateOrigin,
                     filled: true,
@@ -411,15 +441,15 @@ export class DeckTileVisualization implements ITileVisualization {
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     featureIds: entry.pointLayerData.featureIds
-                } as any);
-                registry.upsert(layerKeys.pointLayerKey, pointLayer as any, 425 + entry.orderOffset);
+                });
+                registry.upsert(layerKeys.pointLayerKey, pointLayer, 425 + entry.orderOffset);
                 desiredPointLayerKeys.add(layerKeys.pointLayerKey);
             }
 
             if (entry.pathLayerData && entry.pathLayerData.length > 0) {
-                const pathLayer = new PathLayer({
+                const pathLayer = new PathLayer<DeckPathLayerData, DeckPathLayerMetadata>({
                     id: layerKeys.pathLayerKey,
-                    data: entry.pathLayerData as any,
+                    data: entry.pathLayerData,
                     coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
                     coordinateOrigin: entry.pathLayerData.coordinateOrigin,
                     _pathType: "open",
@@ -432,20 +462,20 @@ export class DeckTileVisualization implements ITileVisualization {
                     tileKey: this.tile.mapTileKey,
                     featureIds: entry.pathLayerData.featureIds,
                     featureIdsByVertex: entry.pathLayerData.featureIdsByVertex
-                } as any);
-                registry.upsert(layerKeys.pathLayerKey, pathLayer as any, 400 + entry.orderOffset);
+                });
+                registry.upsert(layerKeys.pathLayerKey, pathLayer, 400 + entry.orderOffset);
                 desiredPathLayerKeys.add(layerKeys.pathLayerKey);
             }
 
             if (entry.arrowLayerData && entry.arrowLayerData.length > 0) {
                 const arrowMarkers = this.buildArrowMarkers(entry.arrowLayerData);
-                const arrowLayer = new IconLayer({
+                const arrowLayer = new IconLayer<DeckArrowMarker, DeckPickLayerMetadata>({
                     id: layerKeys.arrowLayerKey,
                     data: arrowMarkers,
                     coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
                     coordinateOrigin: entry.arrowLayerData.coordinateOrigin,
                     iconAtlas: DECK_ARROW_ICON_ATLAS,
-                    iconMapping: DECK_ARROW_ICON_MAPPING as any,
+                    iconMapping: DECK_ARROW_ICON_MAPPING,
                     getIcon: () => "arrowhead",
                     getPosition: (marker: DeckArrowMarker) => marker.position,
                     getSize: (marker: DeckArrowMarker) => marker.sizePx,
@@ -456,9 +486,8 @@ export class DeckTileVisualization implements ITileVisualization {
                     pickable: true,
                     tileKey: this.tile.mapTileKey,
                     alphaCutoff: 0.05,
-                    getId: (marker: DeckArrowMarker) => marker.featureId
-                } as any);
-                registry.upsert(layerKeys.arrowLayerKey, arrowLayer as any, 450 + entry.orderOffset);
+                });
+                registry.upsert(layerKeys.arrowLayerKey, arrowLayer, 450 + entry.orderOffset);
                 desiredArrowLayerKeys.add(layerKeys.arrowLayerKey);
             }
         }
@@ -584,6 +613,12 @@ export class DeckTileVisualization implements ITileVisualization {
             return false;
         }
         const selectedLowFiBundles = this.selectLowFiBundlesForCurrentRequest();
+        if (selectedLowFiBundles.length === 0) {
+            // No cached low-fi output is available yet for this tile. Fall back to
+            // the normal render path so we do not clear the current high-fi layers
+            // and temporarily make the tile disappear during a high -> low switch.
+            return false;
+        }
         const selectedLowFiLods = selectedLowFiBundles.map((bundle) => bundle.lod);
         if (this.activeRenderedFidelity === "low" &&
             this.sameLowFiLodSelection(this.activeRenderedLowFiLods, selectedLowFiLods)) {
@@ -826,36 +861,74 @@ export class DeckTileVisualization implements ITileVisualization {
         };
     }
 
+    /**
+     * Cross-tile relation resolution stays on the synchronous selection path.
+     * Worker renders and regular viewport paints only resolve relations inside
+     * the primary tile.
+     */
+    private shouldAddRelationAuxiliaryTiles(): boolean {
+        return this.highlightMode.value === coreLib.HighlightMode.SELECTION_HIGHLIGHT.value
+            && this.styleHasRelationRules;
+    }
+
+    private createMainThreadDeckVisualization(
+        fidelity: "low" | "high" | "any",
+        outputMode: DeckGeometryOutputMode
+    ): DeckFeatureLayerVisualization {
+        const deckCtor = deckFeatureLayerVisualizationCtor();
+        return new deckCtor(
+            this.viewIndex,
+            this.tile.mapTileKey,
+            this.style,
+            this.options,
+            this.pointMergeService,
+            this.highlightMode,
+            this.fidelityEnumValue(fidelity),
+            this.resolvedHighFidelityStage(),
+            this.resolveMaxLowFiLod(fidelity),
+            this.mapGeometryOutputModeForWasm(outputMode),
+            this.featureIdSubset
+        );
+    }
+
+    private async addTilesAndRunMainThreadVisualization(
+        deckVisu: DeckFeatureLayerVisualization
+    ): Promise<number> {
+        let vertexCount = 0;
+        await this.tile.peekAsync(async (tileFeatureLayer) => {
+            vertexCount = Number(tileFeatureLayer.numVertices());
+            deckVisu.addTileFeatureLayer(tileFeatureLayer);
+            deckVisu.run();
+        });
+        return vertexCount;
+    }
+
+    private async resolveExternalRelations(deckVisu: DeckFeatureLayerVisualization): Promise<void> {
+        if (!this.shouldAddRelationAuxiliaryTiles()) {
+            return;
+        }
+        const requests = (deckVisu.externalRelationReferences() as RelationLocateRequest[]) ?? [];
+        if (requests.length === 0) {
+            return;
+        }
+        const locateResult = await this.relationExternalTileLoader(requests);
+        await FeatureTile.peekMany(locateResult.tiles, async (tileFeatureLayers: TileFeatureLayer[]) => {
+            for (const tileFeatureLayer of tileFeatureLayers) {
+                deckVisu.addTileFeatureLayer(tileFeatureLayer);
+            }
+            deckVisu.processResolvedExternalReferences(locateResult.responses);
+        });
+    }
+
     private async renderWasmOnMainThread(
         fidelity: "low" | "high" | "any",
         outputMode: DeckGeometryOutputMode
     ): Promise<DeckWasmRenderOutput> {
-        let deckVisu: any;
+        let deckVisu: DeckFeatureLayerVisualization | undefined;
         try {
-            deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
-                this.viewIndex,
-                this.tile.mapTileKey,
-                this.style,
-                this.options,
-                this.pointMergeService,
-                this.highlightMode,
-                this.fidelityEnumValue(fidelity),
-                this.resolvedHighFidelityStage(),
-                this.resolveMaxLowFiLod(fidelity),
-                this.mapGeometryOutputModeForWasm(outputMode),
-                this.featureIdSubset
-            );
-            if (typeof deckVisu.setGeometryOutputMode === "function") {
-                deckVisu.setGeometryOutputMode(this.mapGeometryOutputModeForWasm(outputMode));
-            }
-
-            let vertexCount = 0;
-
-            await this.tile.peekAsync(async (tileFeatureLayer) => {
-                vertexCount = Number(tileFeatureLayer.numVertices());
-                deckVisu.addTileFeatureLayer(tileFeatureLayer);
-                deckVisu.run();
-            });
+            deckVisu = this.createMainThreadDeckVisualization(fidelity, outputMode);
+            const vertexCount = await this.addTilesAndRunMainThreadVisualization(deckVisu);
+            await this.resolveExternalRelations(deckVisu);
 
             const pathLayerData = this.buildPathLayerData({
                 coordinateOrigin: this.readFloat64Array(deckVisu, "pathCoordinateOriginRaw"),
@@ -894,7 +967,7 @@ export class DeckTileVisualization implements ITileVisualization {
                 workerTimings: null
             };
         } finally {
-            if (deckVisu && typeof deckVisu.delete === "function") {
+            if (deckVisu) {
                 deckVisu.delete();
             }
         }
@@ -950,7 +1023,7 @@ export class DeckTileVisualization implements ITileVisualization {
         return [...bundlesByLod.values()].sort((lhs, rhs) => lhs.lod - rhs.lod);
     }
 
-    private readLowFiBundlesFromDeckVisualization(deckVisu: any): DeckLowFiBundleData[] {
+    private readLowFiBundlesFromDeckVisualization(deckVisu: DeckFeatureLayerVisualization): DeckLowFiBundleData[] {
         const rawBundles = collectLowFiRawBundles(
             deckVisu,
             (rawAccessor) => this.readRawBytes(deckVisu, rawAccessor)
@@ -1190,26 +1263,26 @@ export class DeckTileVisualization implements ITileVisualization {
         return new Uint32Array(raw.buffer, raw.byteOffset, raw.byteLength / Uint32Array.BYTES_PER_ELEMENT);
     }
 
-    private readFloat32Array(deckVisu: any, rawAccessor: string): Float32Array {
+    private readFloat32Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Float32Array {
         const raw = this.readRawBytes(deckVisu, rawAccessor);
         return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / Float32Array.BYTES_PER_ELEMENT);
     }
 
-    private readFloat64Array(deckVisu: any, rawAccessor: string): Float64Array {
+    private readFloat64Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Float64Array {
         const raw = this.readRawBytes(deckVisu, rawAccessor);
         return new Float64Array(raw.buffer, raw.byteOffset, raw.byteLength / Float64Array.BYTES_PER_ELEMENT);
     }
 
-    private readUint32Array(deckVisu: any, rawAccessor: string): Uint32Array {
+    private readUint32Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint32Array {
         const raw = this.readRawBytes(deckVisu, rawAccessor);
         return new Uint32Array(raw.buffer, raw.byteOffset, raw.byteLength / Uint32Array.BYTES_PER_ELEMENT);
     }
 
-    private readUint8Array(deckVisu: any, rawAccessor: string): Uint8Array {
+    private readUint8Array(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint8Array {
         return this.readRawBytes(deckVisu, rawAccessor);
     }
 
-    private readRawBytes(deckVisu: any, rawAccessor: string): Uint8Array {
+    private readRawBytes(deckVisu: DeckFeatureLayerVisualization, rawAccessor: DeckVisualizationRawAccessor): Uint8Array {
         return uint8ArrayFromWasm((shared) => {
             deckVisu[rawAccessor](shared);
             return true;
@@ -1221,7 +1294,7 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private tileFeatureCount(): number {
-        return (this.tile as any).numFeatures as number;
+        return this.tile.numFeatures;
     }
 
     private resolvedHighFidelityStage(): number {
@@ -1229,15 +1302,11 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private highestLoadedStageOrDefault(): number | null {
-        const tileWithStages = this.tile as FeatureTile & { highestLoadedStage?: () => number | null };
-        if (typeof tileWithStages.highestLoadedStage === "function") {
-            const highestLoadedStage = tileWithStages.highestLoadedStage();
-            if (highestLoadedStage === null || highestLoadedStage === undefined || !Number.isFinite(highestLoadedStage)) {
-                return null;
-            }
-            return Math.max(0, Math.floor(highestLoadedStage));
+        const highestLoadedStage = this.tile.highestLoadedStage();
+        if (highestLoadedStage === null || highestLoadedStage === undefined || !Number.isFinite(highestLoadedStage)) {
+            return null;
         }
-        return this.tile.hasData() ? 0 : null;
+        return Math.max(0, Math.floor(highestLoadedStage));
     }
 
     private currentFidelity(): "low" | "high" | "any" | null {
@@ -1256,14 +1325,15 @@ export class DeckTileVisualization implements ITileVisualization {
         return "low";
     }
 
-    private fidelityEnumValue(fidelity: "low" | "high" | "any"): any {
+    private fidelityEnumValue(fidelity: "low" | "high" | "any"): RuleFidelity {
+        const fidelityEnum = deckRuleFidelityEnum();
         if (fidelity === "high") {
-            return (coreLib as any).RuleFidelity.HIGH;
+            return fidelityEnum.HIGH;
         }
         if (fidelity === "low") {
-            return (coreLib as any).RuleFidelity.LOW;
+            return fidelityEnum.LOW;
         }
-        return (coreLib as any).RuleFidelity.ANY;
+        return fidelityEnum.ANY;
     }
 
     private resolveMaxLowFiLod(fidelity: "low" | "high" | "any"): number {
@@ -1277,22 +1347,16 @@ export class DeckTileVisualization implements ITileVisualization {
     }
 
     private mapGeometryOutputModeForWasm(outputMode: DeckGeometryOutputMode): number {
-        const ctor = (coreLib as any).DeckFeatureLayerVisualization;
-        if (!ctor) {
-            return outputMode;
-        }
+        const ctor = deckFeatureLayerVisualizationCtor();
         if (outputMode === DECK_GEOMETRY_OUTPUT_POINTS_ONLY
-            && typeof ctor.GEOMETRY_OUTPUT_POINTS_ONLY === "function") {
+        ) {
             return ctor.GEOMETRY_OUTPUT_POINTS_ONLY();
         }
         if (outputMode === DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY
-            && typeof ctor.GEOMETRY_OUTPUT_NON_POINTS_ONLY === "function") {
+        ) {
             return ctor.GEOMETRY_OUTPUT_NON_POINTS_ONLY();
         }
-        if (typeof ctor.GEOMETRY_OUTPUT_ALL === "function") {
-            return ctor.GEOMETRY_OUTPUT_ALL();
-        }
-        return outputMode;
+        return ctor.GEOMETRY_OUTPUT_ALL();
     }
 
     private setTileVertexCount(count: number): void {

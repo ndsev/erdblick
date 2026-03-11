@@ -130,6 +130,63 @@ struct Viewport {
     double orientation = .0; // The compass orientation of the camera (radians).
 };
 
+namespace {
+
+constexpr int MAX_TILE_RESULT_LIMIT = 1 << 20;
+constexpr double PI = 3.14159265358979323846;
+constexpr double RADIANS_TO_DEGREES = 180.0 / PI;
+constexpr double CANONICAL_CAMERA_VERTICAL_FOV_RADIANS = 60.0 * PI / 180.0;
+constexpr double CANONICAL_CAMERA_ASPECT_RATIO = 16.0 / 9.0;
+constexpr double EARTH_RADIUS_METERS = 6378137.0;
+constexpr double WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
+
+double normalizeLongitude(double longitude)
+{
+    longitude = std::fmod(longitude + 180.0, 360.0);
+    if (longitude < 0.0)
+        longitude += 360.0;
+    return longitude - 180.0;
+}
+
+bool isFiniteViewport(Viewport const& viewport)
+{
+    return std::isfinite(viewport.south) &&
+        std::isfinite(viewport.west) &&
+        std::isfinite(viewport.width) &&
+        std::isfinite(viewport.height) &&
+        std::isfinite(viewport.camPosLon) &&
+        std::isfinite(viewport.camPosLat) &&
+        std::isfinite(viewport.orientation) &&
+        viewport.width >= 0.0 &&
+        viewport.width <= 360.0 &&
+        viewport.height >= 0.0 &&
+        viewport.height <= 180.0;
+}
+
+Viewport canonicalViewportForAltitude(double altitudeMeters)
+{
+    const auto safeAltitude = std::max(1.0, altitudeMeters);
+    const auto visibleHeightMeters = 2.0 * safeAltitude * std::tan(CANONICAL_CAMERA_VERTICAL_FOV_RADIANS * 0.5);
+    const auto visibleWidthMeters = visibleHeightMeters * CANONICAL_CAMERA_ASPECT_RATIO;
+    const auto heightDegrees = std::min(
+        WEB_MERCATOR_MAX_LATITUDE * 2.0,
+        visibleHeightMeters / EARTH_RADIUS_METERS * RADIANS_TO_DEGREES);
+    const auto widthDegrees = std::min(
+        360.0,
+        visibleWidthMeters / EARTH_RADIUS_METERS * RADIANS_TO_DEGREES);
+    return {
+        -.5 * heightDegrees,
+        -.5 * widthDegrees,
+        widthDegrees,
+        heightDegrees,
+        .0,
+        .0,
+        .0
+    };
+}
+
+}
+
 /**
  * Gets the prioritized list of tile IDs for a given viewport, zoom level, and tile limit.
  *
@@ -153,22 +210,32 @@ struct Viewport {
  */
 em::val getTileIds(Viewport const& vp, int level, int limit)
 {
-    Wgs84AABB aabb(Wgs84Point{vp.west, vp.south, .0}, {vp.width, vp.height});
+    if (!isFiniteViewport(vp) || level < 0 || level > 62 || limit <= 0 || limit > MAX_TILE_RESULT_LIMIT)
+        return em::val::array();
+
+    auto west = normalizeLongitude(vp.west);
+    auto camPosLon = normalizeLongitude(vp.camPosLon);
+    Wgs84AABB aabb(Wgs84Point{west, vp.south, .0}, {vp.width, vp.height});
     if (aabb.numTileIds(level) > limit)
         // Create a size-limited AABB from the tile limit.
-        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{vp.camPosLon, vp.camPosLat, .0}, limit, level);
+        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{camPosLon, vp.camPosLat, .0}, limit, level);
 
     std::vector<std::pair<mapget::TileId, float>> prioritizedTileIds;
     prioritizedTileIds.reserve(limit);
     aabb.tileIdsWithPriority(
         level,
         prioritizedTileIds,
-        Wgs84AABB::radialDistancePrioFn({vp.camPosLon, vp.camPosLat}, vp.orientation));
+        Wgs84AABB::radialDistancePrioFn({camPosLon, vp.camPosLat}, vp.orientation));
 
     std::sort(
         prioritizedTileIds.begin(),
         prioritizedTileIds.end(),
-        [](auto const& l, auto const& r) { return l.second < r.second; });
+        [](auto const& l, auto const& r)
+        {
+            if (l.second != r.second)
+                return l.second < r.second;
+            return l.first.value_ < r.first.value_;
+        });
 
     em::val resultArray = em::val::array();
     int64_t prevTileId = -1;
@@ -183,12 +250,31 @@ em::val getTileIds(Viewport const& vp, int level, int limit)
 }
 
 uint32_t getNumTileIds(Viewport const& vp, int level) {
-    Wgs84AABB aabb(Wgs84Point{vp.west, vp.south, .0}, {vp.width, vp.height});
+    if (!isFiniteViewport(vp) || level < 0 || level > 62)
+        return 0;
+    Wgs84AABB aabb(Wgs84Point{normalizeLongitude(vp.west), vp.south, .0}, {vp.width, vp.height});
     return aabb.numTileIds(level);
 }
 
+/**
+ * Returns the tile count for a deterministic canonical camera used for fidelity policy decisions.
+ *
+ * The canonical camera is fixed at the equator, points straight down, and uses a 60-degree
+ * vertical field of view with a 16:9 aspect ratio. Only the altitude varies.
+ */
+uint32_t getNumTileIdsForCanonicalCamera(double altitudeMeters, int level)
+{
+    if (!std::isfinite(altitudeMeters) || altitudeMeters < 0.0 || level < 0 || level > 62)
+        return 0;
+    return getNumTileIds(canonicalViewportForAltitude(altitudeMeters), level);
+}
+
 double getTilePriorityById(Viewport const& vp, uint64_t tileId) {
-    return Wgs84AABB::radialDistancePrioFn({vp.camPosLon, vp.camPosLat}, vp.orientation)(tileId);
+    if (!isFiniteViewport(vp))
+        return 0.0;
+    return Wgs84AABB::radialDistancePrioFn(
+        {normalizeLongitude(vp.camPosLon), vp.camPosLat},
+        vp.orientation)(tileId);
 }
 
 /** Get the center position for a mapget tile id in WGS84. */
@@ -376,6 +462,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
         .function("minimumStage", &FeatureLayerStyle::minimumStage)
         .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)
+        .function("hasRelationRules", &FeatureLayerStyle::hasRelationRules)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
 
     ////////// SourceDataAddressFormat
@@ -504,7 +591,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("arrowColorsRaw", &DeckFeatureLayerVisualization::arrowColorsRaw)
         .function("arrowWidthsRaw", &DeckFeatureLayerVisualization::arrowWidthsRaw)
         .function("arrowFeatureIdsRaw", &DeckFeatureLayerVisualization::arrowFeatureIdsRaw)
-        .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures);
+        .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures)
+        .function("externalRelationReferences", &DeckFeatureLayerVisualization::externalRelationReferences)
+        .function(
+            "processResolvedExternalReferences",
+            &DeckFeatureLayerVisualization::processResolvedExternalReferences);
 
     ////////// FeatureLayerSearch
     em::class_<FeatureLayerSearch>("FeatureLayerSearch")
@@ -555,6 +646,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getNumTileIds", &getNumTileIds);
+    em::function("getNumTileIdsForCanonicalCamera", &getNumTileIdsForCanonicalCamera);
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
     em::function("getTileIdFromPosition", &getTileIdFromPosition);

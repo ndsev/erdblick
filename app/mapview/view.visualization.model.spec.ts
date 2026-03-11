@@ -6,7 +6,7 @@ import {
 } from "./view.visualization.model";
 
 describe("ViewVisualizationState", () => {
-    it("applies the low-fi LOD0..LOD7 threshold policy per zoom level", () => {
+    it("applies the low-fi LOD0..LOD7 threshold policy from canonical per-level tile counts", () => {
         const state = new ViewVisualizationState();
         state.viewport = {
             south: 0,
@@ -19,25 +19,42 @@ describe("ViewVisualizationState", () => {
         };
 
         const tileIdsForLevel = new Map<number, bigint[]>();
-        tileIdsForLevel.set(0, Array.from({length: 130}, (_, i) => BigInt(1000 + i)));
-        tileIdsForLevel.set(1, Array.from({length: 100}, (_, i) => BigInt(2000 + i)));
-        tileIdsForLevel.set(2, Array.from({length: 82}, (_, i) => BigInt(3000 + i)));
-        tileIdsForLevel.set(3, Array.from({length: 65}, (_, i) => BigInt(4000 + i)));
-        tileIdsForLevel.set(4, Array.from({length: 58}, (_, i) => BigInt(5000 + i)));
-        tileIdsForLevel.set(5, Array.from({length: 49}, (_, i) => BigInt(6000 + i)));
-        tileIdsForLevel.set(6, Array.from({length: 41}, (_, i) => BigInt(7000 + i)));
-        tileIdsForLevel.set(7, Array.from({length: 35}, (_, i) => BigInt(8000 + i)));
-        tileIdsForLevel.set(8, Array.from({length: 20}, (_, i) => BigInt(9000 + i)));
+        tileIdsForLevel.set(0, [1000n]);
+        tileIdsForLevel.set(1, [2000n]);
+        tileIdsForLevel.set(2, [3000n]);
+        tileIdsForLevel.set(3, [4000n]);
+        tileIdsForLevel.set(4, [5000n]);
+        tileIdsForLevel.set(5, [6000n]);
+        tileIdsForLevel.set(6, [7000n]);
+        tileIdsForLevel.set(7, [8000n]);
+        tileIdsForLevel.set(8, [9000n]);
+        const canonicalTileCountsByLevel = new Map<number, number>([
+            [0, 4096],
+            [1, 1024],
+            [2, 512],
+            [3, 256],
+            [4, 128],
+            [5, 64],
+            [6, 32],
+            [7, 16],
+            [8, 15]
+        ]);
 
         const getTileIdsSpy = vi.spyOn(coreLib as any, "getTileIds")
             .mockImplementation((_viewport: any, level: number, _limit: number) => {
                 return tileIdsForLevel.get(level) ?? [];
             });
+        const getNumTileIdsForCanonicalCameraSpy = vi.spyOn(coreLib as any, "getNumTileIdsForCanonicalCamera")
+            .mockImplementation((altitudeMeters: number, level: number) => {
+                expect(altitudeMeters).toBe(1234);
+                return canonicalTileCountsByLevel.get(level) ?? 0;
+            });
 
         try {
-            state.recalculateTileIds(999, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+            state.recalculateTileIds(999, [0, 1, 2, 3, 4, 5, 6, 7, 8], 1234);
         } finally {
             getTileIdsSpy.mockRestore();
+            getNumTileIdsForCanonicalCameraSpy.mockRestore();
         }
 
         const level0Policy = state.getTileRenderPolicy(tileIdsForLevel.get(0)![0]);

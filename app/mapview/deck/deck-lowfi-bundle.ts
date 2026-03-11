@@ -1,3 +1,24 @@
+import type {DeckFeatureLayerVisualization} from "../../../build/libs/core/erdblick-core";
+
+export type DeckLowFiRawAccessor =
+    | "availableLowFiLodsRaw"
+    | "pointPositionsRaw"
+    | "pointColorsRaw"
+    | "pointRadiiRaw"
+    | "pointFeatureIdsRaw"
+    | "pathPositionsRaw"
+    | "pathStartIndicesRaw"
+    | "pathColorsRaw"
+    | "pathWidthsRaw"
+    | "pathFeatureIdsRaw"
+    | "pathDashArrayRaw"
+    | "pathDashOffsetsRaw"
+    | "arrowPositionsRaw"
+    | "arrowStartIndicesRaw"
+    | "arrowColorsRaw"
+    | "arrowWidthsRaw"
+    | "arrowFeatureIdsRaw";
+
 export interface DeckLowFiRawBundle {
     lod: number;
     pointPositions: Uint8Array;
@@ -18,7 +39,7 @@ export interface DeckLowFiRawBundle {
     arrowFeatureIds: Uint8Array;
 }
 
-function availableLowFiLods(readRawBytes: (accessorName: string) => Uint8Array): number[] {
+function availableLowFiLods(readRawBytes: (accessorName: DeckLowFiRawAccessor) => Uint8Array): number[] {
     const raw = readRawBytes("availableLowFiLodsRaw");
     if (!raw.length) {
         return [];
@@ -29,12 +50,9 @@ function availableLowFiLods(readRawBytes: (accessorName: string) => Uint8Array):
 }
 
 export function collectLowFiRawBundles(
-    deckVisu: any,
-    readRawBytes: (accessorName: string) => Uint8Array
+    deckVisu: DeckFeatureLayerVisualization,
+    readRawBytes: (accessorName: DeckLowFiRawAccessor) => Uint8Array
 ): DeckLowFiRawBundle[] {
-    if (typeof deckVisu?.setLowFiOutputLod !== "function") {
-        return [];
-    }
     const lods = availableLowFiLods(readRawBytes);
     if (!lods.length) {
         return [];

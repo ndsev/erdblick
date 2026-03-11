@@ -208,8 +208,7 @@ export class ErdblickDebugApi {
         if (!tile?.hasData()) {
             return {error: `Tile ${mapTileKey} is not loaded.`};
         }
-        const styleService = (this.mapService as any).styleService;
-        const style = styleService?.styles?.get(styleId);
+        const style = this.mapService.styleService.styles.get(styleId);
         if (!style) {
             return {error: `Style ${styleId} is not loaded.`};
         }
@@ -220,7 +219,7 @@ export class ErdblickDebugApi {
                 ? coreLib.HighlightMode.NO_HIGHLIGHT
                 : coreLib.HighlightMode.HOVER_HIGHLIGHT;
 
-        const styleOptions = (this.mapService as any).maps.getLayerStyleOptions(
+        const styleOptions = this.mapService.maps.getLayerStyleOptions(
             0,
             tile.mapName,
             tile.layerName,
@@ -228,15 +227,17 @@ export class ErdblickDebugApi {
         ) ?? {};
 
         const readSharedBytes = (sharedArray: any) => {
-            const ptr = sharedArray.getPointer();
-            const size = sharedArray.getSize();
-            const bytes = coreLib.HEAPU8.slice(ptr, ptr + size);
-            sharedArray.delete();
-            return bytes;
+            try {
+                const ptr = sharedArray.getPointer();
+                const size = sharedArray.getSize();
+                return coreLib.HEAPU8.slice(ptr, ptr + size);
+            } finally {
+                sharedArray.delete();
+            }
         };
 
         return tile.peek((parsedTile) => {
-            const deckCtor = coreLib.DeckFeatureLayerVisualization as any;
+            const deckCtor = coreLib.DeckFeatureLayerVisualization;
             const deckVis = new deckCtor(
                 0,
                 mapTileKey,
@@ -246,39 +247,41 @@ export class ErdblickDebugApi {
                 modeValue,
                 coreLib.RuleFidelity.ANY,
                 -1,
-                typeof deckCtor.GEOMETRY_OUTPUT_ALL === "function"
-                    ? deckCtor.GEOMETRY_OUTPUT_ALL()
-                    : 0,
+                -1,
+                deckCtor.GEOMETRY_OUTPUT_ALL(),
                 featureIdSubset);
-            deckVis.addTileFeatureLayer(parsedTile);
-            deckVis.run();
+            try {
+                deckVis.addTileFeatureLayer(parsedTile);
+                deckVis.run();
 
-            const startsShared = new coreLib.SharedUint8Array();
-            deckVis.pathStartIndicesRaw(startsShared);
-            const startsBytes = readSharedBytes(startsShared);
-            const startIndices = new Uint32Array(
-                startsBytes.buffer,
-                startsBytes.byteOffset,
-                Math.floor(startsBytes.byteLength / 4));
+                const startsShared = new coreLib.SharedUint8Array();
+                deckVis.pathStartIndicesRaw(startsShared);
+                const startsBytes = readSharedBytes(startsShared);
+                const startIndices = new Uint32Array(
+                    startsBytes.buffer,
+                    startsBytes.byteOffset,
+                    Math.floor(startsBytes.byteLength / 4));
 
-            const featureIdsShared = new coreLib.SharedUint8Array();
-            deckVis.pathFeatureIdsRaw(featureIdsShared);
-            const featureIdsBytes = readSharedBytes(featureIdsShared);
-            const featureIds = new Uint32Array(
-                featureIdsBytes.buffer,
-                featureIdsBytes.byteOffset,
-                Math.floor(featureIdsBytes.byteLength / 4));
+                const featureIdsShared = new coreLib.SharedUint8Array();
+                deckVis.pathFeatureIdsRaw(featureIdsShared);
+                const featureIdsBytes = readSharedBytes(featureIdsShared);
+                const featureIds = new Uint32Array(
+                    featureIdsBytes.buffer,
+                    featureIdsBytes.byteOffset,
+                    Math.floor(featureIdsBytes.byteLength / 4));
 
-            deckVis.delete();
-            return {
-                renderer: "deck",
-                mode,
-                styleId,
-                subset: [...featureIdSubset],
-                pathCount: Math.max(0, startIndices.length - 1),
-                startIndices: Array.from(startIndices.slice(0, 20)),
-                featureIds: Array.from(featureIds.slice(0, 20))
-            };
+                return {
+                    renderer: "deck",
+                    mode,
+                    styleId,
+                    subset: [...featureIdSubset],
+                    pathCount: Math.max(0, startIndices.length - 1),
+                    startIndices: Array.from(startIndices.slice(0, 20)),
+                    featureIds: Array.from(featureIds.slice(0, 20))
+                };
+            } finally {
+                deckVis.delete();
+            }
         });
     }
 }

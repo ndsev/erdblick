@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <map>
 #include <memory>
@@ -9,6 +10,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -49,8 +51,48 @@ public:
     virtual ~FeatureLayerVisualizationBase();
     void addTileFeatureLayer(TileFeatureLayer const& tile);
     virtual void run();
+    [[nodiscard]] NativeJsValue externalRelationReferences() const;
+    void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
 
 protected:
+    struct RelationStyleState {
+        struct RelationToVisualize {
+            mapget::model_ptr<mapget::Relation> relation_;
+            mapget::model_ptr<mapget::Feature> sourceFeature_;
+            mapget::model_ptr<mapget::Feature> targetFeature_;
+            bool twoway_ = false;
+            bool rendered_ = false;
+
+            [[nodiscard]] bool readyToRender() const;
+        };
+
+        RelationStyleState(
+            FeatureStyleRule const& rule,
+            mapget::model_ptr<mapget::Feature> feature,
+            FeatureLayerVisualizationBase& visualization);
+
+        void populateAndRender(bool onlyUpdateTwowayFlags = false);
+        void addRelation(
+            mapget::model_ptr<mapget::Feature> const& sourceFeature,
+            mapget::model_ptr<mapget::Relation> const& relation,
+            bool onlyUpdateTwowayFlags = false);
+        static std::vector<mapget::SelfContainedGeometry> relationGeometries(
+            mapget::model_ptr<mapget::MultiValidity> const& validities,
+            mapget::model_ptr<mapget::Feature> const& feature);
+        void render(RelationToVisualize& relationToRender);
+
+        FeatureStyleRule const& rule_;
+        FeatureLayerVisualizationBase& visualization_;
+        std::deque<mapget::model_ptr<mapget::Feature>> unexploredFeatures_;
+        std::unordered_map<std::string, std::deque<RelationToVisualize>> relationsBySourceFeatureId_;
+        std::unordered_set<std::string> visualizedFeatureParts_;
+    };
+
+    struct PendingExternalRelation {
+        RelationStyleState* state = nullptr;
+        RelationStyleState::RelationToVisualize* relationToRender = nullptr;
+    };
+
     static constexpr uint32_t kUnselectableFeatureId = std::numeric_limits<uint32_t>::max();
 
     virtual mapget::Point projectWgsPoint(
@@ -199,6 +241,10 @@ protected:
         bool autoWildcard);
     void resolveCachedConstant(CachedExpression& cached);
     void addOptionsToSimfilContext(simfil::model_ptr<simfil::OverlayNode>& context);
+    void rememberExternalRelationReference(
+        RelationStyleState& state,
+        RelationStyleState::RelationToVisualize* relationToRender,
+        mapget::model_ptr<mapget::FeatureId> const& targetRef);
     static JsValue encodeVerticesAsList(std::vector<mapget::Point> const& points);
     static std::pair<JsValue, JsValue> encodeVerticesAsReversedSplitList(std::vector<mapget::Point> const& points);
     static JsValue encodeVerticesAsFloat64Array(std::vector<mapget::Point> const& points);
@@ -224,6 +270,9 @@ protected:
     std::shared_ptr<simfil::StringPool> internalStringPoolCopy_;
     std::unique_ptr<simfil::Environment> evalEnvironment_;
     std::map<std::string, CachedExpression, std::less<>> expressionCache_;
+    std::deque<RelationStyleState> relationStyleStates_;
+    JsValue externalRelationReferences_;
+    std::vector<PendingExternalRelation> externalRelationVisualizations_;
 };
 
 }  // namespace erdblick

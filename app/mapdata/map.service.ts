@@ -6,6 +6,7 @@ import {
 } from "./tilestream";
 import type {MapTileStreamStatusPayload, MapTileStreamTransportCompressionStats} from "./tilestream";
 import {FeatureTile, FeatureWrapper, featureSetContains, featureSetsEqual} from "./features.model";
+import {RelationLocateRequest, RelationLocateResult, RelationLocateResolution} from "./relation-locate.model";
 import {coreLib, uint8ArrayToWasm, } from "../integrations/wasm";
 import {DeckTileVisualization} from "../mapview/deck/deck-tile.visualization.model";
 import {
@@ -99,6 +100,8 @@ export class MapDataService {
     private tileStream: MapTileStreamClient|null = null;
     private selectionVisualizations: ITileVisualization[];
     private hoverVisualizations: ITileVisualization[];
+    private selectionHighlightSignature = "";
+    private hoverHighlightSignature = "";
     private viewVisualizationState: ViewVisualizationState[] = [];
     private GeometryType?: typeof coreLib.GeomType;
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -344,7 +347,7 @@ export class MapDataService {
             this.selectedTileKeys = nextSelectedTileKeys;
 
             // TODO: Consider only visualizing updated selections/features and not the whole set of the panels
-            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedPanels);
+            this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectedPanels);
             // If a hovered feature is selected, eliminate it from the hover highlights.
             const hoveredFeatures = this.hoverTopic.getValue();
             if (hoveredFeatures.length) {
@@ -354,7 +357,7 @@ export class MapDataService {
             }
         });
         this.hoverTopic.subscribe(hoveredFeatureWrappers => {
-            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
+            this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
                 features: hoveredFeatureWrappers}]);
         });
     }
@@ -1078,7 +1081,11 @@ export class MapDataService {
             // Get the tile IDs for the current viewport for each view.
             const tileLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
             this.viewVisualizationState.forEach((state, viewIndex) => {
-                state.recalculateTileIds(tileLimit, this.maps.allLevels(viewIndex));
+                state.recalculateTileIds(
+                    tileLimit,
+                    this.maps.allLevels(viewIndex),
+                    this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt
+                );
             });
 
             await this.updateMapDataRequest();
@@ -1166,11 +1173,7 @@ export class MapDataService {
     }
 
     private styleMinimumStage(style: FeatureLayerStyle): number {
-        const styleWithMinimumStage = style as FeatureLayerStyle & { minimumStage?: () => number };
-        if (typeof styleWithMinimumStage.minimumStage !== "function") {
-            return 0;
-        }
-        const rawValue = styleWithMinimumStage.minimumStage();
+        const rawValue = style.minimumStage();
         if (!Number.isFinite(rawValue)) {
             return 0;
         }
@@ -1178,10 +1181,7 @@ export class MapDataService {
     }
 
     private tileSatisfiesStyleStage(tile: FeatureTile, style: FeatureLayerStyle): boolean {
-        const tileWithStages = tile as FeatureTile & { highestLoadedStage?: () => number | null };
-        const highestLoadedStage = typeof tileWithStages.highestLoadedStage === "function"
-            ? tileWithStages.highestLoadedStage()
-            : (tile.hasData() ? 0 : null);
+        const highestLoadedStage = tile.highestLoadedStage();
         if (highestLoadedStage === null) {
             return false;
         }
@@ -1189,11 +1189,7 @@ export class MapDataService {
     }
 
     public isTileInspectionDataComplete(tile: FeatureTile): boolean {
-        const maybeTile = tile as FeatureTile & { isComplete?: (stageCount: number) => boolean };
-        if (typeof maybeTile.isComplete === "function") {
-            return maybeTile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
-        }
-        return tile.hasData();
+        return tile.isComplete(this.getLayerStageCount(tile.mapName, tile.layerName));
     }
 
     private tileMinimumMissingStage(
@@ -1215,18 +1211,7 @@ export class MapDataService {
         if (!tile) {
             return clampedMaxStage >= 0 ? 0 : undefined;
         }
-        const tileWithStages = tile as FeatureTile & { nextMissingStage?: (stageCount: number) => number | undefined };
-        if (typeof tileWithStages.nextMissingStage === "function") {
-            return tileWithStages.nextMissingStage(clampedMaxStage + 1);
-        }
-        if (!tile.hasData()) {
-            return clampedMaxStage >= 0 ? 0 : undefined;
-        }
-        const highestLoadedStage = tile.highestLoadedStage();
-        if (highestLoadedStage === null) {
-            return clampedMaxStage >= 0 ? 0 : undefined;
-        }
-        return highestLoadedStage < clampedMaxStage ? highestLoadedStage + 1 : undefined;
+        return tile.nextMissingStage(clampedMaxStage + 1);
     }
 
     private tileRenderPolicyForView(viewIndex: number, tile: FeatureTile): {
@@ -1505,9 +1490,7 @@ export class MapDataService {
                     this.applyTileRenderPolicyToVisualization(viewIndex, tileVisu);
                     const styleEntry = this.styleService.styles.get(styleId);
                     const styleHasExplicitLowFidelityRules =
-                        typeof (styleEntry?.featureLayerStyle as any)?.hasExplicitLowFidelityRules === "function"
-                            ? !!(styleEntry?.featureLayerStyle as any).hasExplicitLowFidelityRules()
-                            : true;
+                        styleEntry?.featureLayerStyle?.hasExplicitLowFidelityRules() ?? true;
                     const lowFiLodPolicyChanged =
                         styleHasExplicitLowFidelityRules
                         && previousMaxLowFiLod !== tileVisu.maxLowFiLod;
@@ -1582,24 +1565,129 @@ export class MapDataService {
             }
             this.sortVisualizationQueue(state);
         });
-        const hasActiveHighlights =
-            this.selectionVisualizations.length > 0 || this.hoverVisualizations.length > 0;
-        if (anyRenderPolicyChanged || hasActiveHighlights) {
+        if (anyRenderPolicyChanged
+            || this.selectionVisualizations.length > 0
+            || this.hoverVisualizations.length > 0) {
             this.refreshHighlightVisualizationsForCurrentPolicies();
         }
     }
 
     private refreshHighlightVisualizationsForCurrentPolicies(): void {
         const selectionGroups = this.selectionTopic.getValue();
-        if (selectionGroups.length > 0) {
-            this.visualizeHighlights(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups);
-        }
+        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.SELECTION_HIGHLIGHT, selectionGroups);
         const hoveredFeatureWrappers = this.hoverTopic.getValue();
-        if (hoveredFeatureWrappers.length > 0) {
-            this.visualizeHighlights(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
-                features: hoveredFeatureWrappers
-            }]);
+        this.refreshHighlightVisualizationIfNeeded(coreLib.HighlightMode.HOVER_HIGHLIGHT, [{
+            features: hoveredFeatureWrappers
+        }]);
+    }
+
+    private refreshHighlightVisualizationIfNeeded(
+        mode: HighlightMode,
+        groups: {features: FeatureWrapper[], color?: string, id?: number}[]
+    ): void {
+        const nextSignature = this.buildHighlightVisualizationSignature(mode, groups);
+        if (nextSignature === this.getHighlightVisualizationSignature(mode)) {
+            return;
         }
+        this.visualizeHighlights(mode, groups, nextSignature);
+    }
+
+    private getHighlightVisualizationSignature(mode: HighlightMode): string {
+        switch (mode) {
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
+                return this.selectionHighlightSignature;
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT:
+                return this.hoverHighlightSignature;
+            default:
+                return "";
+        }
+    }
+
+    private setHighlightVisualizationSignature(mode: HighlightMode, signature: string): void {
+        switch (mode) {
+            case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
+                this.selectionHighlightSignature = signature;
+                break;
+            case coreLib.HighlightMode.HOVER_HIGHLIGHT:
+                this.hoverHighlightSignature = signature;
+                break;
+            default:
+                break;
+        }
+    }
+
+    private buildHighlightVisualizationSignature(
+        mode: HighlightMode,
+        groups: {features: FeatureWrapper[], color?: string, id?: number}[]
+    ): string {
+        const signatureParts = [`mode:${mode.value}`, `views:${this.stateService.numViews}`];
+        const visibleStyles = Array.from(this.styleService.styles.values())
+            .filter(style => style.visible)
+            .sort((lhs, rhs) => lhs.id.localeCompare(rhs.id));
+
+        for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            const group = groups[groupIndex];
+            signatureParts.push(`group:${group.id ?? groupIndex}:${group.color ?? ""}`);
+
+            const featureWrappersForTile = new Map<FeatureTile, FeatureWrapper[]>();
+            for (const wrapper of group.features) {
+                let wrappers = featureWrappersForTile.get(wrapper.featureTile);
+                if (!wrappers) {
+                    wrappers = [];
+                    featureWrappersForTile.set(wrapper.featureTile, wrappers);
+                }
+                wrappers.push(wrapper);
+            }
+
+            const tiles = Array.from(featureWrappersForTile.entries())
+                .sort((lhs, rhs) => lhs[0].mapTileKey.localeCompare(rhs[0].mapTileKey));
+
+            for (const [featureTile, features] of tiles) {
+                const featureIds = features
+                    .map(feature => feature.featureId)
+                    .sort();
+                signatureParts.push(
+                    `tile:${featureTile.mapTileKey}:${featureTile.dataVersion}:${featureTile.highestLoadedStage() ?? -1}:${featureIds.join(",")}`
+                );
+
+                for (let viewIndex = 0; viewIndex < this.stateService.numViews; viewIndex++) {
+                    if (!this.viewShowsFeatureTile(viewIndex, featureTile, true)) {
+                        continue;
+                    }
+
+                    const renderPolicy = this.tileRenderPolicyForView(viewIndex, featureTile);
+                    signatureParts.push(
+                        `view:${viewIndex}:${renderPolicy.prefersHighFidelity ? 1 : 0}:${renderPolicy.maxLowFiLod ?? -1}`
+                    );
+
+                    for (const style of visibleStyles) {
+                        const wasmStyle = style.featureLayerStyle;
+                        if (!wasmStyle.hasLayerAffinity(featureTile.layerName)
+                            || !this.tileSatisfiesStyleStage(featureTile, wasmStyle)
+                            || !wasmStyle.supportsHighlightMode(mode)) {
+                            continue;
+                        }
+
+                        const styleOptions = {
+                            ...(this.maps.getLayerStyleOptions(
+                                viewIndex,
+                                featureTile.mapName,
+                                featureTile.layerName,
+                                style.id
+                            ) ?? {})
+                        };
+                        if (group.color) {
+                            styleOptions["selectableFeatureHighlightColor"] = group.color;
+                        }
+                        signatureParts.push(
+                            `style:${viewIndex}:${style.id}:${style.source}:${JSON.stringify(styleOptions)}`
+                        );
+                    }
+                }
+            }
+        }
+
+        return signatureParts.join("|");
     }
 
     private async updateMapDataRequest() {
@@ -1963,8 +2051,66 @@ export class MapDataService {
             featureIdSubset,
             layerKeySuffix,
             boxGrid,
-            options
+            options,
+            (requests) => this.resolveRelationExternalTiles(requests)
         );
+    }
+
+    private async resolveRelationExternalTiles(
+        requests: RelationLocateRequest[]
+    ): Promise<RelationLocateResult> {
+        if (requests.length === 0) {
+            return {responses: [], tiles: []};
+        }
+        let response: Response | undefined;
+        try {
+            response = await fetch("locate", {
+                body: JSON.stringify(
+                    {requests},
+                    (_, value) => typeof value === "bigint" ? Number(value) : value),
+                method: "POST"
+            });
+        } catch (error) {
+            console.error(`Error during /locate call for relation targets: ${error}`);
+            return {responses: [], tiles: []};
+        }
+        if (!response.ok) {
+            console.error(`Locate request for relation targets failed with status ${response.status}.`);
+            return {responses: [], tiles: []};
+        }
+        const locateResponse = await response.json() as {responses?: RelationLocateResolution[][]};
+        const tileKeys = new Set<string>();
+        for (const resolutions of locateResponse.responses ?? []) {
+            for (const resolution of resolutions) {
+                if (typeof resolution.tileId === "string" && resolution.tileId.length > 0) {
+                    tileKeys.add(resolution.tileId);
+                }
+            }
+        }
+        if (tileKeys.size === 0) {
+            return {
+                responses: locateResponse.responses ?? [],
+                tiles: []
+            };
+        }
+        const loadedTiles = await this.loadTiles(tileKeys);
+        const seenTileKeys = new Set<string>();
+        const relationTiles: FeatureTile[] = [];
+        for (const tileKey of tileKeys) {
+            const tile = loadedTiles.get(tileKey) ?? null;
+            if (!tile) {
+                continue;
+            }
+            if (!tile.hasData() || seenTileKeys.has(tile.mapTileKey)) {
+                continue;
+            }
+            seenTileKeys.add(tile.mapTileKey);
+            relationTiles.push(tile);
+        }
+        return {
+            responses: locateResponse.responses ?? [],
+            tiles: relationTiles
+        };
     }
 
     private renderTileLayer(viewIndex: number, tileLayer: FeatureTile, style: ErdblickStyle) {
@@ -2361,15 +2507,11 @@ export class MapDataService {
         });
     }
 
-    *tileLayersForTileId(tileId: bigint): Generator<FeatureTile> {
-        for (const tile of this.loadedTileLayers.values()) {
-            if (tile.tileId == tileId && tile.hasData()) {
-                yield tile;
-            }
-        }
-    }
-
-    private visualizeHighlights(mode: HighlightMode, groups: {features: FeatureWrapper[], color?: string, id?: number}[]) {
+    private visualizeHighlights(
+        mode: HighlightMode,
+        groups: {features: FeatureWrapper[], color?: string, id?: number}[],
+        signature: string = this.buildHighlightVisualizationSignature(mode, groups)
+    ) {
         let visualizationCollection = null;
         switch (mode) {
             case coreLib.HighlightMode.SELECTION_HIGHLIGHT:
@@ -2416,8 +2558,14 @@ export class MapDataService {
                             style.featureLayerStyle.hasLayerAffinity(featureTile.layerName) &&
                             this.tileSatisfiesStyleStage(featureTile, style.featureLayerStyle) &&
                             style.featureLayerStyle.supportsHighlightMode(mode)) {
-                            const styleOptions = this.maps.getLayerStyleOptions(
-                                viewIndex, featureTile.mapName, featureTile.layerName, style.id) ?? {};
+                            const styleOptions = {
+                                ...(this.maps.getLayerStyleOptions(
+                                    viewIndex,
+                                    featureTile.mapName,
+                                    featureTile.layerName,
+                                    style.id
+                                ) ?? {})
+                            };
                             if (group.color) {
                                 styleOptions["selectableFeatureHighlightColor"] = group.color;
                             }
@@ -2443,6 +2591,7 @@ export class MapDataService {
                 }
             }
         }
+        this.setHighlightVisualizationSignature(mode, signature);
     }
 
     private setLegalInfo(mapName: string, legalInfo: string): void {
@@ -2551,6 +2700,40 @@ export class MapDataService {
             }
         }
         return null;
+    }
+
+    findSourceDataMapsForTileId(tileId: bigint): Array<{id: string, name: string}> {
+        const level = coreLib.getTileLevel(tileId);
+        const result: Array<{id: string, name: string}> = [];
+        for (const mapInfo of this.maps.maps.values()) {
+            for (const layerInfo of mapInfo.layers.values()) {
+                if (layerInfo.type != "SourceData") {
+                    continue;
+                }
+                if (layerInfo.info.zoomLevels.length && !layerInfo.info.zoomLevels.includes(level)) {
+                    continue;
+                }
+                result.push({id: mapInfo.id, name: mapInfo.id});
+                break;
+            }
+        }
+        return result;
+    }
+
+    visibleFeatureLevelsInView(viewIndex: number): Set<number> {
+        const levels = new Set<number>();
+        for (const [mapId, mapInfo] of this.maps.maps.entries()) {
+            for (const layerInfo of mapInfo.layers.values()) {
+                if (layerInfo.type === "SourceData") {
+                    continue;
+                }
+                if (!this.maps.getMapLayerVisibility(viewIndex, mapId, layerInfo.id)) {
+                    continue;
+                }
+                levels.add(this.maps.getMapLayerLevel(viewIndex, mapId, layerInfo.id));
+            }
+        }
+        return levels;
     }
 
     findLayersForMapId(mapId: string, isMetadata: boolean = false) {

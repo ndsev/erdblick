@@ -116,11 +116,6 @@ export class FeatureTile {
         }
         this.status = this.error ? TileLoadState.Error : TileLoadState.Ok;
 
-        const parseTimesByKey = this.existingParseTimeStats();
-        this.stats = new Map<string, number[]>();
-        for (const [key, values] of parseTimesByKey.entries()) {
-            this.stats.set(key, values);
-        }
         const stageBlobs = this.stageBlobs();
         const totalSizeKb = stageBlobs.reduce((sum, item) => sum + item.blob.length, 0) / 1024;
         this.stats.set(FeatureTile.statTileSize, [totalSizeKb]);
@@ -139,10 +134,6 @@ export class FeatureTile {
 
     hasData(): boolean {
         return this.tileFeatureLayerBlobsByStage.size > 0;
-    }
-
-    blobCount(): number {
-        return this.tileFeatureLayerBlobsByStage.size;
     }
 
     stageBlobs(): Array<{stage: number, blob: Uint8Array}> {
@@ -180,14 +171,6 @@ export class FeatureTile {
 
     isComplete(stageCount: number): boolean {
         return this.nextMissingStage(stageCount) === undefined;
-    }
-
-    setStageLoadState(stage: number, state: TileLoadState): void {
-        this.stageLoadStates.set(Math.max(0, Math.floor(stage)), state);
-    }
-
-    stageLoadState(stage: number): TileLoadState | undefined {
-        return this.stageLoadStates.get(Math.max(0, Math.floor(stage)));
     }
 
     setVertexCount(count: number): void {
@@ -244,16 +227,6 @@ export class FeatureTile {
         return vertices;
     }
 
-    private existingParseTimeStats(): Map<string, number[]> {
-        const result = new Map<string, number[]>();
-        for (const [key, values] of this.stats.entries()) {
-            if (key === FeatureTile.statParseTime || key.startsWith(`${FeatureTile.statParseTimePrefix}/Stage-`)) {
-                result.set(key, [...values]);
-            }
-        }
-        return result;
-    }
-
     getFieldDictBlob(): Uint8Array | null {
         if (this.fieldDictBlobCache) {
             return this.fieldDictBlobCache;
@@ -261,12 +234,8 @@ export class FeatureTile {
         if (!this.nodeId.length) {
             return null;
         }
-        const parserWithFieldDict = this.parser as any;
-        if (typeof parserWithFieldDict.getFieldDict !== "function") {
-            return null;
-        }
         const encoded = uint8ArrayFromWasm((buf) => {
-            parserWithFieldDict.getFieldDict(buf, this.nodeId);
+            this.parser.getFieldDict(buf, this.nodeId);
             return true;
         });
         if (!encoded) {
@@ -283,12 +252,8 @@ export class FeatureTile {
         if (!this.mapName.length) {
             return null;
         }
-        const parserWithDataSourceInfo = this.parser as any;
-        if (typeof parserWithDataSourceInfo.getDataSourceInfo !== "function") {
-            return null;
-        }
         const encoded = uint8ArrayFromWasm((buf) => {
-            parserWithDataSourceInfo.getDataSourceInfo(buf, this.mapName);
+            this.parser.getDataSourceInfo(buf, this.mapName);
             return true;
         });
         if (!encoded) {
@@ -364,12 +329,8 @@ export class FeatureTile {
     }
 
     private attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLayer[]): void {
-        const maybeAttach = (baseLayer as any).attachOverlay;
-        if (typeof maybeAttach !== "function") {
-            return;
-        }
         for (const overlay of overlays) {
-            maybeAttach.call(baseLayer, overlay);
+            baseLayer.attachOverlay(overlay);
         }
     }
 
@@ -460,15 +421,12 @@ export class FeatureTile {
             return;
         }
 
-        tiles = tiles.filter(tile => tile.hasData());
-        if (!tiles.length) {
-            return;
-        }
-
         // Create parsedTiles list.
         if (parsedTiles === undefined) {
             parsedTiles = [];
         }
+
+        tiles = tiles.filter(tile => tile.hasData());
 
         // Termination condition for recursion.
         if (tiles.length === 0) {
@@ -520,11 +478,7 @@ export class FeatureTile {
             return cached;
         }
         const featureId = this.peek((tileFeatureLayer: TileFeatureLayer) => {
-            const layerAny = tileFeatureLayer as any;
-            if (typeof layerAny.featureIdByIndex !== "function") {
-                return null;
-            }
-            const result = layerAny.featureIdByIndex(featureIndex);
+            const result = tileFeatureLayer.featureIdByIndex(featureIndex);
             return (typeof result === "string" && result.length > 0) ? result : null;
         });
         if (typeof featureId === "string" && featureId.length > 0) {
@@ -572,10 +526,7 @@ export class FeatureWrapper implements TileFeatureId {
         return this.featureTile.peek((tileFeatureLayer: TileFeatureLayer) => {
             let feature: any = null;
             if (this.featureIndex !== undefined) {
-                const featureByIndex = (tileFeatureLayer as any).featureByIndex;
-                if (typeof featureByIndex === "function") {
-                    feature = featureByIndex.call(tileFeatureLayer, this.featureIndex);
-                }
+                feature = tileFeatureLayer.featureByIndex(this.featureIndex);
             }
             if (!feature || feature.isNull()) {
                 if (feature && feature.isNull()) {

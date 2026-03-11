@@ -1,13 +1,21 @@
 import {BehaviorSubject, combineLatest, distinctUntilChanged, Subscription} from "rxjs";
-import {COORDINATE_SYSTEM, Deck as DeckGlDeck, MapView as DeckMercatorView, WebMercatorViewport} from "@deck.gl/core";
-import {BitmapLayer} from "@deck.gl/layers";
+import {
+    COORDINATE_SYSTEM,
+    Deck as DeckGlDeck,
+    type DeckProps,
+    MapView as DeckMercatorView,
+    type PickingInfo,
+    WebMercatorViewport
+} from "@deck.gl/core";
+import {BitmapLayer, PolygonLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
 import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
-import {Cartographic, GeoMath, SceneMode} from "../../integrations/geo";
+import type {Parameters as LumaParameters} from "@luma.gl/core";
+import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
 import {MapDataService, TileVisualizationRenderTask} from "../../mapdata/map.service";
 import {FeatureSearchService} from "../../search/feature.search.service";
 import {JumpTargetService} from "../../search/jump.service";
-import {RightClickMenuService} from "../rightclickmenu.service";
+import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {CoordinatesService} from "../../coords/coordinates.service";
 import {AppStateService, CameraViewState, TileFeatureId, TileGridMode} from "../../shared/appstate.service";
 import {IRenderSceneHandle, IRenderView, ITileVisualization} from "../render-view.model";
@@ -47,6 +55,13 @@ interface VisibleLayerRef {
     layerId: string;
 }
 
+interface DeckRectangleOverlayDatum {
+    polygon: [number, number][];
+    fillColor: [number, number, number, number];
+    lineColor: [number, number, number, number];
+    lineWidthPixels: number;
+}
+
 interface TileGridLevelExtent {
     level: number;
     rowCount: number;
@@ -64,6 +79,19 @@ interface TileGridLevelExtent {
     north: number;
 }
 
+interface DeckPickLayerProps {
+    tileKey?: string;
+    featureIds?: Array<number | null>;
+    featureIdsByVertex?: Array<number | null>;
+}
+
+interface DeckGestureEventLike {
+    srcEvent?: {
+        button?: number;
+        ctrlKey?: boolean;
+    };
+}
+
 /**
  * Minimal deck.gl map view scaffold used to wire renderer switching and camera-state sync.
  * Detailed deck tile rendering is introduced in later migration tasks.
@@ -79,17 +107,25 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly OSM_TILE_URL_TEMPLATE = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
     private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
+    private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
+    private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
     private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
+    private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 240];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
     // Diagnostic mode: force solid red fill from shader to verify overlay visibility/lifecycle.
     private static readonly TILE_GRID_DEBUG_SOLID = false;
+    private static readonly NO_DEPTH_PARAMETERS: LumaParameters = {
+        depthWriteEnabled: false,
+        depthCompare: "always",
+        cullMode: "none"
+    };
 
     protected readonly _viewIndex: number;
     readonly canvasId: string;
-    protected deck: any = null;
+    protected deck: DeckGlDeck<DeckMercatorView> | null = null;
     protected readonly layerRegistry = new DeckLayerRegistry();
     protected readonly subscriptions: Subscription[] = [];
     protected viewState: DeckCameraState = {
@@ -125,6 +161,7 @@ export abstract class DeckMapView implements IRenderView {
     private lastSearchResultsPointsVersion = -1;
     private lastSearchResultsIconAtlasUrl = "";
     private lastSearchResultsIconMappingUrl = "";
+    private jumpAreaHighlightTick: (() => void) | null = null;
 
     get viewIndex() {
         return this._viewIndex;
@@ -154,9 +191,9 @@ export abstract class DeckMapView implements IRenderView {
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
-        this.deck = new DeckGlDeck({
+        const deckProps: DeckProps<DeckMercatorView> = {
             parent: container,
-            views: [new DeckMercatorView({id: `deck-view-${this._viewIndex}`, repeat: true})],
+            views: new DeckMercatorView({id: `deck-view-${this._viewIndex}`, repeat: true}),
             initialViewState: this.viewState,
             viewState: this.viewState,
             layers: [],
@@ -165,11 +202,12 @@ export abstract class DeckMapView implements IRenderView {
                 touchRotate: false,
                 keyboard: false
             },
-            onViewStateChange: ({viewState}: {viewState: any}) => this.onViewStateChange(viewState),
-            onHover: (info: any) => this.onHover(info),
-            onClick: (info: any, event: any) => this.onClick(info, event)
-        } as any);
-        this.layerRegistry.setDeck(this.deck as any);
+            onViewStateChange: ({viewState}) => this.onViewStateChange(viewState as DeckCameraState),
+            onHover: (info) => this.onHover(info),
+            onClick: (info, event) => this.onClick(info, event)
+        };
+        this.deck = new DeckGlDeck(deckProps);
+        this.layerRegistry.setDeck(this.deck);
 
         this.setupSubscriptions();
         this.updateViewport();
@@ -186,8 +224,11 @@ export abstract class DeckMapView implements IRenderView {
         this.hoveredFeatureIds.next(undefined);
         this.layerRegistry.remove(DeckMapView.OSM_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.TILE_GRID_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
         this.removeTileStateLayers();
+        this.stopJumpAreaHighlight();
         this.osmLayerEnabled = false;
         this.osmLayerOpacity = -1;
         this.tileGridEnabled = false;
@@ -264,7 +305,7 @@ export abstract class DeckMapView implements IRenderView {
             x: screenPos.x,
             y: screenPos.y,
             radius: 4
-        }) as any;
+        });
         if (!picked) {
             return [];
         }
@@ -282,7 +323,7 @@ export abstract class DeckMapView implements IRenderView {
             return this.mapService.resolveTileFeatureIdByIndex(tileKey, value as number);
         };
 
-        const objectTileKey = (picked.layer?.props as {tileKey?: string} | undefined)?.tileKey;
+        const objectTileKey = (picked.layer?.props as DeckPickLayerProps | undefined)?.tileKey;
         const pickedObject = picked.object;
         const objectIdTileKeys = Array.isArray(pickedObject?.idTileKeys)
             ? pickedObject.idTileKeys as unknown[]
@@ -304,13 +345,7 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const pickedIndex = Number(picked.index);
-        const layerProps = (
-            picked.layer?.props as {
-                tileKey?: string;
-                featureIds?: Array<number | null>;
-                featureIdsByVertex?: Array<number | null>;
-            } | undefined
-        );
+        const layerProps = picked.layer?.props as DeckPickLayerProps | undefined;
         if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
             const featureIds = layerProps?.featureIds;
             if (Array.isArray(featureIds) && pickedIndex < featureIds.length) {
@@ -576,6 +611,7 @@ export abstract class DeckMapView implements IRenderView {
                     latitude: centerLat,
                     zoom
                 }, true, true);
+                this.startJumpAreaHighlight(value.rectangle);
             })
         );
 
@@ -614,13 +650,19 @@ export abstract class DeckMapView implements IRenderView {
             })
         );
 
+        this.subscriptions.push(
+            this.menuService.tileOutline.subscribe(payload => {
+                this.updateTileOutlineLayer(payload);
+            })
+        );
+
         this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
         this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
         this.scheduleTileGridOverlayUpdate();
         this.scheduleSearchResultsOverlayUpdate();
     }
 
-    private onViewStateChange(rawViewState: any): void {
+    private onViewStateChange(rawViewState: DeckCameraState): void {
         if (this.suppressDeckViewStateEvent) {
             return;
         }
@@ -629,11 +671,11 @@ export abstract class DeckMapView implements IRenderView {
         }
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
         // take effect if we feed the updated camera state back via `setProps`.
-        this.updateViewState(rawViewState as DeckCameraState, true, true);
+        this.updateViewState(rawViewState, true, true);
         this.pushViewStateToAppState();
     }
 
-    private onHover(info: any): void {
+    private onHover(info: PickingInfo): void {
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
             this.hoveredFeatureIds.next(undefined);
             return;
@@ -659,8 +701,12 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
-    private onClick(info: any, event: any): void {
+    private onClick(info: PickingInfo, event: DeckGestureEventLike): void {
         if (environment.visualizationOnly) {
+            return;
+        }
+        const srcEvent = event?.srcEvent;
+        if (srcEvent && Number.isInteger(srcEvent.button) && srcEvent.button !== 0) {
             return;
         }
 
@@ -686,7 +732,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        const shouldPinPanel = !!event?.srcEvent?.ctrlKey;
+        const shouldPinPanel = !!srcEvent?.ctrlKey;
         this.selectFeatureIds(featureIds, shouldPinPanel);
     }
 
@@ -806,7 +852,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        const layer = new TileLayer({
+        const layer = new TileLayer<string>({
             id: DeckMapView.OSM_LAYER_KEY,
             data: DeckMapView.OSM_TILE_URL_TEMPLATE,
             minZoom: 0,
@@ -818,14 +864,13 @@ export abstract class DeckMapView implements IRenderView {
             updateTriggers: {
                 renderSubLayers: [clampedOpacity]
             },
-            renderSubLayers: (props: any) => {
+            renderSubLayers: (props) => {
                 const boundingBox = props.tile?.boundingBox;
                 if (!boundingBox || !props.data) {
                     return null;
                 }
-                return new BitmapLayer(props, {
+                return new BitmapLayer({
                     id: `${props.id}-bitmap`,
-                    data: null,
                     image: props.data,
                     bounds: [
                         boundingBox[0][0],
@@ -836,10 +881,10 @@ export abstract class DeckMapView implements IRenderView {
                     opacity: clampedOpacity,
                     pickable: false,
                     parameters: {depthTest: false}
-                } as any);
+                });
             }
-        } as any);
-        this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer as any, -1000);
+        });
+        this.layerRegistry.upsert(DeckMapView.OSM_LAYER_KEY, layer, -1000);
         this.osmLayerEnabled = true;
         this.osmLayerOpacity = clampedOpacity;
     }
@@ -942,7 +987,7 @@ export abstract class DeckMapView implements IRenderView {
             iconAtlas: iconAtlasUrl,
             iconMapping: iconMappingUrl
         });
-        this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer as any, 650);
+        this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer, 650);
     }
 
     private updateTileGridOverlay(): void {
@@ -961,7 +1006,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         const {layerCount, coloredTileCount} = this.updateTileStateOverlays(levels);
         const layer = this.createTileGridLayer(levels);
-        this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer as any, 490);
+        this.layerRegistry.upsert(DeckMapView.TILE_GRID_LAYER_KEY, layer, 490);
         this.logTileGridDiagnostic(
             `enabled mode=${this.tileGridMode} levels=[${levels.join(",")}] stateLayers=${layerCount} stateTiles=${coloredTileCount} debugSolid=${DeckMapView.TILE_GRID_DEBUG_SOLID}`
         );
@@ -979,7 +1024,6 @@ export abstract class DeckMapView implements IRenderView {
             getFillColor: [0, 0, 0, 0],
             coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
             filled: true,
-            stroked: false,
             extruded: false,
             // Keep the overlay quad in unwrapped longitude space. The shader
             // already works with unwrapped/projection-space X coordinates.
@@ -994,8 +1038,8 @@ export abstract class DeckMapView implements IRenderView {
             lineColor: DeckMapView.TILE_GRID_LINE_COLOR,
             lineWidthPixels: DeckMapView.TILE_GRID_LINE_WIDTH_PX,
             debugSolid: DeckMapView.TILE_GRID_DEBUG_SOLID,
-            parameters: {depthTest: false, cull: false}
-        } as any);
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS
+        });
     }
 
     private updateTileStateOverlays(levels: number[]): {layerCount: number; coloredTileCount: number} {
@@ -1055,7 +1099,6 @@ export abstract class DeckMapView implements IRenderView {
                 getFillColor: [255, 255, 255, 255],
                 coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
                 filled: true,
-                stroked: false,
                 extruded: false,
                 wrapLongitude: false,
                 pickable: false,
@@ -1063,9 +1106,9 @@ export abstract class DeckMapView implements IRenderView {
                 localMin: overlayGeometry.localMin,
                 localSize: overlayGeometry.localSize,
                 imageData,
-                parameters: {depthTest: false, cull: false}
-            } as any);
-            this.layerRegistry.upsert(layerKey, layer as any, 360);
+                parameters: DeckMapView.NO_DEPTH_PARAMETERS
+            });
+            this.layerRegistry.upsert(layerKey, layer, 360);
             nextLayerKeys.add(layerKey);
         }
 
@@ -1286,6 +1329,160 @@ export abstract class DeckMapView implements IRenderView {
                 ndsYCorrection: [0, 1, 0]
             }]
         };
+    }
+
+    private updateTileOutlineLayer(payload: TileOutlinePayload | null): void {
+        if (!payload) {
+            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            return;
+        }
+
+        const coordinates = payload.rectangle?.coordinates;
+        if (!coordinates) {
+            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            return;
+        }
+
+        const data = this.rectangleOverlayData(
+            GeoMath.toDegrees(coordinates.west),
+            GeoMath.toDegrees(coordinates.south),
+            GeoMath.toDegrees(coordinates.east),
+            GeoMath.toDegrees(coordinates.north),
+            this.toDeckColor(payload.rectangle["material"] as Color | undefined, [255, 105, 180, 51]),
+            this.toDeckColor(payload.rectangle["outlineColor"] as Color | undefined, [255, 105, 180, 255]),
+            Math.max(1, Number(payload.rectangle["outlineWidth"] ?? 3))
+        );
+        if (!data.length) {
+            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            return;
+        }
+
+        this.upsertRectangleOverlayLayer(DeckMapView.TILE_OUTLINE_LAYER_KEY, data, 520);
+    }
+
+    private upsertRectangleOverlayLayer(
+        layerKey: string,
+        data: DeckRectangleOverlayDatum[],
+        order: number
+    ): void {
+        const layer = new PolygonLayer<DeckRectangleOverlayDatum>({
+            id: layerKey,
+            data,
+            getPolygon: (datum: DeckRectangleOverlayDatum) => datum.polygon,
+            getFillColor: (datum: DeckRectangleOverlayDatum) => datum.fillColor,
+            getLineColor: (datum: DeckRectangleOverlayDatum) => datum.lineColor,
+            getLineWidth: (datum: DeckRectangleOverlayDatum) => datum.lineWidthPixels,
+            lineWidthUnits: "pixels",
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            filled: true,
+            stroked: true,
+            extruded: false,
+            wrapLongitude: false,
+            pickable: false,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS
+        });
+        this.layerRegistry.upsert(layerKey, layer, order);
+    }
+
+    private rectangleOverlayData(
+        west: number,
+        south: number,
+        east: number,
+        north: number,
+        fillColor: [number, number, number, number],
+        lineColor: [number, number, number, number],
+        lineWidthPixels: number
+    ): DeckRectangleOverlayDatum[] {
+        return this.rectangleOverlayPolygons(west, south, east, north).map(polygon => ({
+            polygon,
+            fillColor,
+            lineColor,
+            lineWidthPixels
+        }));
+    }
+
+    private rectangleOverlayPolygons(
+        west: number,
+        south: number,
+        east: number,
+        north: number
+    ): [number, number][][] {
+        if (east - west >= 360 - 1e-6) {
+            return [
+                [
+                    [-180, south],
+                    [-180, north],
+                    [0, north],
+                    [0, south]
+                ],
+                [
+                    [0, south],
+                    [0, north],
+                    [180, north],
+                    [180, south]
+                ]
+            ];
+        }
+        return [[
+            [west, south],
+            [west, north],
+            [east, north],
+            [east, south]
+        ]];
+    }
+
+    private startJumpAreaHighlight(rectangle: {west: number; south: number; east: number; north: number}): void {
+        this.stopJumpAreaHighlight();
+
+        const startTime = performance.now();
+        const tick = () => {
+            const elapsedMs = performance.now() - startTime;
+            const progress = Math.min(1, elapsedMs / DeckMapView.JUMP_AREA_HIGHLIGHT_DURATION_MS);
+            const fillAlpha = Math.max(0, (1 - progress) * 0.2);
+            const lineAlpha = Math.max(0, 1 - progress);
+            const data = this.rectangleOverlayData(
+                rectangle.west,
+                rectangle.south,
+                rectangle.east,
+                rectangle.north,
+                this.toDeckColor(Color.AQUA.withAlpha(fillAlpha), [0, 255, 255, 51]),
+                this.toDeckColor(Color.AQUA.withAlpha(lineAlpha), [0, 255, 255, 255]),
+                3
+            );
+            this.upsertRectangleOverlayLayer(DeckMapView.JUMP_AREA_LAYER_KEY, data, 510);
+            this.requestRender();
+
+            if (progress >= 1) {
+                this.stopJumpAreaHighlight();
+            }
+        };
+
+        this.jumpAreaHighlightTick = tick;
+        this.onTick(tick);
+        tick();
+    }
+
+    private stopJumpAreaHighlight(): void {
+        if (this.jumpAreaHighlightTick) {
+            this.offTick(this.jumpAreaHighlightTick);
+            this.jumpAreaHighlightTick = null;
+        }
+        this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
+    }
+
+    private toDeckColor(
+        color: Color | undefined,
+        fallback: [number, number, number, number]
+    ): [number, number, number, number] {
+        if (!color) {
+            return fallback;
+        }
+        return [
+            Math.max(0, Math.min(255, Math.round(color.r * 255))),
+            Math.max(0, Math.min(255, Math.round(color.g * 255))),
+            Math.max(0, Math.min(255, Math.round(color.b * 255))),
+            Math.max(0, Math.min(255, Math.round(color.a * 255)))
+        ];
     }
 
     private tileStateOverlayGeometry(extent: TileGridLevelExtent): TileGridOverlayGeometry {

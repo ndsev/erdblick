@@ -24,7 +24,7 @@ import {JumpTargetService} from "../search/jump.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
-import {RightClickMenuService} from "./rightclickmenu.service";
+import {RightClickMenuService, SourceDataDropdownOption} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
@@ -33,6 +33,7 @@ import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
 import {Popover} from "primeng/popover";
+import {coreLib} from "../integrations/wasm";
 
 @Component({
     selector: 'map-view',
@@ -56,7 +57,7 @@ import {Popover} from "primeng/popover";
             </p-buttonGroup>
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
-            <p-contextMenu #viewerContextMenu [model]="menuItems" (onHide)="onContextMenuHide()" appendTo="body" />
+            <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()" (onHide)="onContextMenuHide()" appendTo="body" />
         }
         @if (!appModeService.isVisualizationOnly) {
             <sourcedatadialog></sourcedatadialog>
@@ -84,7 +85,8 @@ import {Popover} from "primeng/popover";
     standalone: false
 })
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
-    private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 0;
+    private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
+    private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
@@ -106,6 +108,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
+    private contextMenuVisible = false;
+    private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
     private rightPressStart: {x: number; y: number} | null = null;
     private rightPressMoved = false;
     private viewerPointerDownCapture?: (event: PointerEvent) => void;
@@ -143,10 +147,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 private ngZone: NgZone
     ) {
         this.subscriptions.push(
-            // TODO: Consider only if the view is focused?
-            //   Fix the tile outline
             this.menuService.menuItems.subscribe(items => {
-                // if (this.stateService.focusedView === this.mapView?.viewIndex)
                 this.menuItems = [...items];
             })
         );
@@ -190,9 +191,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     onContextMenuHide() {
+        this.contextMenuVisible = false;
+        if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
+            const event = this.pendingContextMenuOpenEvent;
+            this.pendingContextMenuOpenEvent = null;
+            setTimeout(() => this.openContextMenu(this.viewerContextMenu!, event), 0);
+            return;
+        }
+        this.resetPreparedSourceData(false, false);
         if (!this.menuService.tileSourceDataDialogVisible) {
             this.menuService.tileOutline.next(null);
         }
+    }
+
+    onContextMenuShow() {
+        this.contextMenuVisible = true;
     }
 
     /**
@@ -348,6 +361,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
 
         this.viewerPointerDownCapture = (event: PointerEvent) => {
+            if (event.button === 0 && this.contextMenuVisible && this.viewerContextMenu) {
+                this.ngZone.run(() => this.viewerContextMenu?.hide());
+            }
             if (event.button !== 2) {
                 return;
             }
@@ -360,33 +376,43 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
             const dx = event.clientX - this.rightPressStart.x;
             const dy = event.clientY - this.rightPressStart.y;
-            if (dx === 0 && dy === 0) {
+            const threshold = MapViewComponent.RIGHT_DRAG_SUPPRESS_THRESHOLD_PX;
+            if (Math.abs(dx) <= threshold && Math.abs(dy) <= threshold) {
                 return;
             }
             this.rightPressMoved = true;
         };
-        this.viewerPointerUpCapture = (_event: PointerEvent) => {};
-        this.viewerPointerCancelCapture = (_event: PointerEvent) => {
-            this.resetRightPressTracking();
-        };
-        this.viewerContextMenuCapture = (event: MouseEvent) => {
-            const menu = this.viewerContextMenu;
-            if (!menu) {
+        this.viewerPointerUpCapture = (event: PointerEvent) => {
+            if (event.button !== 2) {
                 return;
             }
-            event.preventDefault();
+            const menu = this.viewerContextMenu;
             const start = this.rightPressStart;
             const threshold = MapViewComponent.RIGHT_DRAG_SUPPRESS_THRESHOLD_PX;
             const movedSinceRightDown = !!start && (
                 Math.abs(event.clientX - start.x) > threshold ||
                 Math.abs(event.clientY - start.y) > threshold
             );
-            if (this.rightPressMoved || movedSinceRightDown) {
-                this.resetRightPressTracking();
-                return;
+            if (menu && !this.rightPressMoved && !movedSinceRightDown) {
+                this.ngZone.run(() => {
+                    const menuEvent = this.copyContextMenuEvent(event);
+                    if (this.contextMenuVisible) {
+                        this.pendingContextMenuOpenEvent = menuEvent;
+                        this.resetPreparedSourceData();
+                        menu.hide();
+                    } else {
+                        queueMicrotask(() => this.openContextMenu(menu, menuEvent));
+                    }
+                });
             }
-            this.ngZone.run(() => menu.show(event));
             this.resetRightPressTracking();
+        };
+        this.viewerPointerCancelCapture = (_event: PointerEvent) => {
+            this.resetRightPressTracking();
+        };
+        this.viewerContextMenuCapture = (event: MouseEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
         };
 
         this.ngZone.runOutsideAngular(() => {
@@ -426,6 +452,122 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.viewerPointerCancelCapture = undefined;
         this.viewerContextMenuCapture = undefined;
         this.resetRightPressTracking();
+    }
+
+    private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
+        try {
+            this.prepareSourceDataContextMenu(event);
+        } catch (error) {
+            console.error("Failed to prepare source-data context menu.", error);
+            this.menuService.tileIdsForSourceData.next([]);
+        }
+        menu.show(this.contextMenuShowEvent(event) as MouseEvent);
+    }
+
+    private copyContextMenuEvent(event: MouseEvent | PointerEvent): {clientX: number; clientY: number; pageX: number; pageY: number} {
+        return {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            pageX: event.pageX,
+            pageY: event.pageY
+        };
+    }
+
+    private contextMenuShowEvent(event: {pageX: number; pageY: number}): {pageX: number; pageY: number; preventDefault: () => void; stopPropagation: () => void} {
+        return {
+            pageX: event.pageX,
+            pageY: event.pageY,
+            preventDefault: () => {},
+            stopPropagation: () => {}
+        };
+    }
+
+    private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
+        if (!this.mapView || this.appModeService.isVisualizationOnly) {
+            this.resetPreparedSourceData(true);
+            return;
+        }
+
+        this.stateService.focusedView = this.viewIndex();
+        const canvasRect = this.mapView.getCanvasClientRect();
+        const screenPos = {
+            x: event.clientX - canvasRect.left,
+            y: event.clientY - canvasRect.top
+        };
+        const cartographic = this.mapView.pickCartographic(screenPos);
+        if (!cartographic) {
+            this.resetPreparedSourceData(true);
+            return;
+        }
+
+        const tileIds = Array.from({length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT}, (_, level) => {
+            const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
+            return {
+                id: tileId,
+                name: `${tileId} (level ${level})`,
+                tileLevel: level,
+                disabled: this.mapService.findSourceDataMapsForTileId(tileId).length === 0
+            };
+        });
+        const preferredPickedTileId = this.preferredPickedTileId(screenPos, tileIds);
+        const preferredVisibleLevelTileId = this.preferredVisibleLevelTileId(tileIds);
+        this.menuService.preferredTileIdForSourceData =
+            preferredPickedTileId ??
+            preferredVisibleLevelTileId;
+        this.menuService.tileIdsForSourceData.next(tileIds);
+
+        const outlinedTile = this.menuService.preferredSourceDataTile(tileIds);
+        if (outlinedTile) {
+            this.menuService.outlineTile(BigInt(outlinedTile.id));
+        } else {
+            this.menuService.tileOutline.next(null);
+        }
+    }
+
+    private preferredPickedTileId(
+        screenPos: {x: number; y: number},
+        tileIds: SourceDataDropdownOption[]
+    ): bigint | null {
+        if (!this.mapView) {
+            return null;
+        }
+        const availableTileIds = new Set(
+            tileIds
+                .filter(tileId => !tileId.disabled)
+                .map(tileId => tileId.id as bigint)
+        );
+        let bestTileId: bigint | null = null;
+        for (const featureId of this.mapView.pickFeature(screenPos)) {
+            if (!featureId) {
+                continue;
+            }
+            const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, bigint];
+            if (!availableTileIds.has(tileId)) {
+                continue;
+            }
+            if (bestTileId === null || coreLib.getTileLevel(tileId) > coreLib.getTileLevel(bestTileId)) {
+                bestTileId = tileId;
+            }
+        }
+        return bestTileId;
+    }
+
+    private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): bigint | null {
+        const visibleLevels = this.mapService.visibleFeatureLevelsInView(this.viewIndex());
+        const preferredTile = [...tileIds]
+            .reverse()
+            .find(tileId => !tileId.disabled && visibleLevels.has(tileId.tileLevel ?? -1));
+        return preferredTile?.id as bigint | undefined ?? null;
+    }
+
+    private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
+        this.menuService.preferredTileIdForSourceData = null;
+        if (clearOutline) {
+            this.menuService.tileOutline.next(null);
+        }
+        if (clearTileIds) {
+            this.menuService.tileIdsForSourceData.next([]);
+        }
     }
 
     protected readonly environment = environment;

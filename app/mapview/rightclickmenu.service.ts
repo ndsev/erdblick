@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
+import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {AppStateService, SelectedSourceData} from "../shared/appstate.service";
 
@@ -28,6 +29,7 @@ export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     tileSourceDataDialogVisible: boolean = false;
+    preferredTileIdForSourceData: bigint | null = null;
     lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
         new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
@@ -47,8 +49,7 @@ export class RightClickMenuService {
             const items = this.menuItems.getValue();
             const lastOption = this.lastInspectedTileSourceDataOption.getValue();
             if (lastOption) {
-                const level = coreLib.getTileLevel(BigInt(lastOption.tileId));
-                const tileId = tileIds.find(tileId => tileId.tileLevel === level);
+                const tileId = this.preferredSourceDataTile(tileIds);
                 if (tileId) {
                     this.updateMenuForLastInspectedSourceData({
                         tileId: tileId.id as bigint,
@@ -62,6 +63,46 @@ export class RightClickMenuService {
             if (items.length > 1) {
                 items.shift();
                 this.menuItems.next(items);
+            }
+        });
+    }
+
+    preferredSourceDataTile(tileIds: SourceDataDropdownOption[]): SourceDataDropdownOption | undefined {
+        if (this.preferredTileIdForSourceData !== null) {
+            const preferredTile = tileIds.find(tileId => tileId.id === this.preferredTileIdForSourceData && !tileId.disabled);
+            if (preferredTile) {
+                return preferredTile;
+            }
+        }
+
+        const lastOption = this.lastInspectedTileSourceDataOption.getValue();
+        if (lastOption) {
+            const level = coreLib.getTileLevel(BigInt(lastOption.tileId));
+            const matchingTile = tileIds.find(tileId => tileId.tileLevel === level && !tileId.disabled);
+            if (matchingTile) {
+                return matchingTile;
+            }
+        }
+
+        for (let index = tileIds.length - 1; index >= 0; index--) {
+            const tileId = tileIds[index];
+            if (!tileId.disabled) {
+                return tileId;
+            }
+        }
+        return undefined;
+    }
+
+    outlineTile(tileId: bigint, color: Color = Color.HOTPINK) {
+        const tileBox = coreLib.getTileBox(tileId);
+        this.tileOutline.next({
+            rectangle: {
+                coordinates: Rectangle.fromDegrees(...tileBox),
+                height: HeightReference.CLAMP_TO_GROUND,
+                material: color.withAlpha(0.2),
+                outline: true,
+                outlineWidth: 3.,
+                outlineColor: color
             }
         });
     }

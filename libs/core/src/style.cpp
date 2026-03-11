@@ -139,6 +139,13 @@ bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
     return hasExplicitLowFidelityRules_;
 }
 
+bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
+{
+    return std::ranges::any_of(rules_, [mode](auto const& rule) {
+        return rule.mode() == mode && rule.aspect() == FeatureStyleRule::Relation;
+    });
+}
+
 std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
     FeatureStyleRule::HighlightMode mode,
     FeatureStyleRule::Fidelity fidelity,

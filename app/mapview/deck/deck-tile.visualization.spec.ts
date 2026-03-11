@@ -2,6 +2,8 @@ import {describe, expect, it, vi} from "vitest";
 import {DeckLayerLike, DeckLayerRegistry, DeckLike} from "./deck-layer-registry";
 import {DeckTileVisualization} from "./deck-tile.visualization.model";
 import {PointMergeService} from "../pointmerge.service";
+import {coreLib} from "../../integrations/wasm";
+import {FeatureTile} from "../../mapdata/features.model";
 
 class DeckStub implements DeckLike {
     readonly commits: DeckLayerLike[][] = [];
@@ -25,7 +27,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -101,7 +104,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -205,7 +209,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -251,6 +256,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             minimumStage: () => 0
         } as any;
         const pointMergeService = new PointMergeService();
@@ -313,6 +319,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             minimumStage: () => 0
         } as any;
         const pointMergeService = new PointMergeService();
@@ -375,7 +382,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -414,7 +422,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -457,7 +466,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
 
@@ -508,7 +518,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
@@ -570,7 +581,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
@@ -637,7 +649,8 @@ describe("DeckTileVisualization", () => {
         } as any;
         const style = {
             name: () => "test-style",
-            isDeleted: () => false
+            isDeleted: () => false,
+            hasRelationRules: () => false
         } as any;
         const pointMergeService = new PointMergeService();
         const visu = new DeckTileVisualization(
@@ -688,6 +701,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             hasExplicitLowFidelityRules: () => true
         } as any;
         const pointMergeService = new PointMergeService();
@@ -710,7 +724,7 @@ describe("DeckTileVisualization", () => {
         expect(visu.hasPendingLowFiSwitch()).toBe(true);
     });
 
-    it("applies a cached low-fi switch even when the requested selection is empty", () => {
+    it("does not apply a cached low-fi switch when the requested selection is empty", () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
         const tile = {
@@ -725,6 +739,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             hasExplicitLowFidelityRules: () => true
         } as any;
         const pointMergeService = new PointMergeService();
@@ -753,9 +768,9 @@ describe("DeckTileVisualization", () => {
             "low"
         );
 
-        expect(switched).toBe(true);
-        expect(visu.applyLowFiBundleDataToRegistry).toHaveBeenCalledWith(registry, []);
-        expect(visu.completeRender).toHaveBeenCalledWith("low", []);
+        expect(switched).toBe(false);
+        expect(visu.applyLowFiBundleDataToRegistry).not.toHaveBeenCalled();
+        expect(visu.completeRender).not.toHaveBeenCalled();
     });
 
     it("keeps the active low-fi render when a requested high-fi render returns empty", async () => {
@@ -774,6 +789,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             hasExplicitLowFidelityRules: () => true
         } as any;
         const pointMergeService = new PointMergeService();
@@ -820,6 +836,7 @@ describe("DeckTileVisualization", () => {
         const style = {
             name: () => "test-style",
             isDeleted: () => false,
+            hasRelationRules: () => false,
             hasExplicitLowFidelityRules: () => true
         } as any;
         const pointMergeService = new PointMergeService();
@@ -843,5 +860,174 @@ describe("DeckTileVisualization", () => {
         tile.dataVersion = 2;
 
         expect(visu.isDirty()).toBe(true);
+    });
+
+    it("does not add auxiliary tiles before locate on the main thread", async () => {
+        const addedLayers: any[] = [];
+        const fakeDeckVisualization = {
+            addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
+            run: vi.fn(),
+            mergedPointFeatures: () => ({}),
+            delete: vi.fn()
+        };
+        const deckVisualizationCtor = vi.fn(() => fakeDeckVisualization);
+        const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
+        const previousPeekMany = FeatureTile.peekMany;
+        (coreLib as any).DeckFeatureLayerVisualization = deckVisualizationCtor;
+
+        const baseLayer = {numVertices: () => 7};
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            mapName: "Island-6-Local",
+            tileId: 42n,
+            numFeatures: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            peekAsync: async (callback: (layer: any) => Promise<any>) => await callback(baseLayer),
+            stats: new Map<string, number[]>()
+        } as any;
+        FeatureTile.peekMany = vi.fn();
+
+        try {
+            const style = {
+                name: () => "test-style",
+                isDeleted: () => false,
+                hasRelationRules: () => true
+            } as any;
+            const pointMergeService = new PointMergeService();
+            const visu = new DeckTileVisualization(
+                0,
+                tile,
+                pointMergeService,
+                style,
+                "",
+                1,
+                true,
+                null,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+                [],
+                "",
+                false,
+                {}
+            ) as any;
+            visu.readFloat64Array = () => new Float64Array([0, 0, 0]);
+            visu.readFloat32Array = () => new Float32Array();
+            visu.readUint32Array = () => new Uint32Array();
+            visu.readUint8Array = () => new Uint8Array();
+            visu.readLowFiBundlesFromDeckVisualization = () => [];
+
+            await visu.renderWasmOnMainThread("high", 0);
+
+            expect(deckVisualizationCtor).toHaveBeenCalledOnce();
+            expect(FeatureTile.peekMany).not.toHaveBeenCalled();
+            expect(addedLayers).toEqual([baseLayer]);
+        } finally {
+            (coreLib as any).DeckFeatureLayerVisualization = previousDeckVisualizationCtor;
+            FeatureTile.peekMany = previousPeekMany;
+        }
+    });
+
+    it("loads and resolves unresolved external relation targets on the main thread", async () => {
+        const addedLayers: any[] = [];
+        let currentRequests = [{
+            mapId: "Island-6-Local",
+            typeId: "LaneGroup",
+            featureId: ["laneGroupId", 123]
+        }];
+        const deckVisualization = {
+            addTileFeatureLayer: (layer: any) => addedLayers.push(layer),
+            run: vi.fn(),
+            mergedPointFeatures: () => ({}),
+            externalRelationReferences: () => currentRequests,
+            processResolvedExternalReferences: vi.fn(() => {
+                currentRequests = [];
+            }),
+            delete: vi.fn()
+        };
+        const deckVisualizationCtor = vi.fn().mockImplementation(() => deckVisualization);
+        const previousDeckVisualizationCtor = (coreLib as any).DeckFeatureLayerVisualization;
+        const previousPeekMany = FeatureTile.peekMany;
+        (coreLib as any).DeckFeatureLayerVisualization = deckVisualizationCtor;
+
+        const baseLayer = {numVertices: () => 7, key: "base"};
+        const locatedLayer = {numVertices: () => 5, key: "located"};
+        const tile = {
+            mapTileKey: "Island-6-Local/Lane/42",
+            layerName: "Lane",
+            mapName: "Island-6-Local",
+            tileId: 42n,
+            numFeatures: 1,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            peekAsync: async (callback: (layer: any) => Promise<any>) => await callback(baseLayer),
+            stats: new Map<string, number[]>()
+        } as any;
+        const locatedTile = {
+            mapTileKey: "Island-6-Local/Lane/44",
+            hasData: () => true
+        } as any;
+        FeatureTile.peekMany = vi.fn(async (tiles: any[], callback) => {
+            const layers = tiles.map(() => locatedLayer);
+            return await callback(layers);
+        });
+
+        try {
+            const style = {
+                name: () => "test-style",
+                isDeleted: () => false,
+                hasRelationRules: () => true
+            } as any;
+            const pointMergeService = new PointMergeService();
+            const relationExternalTileLoader = vi.fn(async () => ({
+                responses: [[{
+                    tileId: locatedTile.mapTileKey,
+                    typeId: "LaneGroupCanonical",
+                    featureId: ["laneGroupId", 987]
+                }]],
+                tiles: [locatedTile]
+            }));
+            const visu = new DeckTileVisualization(
+                0,
+                tile,
+                pointMergeService,
+                style,
+                "",
+                1,
+                true,
+                null,
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+                [],
+                "",
+                false,
+                {},
+                relationExternalTileLoader
+            ) as any;
+            visu.readFloat64Array = () => new Float64Array([0, 0, 0]);
+            visu.readFloat32Array = () => new Float32Array();
+            visu.readUint32Array = () => new Uint32Array();
+            visu.readUint8Array = () => new Uint8Array();
+            visu.readLowFiBundlesFromDeckVisualization = () => [];
+
+            await visu.renderWasmOnMainThread("high", 0);
+
+            expect(deckVisualizationCtor).toHaveBeenCalledOnce();
+            expect(relationExternalTileLoader).toHaveBeenCalledWith([{
+                mapId: "Island-6-Local",
+                typeId: "LaneGroup",
+                featureId: ["laneGroupId", 123]
+            }]);
+            expect(deckVisualization.processResolvedExternalReferences).toHaveBeenCalledWith([[
+                {
+                    tileId: locatedTile.mapTileKey,
+                    typeId: "LaneGroupCanonical",
+                    featureId: ["laneGroupId", 987]
+                }
+            ]]);
+            expect(addedLayers).toEqual([baseLayer, locatedLayer]);
+        } finally {
+            (coreLib as any).DeckFeatureLayerVisualization = previousDeckVisualizationCtor;
+            FeatureTile.peekMany = previousPeekMany;
+        }
     });
 });

@@ -120,10 +120,6 @@ function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatur
     if (!baseTile) {
         return null;
     }
-    const attachOverlay = (baseTile as any).attachOverlay;
-    if (typeof attachOverlay !== "function") {
-        return baseTile;
-    }
     try {
         for (let i = 1; i < tileBlobs.length; i++) {
             const overlay = uint8ArrayToWasm(data => parser.readTileFeatureLayer(data), tileBlobs[i]) as TileFeatureLayer | null;
@@ -131,7 +127,7 @@ function parseTileWithOverlays(parser: any, tileBlobs: Uint8Array[]): TileFeatur
                 continue;
             }
             try {
-                attachOverlay.call(baseTile, overlay);
+                baseTile.attachOverlay(overlay);
             } finally {
                 overlay.delete();
             }

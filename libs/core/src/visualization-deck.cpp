@@ -15,7 +15,12 @@ namespace erdblick
 
 namespace {
 constexpr uint32_t kUnselectableFeatureIndex = std::numeric_limits<uint32_t>::max();
-constexpr double kEarthRadiusMeters = 6378137.0;
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kDegToRad = kPi / 180.0;
+constexpr double kMercatorTileSize = 512.0;
+constexpr double kFallbackEarthRadiusMeters = 6378137.0;
+// Keep this in sync with math.gl web-mercator (addMetersToLngLat/getDistanceScales).
+constexpr double kEarthCircumferenceMeters = 40.03e6;
 constexpr double kArrowHeadLengthMinMeters = 2.0;
 constexpr double kArrowHeadLengthMaxMeters = 24.0;
 constexpr double kArrowHeadLengthFraction = 0.35;
@@ -57,6 +62,42 @@ JsValue rgbaBytesFromColor(glm::fvec4 const& color)
         JsValue(toByte(color.b)),
         JsValue(toByte(color.a)),
     });
+}
+
+double mercatorWorldX(double longitudeDeg)
+{
+    return (kMercatorTileSize * ((longitudeDeg * kDegToRad) + kPi)) / (2.0 * kPi);
+}
+
+double mercatorWorldY(double latitudeDeg)
+{
+    auto const latitudeRad = latitudeDeg * kDegToRad;
+    auto const mercatorTerm = std::log(std::tan((kPi * 0.25) + (latitudeRad * 0.5)));
+    return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
+}
+
+bool distanceScalesAt(
+    double latitudeDeg,
+    double& unitsPerMeter,
+    double& unitsPerMeter2)
+{
+    auto const latitudeRad = latitudeDeg * kDegToRad;
+    auto const latitudeCos = std::cos(latitudeRad);
+    if (!std::isfinite(latitudeCos) || std::abs(latitudeCos) < 1e-12) {
+        unitsPerMeter = 0.0;
+        unitsPerMeter2 = 0.0;
+        return false;
+    }
+
+    auto const unitsPerDegreeX = kMercatorTileSize / 360.0;
+    auto const unitsPerDegreeY = unitsPerDegreeX / latitudeCos;
+    unitsPerMeter = kMercatorTileSize / kEarthCircumferenceMeters / latitudeCos;
+
+    // math.gl high-precision scale correction term (unitsPerMeter2[0]).
+    auto const latitudeCosine2 = (kDegToRad * std::tan(latitudeRad)) / latitudeCos;
+    auto const unitsPerDegree2 = (kMercatorTileSize / kEarthCircumferenceMeters) * latitudeCosine2;
+    unitsPerMeter2 = (unitsPerDegree2 / unitsPerDegreeY) * unitsPerMeter;
+    return std::isfinite(unitsPerMeter) && std::isfinite(unitsPerMeter2);
 }
 }
 
@@ -302,6 +343,17 @@ NativeJsValue DeckFeatureLayerVisualization::mergedPointFeatures() const
     return *result;
 }
 
+NativeJsValue DeckFeatureLayerVisualization::externalRelationReferences() const
+{
+    return FeatureLayerVisualizationBase::externalRelationReferences();
+}
+
+void DeckFeatureLayerVisualization::processResolvedExternalReferences(
+    NativeJsValue const& resolvedReferences)
+{
+    FeatureLayerVisualizationBase::processResolvedExternalReferences(resolvedReferences);
+}
+
 void DeckFeatureLayerVisualization::addTileFeatureLayer(TileFeatureLayer const& tile)
 {
     auto const isFirstTile = !tile_;
@@ -420,13 +472,35 @@ mapget::Point DeckFeatureLayerVisualization::projectWgsPoint(
         hasPathCoordinateOriginWgs_ = true;
     }
 
-    auto const lat0Rad = glm::radians(pathCoordinateOriginWgs_.y);
-    auto const dLonRad = glm::radians(adjustedWgs.x - pathCoordinateOriginWgs_.x);
-    auto const dLatRad = glm::radians(adjustedWgs.y - pathCoordinateOriginWgs_.y);
+    double unitsPerMeter = 0.0;
+    double unitsPerMeter2 = 0.0;
+    if (!distanceScalesAt(pathCoordinateOriginWgs_.y, unitsPerMeter, unitsPerMeter2)) {
+        auto const lat0Rad = glm::radians(pathCoordinateOriginWgs_.y);
+        auto const dLonRad = glm::radians(adjustedWgs.x - pathCoordinateOriginWgs_.x);
+        auto const dLatRad = glm::radians(adjustedWgs.y - pathCoordinateOriginWgs_.y);
+        return {
+            dLonRad * std::cos(lat0Rad) * kFallbackEarthRadiusMeters,
+            dLatRad * kFallbackEarthRadiusMeters,
+            adjustedWgs.z - pathCoordinateOriginWgs_.z,
+        };
+    }
 
+    auto const originWorldX = mercatorWorldX(pathCoordinateOriginWgs_.x);
+    auto const originWorldY = mercatorWorldY(pathCoordinateOriginWgs_.y);
+    auto const pointWorldX = mercatorWorldX(adjustedWgs.x);
+    auto const pointWorldY = mercatorWorldY(adjustedWgs.y);
+    auto const deltaWorldX = pointWorldX - originWorldX;
+    auto const deltaWorldY = pointWorldY - originWorldY;
+
+    // Invert math.gl addMetersToLngLat:
+    // worldDeltaY = yMeters * unitsPerMeter
+    // worldDeltaX = xMeters * (unitsPerMeter + unitsPerMeter2 * yMeters)
+    auto const yMeters = deltaWorldY / unitsPerMeter;
+    auto const xDenominator = unitsPerMeter + unitsPerMeter2 * yMeters;
+    auto const xMeters = std::abs(xDenominator) < 1e-12 ? 0.0 : deltaWorldX / xDenominator;
     return {
-        dLonRad * std::cos(lat0Rad) * kEarthRadiusMeters,
-        dLatRad * kEarthRadiusMeters,
+        xMeters,
+        yMeters,
         adjustedWgs.z - pathCoordinateOriginWgs_.z,
     };
 }

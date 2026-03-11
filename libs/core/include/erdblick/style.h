@@ -64,6 +64,7 @@ public:
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
     [[nodiscard]] bool hasExplicitLowFidelityRules() const;
+    [[nodiscard]] bool hasRelationRules(FeatureStyleRule::HighlightMode mode) const;
     [[nodiscard]] std::vector<uint32_t> const& candidateRuleIndices(
         FeatureStyleRule::HighlightMode mode,
         FeatureStyleRule::Fidelity fidelity,

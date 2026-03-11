@@ -31,6 +31,61 @@ export interface TileRenderPolicy {
     maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
 }
 
+function tileRenderPolicyForCount(tileCount: number): TileRenderPolicy {
+    if (tileCount >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 0
+        };
+    }
+    if (tileCount >= LOW_FI_LOD1_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 1
+        };
+    }
+    if (tileCount >= LOW_FI_LOD2_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 2
+        };
+    }
+    if (tileCount >= LOW_FI_LOD3_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 3
+        };
+    }
+    if (tileCount >= LOW_FI_LOD4_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 4
+        };
+    }
+    if (tileCount >= LOW_FI_LOD5_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 5
+        };
+    }
+    if (tileCount >= LOW_FI_LOD6_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 6
+        };
+    }
+    if (tileCount >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
+        return {
+            targetFidelity: "low",
+            maxLowFiLod: 7
+        };
+    }
+    return {
+        targetFidelity: "high",
+        maxLowFiLod: null
+    };
+}
+
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     visibleTileIds: Set<bigint> = new Set();
@@ -152,7 +207,7 @@ export class ViewVisualizationState {
         }
     }
 
-    recalculateTileIds(tileLimit: number, levels: Iterable<number>) {
+    recalculateTileIds(tileLimit: number, levels: Iterable<number>, canonicalCameraAltitudeMeters: number) {
         this.visibleTileIds.clear();
         this.tileRenderPolicy.clear();
         this.visibleTileIdsPerLevel.clear();
@@ -168,51 +223,8 @@ export class ViewVisualizationState {
                 ...new Set<bigint>(visibleTileIdsForLevel)
             ]);
 
-            let levelPolicy: TileRenderPolicy = {
-                targetFidelity: "high",
-                maxLowFiLod: null
-            };
-            if (visibleTileIdsForLevel.length >= LOW_FI_LOD0_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 0
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD1_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 1
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD2_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 2
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD3_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 3
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD4_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 4
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD5_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 5
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD6_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 6
-                };
-            } else if (visibleTileIdsForLevel.length >= LOW_FI_LOD7_TILE_COUNT_THRESHOLD) {
-                levelPolicy = {
-                    targetFidelity: "low",
-                    maxLowFiLod: 7
-                };
-            }
+            const canonicalTileCount = coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level);
+            const levelPolicy = tileRenderPolicyForCount(canonicalTileCount);
 
             for (const tileId of visibleTileIdsForLevel) {
                 this.tileRenderPolicy.set(tileId, levelPolicy);

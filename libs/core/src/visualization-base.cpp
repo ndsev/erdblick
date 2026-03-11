@@ -6,9 +6,11 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <deque>
 #include <iostream>
 #include <regex>
 #include <type_traits>
+#include <unordered_map>
 
 using namespace mapget;
 
@@ -77,6 +79,245 @@ std::optional<uint32_t> parseFeatureIndexToken(std::string_view value) {
     }
     return parsed;
 }
+
+}
+
+bool FeatureLayerVisualizationBase::RelationStyleState::RelationToVisualize::readyToRender() const
+{
+    return relation_ && sourceFeature_ && targetFeature_ && !rendered_;
+}
+
+FeatureLayerVisualizationBase::RelationStyleState::RelationStyleState(
+    FeatureStyleRule const& rule,
+    model_ptr<Feature> feature,
+    FeatureLayerVisualizationBase& visualization)
+    : rule_(rule),
+      visualization_(visualization)
+{
+    unexploredFeatures_.emplace_back(std::move(feature));
+    populateAndRender();
+}
+
+void FeatureLayerVisualizationBase::RelationStyleState::populateAndRender(bool onlyUpdateTwowayFlags)
+{
+    while (!unexploredFeatures_.empty()) {
+        auto next = unexploredFeatures_.front();
+        unexploredFeatures_.pop_front();
+
+        next->forEachRelation([&](auto const& relation) {
+            addRelation(next, relation, onlyUpdateTwowayFlags);
+            return true;
+        });
+    }
+
+    for (auto& [_, relationList] : relationsBySourceFeatureId_) {
+        for (auto& relationToRender : relationList) {
+            if (relationToRender.readyToRender()) {
+                render(relationToRender);
+            }
+        }
+    }
+}
+
+void FeatureLayerVisualizationBase::RelationStyleState::addRelation(
+    model_ptr<Feature> const& sourceFeature,
+    model_ptr<Relation> const& relation,
+    bool onlyUpdateTwowayFlags)
+{
+    if (auto const& relationType = rule_.relationType()) {
+        auto relationName = relation->name();
+        if (!std::regex_match(relationName.begin(), relationName.end(), *relationType)) {
+            return;
+        }
+    }
+
+    auto const sourceId = sourceFeature->id()->toString();
+    auto const targetRef = relation->target();
+    auto const targetRefString = targetRef->toString();
+    auto& relationsForSource = relationsBySourceFeatureId_[sourceId];
+    for (auto const& existingRelation : relationsForSource) {
+        if (existingRelation.relation_
+            && existingRelation.relation_->target()->toString() == targetRefString) {
+            return;
+        }
+    }
+
+    auto targetFeature =
+        visualization_.tile_->find(targetRef->typeId(), targetRef->keyValuePairs());
+
+    auto relationsForTargetIt = relationsBySourceFeatureId_.end();
+    if (targetFeature) {
+        auto const targetId = targetFeature->id()->toString();
+        relationsForTargetIt = relationsBySourceFeatureId_.find(targetId);
+        if (rule_.relationMergeTwoWay() && relationsForTargetIt != relationsBySourceFeatureId_.end()) {
+            for (auto& existingRelation : relationsForTargetIt->second) {
+                if (existingRelation.targetFeature_
+                    && existingRelation.targetFeature_->id()->toString() == sourceId) {
+                    existingRelation.twoway_ = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    if (onlyUpdateTwowayFlags) {
+        return;
+    }
+
+    auto& newRelation = relationsForSource.emplace_back();
+    newRelation.relation_ = relation;
+    newRelation.sourceFeature_ = sourceFeature;
+    if (targetFeature) {
+        newRelation.targetFeature_ = targetFeature;
+        if (rule_.relationRecursive()
+            && relationsForTargetIt == relationsBySourceFeatureId_.end()) {
+            unexploredFeatures_.emplace_back(targetFeature);
+        }
+        return;
+    }
+    visualization_.rememberExternalRelationReference(
+        *this,
+        &newRelation,
+        targetRef);
+}
+
+std::vector<SelfContainedGeometry> FeatureLayerVisualizationBase::RelationStyleState::relationGeometries(
+    model_ptr<MultiValidity> const& validities,
+    model_ptr<Feature> const& feature)
+{
+    std::vector<SelfContainedGeometry> result;
+    if (validities) {
+        validities->forEach([&](auto&& validity) {
+            result.emplace_back(validity.computeGeometry(feature->geomOrNull()));
+            return true;
+        });
+    }
+    if (result.empty()) {
+        result.emplace_back(feature->firstGeometry());
+    }
+    return result;
+}
+
+void FeatureLayerVisualizationBase::RelationStyleState::render(RelationToVisualize& relationToRender)
+{
+    auto const& relation = static_cast<mapget::Relation const&>(*relationToRender.relation_);
+    auto const& source = static_cast<mapget::Feature const&>(*relationToRender.sourceFeature_);
+    auto const& target = static_cast<mapget::Feature const&>(*relationToRender.targetFeature_);
+
+    auto relationContext =
+        simfil::model_ptr<simfil::OverlayNode>::make(simfil::Value::field(relation));
+    visualization_.addOptionsToSimfilContext(relationContext);
+    relationContext->set(
+        visualization_.internalStringPoolCopy_->emplace("$source").value(),
+        simfil::Value::field(source));
+    relationContext->set(
+        visualization_.internalStringPoolCopy_->emplace("$target").value(),
+        simfil::Value::field(target));
+    relationContext->set(
+        visualization_.internalStringPoolCopy_->emplace("$twoway").value(),
+        simfil::Value(relationToRender.twoway_));
+
+    auto boundEvalFun = BoundEvalFun{
+        relationContext,
+        [this, &relationContext](auto&& expression)
+        {
+            return visualization_.evaluateExpression(expression, *relationContext, false, false);
+        }};
+
+    auto const sourceGeometries =
+        relationGeometries(relationToRender.relation_->sourceValidityOrNull(), relationToRender.sourceFeature_);
+    auto const targetGeometries =
+        relationGeometries(relationToRender.relation_->targetValidityOrNull(), relationToRender.targetFeature_);
+    auto offsetBase = glm::dmat3x3(1.0);
+    if (!sourceGeometries.empty() && !sourceGeometries.front().points_.empty()) {
+        offsetBase = localWgs84UnitCoordinateSystem(sourceGeometries.front());
+    }
+    auto const relationOffset = offsetBase * rule_.offset();
+
+    auto const sourceId = relationToRender.sourceFeature_->id()->toString();
+    auto const targetId = relationToRender.targetFeature_->id()->toString();
+
+    if (!sourceGeometries.empty()
+        && !targetGeometries.empty()
+        && !sourceGeometries.front().points_.empty()
+        && !targetGeometries.front().points_.empty()) {
+        auto const sourceCenter = geometryCenter(sourceGeometries.front());
+        auto const targetCenter = geometryCenter(targetGeometries.front());
+        auto const liftedSource = Point{
+            sourceCenter.x,
+            sourceCenter.y,
+            sourceCenter.z + rule_.relationLineHeightOffset()};
+        auto const liftedTarget = Point{
+            targetCenter.x,
+            targetCenter.y,
+            targetCenter.z + rule_.relationLineHeightOffset()};
+
+        if (rule_.width() > 0.0f) {
+            visualization_.addLine(
+                liftedSource,
+                liftedTarget,
+                FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                rule_,
+                boundEvalFun,
+                relationOffset);
+        }
+        if (auto lineEndMarkerStyle = rule_.relationLineEndMarkerStyle()) {
+            if (visualizedFeatureParts_.emplace(sourceId + "-line-end-marker").second) {
+                visualization_.addLine(
+                    sourceCenter,
+                    liftedSource,
+                    FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                    *lineEndMarkerStyle,
+                    boundEvalFun,
+                    offsetBase * lineEndMarkerStyle->offset());
+            }
+            if (visualizedFeatureParts_.emplace(targetId + "-line-end-marker").second) {
+                visualization_.addLine(
+                    targetCenter,
+                    liftedTarget,
+                    FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                    *lineEndMarkerStyle,
+                    boundEvalFun,
+                    offsetBase * lineEndMarkerStyle->offset());
+            }
+        }
+    }
+
+    if (auto sourceStyle = rule_.relationSourceStyle();
+        sourceStyle && visualizedFeatureParts_.emplace(sourceId).second) {
+        for (auto const& sourceGeometry : sourceGeometries) {
+            if (sourceGeometry.points_.empty()) {
+                continue;
+            }
+            visualization_.addGeometry(
+                sourceGeometry,
+                std::nullopt,
+                FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                *sourceStyle,
+                "",
+                boundEvalFun,
+                offsetBase * sourceStyle->offset());
+        }
+    }
+
+    if (auto targetStyle = rule_.relationTargetStyle();
+        targetStyle && visualizedFeatureParts_.emplace(targetId).second) {
+        for (auto const& targetGeometry : targetGeometries) {
+            if (targetGeometry.points_.empty()) {
+                continue;
+            }
+            visualization_.addGeometry(
+                targetGeometry,
+                std::nullopt,
+                FeatureLayerVisualizationBase::kUnselectableFeatureId,
+                *targetStyle,
+                "",
+                boundEvalFun,
+                offsetBase * targetStyle->offset());
+        }
+    }
+
+    relationToRender.rendered_ = true;
 }
 
 FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
@@ -101,6 +342,7 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
       featureMergeService_(rawFeatureMergeService)
 {
     (void) mapTileKey;
+    externalRelationReferences_ = JsValue::List();
     // Convert option values dict to simfil values.
     auto optionValues = JsValue(rawOptionValues);
     for (auto const& option : style.options()) {
@@ -131,6 +373,79 @@ FeatureLayerVisualizationBase::FeatureLayerVisualizationBase(
 
 FeatureLayerVisualizationBase::~FeatureLayerVisualizationBase() = default;
 
+NativeJsValue FeatureLayerVisualizationBase::externalRelationReferences() const
+{
+    return *externalRelationReferences_;
+}
+
+void FeatureLayerVisualizationBase::processResolvedExternalReferences(
+    NativeJsValue const& resolvedReferences)
+{
+    #ifdef EMSCRIPTEN
+    auto resolvedReferenceLists = JsValue(resolvedReferences);
+    auto const numResolutionLists = resolvedReferenceLists.size();
+    #else
+    auto const numResolutionLists = resolvedReferences.size();
+    #endif
+    if (numResolutionLists != externalRelationVisualizations_.size()) {
+        std::cout << "Unexpected number of resolutions!" << std::endl;
+        return;
+    }
+
+    std::set<RelationStyleState*> updatedRelationStates;
+    for (uint32_t index = 0; index < numResolutionLists; ++index) {
+        #ifdef EMSCRIPTEN
+        auto resolutionList = resolvedReferenceLists.at(static_cast<uint32_t>(index));
+        if (resolutionList.size() == 0) {
+            continue;
+        }
+
+        auto firstResolution = resolutionList.at(0);
+        auto const typeId = firstResolution["typeId"].as<std::string>();
+        auto const featureId = firstResolution["featureId"].toKeyValuePairs();
+        #else
+        auto const& resolutionList = resolvedReferences[index];
+        if (!resolutionList.is_array() || resolutionList.empty()) {
+            continue;
+        }
+
+        auto const& firstResolution = resolutionList[0];
+        auto const typeId = firstResolution["typeId"].get<std::string>();
+        auto const featureId = JsValue(firstResolution["featureId"]).toKeyValuePairs();
+        #endif
+
+        mapget::model_ptr<mapget::Feature> targetFeature;
+        for (auto const& tile : allTiles_) {
+            targetFeature = tile->find(typeId, featureId);
+            if (targetFeature) {
+                break;
+            }
+        }
+        if (!targetFeature) {
+            std::cout << "Resolved target feature was not found in aux tiles!" << std::endl;
+            continue;
+        }
+
+        auto const& pendingRelation = externalRelationVisualizations_[index];
+        if (!pendingRelation.state) {
+            continue;
+        }
+        auto* relationToRender = pendingRelation.relationToRender;
+        if (!relationToRender || !relationToRender->relation_ || relationToRender->targetFeature_) {
+            continue;
+        }
+        relationToRender->targetFeature_ = targetFeature;
+        if (pendingRelation.state->rule_.relationMergeTwoWay()) {
+            pendingRelation.state->unexploredFeatures_.emplace_back(targetFeature);
+        }
+        updatedRelationStates.insert(pendingRelation.state);
+    }
+
+    for (auto* relationState : updatedRelationStates) {
+        relationState->populateAndRender(true);
+    }
+}
+
 bool FeatureLayerVisualizationBase::includesPointLikeGeometry() const
 {
     return geometryOutputMode_ != GeometryOutputMode::NonPointsOnly;
@@ -153,10 +468,9 @@ void FeatureLayerVisualizationBase::onRelationStyle(
     FeatureStyleRule const& rule,
     std::string const& mapLayerStyleRuleId)
 {
-    (void) feature;
     (void) evalFun;
-    (void) rule;
     (void) mapLayerStyleRuleId;
+    relationStyleStates_.emplace_back(rule, feature, *this);
 }
 
 void FeatureLayerVisualizationBase::onFeatureForRendering(mapget::Feature const& feature)
@@ -325,6 +639,10 @@ void FeatureLayerVisualizationBase::run()
     if (!tile_) {
         return;
     }
+
+    relationStyleStates_.clear();
+    externalRelationReferences_ = JsValue::List();
+    externalRelationVisualizations_.clear();
 
     auto processFeature = [this](mapget::model_ptr<mapget::Feature>& feature)
     {
@@ -704,6 +1022,30 @@ void FeatureLayerVisualizationBase::addMergedPointGeometry(
             (*mergedPointVisu)["featureIds"].push(JsValue(tileFeatureId));
         }
     }
+}
+
+void FeatureLayerVisualizationBase::rememberExternalRelationReference(
+    RelationStyleState& state,
+    RelationStyleState::RelationToVisualize* relationToRender,
+    model_ptr<FeatureId> const& targetRef)
+{
+    auto pendingRelation = PendingExternalRelation{
+        .state = &state,
+        .relationToRender = relationToRender
+    };
+    externalRelationVisualizations_.push_back(pendingRelation);
+
+    auto featureId = JsValue::List();
+    for (auto const& [key, value] : targetRef->keyValuePairs()) {
+        featureId.push(JsValue(std::string(key)));
+        featureId.push(JsValue::fromVariant(value));
+    }
+
+    externalRelationReferences_.push(JsValue::Dict({
+        {"mapId", JsValue(tile_ ? tile_->mapId() : std::string())},
+        {"typeId", JsValue(std::string(targetRef->typeId()))},
+        {"featureId", featureId}
+    }));
 }
 
 void FeatureLayerVisualizationBase::addLine(

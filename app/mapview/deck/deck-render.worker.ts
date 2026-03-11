@@ -1,4 +1,12 @@
-import {initializeLibrary, coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../../integrations/wasm";
+import {initializeLibrary, coreLib, type ErdblickCore_, uint8ArrayFromWasm, uint8ArrayToWasm} from "../../integrations/wasm";
+import {
+    DeckFeatureLayerVisualization,
+    FeatureLayerStyle,
+    HighlightMode,
+    RuleFidelity,
+    TileFeatureLayer,
+    TileLayerParser
+} from "../../../build/libs/core/erdblick-core";
 import {
     DECK_GEOMETRY_OUTPUT_ALL,
     DECK_GEOMETRY_OUTPUT_NON_POINTS_ONLY,
@@ -9,11 +17,23 @@ import {
     DeckWorkerInboundMessage,
     DeckWorkerReadyMessage
 } from "./deck-render.worker.protocol";
-import {collectLowFiRawBundles} from "./deck-lowfi-bundle";
+import {collectLowFiRawBundles, type DeckLowFiRawAccessor} from "./deck-lowfi-bundle";
 
 const styleTextEncoder = new TextEncoder();
-const parserCache = new Map<string, any>();
-const styleCache = new Map<string, any>();
+const parserCache = new Map<string, TileLayerParser>();
+const styleCache = new Map<string, FeatureLayerStyle>();
+
+type DeckFeatureLayerVisualizationCtor = ErdblickCore_["DeckFeatureLayerVisualization"];
+type RuleFidelityEnum = ErdblickCore_["RuleFidelity"];
+type DeckVisualizationRawAccessor = DeckLowFiRawAccessor | "pathCoordinateOriginRaw";
+
+function deckFeatureLayerVisualizationCtor(): DeckFeatureLayerVisualizationCtor {
+    return coreLib.DeckFeatureLayerVisualization as DeckFeatureLayerVisualizationCtor;
+}
+
+function ruleFidelityEnum(): RuleFidelityEnum {
+    return coreLib.RuleFidelity as RuleFidelityEnum;
+}
 
 function blobSignature(blob: Uint8Array): string {
     if (!blob.length) {
@@ -32,7 +52,7 @@ function parserCacheKey(task: DeckTileRenderTask): string {
     ].join("|");
 }
 
-function getOrCreateParser(task: DeckTileRenderTask): any {
+function getOrCreateParser(task: DeckTileRenderTask): TileLayerParser {
     const key = parserCacheKey(task);
     const cached = parserCache.get(key);
     if (cached) {
@@ -45,18 +65,21 @@ function getOrCreateParser(task: DeckTileRenderTask): any {
     return parser;
 }
 
-function getOrCreateStyle(styleSource: string): any {
+function getOrCreateStyle(styleSource: string): FeatureLayerStyle {
     const cached = styleCache.get(styleSource);
     if (cached) {
         return cached;
     }
     const styleBytes = styleTextEncoder.encode(styleSource);
-    const parsed = uint8ArrayToWasm((data) => new coreLib.FeatureLayerStyle(data), styleBytes) as any;
+    const parsed = uint8ArrayToWasm((data) => new coreLib.FeatureLayerStyle(data), styleBytes);
+    if (!parsed) {
+        throw new Error("Failed to parse FeatureLayerStyle in deck render worker.");
+    }
     styleCache.set(styleSource, parsed);
     return parsed;
 }
 
-function resolveHighlightMode(modeValue: number): any {
+function resolveHighlightMode(modeValue: number): HighlightMode {
     if (modeValue === coreLib.HighlightMode.HOVER_HIGHLIGHT.value) {
         return coreLib.HighlightMode.HOVER_HIGHLIGHT;
     }
@@ -66,8 +89,8 @@ function resolveHighlightMode(modeValue: number): any {
     return coreLib.HighlightMode.NO_HIGHLIGHT;
 }
 
-function resolveFidelity(fidelityValue: number): any {
-    const ruleFidelity = (coreLib as any).RuleFidelity;
+function resolveFidelity(fidelityValue: number): RuleFidelity {
+    const ruleFidelity = ruleFidelityEnum();
     if (fidelityValue === ruleFidelity.HIGH.value) {
         return ruleFidelity.HIGH;
     }
@@ -77,24 +100,26 @@ function resolveFidelity(fidelityValue: number): any {
     return ruleFidelity.ANY;
 }
 
-function createMergeCountProvider(snapshot: Record<string, number>): any {
+function createMergeCountProvider(snapshot: Record<string, number>): {
+    count: (_geoPos: unknown, hashPos: string, _level: number, mapViewLayerStyleRuleId: string) => number
+} {
     const table = snapshot ?? {};
     return {
-        count: (_geoPos: any, hashPos: string, _level: number, mapViewLayerStyleRuleId: string) => {
+        count: (_geoPos: unknown, hashPos: string, _level: number, mapViewLayerStyleRuleId: string) => {
             const value = table[`${mapViewLayerStyleRuleId}|${hashPos}`];
             return Number.isInteger(value) ? value : 0;
         }
     };
 }
 
-function readRawBytes(deckVisu: any, accessorName: string): Uint8Array {
+function readRawBytes(deckVisu: DeckFeatureLayerVisualization, accessorName: DeckVisualizationRawAccessor): Uint8Array {
     return uint8ArrayFromWasm((shared) => {
         deckVisu[accessorName](shared);
         return true;
     }) as Uint8Array;
 }
 
-function readLowFiBundles(deckVisu: any): DeckLowFiBundleResult[] {
+function readLowFiBundles(deckVisu: DeckFeatureLayerVisualization): DeckLowFiBundleResult[] {
     return collectLowFiRawBundles(
         deckVisu,
         (accessorName) => readRawBytes(deckVisu, accessorName)
@@ -119,29 +144,25 @@ function readLowFiBundles(deckVisu: any): DeckLowFiBundleResult[] {
     }));
 }
 
-function attachOverlayChain(baseLayer: any, overlays: any[]): void {
-    const maybeAttach = baseLayer?.attachOverlay;
-    if (typeof maybeAttach !== "function") {
-        return;
-    }
+function attachOverlayChain(baseLayer: TileFeatureLayer, overlays: TileFeatureLayer[]): void {
     for (const overlay of overlays) {
-        maybeAttach.call(baseLayer, overlay);
+        baseLayer.attachOverlay(overlay);
     }
 }
 
 function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
     const totalStart = performance.now();
     let deserializeMs = 0;
-    let baseLayer: any = null;
-    const overlays: any[] = [];
-    let deckVisu: any = null;
+    let baseLayer: TileFeatureLayer | null = null;
+    const overlays: TileFeatureLayer[] = [];
+    let deckVisu: DeckFeatureLayerVisualization | null = null;
     try {
         const parser = getOrCreateParser(task);
         const style = getOrCreateStyle(task.styleSource);
         const deserializeStart = performance.now();
-        const deserializedLayers: any[] = [];
+        const deserializedLayers: TileFeatureLayer[] = [];
         for (const tileBlob of task.tileStageBlobs) {
-            const layer = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), tileBlob) as any;
+            const layer = uint8ArrayToWasm((data) => parser.readTileFeatureLayer(data), tileBlob) as TileFeatureLayer | null;
             if (layer) {
                 deserializedLayers.push(layer);
             }
@@ -155,7 +176,8 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         attachOverlayChain(baseLayer, overlays);
         const vertexCount = Math.max(0, Math.floor(Number(baseLayer.numVertices())));
 
-        deckVisu = new (coreLib as any).DeckFeatureLayerVisualization(
+        const deckCtor = deckFeatureLayerVisualizationCtor();
+        deckVisu = new deckCtor(
             task.viewIndex,
             task.tileKey,
             style,
@@ -175,9 +197,7 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         ].includes(task.outputMode)
             ? task.outputMode
             : DECK_GEOMETRY_OUTPUT_ALL;
-        if (typeof (deckVisu as any).setGeometryOutputMode === "function") {
-            (deckVisu as any).setGeometryOutputMode(normalizedOutputMode);
-        }
+        deckVisu.setGeometryOutputMode(normalizedOutputMode);
         const renderStart = performance.now();
         deckVisu.addTileFeatureLayer(baseLayer);
         deckVisu.run();
@@ -234,15 +254,13 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
             }
         };
     } finally {
-        if (deckVisu && typeof deckVisu.delete === "function") {
+        if (deckVisu) {
             deckVisu.delete();
         }
         for (const overlay of overlays) {
-            if (overlay && typeof overlay.delete === "function") {
-                overlay.delete();
-            }
+            overlay.delete();
         }
-        if (baseLayer && typeof baseLayer.delete === "function") {
+        if (baseLayer) {
             baseLayer.delete();
         }
     }

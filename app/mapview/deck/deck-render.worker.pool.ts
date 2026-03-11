@@ -344,7 +344,7 @@ function sanitizeWorkerOverride(workerCountOverride: number | null): number | nu
 
 function resolveAutoWorkerCount(): number {
     const rawCpuCount = Number(
-        (globalThis as any).navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK_CPU_COUNT
+        globalThis.navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK_CPU_COUNT
     );
     const normalizedCpuCount =
         Number.isFinite(rawCpuCount) && rawCpuCount >= 1

@@ -59,6 +59,8 @@ public:
     void arrowWidthsRaw(SharedUint8Array& out) const;
     void arrowFeatureIdsRaw(SharedUint8Array& out) const;
     [[nodiscard]] NativeJsValue mergedPointFeatures() const;
+    [[nodiscard]] NativeJsValue externalRelationReferences() const;
+    void processResolvedExternalReferences(NativeJsValue const& resolvedReferences);
 
 private:
     mapget::Point projectWgsPoint(

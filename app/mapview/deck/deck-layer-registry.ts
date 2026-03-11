@@ -1,10 +1,10 @@
+import type {Deck as DeckGlDeck} from "@deck.gl/core";
+
 export interface DeckLayerLike {
     id: string;
 }
 
-export interface DeckLike {
-    setProps(props: {layers: DeckLayerLike[]}): void;
-}
+export type DeckLike = Pick<DeckGlDeck<any>, "setProps">;
 
 type ScheduleFn = (cb: () => void) => number;
 type CancelFn = (handle: number) => void;
@@ -124,7 +124,7 @@ export class DeckLayerRegistry {
             })
             .map(([, entry]) => entry.layer);
 
-        this.deck.setProps({layers});
+        this.deck.setProps({layers: layers as never[]});
         this.dirty = false;
     }
 

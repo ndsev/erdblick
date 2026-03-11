@@ -306,6 +306,50 @@ describe('MapDataService', () => {
             state.visibleTileIds.has(id))).toBe(true);
     });
 
+    it('loads locate-resolved relation target tiles before returning them', async () => {
+        const {service} = createMapDataService();
+        const fetchMock = vi.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                responses: [[{
+                    tileId: 'm1/layerA/44',
+                    typeId: 'LaneGroup',
+                    featureId: ['tileId', 44, 'laneGroupId', 7]
+                }]]
+            })
+        }));
+        vi.stubGlobal('fetch', fetchMock as any);
+
+        const loadedTile = {
+            mapTileKey: 'm1/layerA/44',
+            hasData: () => true,
+        } as any;
+        const loadTilesSpy = vi.spyOn(service as any, 'loadTiles').mockResolvedValue(new Map([
+            ['m1/layerA/44', loadedTile]
+        ]));
+
+        try {
+            const result = await (service as any).resolveRelationExternalTiles([{
+                mapId: 'm1',
+                typeId: 'LaneGroup',
+                featureId: ['tileId', 1, 'connPosX', 2, 'connPosY', 3, 'connPosZ', 0]
+            }], coreLib.HighlightMode.SELECTION_HIGHLIGHT);
+
+            expect(fetchMock).toHaveBeenCalledOnce();
+            expect(loadTilesSpy).toHaveBeenCalledWith(new Set(['m1/layerA/44']));
+            expect(result.responses).toEqual([[
+                {
+                    tileId: 'm1/layerA/44',
+                    typeId: 'LaneGroup',
+                    featureId: ['tileId', 44, 'laneGroupId', 7]
+                }
+            ]]);
+            expect(result.tiles).toEqual([loadedTile]);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('evicts non-required tiles while keeping required ones', async () => {
         const {service, tileParser} = createMapDataService();
 
