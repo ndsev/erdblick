@@ -265,6 +265,7 @@ export class SearchState extends JobGroup {
 export class FeatureSearchService {
     private static readonly SEARCH_ICON_ATLAS_URL = "/bundle/images/search/location-icon-atlas.png";
     private static readonly SEARCH_ICON_MAPPING_URL = "/bundle/images/search/location-icon-mapping.json";
+    private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
 
     workers: Array<Worker> = []
     private workerBusy: Array<boolean> = [];
@@ -310,6 +311,7 @@ export class FeatureSearchService {
     private tintedAtlasByColor = new Map<string, string>();
     private baseAtlasImagePromise: Promise<HTMLImageElement> | null = null;
     private clusterIconAtlasUrl = FeatureSearchService.SEARCH_ICON_ATLAS_URL;
+    private locationMarkerGraphicUrl: string | null = null;
 
     public fixedDiagnosticsSearchQuery: Subject<string> = new Subject<string>();
 
@@ -327,6 +329,17 @@ export class FeatureSearchService {
 
     getSearchClusterIconMappingUrl(): string {
         return FeatureSearchService.SEARCH_ICON_MAPPING_URL;
+    }
+
+    /**
+     * Returns the legacy single-marker icon used for explicit coordinate marking.
+     */
+    markerGraphics(): string {
+        if (!this.locationMarkerGraphicUrl) {
+            this.locationMarkerGraphicUrl =
+                `data:image/svg+xml;base64,${btoa(FeatureSearchService.LOCATION_MARKER_SVG)}`;
+        }
+        return this.locationMarkerGraphicUrl;
     }
 
     get searchResultPointsVersion(): number {

@@ -129,18 +129,25 @@ function readLowFiBundles(deckVisu: DeckFeatureLayerVisualization): DeckLowFiBun
         pointColors: bundle.pointColors.buffer as ArrayBuffer,
         pointRadii: bundle.pointRadii.buffer as ArrayBuffer,
         pointFeatureIds: bundle.pointFeatureIds.buffer as ArrayBuffer,
+        pointBillboards: bundle.pointBillboards.buffer as ArrayBuffer,
+        surfacePositions: bundle.surfacePositions.buffer as ArrayBuffer,
+        surfaceStartIndices: bundle.surfaceStartIndices.buffer as ArrayBuffer,
+        surfaceColors: bundle.surfaceColors.buffer as ArrayBuffer,
+        surfaceFeatureIds: bundle.surfaceFeatureIds.buffer as ArrayBuffer,
         positions: bundle.positions.buffer as ArrayBuffer,
         startIndices: bundle.startIndices.buffer as ArrayBuffer,
         colors: bundle.colors.buffer as ArrayBuffer,
         widths: bundle.widths.buffer as ArrayBuffer,
         featureIds: bundle.featureIds.buffer as ArrayBuffer,
+        billboards: bundle.billboards.buffer as ArrayBuffer,
         dashArrays: bundle.dashArrays.buffer as ArrayBuffer,
         dashOffsets: bundle.dashOffsets.buffer as ArrayBuffer,
         arrowPositions: bundle.arrowPositions.buffer as ArrayBuffer,
         arrowStartIndices: bundle.arrowStartIndices.buffer as ArrayBuffer,
         arrowColors: bundle.arrowColors.buffer as ArrayBuffer,
         arrowWidths: bundle.arrowWidths.buffer as ArrayBuffer,
-        arrowFeatureIds: bundle.arrowFeatureIds.buffer as ArrayBuffer
+        arrowFeatureIds: bundle.arrowFeatureIds.buffer as ArrayBuffer,
+        arrowBillboards: bundle.arrowBillboards.buffer as ArrayBuffer
     }));
 }
 
@@ -208,6 +215,10 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
         const pointFeatureIds = readRawBytes(deckVisu, "pointFeatureIdsRaw");
         const pointBillboards = readRawBytes(deckVisu, "pointBillboardsRaw");
         const coordinateOrigin = readRawBytes(deckVisu, "pathCoordinateOriginRaw");
+        const surfacePositions = readRawBytes(deckVisu, "surfacePositionsRaw");
+        const surfaceStartIndices = readRawBytes(deckVisu, "surfaceStartIndicesRaw");
+        const surfaceColors = readRawBytes(deckVisu, "surfaceColorsRaw");
+        const surfaceFeatureIds = readRawBytes(deckVisu, "surfaceFeatureIdsRaw");
         const positions = readRawBytes(deckVisu, "pathPositionsRaw");
         const startIndices = readRawBytes(deckVisu, "pathStartIndicesRaw");
         const colors = readRawBytes(deckVisu, "pathColorsRaw");
@@ -237,6 +248,10 @@ function processTileRenderTask(task: DeckTileRenderTask): DeckTileRenderResult {
             pointFeatureIds: pointFeatureIds.buffer as ArrayBuffer,
             pointBillboards: pointBillboards.buffer as ArrayBuffer,
             coordinateOrigin: coordinateOrigin.buffer as ArrayBuffer,
+            surfacePositions: surfacePositions.buffer as ArrayBuffer,
+            surfaceStartIndices: surfaceStartIndices.buffer as ArrayBuffer,
+            surfaceColors: surfaceColors.buffer as ArrayBuffer,
+            surfaceFeatureIds: surfaceFeatureIds.buffer as ArrayBuffer,
             positions: positions.buffer as ArrayBuffer,
             startIndices: startIndices.buffer as ArrayBuffer,
             colors: colors.buffer as ArrayBuffer,
@@ -280,6 +295,10 @@ function emptyResultBuffers() {
         pointFeatureIds: new ArrayBuffer(0),
         pointBillboards: new ArrayBuffer(0),
         coordinateOrigin: new ArrayBuffer(0),
+        surfacePositions: new ArrayBuffer(0),
+        surfaceStartIndices: new ArrayBuffer(0),
+        surfaceColors: new ArrayBuffer(0),
+        surfaceFeatureIds: new ArrayBuffer(0),
         positions: new ArrayBuffer(0),
         startIndices: new ArrayBuffer(0),
         colors: new ArrayBuffer(0),
@@ -330,6 +349,10 @@ addEventListener("message", async ({data}) => {
                 bundle.pointRadii,
                 bundle.pointFeatureIds,
                 bundle.pointBillboards,
+                bundle.surfacePositions,
+                bundle.surfaceStartIndices,
+                bundle.surfaceColors,
+                bundle.surfaceFeatureIds,
                 bundle.positions,
                 bundle.startIndices,
                 bundle.colors,
@@ -354,6 +377,10 @@ addEventListener("message", async ({data}) => {
             result.pointFeatureIds,
             result.pointBillboards,
             result.coordinateOrigin,
+            result.surfacePositions,
+            result.surfaceStartIndices,
+            result.surfaceColors,
+            result.surfaceFeatureIds,
             result.positions,
             result.startIndices,
             result.colors,

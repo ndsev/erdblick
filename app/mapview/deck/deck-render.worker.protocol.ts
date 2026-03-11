@@ -49,6 +49,10 @@ export interface DeckLowFiBundleResult {
     pointRadii: ArrayBuffer;
     pointFeatureIds: ArrayBuffer;
     pointBillboards: ArrayBuffer;
+    surfacePositions: ArrayBuffer;
+    surfaceStartIndices: ArrayBuffer;
+    surfaceColors: ArrayBuffer;
+    surfaceFeatureIds: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
     colors: ArrayBuffer;
@@ -76,6 +80,10 @@ export interface DeckTileRenderResult {
     pointFeatureIds: ArrayBuffer;
     pointBillboards: ArrayBuffer;
     coordinateOrigin: ArrayBuffer;
+    surfacePositions: ArrayBuffer;
+    surfaceStartIndices: ArrayBuffer;
+    surfaceColors: ArrayBuffer;
+    surfaceFeatureIds: ArrayBuffer;
     positions: ArrayBuffer;
     startIndices: ArrayBuffer;
     colors: ArrayBuffer;

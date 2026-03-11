@@ -7,6 +7,10 @@ export type DeckLowFiRawAccessor =
     | "pointRadiiRaw"
     | "pointFeatureIdsRaw"
     | "pointBillboardsRaw"
+    | "surfacePositionsRaw"
+    | "surfaceStartIndicesRaw"
+    | "surfaceColorsRaw"
+    | "surfaceFeatureIdsRaw"
     | "pathPositionsRaw"
     | "pathStartIndicesRaw"
     | "pathColorsRaw"
@@ -29,6 +33,10 @@ export interface DeckLowFiRawBundle {
     pointRadii: Uint8Array;
     pointFeatureIds: Uint8Array;
     pointBillboards: Uint8Array;
+    surfacePositions: Uint8Array;
+    surfaceStartIndices: Uint8Array;
+    surfaceColors: Uint8Array;
+    surfaceFeatureIds: Uint8Array;
     positions: Uint8Array;
     startIndices: Uint8Array;
     colors: Uint8Array;
@@ -75,6 +83,10 @@ export function collectLowFiRawBundles(
                 pointRadii: readRawBytes("pointRadiiRaw"),
                 pointFeatureIds: readRawBytes("pointFeatureIdsRaw"),
                 pointBillboards: readRawBytes("pointBillboardsRaw"),
+                surfacePositions: readRawBytes("surfacePositionsRaw"),
+                surfaceStartIndices: readRawBytes("surfaceStartIndicesRaw"),
+                surfaceColors: readRawBytes("surfaceColorsRaw"),
+                surfaceFeatureIds: readRawBytes("surfaceFeatureIdsRaw"),
                 positions: readRawBytes("pathPositionsRaw"),
                 startIndices: readRawBytes("pathStartIndicesRaw"),
                 colors: readRawBytes("pathColorsRaw"),

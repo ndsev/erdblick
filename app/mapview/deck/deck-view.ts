@@ -7,7 +7,7 @@ import {
     type PickingInfo,
     WebMercatorViewport
 } from "@deck.gl/core";
-import {BitmapLayer, PolygonLayer} from "@deck.gl/layers";
+import {BitmapLayer, IconLayer, PolygonLayer} from "@deck.gl/layers";
 import {TileLayer} from "@deck.gl/geo-layers";
 import {getBounds as getWebMercatorBounds} from "@math.gl/web-mercator";
 import type {Parameters as LumaParameters} from "@luma.gl/core";
@@ -62,6 +62,10 @@ interface DeckRectangleOverlayDatum {
     lineWidthPixels: number;
 }
 
+interface DeckLocationMarkerDatum {
+    position: [number, number];
+}
+
 interface TileGridLevelExtent {
     level: number;
     rowCount: number;
@@ -110,6 +114,10 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
     private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
     private static readonly SEARCH_RESULTS_LAYER_KEY = "builtin/search-results";
+    private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
+    private static readonly LOCATION_MARKER_ICON_NAME = "marker";
+    private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
+    private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
     private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
     private static readonly TILE_GRID_LINE_COLOR: [number, number, number, number] = [245, 245, 245, 240];
     private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
@@ -161,6 +169,7 @@ export abstract class DeckMapView implements IRenderView {
     private lastSearchResultsPointsVersion = -1;
     private lastSearchResultsIconAtlasUrl = "";
     private lastSearchResultsIconMappingUrl = "";
+    private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
 
     get viewIndex() {
@@ -227,6 +236,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
         this.layerRegistry.remove(DeckMapView.SEARCH_RESULTS_LAYER_KEY);
+        this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
         this.osmLayerEnabled = false;
@@ -544,6 +554,15 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
+            combineLatest([
+                this.stateService.markerState,
+                this.stateService.markedPositionState
+            ]).subscribe(() => {
+                this.updateLocationMarkerOverlay();
+            })
+        );
+
+        this.subscriptions.push(
             this.stateService.viewTileBordersState
                 .pipe(this._viewIndex, distinctUntilChanged())
                 .subscribe(enabled => {
@@ -658,6 +677,7 @@ export abstract class DeckMapView implements IRenderView {
 
         this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
         this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
+        this.updateLocationMarkerOverlay();
         this.scheduleTileGridOverlayUpdate();
         this.scheduleSearchResultsOverlayUpdate();
     }
@@ -988,6 +1008,62 @@ export abstract class DeckMapView implements IRenderView {
             iconMapping: iconMappingUrl
         });
         this.layerRegistry.upsert(DeckMapView.SEARCH_RESULTS_LAYER_KEY, layer, 650);
+    }
+
+    /**
+     * Mirrors the legacy Cesium single-location pin as a dedicated deck IconLayer.
+     */
+    private updateLocationMarkerOverlay(): void {
+        const markerEnabled = this.stateService.markerState.getValue();
+        const markedPosition = this.stateService.markedPositionState.getValue();
+        if (!this.deck || !markerEnabled || markedPosition.length !== 2) {
+            this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
+            this.lastLocationMarkerSignature = "";
+            return;
+        }
+
+        const longitude = Number(markedPosition[0]);
+        const latitude = Number(markedPosition[1]);
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+            this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
+            this.lastLocationMarkerSignature = "";
+            return;
+        }
+
+        const iconAtlas = this.featureSearchService.markerGraphics();
+        const signature = `${longitude},${latitude},${iconAtlas}`;
+        if (this.lastLocationMarkerSignature === signature) {
+            return;
+        }
+
+        this.lastLocationMarkerSignature = signature;
+        const iconSize = DeckMapView.LOCATION_MARKER_ICON_SIZE_PX;
+        const layer = new IconLayer<DeckLocationMarkerDatum>({
+            id: DeckMapView.LOCATION_MARKER_LAYER_KEY,
+            data: [{position: [longitude, latitude]}],
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            iconAtlas,
+            iconMapping: {
+                [DeckMapView.LOCATION_MARKER_ICON_NAME]: {
+                    x: 0,
+                    y: 0,
+                    width: iconSize,
+                    height: iconSize,
+                    anchorX: iconSize / 2,
+                    anchorY: iconSize,
+                    mask: false
+                }
+            },
+            getIcon: () => DeckMapView.LOCATION_MARKER_ICON_NAME,
+            getPosition: (marker: DeckLocationMarkerDatum) => marker.position,
+            getSize: () => DeckMapView.LOCATION_MARKER_RENDER_SIZE_PX,
+            sizeUnits: "pixels",
+            billboard: true,
+            pickable: false,
+            alphaCutoff: 0.05,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS
+        });
+        this.layerRegistry.upsert(DeckMapView.LOCATION_MARKER_LAYER_KEY, layer, 700);
     }
 
     private updateTileGridOverlay(): void {

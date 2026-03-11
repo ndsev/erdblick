@@ -45,6 +45,10 @@ public:
     void pointRadiiRaw(SharedUint8Array& out) const;
     void pointFeatureIdsRaw(SharedUint8Array& out) const;
     void pointBillboardsRaw(SharedUint8Array& out) const;
+    void surfacePositionsRaw(SharedUint8Array& out) const;
+    void surfaceStartIndicesRaw(SharedUint8Array& out) const;
+    void surfaceColorsRaw(SharedUint8Array& out) const;
+    void surfaceFeatureIdsRaw(SharedUint8Array& out) const;
 
     void pathPositionsRaw(SharedUint8Array& out) const;
     void pathStartIndicesRaw(SharedUint8Array& out) const;
@@ -77,6 +81,16 @@ private:
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun) override;
+    void emitPolygon(
+        std::vector<mapget::Point> const& vertsCartesian,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun) override;
+    void emitMesh(
+        std::vector<mapget::Point> const& vertsCartesian,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun) override;
     void emitIcon(
         JsValue const& xyzPos,
         FeatureStyleRule const& rule,
@@ -100,6 +114,11 @@ private:
         BoundEvalFun& evalFun) override;
     void appendPointGeometry(
         mapget::Point const& pointCartesian,
+        FeatureStyleRule const& rule,
+        uint32_t tileFeatureId,
+        BoundEvalFun& evalFun);
+    void appendSurfaceGeometry(
+        std::vector<mapget::Point> const& vertsCartesian,
         FeatureStyleRule const& rule,
         uint32_t tileFeatureId,
         BoundEvalFun& evalFun);
@@ -144,6 +163,10 @@ private:
         std::vector<float> pointRadii;
         std::vector<uint32_t> pointFeatureIds;
         std::vector<uint8_t> pointBillboards;
+        std::vector<float> surfacePositions;
+        std::vector<uint32_t> surfaceStartIndices;
+        std::vector<uint8_t> surfaceColors;
+        std::vector<uint32_t> surfaceFeatureIds;
         std::vector<float> pathPositions;
         std::vector<uint32_t> pathStartIndices;
         std::vector<uint8_t> pathColors;

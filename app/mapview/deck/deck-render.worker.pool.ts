@@ -37,6 +37,10 @@ export interface DeckTileRenderBuffers {
     pointFeatureIds: Uint32Array;
     pointBillboards: Uint8Array;
     coordinateOrigin: Float64Array;
+    surfacePositions: Float32Array;
+    surfaceStartIndices: Uint32Array;
+    surfaceColors: Uint8Array;
+    surfaceFeatureIds: Uint32Array;
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
@@ -63,6 +67,10 @@ export interface DeckLowFiBundleBuffers {
     pointRadii: Float32Array;
     pointFeatureIds: Uint32Array;
     pointBillboards: Uint8Array;
+    surfacePositions: Float32Array;
+    surfaceStartIndices: Uint32Array;
+    surfaceColors: Uint8Array;
+    surfaceFeatureIds: Uint32Array;
     positions: Float32Array;
     startIndices: Uint32Array;
     colors: Uint8Array;
@@ -222,6 +230,10 @@ export class DeckRenderWorkerPool {
             pointFeatureIds: this.toUint32Array(result.pointFeatureIds),
             pointBillboards: this.toUint8Array(result.pointBillboards),
             coordinateOrigin: this.toFloat64Array(result.coordinateOrigin),
+            surfacePositions: this.toFloat32Array(result.surfacePositions),
+            surfaceStartIndices: this.toUint32Array(result.surfaceStartIndices),
+            surfaceColors: this.toUint8Array(result.surfaceColors),
+            surfaceFeatureIds: this.toUint32Array(result.surfaceFeatureIds),
             positions: this.toFloat32Array(result.positions),
             startIndices: this.toUint32Array(result.startIndices),
             colors: this.toUint8Array(result.colors),
@@ -243,6 +255,10 @@ export class DeckRenderWorkerPool {
                 pointRadii: this.toFloat32Array(bundle.pointRadii),
                 pointFeatureIds: this.toUint32Array(bundle.pointFeatureIds),
                 pointBillboards: this.toUint8Array(bundle.pointBillboards),
+                surfacePositions: this.toFloat32Array(bundle.surfacePositions),
+                surfaceStartIndices: this.toUint32Array(bundle.surfaceStartIndices),
+                surfaceColors: this.toUint8Array(bundle.surfaceColors),
+                surfaceFeatureIds: this.toUint32Array(bundle.surfaceFeatureIds),
                 positions: this.toFloat32Array(bundle.positions),
                 startIndices: this.toUint32Array(bundle.startIndices),
                 colors: this.toUint8Array(bundle.colors),

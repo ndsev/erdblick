@@ -210,6 +210,75 @@ describe("DeckTileVisualization", () => {
         expect(deck.commits[0][1].id).toContain("/arrow");
     });
 
+    it("renders polygon and mesh output as a dedicated deck surface layer", async () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const tile = {
+            mapTileKey: "Island-6-Local/Road/42",
+            layerName: "Road",
+            tileId: 42n,
+            hasData: () => true,
+            highestLoadedStage: () => 1,
+            peekAsync: async () => undefined,
+            stats: new Map<string, number[]>()
+        } as any;
+        const style = makeStyle();
+        const pointMergeService = new PointMergeService();
+
+        const visu = new DeckTileVisualization(
+            0,
+            tile,
+            pointMergeService,
+            style,
+            "",
+            1,
+            true,
+            null,
+            {value: 0} as any
+        ) as any;
+
+        visu.renderWasm = async function() {
+            this.latestSurfaceLayerData = [{
+                length: 2,
+                coordinateOrigin: [11, 48, 0],
+                startIndices: new Uint32Array([0, 3, 6]),
+                featureIds: [10, 11],
+                attributes: {
+                    getPolygon: {
+                        value: new Float32Array([
+                            0, 0, 0,
+                            1, 0, 0,
+                            0, 1, 0,
+                            2, 0, 0,
+                            3, 0, 0,
+                            2, 1, 0
+                        ]),
+                        size: 3
+                    },
+                    getFillColor: {
+                        value: new Uint8Array([
+                            255, 0, 0, 255,
+                            0, 128, 255, 255
+                        ]),
+                        size: 4
+                    }
+                }
+            }];
+            return [];
+        };
+
+        const rendered = await visu.render({
+            renderer: "deck",
+            scene: {layerRegistry: registry}
+        });
+        registry.flush();
+
+        expect(rendered).toBe(true);
+        expect(deck.commits).toHaveLength(1);
+        expect(deck.commits[0]).toHaveLength(1);
+        expect(deck.commits[0][0].id).toContain("/surface");
+    });
+
     it("becomes dirty when tile data arrives after an initial empty render", async () => {
         const deck = new DeckStub();
         const registry = new DeckLayerRegistry(deck);
