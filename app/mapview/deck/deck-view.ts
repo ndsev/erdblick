@@ -178,6 +178,7 @@ export abstract class DeckMapView implements IRenderView {
 
     protected abstract readonly sceneMode: SceneMode;
     protected abstract readonly allowPitchAndBearing: boolean;
+    protected readonly useOrthographicProjection: boolean = false;
 
     constructor(id: number,
                 canvasId: string,
@@ -202,7 +203,11 @@ export abstract class DeckMapView implements IRenderView {
 
         const deckProps: DeckProps<DeckMercatorView> = {
             parent: container,
-            views: new DeckMercatorView({id: `deck-view-${this._viewIndex}`, repeat: true}),
+            views: new DeckMercatorView({
+                id: `deck-view-${this._viewIndex}`,
+                repeat: true,
+                orthographic: this.useOrthographicProjection
+            }),
             initialViewState: this.viewState,
             viewState: this.viewState,
             layers: [],
@@ -855,7 +860,8 @@ export abstract class DeckMapView implements IRenderView {
             latitude: this.viewState.latitude,
             zoom: this.viewState.zoom,
             pitch: this.viewState.pitch,
-            bearing: this.viewState.bearing
+            bearing: this.viewState.bearing,
+            orthographic: this.useOrthographicProjection
         });
     }
 
