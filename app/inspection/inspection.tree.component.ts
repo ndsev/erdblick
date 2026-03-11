@@ -81,50 +81,23 @@ export class FeatureFilterOptions {
             </ng-template>
 
             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
-                <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)" [class]="rowData.styleClass || ''">
-                    @for (col of columns(); track $index) {
-                        <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
-                            pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
-                            <div style="display: flex; flex-direction: row; gap: 0.25em;">
-                                @if ($index === 0) {
-                                    <p-treeTableToggler [rowNode]="rowNode"/>
-                                }
-                                @if (filterFields.indexOf(col.key) !== -1) {
+                @if (rowData) {
+                    <tr [ttRow]="rowNode" (click)="onRowClick(rowNode)" [class]="rowData.styleClass || ''">
+                        @for (col of columns(); track $index) {
+                            <td [class]="getStyleClassByType(rowData)" style="white-space: nowrap;"
+                                pTooltip="{{rowData[col.key]}}" tooltipPosition="left" [tooltipOptions]="tooltipOptions">
+                                <div style="display: flex; flex-direction: row; gap: 0.25em;">
+                                    @if ($index === 0) {
+                                        <p-treeTableToggler [rowNode]="rowNode"/>
+                                    }
                                     <span (click)="onNodeClick($event, rowData, col.key)"
                                           (mouseover)="onNodeHover($event, rowData)"
                                           (mouseout)="onNodeHoverExit($event, rowData)"
-                                          style="cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis"
-                                          [innerHTML]="col.transform(col.key, rowData) | highlight: filterString">
-                                    </span>
-                                    @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
-                                        <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
-                                    }
-                                    @if (rowData.hasOwnProperty("info") && $index !== 0) {
-                                        <span>
-                                            <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
-                                        </span>
-                                    }
-                                    @if (enableSourceDataNavigation() &&
-                                         rowData.hasOwnProperty("sourceDataReferences") && 
-                                         rowData["sourceDataReferences"].length > 0 &&
-                                         $index === 0) {
-                                        <p-buttonGroup class="source-data-ref-container">
-                                            @for (item of rowData["sourceDataReferences"]; track $index) {
-                                                <p-button class="source-data-button"
-                                                          (click)="showSourceData($event, item)"
-                                                          severity="secondary"
-                                                          label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          pTooltip="Go to {{item.qualifier?.trim()}} source data."
-                                                          [tooltipOptions]="{appendTo: 'body'}"
-                                                          tooltipPosition="bottom" />
-                                            }
-                                        </p-buttonGroup>
-                                    }
-                                } @else {
-                                    <span (click)="onNodeClick($event, rowData, col.key)"
-                                          (mouseover)="onNodeHover($event, rowData)"
-                                          (mouseout)="onNodeHoverExit($event, rowData)"
-                                          style="cursor: pointer" [innerHTML]="col.transform(col.key, rowData)">
+                                          style="cursor: pointer"
+                                          [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                          [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                          [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
+                                          [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                     </span>
                                     @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
                                         <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
@@ -145,15 +118,16 @@ export class FeatureFilterOptions {
                                                           severity="secondary"
                                                           label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
                                                           pTooltip="Go to {{item.qualifier?.trim()}} source data."
+                                                          [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
                                             }
                                         </p-buttonGroup>
                                     }
-                                }
-                            </div>
-                        </td>
-                    }
-                </tr>
+                                </div>
+                            </td>
+                        }
+                    </tr>
+                }
             </ng-template>
 
             <ng-template pTemplate="emptymessage">

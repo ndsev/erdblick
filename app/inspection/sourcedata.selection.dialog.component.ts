@@ -1,8 +1,7 @@
 import {Component} from "@angular/core";
 import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
 import {MapDataService} from "../mapdata/map.service";
-import {Color, HeightReference, Rectangle} from "../integrations/geo";
-import {coreLib} from "../integrations/wasm";
+import {Color} from "../integrations/geo";
 
 @Component({
     selector: 'sourcedatadialog',
@@ -95,8 +94,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.showCustomTileIdInput = customTileId.length > 0;
         this.customTileId = customTileId;
         this.customMapId = customMapId;
-        this.mapIds = [];
-        this.sourceDataLayers = [];
+        this.resetSelectionState();
         this.loading = false;
 
         // Special case: There is a custom tile ID.
@@ -116,27 +114,12 @@ export class SourceDataLayerSelectionDialogComponent {
         // Fill map IDs per tile ID.
         for (let i = 0; i < this.tileIds.length; i++) {
             const id = this.tileIds[i].id as bigint;
-            const maps = [...this.findMapsForTileId(id)];
+            const maps = this.mapService.findSourceDataMapsForTileId(id);
             this.tileIds[i]["disabled"] = !maps.length;
             this.mapIdsPerTileId.set(id, maps);
         }
 
-        let tileIdSelection: SourceDataDropdownOption | undefined;
-        if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
-            const savedTileId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.tileId;
-            tileIdSelection = this.tileIds.find(element =>
-                Number(element.id) == savedTileId && !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
-            );
-            if (tileIdSelection) {
-                this.setCurrentTileId(tileIdSelection);
-                return;
-            }
-        }
-
-        // Pre-select the tile ID.
-        tileIdSelection = this.tileIds.find(element =>
-            !element.disabled && [...this.mapService.tileLayersForTileId(element.id as bigint)].length
-        );
+        const tileIdSelection = this.menuService.preferredSourceDataTile(this.tileIds);
         if (tileIdSelection) {
             this.setCurrentTileId(tileIdSelection);
         } else {
@@ -144,30 +127,15 @@ export class SourceDataLayerSelectionDialogComponent {
         }
     }
 
-    *findMapsForTileId(tileId: bigint): Generator<SourceDataDropdownOption> {
-        const level = coreLib.getTileLevel(tileId);
-        for (const [_, mapInfo] of this.mapService.maps.maps.entries()) {
-            for (const [_, layerInfo] of mapInfo.layers.entries()) {
-                if (layerInfo.type == "SourceData") {
-                    if (!layerInfo.info.zoomLevels.length || layerInfo.info.zoomLevels.includes(level)) {
-                        yield { id: mapInfo.id, name: mapInfo.id };
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
     onCustomTileIdChange(tileIdString: string) {
         if (!tileIdString) {
-            this.mapIds = [];
-            this.sourceDataLayers = [];
+            this.resetSelectionState();
             this.menuService.tileOutline.next(null);
             return;
         }
 
         const tileId = BigInt(tileIdString);
-        const maps = [...this.findMapsForTileId(tileId)];
+        const maps = this.mapService.findSourceDataMapsForTileId(tileId);
         this.mapIdsPerTileId.set(tileId, maps);
         this.setCurrentTileId({id: tileId, name: tileIdString});
     }
@@ -175,21 +143,7 @@ export class SourceDataLayerSelectionDialogComponent {
     private setCurrentTileId(tileId: SourceDataDropdownOption) {
         this.selectedTileId = tileId;
         this.onTileIdChange(tileId);
-
-        if (this.customMapId) {
-            const mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
-            if (mapSelection) {
-                this.selectedMapId = mapSelection;
-            } else {
-                this.mapIds.unshift({ id: this.customMapId, name: this.customMapId });
-            }
-        } else if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
-            const savedMapId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.mapId;
-            const mapSelection = this.mapIds.find(entry => entry.id == savedMapId);
-            if (mapSelection) {
-                this.selectedMapId = mapSelection;
-            }
-        }
+        this.restorePreferredMapSelection();
 
         if (this.mapIds.length) {
             if (!this.selectedMapId) {
@@ -197,18 +151,10 @@ export class SourceDataLayerSelectionDialogComponent {
             }
             this.onMapIdChange(this.selectedMapId);
             if (this.sourceDataLayers.length) {
-                if (this.menuService.lastInspectedTileSourceDataOption.getValue()) {
-                    const savedLayerId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.layerId;
-                    const layerSelection = this.sourceDataLayers.find(entry => entry.id == savedLayerId);
-                    if (layerSelection) {
-                        this.selectedSourceDataLayer = layerSelection;
-                    } else {
-                        this.selectedSourceDataLayer = this.sourceDataLayers[0];
-                    }
-                } else {
-                    this.selectedSourceDataLayer = this.sourceDataLayers[0];
+                this.restorePreferredLayerSelection();
+                if (this.selectedSourceDataLayer) {
+                    this.onLayerIdChange(this.selectedSourceDataLayer);
                 }
-                this.onLayerIdChange(this.selectedSourceDataLayer);
             }
         }
     }
@@ -217,7 +163,7 @@ export class SourceDataLayerSelectionDialogComponent {
         this.selectedMapId = undefined;
         this.selectedSourceDataLayer = undefined;
         this.sourceDataLayers = [];
-        this.outlineTheTileBox(BigInt(tileId.id), Color.HOTPINK);
+        this.menuService.outlineTile(BigInt(tileId.id), Color.HOTPINK);
         const mapIds = this.mapIdsPerTileId.get(tileId.id as bigint);
         if (mapIds !== undefined) {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
@@ -228,20 +174,6 @@ export class SourceDataLayerSelectionDialogComponent {
                 this.sourceDataLayersPerMapId.set(id, layers);
             }
         }
-    }
-
-    outlineTheTileBox(tileId: bigint, color: Color) {
-        const tileBox = coreLib.getTileBox(tileId);
-        this.menuService.tileOutline.next({
-            rectangle: {
-                coordinates: Rectangle.fromDegrees(...tileBox),
-                height: HeightReference.CLAMP_TO_GROUND,
-                material: color.withAlpha(0.2),
-                outline: true,
-                outlineWidth: 3.,
-                outlineColor: color
-            }
-        });
     }
 
     onMapIdChange(mapId: SourceDataDropdownOption) {
@@ -273,29 +205,60 @@ export class SourceDataLayerSelectionDialogComponent {
         if (!this.showCustomTileIdInput) {
             this.load();
         } else {
-            this.errorString = "";
-            this.mapIds = [];
-            this.sourceDataLayers = [];
-            this.selectedTileId = undefined;
-            this.selectedMapId = undefined;
-            this.selectedSourceDataLayer = undefined;
+            this.resetSelectionState();
             this.customTileId = "";
         }
     }
 
     reset() {
         this.loading = true;
-        this.errorString = "";
-        this.selectedTileId = undefined;
-        this.selectedMapId = undefined;
-        this.selectedSourceDataLayer = undefined;
-        this.mapIds = [];
-        this.sourceDataLayers = [];
+        this.resetSelectionState();
         this.showCustomTileIdInput = false;
         this.customTileId = "";
     }
 
     close() {
         this.menuService.tileSourceDataDialogVisible = false;
+    }
+
+    private resetSelectionState() {
+        this.errorString = "";
+        this.selectedTileId = undefined;
+        this.selectedMapId = undefined;
+        this.selectedSourceDataLayer = undefined;
+        this.mapIds = [];
+        this.sourceDataLayers = [];
+        this.mapIdsPerTileId.clear();
+        this.sourceDataLayersPerMapId.clear();
+    }
+
+    private restorePreferredMapSelection() {
+        if (this.customMapId) {
+            const mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
+            if (mapSelection) {
+                this.selectedMapId = mapSelection;
+            } else {
+                this.mapIds.unshift({ id: this.customMapId, name: this.customMapId });
+            }
+            return;
+        }
+
+        const savedMapId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.mapId;
+        if (!savedMapId) {
+            return;
+        }
+        this.selectedMapId = this.mapIds.find(entry => entry.id == savedMapId);
+    }
+
+    private restorePreferredLayerSelection() {
+        const savedLayerId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.layerId;
+        if (savedLayerId) {
+            const layerSelection = this.sourceDataLayers.find(entry => entry.id == savedLayerId);
+            if (layerSelection) {
+                this.selectedSourceDataLayer = layerSelection;
+                return;
+            }
+        }
+        this.selectedSourceDataLayer = this.sourceDataLayers[0];
     }
 }

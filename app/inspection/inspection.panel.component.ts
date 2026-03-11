@@ -175,6 +175,7 @@ export class InspectionPanelComponent implements AfterViewInit, OnDestroy {
                 private renderer: Renderer2) {
         effect(() => {
             this.title = "";
+            this.errorMessage = "";
             const panel = this.panel();
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;

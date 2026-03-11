@@ -150,6 +150,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 private dialogStack: DialogStackService) {
         effect(() => {
             const panel = this.panel();
+            this.errorMessage = "";
             this.updateHeaderFor(panel);
             this.dialogStyle = this.buildDialogStyle(panel);
         });

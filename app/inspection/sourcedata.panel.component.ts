@@ -19,6 +19,10 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
             <div class="spinner">
                 <p-progressSpinner ariaLabel="loading"/>
             </div>
+        } @else if (errorMessage) {
+            <div>
+                <strong>Error</strong><br>{{ errorMessage }}
+            </div>
         } @else {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
@@ -39,6 +43,7 @@ export class SourceDataPanelComponent {
     error = output<string>({ alias: 'errorOccurred' });
 
     loading: boolean = true;
+    errorMessage: string = "";
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
@@ -58,6 +63,9 @@ export class SourceDataPanelComponent {
             if (!this.panel().sourceData) {
                 return;
             }
+            this.loading = true;
+            this.treeData = [];
+            this.errorMessage = "";
 
             this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
                 .then(layer => {
@@ -66,12 +74,13 @@ export class SourceDataPanelComponent {
 
                     layer.delete();
 
-                    if (root) {
-                        this.treeData = root.children ? root.children : [root];
+                    const treeData = this.treeDataFromRoot(root);
+                    if (treeData.length) {
+                        this.treeData = treeData;
                         this.selectItemWithAddress(this.panel().sourceData!.address);
                     } else {
                         this.treeData = [];
-                        this.setError('Empty layer.');
+                        this.setError(this.noSourceDataMessage(this.panel().sourceData!.mapTileKey));
                     }
                 })
                 .catch(error => {
@@ -107,7 +116,8 @@ export class SourceDataPanelComponent {
                     return socket.parser.readTileSourceDataLayer(wasmBlob);
                 }, payload);
                 if (parsedLayer) {
-                    (layer as any)?.delete();
+                    const currentLayer = layer as TileSourceDataLayer | null;
+                    currentLayer?.delete();
                     layer = parsedLayer;
                 }
             } catch (err) {
@@ -125,14 +135,16 @@ export class SourceDataPanelComponent {
                 await new Promise(resolve => setTimeout(resolve, 25));
             }
         } catch (err) {
-            (layer as any)?.delete();
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
             throw err instanceof Error ? err : new Error(`${err}`);
         } finally {
             socket.destroy();
         }
 
         if (sourceDataParseError) {
-            (layer as any)?.delete();
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
             throw sourceDataParseError;
         }
 
@@ -142,21 +154,43 @@ export class SourceDataPanelComponent {
             const summary = failures
                 .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
                 .join(", ");
-            (layer as any)?.delete();
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
             throw new Error(`Tile request failed: ${summary}`);
         }
 
-        if (!layer) {
-            throw new Error(statusMessage || "Unknown error while loading layer (no SourceData payload received).");
+        const loadedLayer = layer as TileSourceDataLayer | null;
+        if (!loadedLayer) {
+            throw new Error(statusMessage || this.noSourceDataMessage(mapTileKey));
         }
 
-        const error = (layer as unknown as { getError: () => string }).getError();
+        const error = loadedLayer.getError();
         if (error) {
-            (layer as any)?.delete();
+            loadedLayer.delete();
             throw new Error(`Error while loading layer: ${error}`);
         }
 
-        return layer;
+        return loadedLayer;
+    }
+
+    private treeDataFromRoot(root: any): TreeTableNode[] {
+        if (!root) {
+            return [];
+        }
+        if (Array.isArray(root.children)) {
+            return root.children.filter((node: any) => this.hasTreeNodeContent(node));
+        }
+        return this.hasTreeNodeContent(root) ? [root] : [];
+    }
+
+    private hasTreeNodeContent(node: any): boolean {
+        return !!node && (node.data !== undefined || (Array.isArray(node.children) && node.children.length > 0));
+    }
+
+    private noSourceDataMessage(mapTileKey: string): string {
+        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const layerName = this.mapService.layerNameForSourceDataLayerId(String(layerId), String(layerId).startsWith("Metadata"));
+        return `No source data for tile ${tileId} (${layerName}) of map ${mapId}.`;
     }
 
     /**
@@ -168,6 +202,7 @@ export class SourceDataPanelComponent {
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
+        this.errorMessage = message;
         this.error.emit(message);
     }
 
